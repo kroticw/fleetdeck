@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -27,7 +28,7 @@ func TestLoadBrokenFileIsAnError(t *testing.T) {
 
 func TestLoadOverridesOnlyGivenKeys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("server_port: 9001\n"), 0o600)
+	os.WriteFile(p, []byte("server:\n  port: 9001\n"), 0o600)
 	got, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -54,5 +55,120 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	}
 	if got.BoardPath != want.BoardPath || got.Notify.SilenceAfter != want.Notify.SilenceAfter {
 		t.Fatalf("round trip lost data: %+v", got)
+	}
+}
+
+func TestLoadNestedConfigOverridesExactlyNamedKeys(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(p, []byte("board:\n  path: /custom/board\nserver:\n  port: 8080\n"), 0o600)
+	got, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BoardPath != "/custom/board" {
+		t.Fatalf("board.path not applied: %q", got.BoardPath)
+	}
+	if got.ServerPort != 8080 {
+		t.Fatalf("server.port not applied: %d", got.ServerPort)
+	}
+	if got.DaemonPollInterval != Default().DaemonPollInterval {
+		t.Fatalf("daemon.poll_interval should be default, got %v", got.DaemonPollInterval)
+	}
+	if got.Notify.Waiting != Default().Notify.Waiting {
+		t.Fatalf("notify.enabled.waiting should be default")
+	}
+}
+
+func TestLoadUsageEnabledFalse(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(p, []byte("usage:\n  enabled: false\n"), 0o600)
+	got, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UsageEnabled != false {
+		t.Fatalf("usage.enabled: false must yield false, got %v", got.UsageEnabled)
+	}
+}
+
+func TestLoadUsageEnabledDefaultWhenMissing(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(p, []byte("server:\n  port: 8080\n"), 0o600)
+	got, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UsageEnabled != Default().UsageEnabled {
+		t.Fatalf("usage.enabled should be default when missing, got %v", got.UsageEnabled)
+	}
+}
+
+func TestLoadPartialNotifyOverride(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(p, []byte("notify:\n  enabled:\n    waiting: false\n"), 0o600)
+	got, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Notify.Waiting != false {
+		t.Fatalf("notify.enabled.waiting should be false, got %v", got.Notify.Waiting)
+	}
+	if got.Notify.Failed != Default().Notify.Failed {
+		t.Fatalf("notify.enabled.failed should be default, got %v", got.Notify.Failed)
+	}
+	if got.Notify.Silent != Default().Notify.Silent {
+		t.Fatalf("notify.enabled.silent should be default, got %v", got.Notify.Silent)
+	}
+	if got.Notify.CardBlocked != Default().Notify.CardBlocked {
+		t.Fatalf("notify.enabled.card_blocked should be default, got %v", got.Notify.CardBlocked)
+	}
+	if got.Notify.SilenceAfter != Default().Notify.SilenceAfter {
+		t.Fatalf("notify.silence_after should be default, got %v", got.Notify.SilenceAfter)
+	}
+}
+
+func TestLoadUnknownKeyIsError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(p, []byte("unknown_key: value\n"), 0o600)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("unknown key must be an error")
+	}
+	if !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("error should mention unknown key, got: %v", err)
+	}
+}
+
+func TestLoadFlatLegacyKeysAreRejected(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(p, []byte("board_path: /x\n"), 0o600)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("flat legacy key board_path must be rejected")
+	}
+}
+
+func TestSavePreservesNestedFormat(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	want := Default()
+	want.BoardPath = "/my/board"
+	want.ServerPort = 9999
+	want.Notify.Waiting = false
+	if err := Save(p, want); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "board:") || !strings.Contains(content, "path:") {
+		t.Fatalf("saved config should have nested board.path, got:\n%s", content)
+	}
+	if !strings.Contains(content, "server:") || !strings.Contains(content, "port:") {
+		t.Fatalf("saved config should have nested server.port, got:\n%s", content)
+	}
+	if !strings.Contains(content, "enabled:") {
+		t.Fatalf("saved config should have nested notify.enabled, got:\n%s", content)
 	}
 }
