@@ -97,3 +97,9 @@ type ErrUnknown struct {
 func (e *ErrUnknown) Error() string {
 	return "unknown error: " + e.Code
 }
+
+type ErrSubmitNotSupported struct{}
+
+func (e *ErrSubmitNotSupported) Error() string {
+	return "daemon delivers replies submitted"
+}

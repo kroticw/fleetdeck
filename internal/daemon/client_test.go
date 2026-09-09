@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -95,6 +96,16 @@ func TestWaiting(t *testing.T) {
 	if foundNotWaiting == 0 {
 		t.Error("fixture should have at least one non-waiting session")
 	}
+
+	// Test the AND logic: Waiting() requires both tempo=="blocked" AND needs != ""
+	// A session with needs set but tempo not "blocked" should return false
+	sessionWithNeedsButNotBlocked := Session{
+		Tempo: "idle",
+		Needs: "answer: What color? (A · B)",
+	}
+	if sessionWithNeedsButNotBlocked.Waiting() {
+		t.Error("session with needs set but tempo != \"blocked\" should not be waiting")
+	}
 }
 
 func TestMissingSocketErrDaemonUnavailable(t *testing.T) {
@@ -111,7 +122,7 @@ func TestMissingSocketErrDaemonUnavailable(t *testing.T) {
 func TestTruncatedJSONIsError(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -135,7 +146,7 @@ func TestTruncatedJSONIsError(t *testing.T) {
 func TestSilentDaemonTimesOut(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -163,10 +174,58 @@ func TestSilentDaemonTimesOut(t *testing.T) {
 	}
 }
 
+func TestListSessionsCachedProtoTimesOut(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	// First connection for ping (succeeds)
+	// Second connection for ListSessions (hangs)
+	connCount := 0
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			connCount++
+
+			reader := bufio.NewReader(conn)
+			_, _ = reader.ReadString('\n')
+
+			if connCount == 1 {
+				// First request (ping) - respond
+				conn.Write([]byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":1}` + "\n"))
+			}
+			// Second request (list with cached proto) - never respond, just close
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	// Prime the cache with a ping
+	_, _ = client.Ping(context.Background())
+
+	// Now call ListSessions with context.Background() and a short timeout
+	// Without the deadline fallback, this would hang forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = client.ListSessions(ctx)
+	if err == nil {
+		t.Error("expected timeout error for ListSessions with cached proto, got nil")
+	}
+}
+
 func TestRequestEndsWithNewline(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -207,6 +266,13 @@ func TestRequestEndsWithNewline(t *testing.T) {
 	// Wait a bit for requests to be processed
 	time.Sleep(100 * time.Millisecond)
 
+	// Verify we captured the expected number of requests.
+	// If framing broke and requests never ended with \n, ReadString would hang forever
+	// and requestLines would be empty. Zero captured requests means the framing hung.
+	if len(requestLines) != 2 {
+		t.Fatalf("expected 2 captured requests (ping + list), got %d; zero means framing hung", len(requestLines))
+	}
+
 	// Verify each request ends with exactly one \n
 	for i, line := range requestLines {
 		if !strings.HasSuffix(line, "\n") {
@@ -222,7 +288,7 @@ func TestRequestEndsWithNewline(t *testing.T) {
 func TestProtoNegotiation(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -278,7 +344,7 @@ func TestProtoNegotiation(t *testing.T) {
 func TestPingNoProtoField(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -318,7 +384,7 @@ func TestPingNoProtoField(t *testing.T) {
 func TestErrorCodeEPROTO(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -342,7 +408,7 @@ func TestErrorCodeEPROTO(t *testing.T) {
 func TestErrorCodeEAUTH(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -371,7 +437,7 @@ func TestErrorCodeEAUTH(t *testing.T) {
 func TestErrorCodeEPEERUID(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -412,7 +478,7 @@ func TestControlKeyMissingFile(t *testing.T) {
 func TestNoControlKeyLeakedInError(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Skipf("sandbox denies unix socket bind: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
 
@@ -434,9 +500,422 @@ func TestNoControlKeyLeakedInError(t *testing.T) {
 	}
 }
 
-// tempSocket creates a temporary unix socket path
+// tempSocket creates a temporary unix socket path with a short name.
+// macOS limits socket paths to 104 bytes, so we use a short directory name.
 func tempSocket(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	return filepath.Join(dir, "test.sock")
+	dir, err := os.MkdirTemp("", "fd")
+	if err != nil {
+		t.Fatalf("creating temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(dir)
+	})
+	return filepath.Join(dir, "s.sock")
+}
+
+func TestSendTextRequest(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	var capturedReq map[string]interface{}
+	errChan := make(chan error, 1)
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			if err := json.Unmarshal(req, &capturedReq); err != nil {
+				errChan <- err
+				return nil
+			}
+			return []byte(`{"ok":true,"op":"reply"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "test-key-12345678", nil
+	})
+	client.proto = 1 // Set proto to avoid ping
+
+	err = client.SendText(context.Background(), "session123", "hello world", true)
+	if err != nil {
+		t.Fatalf("SendText failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case err := <-errChan:
+		t.Fatalf("error in server: %v", err)
+	default:
+	}
+
+	// Verify request structure
+	if short, ok := capturedReq["short"].(string); !ok || short != "session123" {
+		t.Errorf("expected short='session123', got %v", capturedReq["short"])
+	}
+	if text, ok := capturedReq["text"].(string); !ok || text != "hello world" {
+		t.Errorf("expected text='hello world', got %v", capturedReq["text"])
+	}
+	if auth, ok := capturedReq["auth"].(string); !ok || auth != "test-key-12345678" {
+		t.Errorf("expected auth='test-key-12345678', got %v", capturedReq["auth"])
+	}
+}
+
+func TestSendTextKeyFunctionFailure(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	requestReceived := false
+	go func() {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			requestReceived = true
+			conn.Close()
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "", ErrNoControlKey
+	})
+	client.proto = 1
+
+	err = client.SendText(context.Background(), "session123", "hello", true)
+	if err != ErrNoControlKey {
+		t.Errorf("expected ErrNoControlKey, got %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if requestReceived {
+		t.Error("server should not have received any request")
+	}
+}
+
+func TestSendTextSubmitFalse(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	requestReceived := false
+	go func() {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			requestReceived = true
+			conn.Close()
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	err = client.SendText(context.Background(), "session123", "hello", false)
+	var submitErr *ErrSubmitNotSupported
+	if !errors.As(err, &submitErr) {
+		t.Errorf("expected *ErrSubmitNotSupported, got %T: %v", err, err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if requestReceived {
+		t.Error("server should not have received any request when submit=false")
+	}
+}
+
+func TestSendTextErrorENOJOB(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	err = client.SendText(context.Background(), "missing", "text", true)
+	var nojobErr *ErrNojob
+	if !errors.As(err, &nojobErr) {
+		t.Errorf("expected *ErrNojob, got %T: %v", err, err)
+	}
+}
+
+func TestReadScreenReturnsStreamedBytes(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n') // read the request
+
+		// Send header line
+		headerLine := `{"ok":true,"op":"attach","imarkNonce":"nonce","decModes":{},"via":"local","booting":false,"tempo":"idle","state":"working","cached":false,"stale":false,"workerCliVersion":"2.1.263"}` + "\n"
+		conn.Write([]byte(headerLine))
+
+		// Send streamed bytes
+		conn.Write([]byte("Hello from terminal"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	output, err := client.ReadScreen(context.Background(), "session123", 0)
+	if err != nil {
+		t.Fatalf("ReadScreen failed: %v", err)
+	}
+
+	<-done
+	expected := "Hello from terminal"
+	if output != expected {
+		t.Errorf("expected output %q, got %q", expected, output)
+	}
+}
+
+func TestReadScreenTailBytes(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n') // read the request
+
+		// Send header line
+		headerLine := `{"ok":true,"op":"attach"}` + "\n"
+		conn.Write([]byte(headerLine))
+
+		// Send streamed bytes
+		fullOutput := "0123456789ABCDEFGHIJ"
+		conn.Write([]byte(fullOutput))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	output, err := client.ReadScreen(context.Background(), "session123", 5)
+	if err != nil {
+		t.Fatalf("ReadScreen failed: %v", err)
+	}
+
+	<-done
+	expected := "FGHIJ"
+	if output != expected {
+		t.Errorf("expected last 5 bytes %q, got %q", expected, output)
+	}
+}
+
+func TestAttachOmitsAuthWhenKeyFails(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	var capturedReq map[string]interface{}
+	errChan := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		line, _ := reader.ReadString('\n')
+		if err := json.Unmarshal([]byte(line[:len(line)-1]), &capturedReq); err != nil {
+			errChan <- err
+			return
+		}
+
+		// Send header
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "", ErrNoControlKey
+	})
+	client.proto = 1
+
+	_, _ = client.ReadScreen(context.Background(), "session123", 0)
+
+	<-done
+	select {
+	case err := <-errChan:
+		t.Fatalf("error in server: %v", err)
+	default:
+	}
+
+	// Verify auth key is absent from request
+	if _, ok := capturedReq["auth"]; ok {
+		t.Error("attach request should not have auth field when key function fails")
+	}
+}
+
+func TestAttachIncludesAuthWhenKeySucceeds(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	var capturedReq map[string]interface{}
+	errChan := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		line, _ := reader.ReadString('\n')
+		if err := json.Unmarshal([]byte(line[:len(line)-1]), &capturedReq); err != nil {
+			errChan <- err
+			return
+		}
+
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "my-control-key", nil
+	})
+	client.proto = 1
+
+	_, _ = client.ReadScreen(context.Background(), "session123", 0)
+
+	<-done
+	select {
+	case err := <-errChan:
+		t.Fatalf("error in server: %v", err)
+	default:
+	}
+
+	if auth, ok := capturedReq["auth"].(string); !ok || auth != "my-control-key" {
+		t.Errorf("expected auth='my-control-key', got %v", capturedReq["auth"])
+	}
+}
+
+func TestSendKeysWritesBytesToAttach(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	capturedKeys := make([]byte, 0)
+	errChan := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n') // read the attach request
+
+		// Send header
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		// Read the key bytes
+		buf := make([]byte, 1024)
+		n, err := conn.Read(buf)
+		if err != nil && err != io.EOF {
+			errChan <- err
+			return
+		}
+		capturedKeys = append(capturedKeys, buf[:n]...)
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	err = client.SendKeys(context.Background(), "session123", "hello keys")
+	if err != nil {
+		t.Fatalf("SendKeys failed: %v", err)
+	}
+
+	<-done
+	select {
+	case err := <-errChan:
+		t.Fatalf("error in server: %v", err)
+	default:
+	}
+
+	expected := []byte("hello keys")
+	if !bytes.Equal(capturedKeys, expected) {
+		t.Errorf("expected keys %v, got %v", expected, capturedKeys)
+	}
+}
+
+func TestErrorMessageNoControlKey(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false,"code":"EAUTH","error":"auth failed"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "super-secret-key-abc123xyz789", nil
+	})
+	client.proto = 1
+
+	err = client.SendText(context.Background(), "session123", "text", true)
+
+	// The error message should not contain the control key
+	if strings.Contains(err.Error(), "super-secret-key-abc123xyz789") {
+		t.Error("error message contains control key value")
+	}
 }
