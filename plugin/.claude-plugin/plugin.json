@@ -1,0 +1,8 @@
+{
+  "name": "agent-fleet",
+  "version": "0.4.0",
+  "description": "Оркестрация флота фоновых сессий Claude Code над доской из markdown-карточек: диспатч задач по карточкам, пины активной работы, уборка и воскрешение сессий.",
+  "author": {
+    "name": "fleetdeck contributors"
+  }
+}
