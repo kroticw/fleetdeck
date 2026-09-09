@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "fleetdeck",
+  "description": "The board convention that fleetdeck reads, packaged as a Claude Code plugin",
+  "owner": {
+    "name": "kroticw",
+    "url": "https://github.com/kroticw"
+  },
+  "plugins": [
+    {
+      "name": "agent-fleet",
+      "source": "./plugin",
+      "description": "Board convention and orchestration skills for a fleet of background Claude Code sessions",
+      "category": "workflow"
+    }
+  ]
+}
