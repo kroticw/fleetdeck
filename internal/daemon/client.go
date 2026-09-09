@@ -453,6 +453,18 @@ func Discover(key func() (string, error)) (*Client, error) {
 	return c, nil
 }
 
+// dialTimeout bounds the connect(2) call itself, independently of whatever deadline
+// (if any) ctx carries. context.Background() is the documented call path for
+// ListSessions, SendText, SendKeys and Ping — only ReadScreen derives a context
+// deadline of its own — so a Dialer with no Timeout of its own left the connect phase
+// completely unbounded on every one of those paths: a daemon that is alive but not
+// accepting connections (a full backlog, a wedged process) can make connect(2) on an
+// AF_UNIX socket block indefinitely, and nothing could break a caller's goroutine out
+// of that. resolveSocketCandidate already dials its liveness probes with
+// net.DialTimeout for exactly this reason; dialTimeout is the same defence carried to
+// the main connect path.
+const dialTimeout = 5 * time.Second
+
 // dial connects to the client's current socket path, checking beforehand that it (and
 // its enclosing directories) are safely owned. For a discoverable client, a dial
 // failure triggers exactly one re-resolution of the socket path (via c.resolve, which
@@ -460,15 +472,11 @@ func Discover(key func() (string, error)) (*Client, error) {
 // under a new directory — never a loop. A client created with an explicit path (New,
 // not discoverable) never re-resolves.
 //
-// ctx bounds the connect itself, not just the request/response exchange that follows
-// it. Before this, dial called plain net.Dial with no timeout at all: c.setDeadline
-// only runs on the connection dial already returned, so neither the 2s ReadScreen
-// ceiling nor any context.WithTimeout a caller supplied covered the connect phase. A
-// daemon that is alive but not accepting connections (a full backlog, a wedged
-// process) can make connect(2) on an AF_UNIX socket block indefinitely, and nothing
-// could break a poller's goroutine out of that. resolveSocketCandidate already dialled
-// its liveness probes with net.DialTimeout for exactly this reason; this is the same
-// fix applied to the main connect path, which had been overlooked.
+// The connect itself is bounded twice over: by dialTimeout, set on the Dialer and thus
+// in effect no matter what ctx carries, and by ctx's own deadline when it has one
+// (DialContext still honours ctx.Done() independently of Timeout). Neither on its own
+// used to be enough — ctx alone because context.Background() is the common case, and
+// nothing prior set a Dialer.Timeout at all.
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	path := c.currentSocketPath()
 
@@ -509,7 +517,7 @@ func dialChecked(ctx context.Context, path string) (net.Conn, error) {
 		}
 		return nil, err
 	}
-	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+	conn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}
@@ -757,26 +765,40 @@ func detectKick(data []byte, closed bool) (prefix []byte, detail string, kicked 
 
 // collectUntilIdleOrClosed reads from reader into an accumulating buffer until: the
 // connection is observed to close (a non-timeout read error), the stream has gone idle
-// for idleTimeout with no new bytes, or ctx's deadline is reached. The buffer is capped
-// at maxBytes, trimming from the front (never splitting a UTF-8 rune) on overflow.
+// for idleTimeout with no new bytes, ctx's deadline is reached, or until is reached. The
+// buffer is capped at maxBytes, trimming from the front (never splitting a UTF-8 rune)
+// on overflow.
+//
+// until is a hard ceiling on the whole call, independent of ctx and of idleTimeout: it
+// is checked directly, not derived from lastReadTime, so it cannot be pushed back by a
+// session that keeps printing more often than idleTimeout. Without it, a chatty session
+// (one that redraws faster than idleTimeout) resets the sliding idle deadline on every
+// byte and, when ctx carries no deadline of its own (context.Background(), SendKeys'
+// documented call path), nothing ever ends the loop — the call blocks for as long as the
+// session keeps talking, or forever. A zero until means no such ceiling is in effect;
+// both of this function's callers always pass a non-zero one today.
 //
 // When idleFromStart is false, the idle timer starts only once the first byte has been
-// read, letting ctx's deadline alone bound the wait for that first byte — a slow first
-// paint (a loaded machine, a large screen buffer) is normal, not idle. ReadScreen wants
-// this. When idleFromStart is true, the idle window is in effect from the very first
-// call, exactly like an ordinary idle detection with no special-cased "first byte" grace
-// period; SendKeys wants this, since silence for the whole window is itself the expected,
-// successful outcome for most key deliveries (see docs/protocol/daemon-control-socket.md
-// section 3, item 8: there is no per-delivery acknowledgement).
+// read, letting ctx's deadline (or until) alone bound the wait for that first byte — a
+// slow first paint (a loaded machine, a large screen buffer) is normal, not idle.
+// ReadScreen wants this. When idleFromStart is true, the idle window is in effect from
+// the very first call, exactly like an ordinary idle detection with no special-cased
+// "first byte" grace period; SendKeys wants this, since silence for the whole window is
+// itself the expected, successful outcome for most key deliveries (see
+// docs/protocol/daemon-control-socket.md section 3, item 8: there is no per-delivery
+// acknowledgement).
 //
 // Both ReadScreen and SendKeys build their kick detection on this one routine (paired
 // with detectKick) so they cannot drift apart on what counts as "the connection closing"
 // or "the marker arrived" — a marker or a close split across two reads is caught either
-// way, since data accumulates across calls to this function.
-func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.Reader, idleTimeout time.Duration, maxBytes int, idleFromStart bool) (data []byte, closed bool) {
+// way, since data accumulates across calls to this function. They share the same
+// until-based hard ceiling for the same reason: a bound that lives in only one of two
+// otherwise-identical call paths is a bound the other path does not actually have.
+func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.Reader, idleTimeout time.Duration, maxBytes int, idleFromStart bool, until time.Time) (data []byte, closed bool) {
 	lastReadTime := time.Now()
 	gotFirstByte := idleFromStart
 	ctxDeadline, hasCtxDeadline := ctx.Deadline()
+	hasUntil := !until.IsZero()
 
 	// firstByteDeadline bounds the wait for the very first byte when neither a context
 	// deadline nor the idle window is yet in effect (only reachable when idleFromStart
@@ -786,10 +808,19 @@ func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.
 	// timed out, so the loop never actually reached it — contradicting the "bounded
 	// wait" this is meant to provide and looping forever against a silent connection.
 	firstByteDeadline := lastReadTime.Add(idleTimeout)
+	if hasUntil && until.Before(firstByteDeadline) {
+		firstByteDeadline = until
+	}
 
 	buf := make([]byte, 4096)
 	for {
 		if ctx.Err() != nil {
+			return data, false
+		}
+		// until is checked directly against the clock, not folded into lastReadTime-
+		// relative math, precisely so a stream of incoming bytes can never push it back
+		// — see this function's own doc comment above.
+		if hasUntil && !time.Now().Before(until) {
 			return data, false
 		}
 
@@ -810,6 +841,9 @@ func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.
 			// time.Now().Add(idleTimeout) — see its comment for why that recomputation
 			// never actually bounded anything.
 			readDeadline = firstByteDeadline
+		}
+		if hasUntil && until.Before(readDeadline) {
+			readDeadline = until
 		}
 		if err := conn.SetReadDeadline(readDeadline); err != nil {
 			return data, false
@@ -1127,27 +1161,37 @@ func trimToRuneBoundary(b []byte) []byte {
 // passing cols/rows on attach has no side effect on anyone's terminal, and a poller
 // calling ReadScreen on a cadence cannot reshape a user's session.
 func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (string, error) {
-	// The read loop below races a single absolute deadline against the idle
-	// timeout. When the caller's context carries none (context.Background() is the
-	// documented call path for a session poller), derive one here, once, so
-	// ctx.Err() is the loop's only exit condition instead of two competing clocks.
-	//
-	// This uses c.screenDeadline, not c.defaultDeadline: a chatty session (a redrawing
-	// spinner, say) never goes idle, so the idle timeout never fires and this derived
-	// deadline is what actually ends the read. defaultDeadline's 30s is sized for
-	// request/response operations, not for bounding a stream read on every poll tick.
+	out, err := c.readScreenWithDeadline(ctx, session, tail)
+	if isProtoErr(err) {
+		c.invalidateProto()
+		out, err = c.readScreenWithDeadline(ctx, session, tail)
+	}
+	return out, err
+}
+
+// readScreenWithDeadline derives a fresh, full c.screenDeadline-based context for
+// exactly one call to readScreenOnce, when ctx (the caller's own, as passed to
+// ReadScreen, never mutated in place) carries no deadline of its own. It is factored
+// out of ReadScreen precisely so an EPROTO retry gets a full budget of its own: the
+// previous shape derived the deadline once, before the first attempt, and reused that
+// same context for the retry — leaving it with whatever time happened to remain after
+// the first attempt's own dial-and-response, sometimes almost none.
+//
+// The read loop below (inside readScreenOnce, via collectUntilIdleOrClosed) races this
+// absolute deadline against the idle timeout. context.Background() is the documented
+// call path for a session poller, so ctx.Deadline() is typically absent and this
+// derivation runs on every attempt. This uses c.screenDeadline, not c.defaultDeadline:
+// a chatty session (a redrawing spinner, say) never goes idle, so the idle timeout
+// never fires and this derived deadline is what actually ends the read.
+// defaultDeadline's 30s is sized for request/response operations, not for bounding a
+// stream read on every poll tick.
+func (c *Client) readScreenWithDeadline(ctx context.Context, session string, tail int) (string, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.screenDeadline)
 		defer cancel()
 	}
-
-	out, err := c.readScreenOnce(ctx, session, tail)
-	if isProtoErr(err) {
-		c.invalidateProto()
-		out, err = c.readScreenOnce(ctx, session, tail)
-	}
-	return out, err
+	return c.readScreenOnce(ctx, session, tail)
 }
 
 func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (string, error) {
@@ -1164,20 +1208,18 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 
 	c.setDeadline(ctx, conn)
 
-	// Get control key if available
-	key, _ := c.keyFunc()
-
-	// Build attach request. Only include auth if key is available.
+	// Reading never needs a key (docs/protocol/daemon-control-socket.md section 3:
+	// auth is optional for attach, and the daemon rejects only a *wrong* key, never a
+	// missing one). Deliberately never fetch or send one here: a stale control.key —
+	// wrong, rotated, whatever — would otherwise make the daemon reject with EAUTH an
+	// attach that would have succeeded fine with no auth field at all, breaking a read
+	// path that has no actual need for a credential.
 	req := map[string]interface{}{
 		"proto": proto,
 		"op":    "attach",
 		"short": session,
 		"cols":  80,
 		"rows":  24,
-	}
-
-	if key != "" {
-		req["auth"] = key
 	}
 
 	if err := c.writeRequest(conn, req); err != nil {
@@ -1196,9 +1238,14 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 	// stream goes idle (no data for c.readIdleTimeout, counted from the first byte
 	// received — see collectUntilIdleOrClosed) and return promptly, not wait for the
 	// full context deadline; a session that prints continuously (a spinner, say) never
-	// goes idle, so the context deadline is what ends the read in that case, and what
-	// has been accumulated by then is a real, valid partial screen.
-	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false)
+	// goes idle, so the explicit ceiling below is what ends the read in that case, and
+	// what has been accumulated by then is a real, valid partial screen.
+	//
+	// The ceiling is passed explicitly, as an absolute time.Time independent of ctx's
+	// own deadline, rather than relying solely on whatever deadline ctx happens to
+	// carry by this point: collectUntilIdleOrClosed's own hard ceiling must not depend
+	// on a caller upstream having derived one on ctx (see its own doc comment).
+	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false, time.Now().Add(c.screenDeadline))
 
 	// The kick marker means this attach connection was evicted (see detectKick's
 	// comment for the full three-condition rule, and
@@ -1310,7 +1357,16 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	// reads with the same routine ReadScreen uses (see collectUntilIdleOrClosed) so a
 	// kick marker split across two reads, or arriving after a chunk of ordinary PTY
 	// bytes, is never missed the way a single fixed-size read would miss it.
-	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true)
+	//
+	// The window has its own explicit ceiling, independent of ctx (SendKeys never
+	// derives a context deadline the way ReadScreen does — context.Background() is its
+	// documented call path). Without this, a session that keeps printing more often
+	// than c.readIdleTimeout resets collectUntilIdleOrClosed's sliding idle deadline on
+	// every byte, and with no ctx deadline in play either, the call never returns: it
+	// blocks for the whole of the session's current turn, or forever. c.screenDeadline
+	// is reused here rather than a separate field, so this window and ReadScreen's own
+	// cannot silently drift apart from each other.
+	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true, time.Now().Add(c.screenDeadline))
 
 	if _, detail, kicked := detectKick(data, closed); kicked {
 		// The keys were written to the connection, but a kick observed right after

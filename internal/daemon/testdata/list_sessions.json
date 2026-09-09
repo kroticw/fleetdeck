@@ -154,6 +154,26 @@
       "cliVersion": "2.1.263",
       "source": "shell",
       "needs": "rate limited, retrying in 30s"
+    },
+    {
+      "short": "2b91d6f7",
+      "nonce": "5e0a8c34",
+      "sessionId": "2b91d6f7-9c4a-4e6b-8d2f-1a3c7e9b0d52",
+      "pid": 49012,
+      "attempt": 1,
+      "startedAt": 1783909567845,
+      "createdAt": 1783909567800,
+      "cwd": "/home/user/project",
+      "backend": "daemon",
+      "tempo": "blocked",
+      "state": "blocked",
+      "detail": "being killed mid-question",
+      "intent": "",
+      "name": "worker-h",
+      "cliVersion": "2.1.263",
+      "source": "shell",
+      "needs": "choose: (1) keep the branch; (2) discard it",
+      "dying": true
     }
   ]
 }

@@ -24,6 +24,12 @@ package daemon
 // (d4bc7159), a needs reporting a usage limit with neither blocked flag (07ea8b3c), and
 // a tempo=blocked session whose needs is a non-question ("rate limited...") — proving
 // the blocked flag alone is enough to land it in Waiting, never Stalled (918cf4a2).
+//
+// The eighth (short "2b91d6f7") is invented the same way, to cover the blocker that
+// Waiting/Stalled ignored Dying entirely: unlike f5ab6148 above (dying but otherwise
+// plainly working), this one carries every trigger Waiting checks for at once
+// (state=blocked, tempo=blocked, and a "choose:" question in needs) alongside
+// "dying": true, to prove Dying overrides all of them rather than merely the weakest.
 
 import (
 	"bufio"
@@ -178,6 +184,10 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 		// a question, but tempo=blocked already makes this waiting — proving Waiting
 		// and Stalled stay mutually exclusive even with a non-question needs present.
 		"918cf4a2": {waiting: true, stalled: false},
+		// tempo=blocked, state=blocked, needs="choose: ...", dying=true: every trigger
+		// Waiting checks for is satisfied, but the session is being killed — Dying
+		// overrides all of them, so this must land in neither counter.
+		"2b91d6f7": {waiting: false, stalled: false},
 	}
 
 	if len(sessions) != len(want) {
@@ -240,6 +250,7 @@ func TestFixtureDyingFieldParsesViaListSessions(t *testing.T) {
 		"d4bc7159": false,
 		"07ea8b3c": false,
 		"918cf4a2": false,
+		"2b91d6f7": true,
 	}
 
 	if len(sessions) != len(wantDying) {
@@ -383,6 +394,50 @@ func TestWaitingNegative(t *testing.T) {
 	}
 	if s.Stalled() {
 		t.Error("state=working, tempo=active, needs=\"\" must not be stalled either")
+	}
+}
+
+// TestDyingSessionIsNeverWaitingOrStalled covers the blocker that a session being
+// killed or retired still landed in the Waiting (or Stalled) counter: Dying was added
+// specifically to tell a dying session from a live one, but Waiting/Stalled never
+// consulted it. This session satisfies every one of Waiting's three triggers at once
+// (state=blocked, tempo=blocked, and a "choose:" question in needs) to prove Dying
+// overrides all of them, not just the weakest one.
+func TestDyingSessionIsNeverWaitingOrStalled(t *testing.T) {
+	s := Session{
+		State: "blocked",
+		Tempo: "blocked",
+		Needs: "choose: (1) A; (2) B",
+		Dying: true,
+	}
+	if s.Waiting() {
+		t.Error("a dying session must never be Waiting(), regardless of state/tempo/needs")
+	}
+	if s.Stalled() {
+		t.Error("a dying session must never be Stalled(), regardless of state/tempo/needs")
+	}
+}
+
+// TestDialCheckedDialerConfiguredWithTimeout covers blocker 2: dialChecked dialled with
+// a bare &net.Dialer{}, which carries no Timeout of its own, so a context with no
+// deadline (context.Background() — the documented call path for ListSessions, SendText,
+// SendKeys and Ping; only ReadScreen derives one) left the connect itself unbounded. A
+// daemon that is alive but not accepting connections (a full backlog, a wedged process)
+// can make connect(2) on an AF_UNIX socket block indefinitely, and nothing could break a
+// caller out of that.
+//
+// On macOS, connecting to a listening-but-unaccepted unix socket returns immediately
+// regardless of backlog state — there is no local fixture that reproduces a genuine
+// connect(2) hang to assert against. Per the review, this is verified at the
+// configuration level instead: dialTimeout, the Timeout dialChecked's Dialer is
+// constructed with, must be a positive, bounded duration that applies independently of
+// whatever deadline ctx does or does not carry.
+func TestDialCheckedDialerConfiguredWithTimeout(t *testing.T) {
+	if dialTimeout <= 0 {
+		t.Fatalf("dialChecked's dialer must have a positive Timeout independent of ctx, got %v", dialTimeout)
+	}
+	if dialTimeout > 30*time.Second {
+		t.Fatalf("dialChecked's dialer Timeout (%v) is too large to bound a connect against a wedged daemon promptly", dialTimeout)
 	}
 }
 
@@ -1543,7 +1598,14 @@ func TestAttachOmitsAuthWhenKeyFails(t *testing.T) {
 	}
 }
 
-func TestAttachIncludesAuthWhenKeySucceeds(t *testing.T) {
+// TestReadScreenNeverSendsAuthEvenWhenKeySucceeds covers the recommendation that
+// ReadScreen sent the control key on attach whenever one happened to be available.
+// Reading needs no key at all (docs/protocol/daemon-control-socket.md section 3), so
+// a stale control.key — wrong, rotated, whatever — would make the daemon reject the
+// attach with EAUTH outright and break a read that would otherwise have succeeded with
+// no auth field at all. ReadScreen must never send auth, regardless of whether the key
+// function succeeds.
+func TestReadScreenNeverSendsAuthEvenWhenKeySucceeds(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -1585,8 +1647,8 @@ func TestAttachIncludesAuthWhenKeySucceeds(t *testing.T) {
 	default:
 	}
 
-	if auth, ok := capturedReq["auth"].(string); !ok || auth != "my-control-key" {
-		t.Errorf("expected auth='my-control-key', got %v", capturedReq["auth"])
+	if _, ok := capturedReq["auth"]; ok {
+		t.Errorf("ReadScreen must never send auth, got %v", capturedReq["auth"])
 	}
 }
 
@@ -1779,6 +1841,80 @@ func TestReadScreenAttachRefusedEAUTH(t *testing.T) {
 	}
 	if out != "" {
 		t.Errorf("expected empty screen on refused attach, got %q", out)
+	}
+}
+
+// TestReadScreenEPROTORetryGetsFreshDeadline covers the recommendation that
+// ReadScreen's EPROTO retry reused the same, already-mostly-spent context deadline as
+// the first attempt: the deadline is derived once, before the first attempt, from
+// c.screenDeadline, and reusing that same ctx for the retry leaves it with whatever
+// time happened to remain — here, deliberately, almost none. The first connection
+// stalls for longer than client.screenDeadline before answering EPROTO, so by the time
+// the retry begins, the context ReadScreen derived at the top would already be past
+// its deadline. If the retry inherits that same ctx, its own dial fails immediately
+// with a context error; ReadScreen must instead give the retry a fresh, full budget of
+// its own, exactly as the first attempt got.
+func TestReadScreenEPROTORetryGetsFreshDeadline(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	// Three connections land here, in order: the first attempt's attach (answered
+	// EPROTO), a re-ping (isProtoErr's invalidateProto forces ensureProto to re-ping
+	// before the retry's own attach — this is correct, existing behaviour, not part of
+	// what this test is exercising), and the retry's attach.
+	go func() {
+		for i := 0; i < 3; i++ {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+
+			reader := bufio.NewReader(conn)
+			line, _ := reader.ReadString('\n')
+
+			switch {
+			case strings.Contains(line, `"op":"ping"`):
+				// Answer the re-ping immediately; it should not itself consume any
+				// meaningful part of whatever budget is in play.
+				conn.Write([]byte(`{"ok":true,"op":"ping","version":"test","proto":1}` + "\n"))
+				conn.Close()
+			case i == 0:
+				// First attempt: stall for most of client.screenDeadline before
+				// answering EPROTO — long enough to receive the response inside that
+				// budget, but leaving only a sliver of it unspent by the time this
+				// attempt returns and the retry begins.
+				time.Sleep(250 * time.Millisecond)
+				conn.Write([]byte(`{"ok":false,"code":"EPROTO"}` + "\n"))
+				conn.Close()
+			default:
+				// Retry's attach: stall longer than the sliver left over from a
+				// reused deadline (50ms), but well inside a fresh, full
+				// screenDeadline (300ms), before answering with a short,
+				// distinctive screen.
+				time.Sleep(150 * time.Millisecond)
+				conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+				conn.Write([]byte("retry succeeded"))
+				conn.Close()
+			}
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.screenDeadline = 300 * time.Millisecond
+	client.readIdleTimeout = 30 * time.Millisecond
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	if err != nil {
+		t.Fatalf("expected the retry to succeed with its own fresh deadline, got error: %v", err)
+	}
+	if out != "retry succeeded" {
+		t.Errorf("expected %q, got %q", "retry succeeded", out)
 	}
 }
 
@@ -2575,6 +2711,19 @@ func TestSendKeysWriteFailureReturnsErrKeysNotDelivered(t *testing.T) {
 	}
 }
 
+// TestErrKeysNotDeliveredNilErrDoesNotPanic covers the recommendation that
+// ErrKeysNotDelivered.Error() dereferenced e.Err unconditionally. Every production
+// call site constructs it with a non-nil cause (see sendKeysOnce), but the type is
+// exported, so any caller outside this package can construct one with Err left nil —
+// and doing so must not panic when Error() is called.
+func TestErrKeysNotDeliveredNilErrDoesNotPanic(t *testing.T) {
+	err := &ErrKeysNotDelivered{}
+	got := err.Error() // must not panic
+	if got == "" {
+		t.Error("expected a non-empty message even with a nil Err")
+	}
+}
+
 // --- EKICKED: the daemon evicting an attacher must not look like a normal outcome ---
 
 // TestReadScreenDetectsEkicked covers the read path: the daemon writes a plain-text
@@ -3029,6 +3178,79 @@ func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) 
 	}
 }
 
+// TestSendKeysProductionDefaultsChattySessionReturnsPromptly is
+// TestReadScreenProductionDefaultsChattySessionReturnsPromptly's counterpart for
+// SendKeys, covering the blocker that SendKeys had no ceiling of its own at all: unlike
+// ReadScreen, it never derives a context deadline when the caller's (context.Background,
+// the documented call path) carries none, and collectUntilIdleOrClosed's per-iteration
+// read deadline is recomputed from lastReadTime on every byte received — so a session
+// that keeps printing more often than the idle timeout never lets the loop's idle branch
+// fire, and with no context deadline in play either, nothing ever ends the call. This
+// server sends one byte every 100ms, forever, to reproduce exactly that: SendKeys must
+// still return well before defaultDeadline's 30 seconds.
+func TestSendKeysProductionDefaultsChattySessionReturnsPromptly(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		buf := make([]byte, 1024)
+		_, _ = conn.Read(buf) // read the key bytes
+
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := conn.Write([]byte("x")); err != nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	// Deliberately not touching client.defaultDeadline or client.screenDeadline: this
+	// test measures the production ceiling.
+
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = client.SendKeys(context.Background(), "session123", "\r")
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("SendKeys did not return within 10s against a session that keeps printing")
+	}
+	elapsed := time.Since(start)
+
+	if elapsed >= client.defaultDeadline {
+		t.Errorf("SendKeys took %v, expected it to return well before defaultDeadline (%v)", elapsed, client.defaultDeadline)
+	}
+}
+
 // TestCollectUntilIdleOrClosedBoundsFirstByteWaitWithNoContextDeadline covers the
 // "bounded wait" branch with idleFromStart == false and a context carrying no
 // deadline: recomputing time.Now().Add(idleTimeout) on every loop iteration would push
@@ -3050,7 +3272,7 @@ func TestCollectUntilIdleOrClosedBoundsFirstByteWaitWithNoContextDeadline(t *tes
 		closed bool
 	}, 1)
 	go func() {
-		data, closed := collectUntilIdleOrClosed(context.Background(), clientConn, bufio.NewReader(clientConn), idleTimeout, maxAttachBytes, false)
+		data, closed := collectUntilIdleOrClosed(context.Background(), clientConn, bufio.NewReader(clientConn), idleTimeout, maxAttachBytes, false, time.Time{})
 		done <- struct {
 			data   []byte
 			closed bool
@@ -3484,7 +3706,7 @@ func TestCollectUntilIdleOrClosedUnwrapsWrappedTimeoutError(t *testing.T) {
 	conn := alwaysWrappedTimeoutConn{}
 	reader := bufio.NewReader(conn)
 
-	data, closed := collectUntilIdleOrClosed(context.Background(), conn, reader, 20*time.Millisecond, 0, true)
+	data, closed := collectUntilIdleOrClosed(context.Background(), conn, reader, 20*time.Millisecond, 0, true, time.Time{})
 	if closed {
 		t.Fatal("expected a wrapped timeout error to be recognised as a timeout, not a closed connection")
 	}

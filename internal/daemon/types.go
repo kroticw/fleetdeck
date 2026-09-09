@@ -73,7 +73,14 @@ func isQuestionNeeds(needs string) bool {
 // Tempo reports "blocked". This and Stalled are deliberately kept mutually exclusive:
 // a needs string that is non-empty but is not a question (a usage limit, a login
 // prompt, a rate limit) means the session is Stalled, not Waiting on a person.
+//
+// A Dying session is never Waiting, regardless of what State, Tempo, or Needs say: it
+// is being killed or retired, so no one has to answer it. This overrides every other
+// form above, including a session that happens to satisfy all three at once.
 func (s Session) Waiting() bool {
+	if s.Dying {
+		return false
+	}
 	return s.State == "blocked" || s.Tempo == "blocked" || isQuestionNeeds(s.Needs)
 }
 
@@ -84,7 +91,15 @@ func (s Session) Waiting() bool {
 // or Stalled whenever it is stopped at all — the UI shows these as two separate
 // counters, and a session counted in both (or neither, while stopped) would make the
 // totals lie.
+//
+// A Dying session is never Stalled either, for the same reason Waiting excludes it: it
+// needs no one's attention, not even the kind Stalled reports. Without this explicit
+// check, a dying session with a non-empty, non-question Needs would fall straight
+// through Waiting's own Dying guard above and still land here.
 func (s Session) Stalled() bool {
+	if s.Dying {
+		return false
+	}
 	return !s.Waiting() && s.Needs != ""
 }
 
@@ -171,6 +186,9 @@ type ErrKeysNotDelivered struct {
 }
 
 func (e *ErrKeysNotDelivered) Error() string {
+	if e.Err == nil {
+		return "keys not confirmed delivered"
+	}
 	return "keys not confirmed delivered: " + e.Err.Error()
 }
 
