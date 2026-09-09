@@ -25,4 +25,8 @@ lint:
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 
 run: build
+	@if [ ! -x ./bin/fleetdeck ]; then \
+		echo "run: ./bin/fleetdeck was not built — no cmd/ directory exists yet in this branch" >&2; \
+		exit 1; \
+	fi
 	./bin/fleetdeck

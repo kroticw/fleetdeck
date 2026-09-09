@@ -162,14 +162,51 @@ func validate(c Config) error {
 }
 
 // Save writes the config file, creating parent directories as needed.
+//
+// It validates before writing anything, so it can never leave behind a config that
+// Load would refuse — the UI writes here whenever the user toggles notifications or
+// pins the orchestrator session, so a bad write would be a live way to brick the next
+// startup. The write itself goes through a temporary file in the same directory
+// followed by a rename, so a write interrupted by a full disk or a killed process
+// leaves the previous file intact rather than a truncated one: rename is atomic on
+// the same filesystem, which a same-directory temp file guarantees.
 func Save(path string, c Config) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := validate(c); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
+
 	f := configToFile(c)
 	raw, err := yaml.Marshal(f)
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	return os.WriteFile(path, raw, 0o600)
+
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp config file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp config file: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("set config file permissions: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp config file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace config file: %w", err)
+	}
+	return nil
 }

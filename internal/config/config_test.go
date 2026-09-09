@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
@@ -267,6 +269,58 @@ func TestLoadNegativePollIntervalIsAnError(t *testing.T) {
 	}
 	if _, err := Load(p); err == nil {
 		t.Fatal("a negative poll interval must be rejected")
+	}
+}
+
+func TestSaveRejectsInvalidConfigAndLeavesExistingFileUntouched(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	original := Default()
+	original.BoardPath = "/keep/me"
+	if err := Save(p, original); err != nil {
+		t.Fatalf("seeding a valid config: %v", err)
+	}
+	before, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Save(p, Config{}); err == nil {
+		t.Fatal("Save must reject a config that Load would refuse (port 0, poll_interval 0)")
+	}
+
+	after, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("a rejected Save must not modify the existing file: before=%q after=%q", before, after)
+	}
+}
+
+func TestSaveWritesCompleteValidYAML(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	want := Default()
+	want.BoardPath = "/my/board"
+	if err := Save(p, want); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var f file
+	if err := yaml.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("Save must write complete, valid YAML, got a parse error: %v", err)
+	}
+
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("reading back a saved config: %v", err)
+	}
+	if got.BoardPath != want.BoardPath {
+		t.Fatalf("round trip lost data: %+v", got)
 	}
 }
 
