@@ -1510,16 +1510,19 @@ git commit --signoff -m "feat(init): idempotent setup of config, statusline and 
 - [ ] **Step 1: Перенести файлы**
 
 ```bash
-cp -R ~/claude/krotic-claude-code/plugins/agent-fleet/ plugin/
+cp -R "$PLUGIN_SOURCE/plugins/agent-fleet/" plugin/
 rm plugin/templates/board/Доска.base
 ```
 
-- [ ] **Step 2: Обезличить три места.** В `plugin/.claude-plugin/plugin.json` заменить автора на `fleetdeck contributors`. В `plugin/templates/board/README.md` убрать упоминание `krotic`. В `plugin/templates/board/scripts/test_validate_cards.py` заменить фикстуру `bigcountry` на нейтральное `example/project`.
+- [ ] **Step 2: Обезличить три места.** В `plugin/.claude-plugin/plugin.json` заменить автора на `fleetdeck contributors`. В `plugin/templates/board/README.md` убрать имя мейнтейнера. В `plugin/templates/board/scripts/test_validate_cards.py` заменить имя рабочего репозитория в фикстуре на нейтральное `example/project`. Конкретные значения здесь не приводятся намеренно: репозиторий публичный, а инструкция «убрать упоминание клиента», называющая клиента, сама является этим упоминанием.
 
 - [ ] **Step 3: Проверить, что приватного не осталось**
 
 ```bash
-grep --recursive --ignore-case --extended-regexp "balalaika|bigcountry|krotic|nevalyashka|denisdavydov|remnawave|homelab|eluosizhiyou" plugin/ || echo "чисто"
+# Шаблон приватных имён держится вне репозитория — в переменной окружения
+# или в нетрекаемом файле. Публичный markdown с этим списком выдаёт ровно то,
+# что список призван прятать.
+grep --recursive --ignore-case --extended-regexp "$PRIVATE_NAMES" plugin/ || echo "чисто"
 ```
 
 Ожидается `чисто`. Любое совпадение — блокирующее: репозиторий публичный.
@@ -1535,7 +1538,7 @@ git add plugin
 git commit --signoff -m "feat(plugin): move the board convention into the public repository"
 ```
 
-- [ ] **Step 7: Удалить оригинал из приватного репозитория.** Это отдельная работа в `~/claude/krotic-claude-code`: убрать `plugins/agent-fleet`, вычистить запись из `.claude-plugin/marketplace.json`, поднять версию маркетплейса и открыть PR. Две копии конвенции разъедутся, и это вопрос времени. Выполнять после того, как плагин отсюда установится и заработает хотя бы на одной машине.
+- [ ] **Step 7: Удалить оригинал из приватного репозитория.** Это отдельная работа в исходном репозитории плагина: убрать `plugins/agent-fleet`, вычистить запись из `.claude-plugin/marketplace.json`, поднять версию маркетплейса и открыть PR. Две копии конвенции разъедутся, и это вопрос времени. Выполнять после того, как плагин отсюда установится и заработает хотя бы на одной машине.
 
 ---
 
