@@ -184,6 +184,20 @@ git commit --signoff -m "chore: module skeleton with build version and CI"
 
 ## Task 2: Конфигурация
 
+> **Поправка (пост-фактум, ветка feat/server).** Ниже описан плоский формат ключей
+> (`board_path`, `server_port` и так далее) и прямой `yaml.Unmarshal` в `Config`. Это не то,
+> что в итоге пошло в код: коммит `ec5287b` заменил его на вложенный формат
+> (`board.path`, `server.port`, `notify.enabled.*`, `daemon.poll_interval`, `usage.enabled`)
+> с отдельным приватным типом `file` для (де)сериализации и `yaml.KnownFields(true)`, чтобы
+> неизвестные и плоские ключи были ошибкой, а не молча игнорировались. `Config` вообще не
+> сериализуется напрямую и не несёт yaml-тегов. Блоки кода ниже — исторический черновик,
+> сохранённый как есть; они замещены фактическим `internal/config/config.go`.
+>
+> Ещё два расхождения с итоговым кодом: `Load` на пустом файле или файле из одних
+> комментариев теперь тоже возвращает умолчания (а не ошибку `EOF`), и добавлена валидация
+> `server.port` (диапазон 1–65535) и `daemon.poll_interval` (строго positive) — оба
+> проверяются при загрузке и дают ошибку при недопустимом значении.
+
 **Files:**
 - Create: `internal/config/config.go`, `internal/config/config_test.go`
 

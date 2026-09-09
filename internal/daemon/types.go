@@ -30,9 +30,16 @@ type Session struct {
 }
 
 // Waiting returns true if the session is waiting for user input.
-// A session waits when it has tempo="blocked" and has a non-empty needs field.
+//
+// There are two independent forms this takes in practice:
+//  1. A session reports its own status as awaiting a decision: State == "blocked",
+//     with the reason described in Detail. Tempo may still read "active" here.
+//  2. The daemon detects a session parked on a rendered question: Tempo == "blocked"
+//     with Needs holding the question text.
+//
+// Either form, or a non-empty Needs on its own, counts as waiting.
 func (s Session) Waiting() bool {
-	return s.Tempo == "blocked" && s.Needs != ""
+	return s.State == "blocked" || s.Tempo == "blocked" || s.Needs != ""
 }
 
 // Info holds daemon version and protocol information.
@@ -101,5 +108,5 @@ func (e *ErrUnknown) Error() string {
 type ErrSubmitNotSupported struct{}
 
 func (e *ErrSubmitNotSupported) Error() string {
-	return "daemon delivers replies submitted"
+	return "the control socket always submits a reply; holding text unsent is not supported"
 }

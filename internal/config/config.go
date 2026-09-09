@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,22 +15,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// NotifyConfig is never serialised directly either — see Config below.
 type NotifyConfig struct {
-	Waiting      bool          `yaml:"waiting"`
-	Failed       bool          `yaml:"failed"`
-	Silent       bool          `yaml:"silent"`
-	CardBlocked  bool          `yaml:"card_blocked"`
-	SilenceAfter time.Duration `yaml:"silence_after"`
+	Waiting      bool
+	Failed       bool
+	Silent       bool
+	CardBlocked  bool
+	SilenceAfter time.Duration
 }
 
+// Config is never serialised directly — Save/Load marshal the nested unexported
+// file type below, so Config carries no yaml tags of its own.
 type Config struct {
-	BoardPath           string        `yaml:"board_path"`
-	DocsPaths           []string      `yaml:"docs_paths"`
-	OrchestratorSession string        `yaml:"orchestrator_session"`
-	Notify              NotifyConfig  `yaml:"notify"`
-	DaemonPollInterval  time.Duration `yaml:"daemon_poll_interval"`
-	UsageEnabled        bool          `yaml:"usage_enabled"`
-	ServerPort          int           `yaml:"server_port"`
+	BoardPath           string
+	DocsPaths           []string
+	OrchestratorSession string
+	Notify              NotifyConfig
+	DaemonPollInterval  time.Duration
+	UsageEnabled        bool
+	ServerPort          int
 }
 
 // notifyFile represents the nested notify section in the config file.
@@ -115,7 +119,9 @@ func fileToConfig(f file) Config {
 	}
 }
 
-// Load reads the config file. A missing file yields defaults; a malformed one is an error.
+// Load reads the config file. A missing file yields defaults; so does a file that
+// decodes to no document at all — empty, or containing only comments. Either is an
+// absence of settings, not a failure. A malformed file is still an error.
 func Load(path string) (Config, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -129,9 +135,30 @@ func Load(path string) (Config, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(raw))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&f); err != nil {
+		if errors.Is(err, io.EOF) {
+			return Default(), nil
+		}
 		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	return fileToConfig(f), nil
+
+	c := fileToConfig(f)
+	if err := validate(c); err != nil {
+		return Config{}, fmt.Errorf("invalid config %s: %w", path, err)
+	}
+	return c, nil
+}
+
+// validate rejects configuration values that would be silently harmful: an out-of-range
+// port, or a non-positive poll interval that would spin in a hot loop against the
+// daemon socket.
+func validate(c Config) error {
+	if c.ServerPort < 1 || c.ServerPort > 65535 {
+		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.ServerPort)
+	}
+	if c.DaemonPollInterval <= 0 {
+		return fmt.Errorf("daemon.poll_interval must be positive, got %s", c.DaemonPollInterval)
+	}
+	return nil
 }
 
 // Save writes the config file, creating parent directories as needed.

@@ -18,9 +18,40 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadEmptyFileReturnsDefaults(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "empty.yaml")
+	if err := os.WriteFile(p, []byte(""), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("an empty file must not be an error, got %v", err)
+	}
+	if got.ServerPort != Default().ServerPort || got.DaemonPollInterval != Default().DaemonPollInterval {
+		t.Fatalf("an empty file must yield defaults, got %+v", got)
+	}
+}
+
+func TestLoadCommentOnlyFileReturnsDefaults(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "comments.yaml")
+	content := "# fleetdeck config\n# nothing set yet\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("a comment-only file must not be an error, got %v", err)
+	}
+	if got.ServerPort != Default().ServerPort || got.DaemonPollInterval != Default().DaemonPollInterval {
+		t.Fatalf("a comment-only file must yield defaults, got %+v", got)
+	}
+}
+
 func TestLoadBrokenFileIsAnError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "broken.yaml")
-	os.WriteFile(p, []byte("server_port: [1,2\n"), 0o600)
+	if err := os.WriteFile(p, []byte("server_port: [1,2\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	if _, err := Load(p); err == nil {
 		t.Fatal("a broken config must fail loudly, not fall back to defaults")
 	}
@@ -28,7 +59,9 @@ func TestLoadBrokenFileIsAnError(t *testing.T) {
 
 func TestLoadOverridesOnlyGivenKeys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("server:\n  port: 9001\n"), 0o600)
+	if err := os.WriteFile(p, []byte("server:\n  port: 9001\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	got, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +93,10 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 
 func TestLoadNestedConfigOverridesExactlyNamedKeys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("board:\n  path: /custom/board\nserver:\n  port: 8080\n"), 0o600)
+	content := "board:\n  path: /custom/board\nserver:\n  port: 8080\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	got, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +117,9 @@ func TestLoadNestedConfigOverridesExactlyNamedKeys(t *testing.T) {
 
 func TestLoadUsageEnabledFalse(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("usage:\n  enabled: false\n"), 0o600)
+	if err := os.WriteFile(p, []byte("usage:\n  enabled: false\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	got, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +131,9 @@ func TestLoadUsageEnabledFalse(t *testing.T) {
 
 func TestLoadUsageEnabledDefaultWhenMissing(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("server:\n  port: 8080\n"), 0o600)
+	if err := os.WriteFile(p, []byte("server:\n  port: 8080\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	got, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +145,10 @@ func TestLoadUsageEnabledDefaultWhenMissing(t *testing.T) {
 
 func TestLoadPartialNotifyOverride(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("notify:\n  enabled:\n    waiting: false\n"), 0o600)
+	content := "notify:\n  enabled:\n    waiting: false\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	got, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +172,9 @@ func TestLoadPartialNotifyOverride(t *testing.T) {
 
 func TestLoadUnknownKeyIsError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("unknown_key: value\n"), 0o600)
+	if err := os.WriteFile(p, []byte("unknown_key: value\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	_, err := Load(p)
 	if err == nil {
 		t.Fatal("unknown key must be an error")
@@ -141,7 +186,9 @@ func TestLoadUnknownKeyIsError(t *testing.T) {
 
 func TestLoadFlatLegacyKeysAreRejected(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	os.WriteFile(p, []byte("board_path: /x\n"), 0o600)
+	if err := os.WriteFile(p, []byte("board_path: /x\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
 	_, err := Load(p)
 	if err == nil {
 		t.Fatal("flat legacy key board_path must be rejected")
@@ -170,5 +217,73 @@ func TestSavePreservesNestedFormat(t *testing.T) {
 	}
 	if !strings.Contains(content, "enabled:") {
 		t.Fatalf("saved config should have nested notify.enabled, got:\n%s", content)
+	}
+}
+
+func TestLoadPortOutOfRangeIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("server:\n  port: 99999\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("a port above 65535 must be rejected")
+	}
+}
+
+func TestLoadPortZeroIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("server:\n  port: 0\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("a port of 0 must be rejected")
+	}
+}
+
+func TestLoadPortNegativeIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("server:\n  port: -1\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("a negative port must be rejected")
+	}
+}
+
+func TestLoadZeroPollIntervalIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: 0s\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("a zero poll interval must be rejected: it would hot-loop against the daemon socket")
+	}
+}
+
+func TestLoadNegativePollIntervalIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: -5s\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("a negative poll interval must be rejected")
+	}
+}
+
+func TestLoadValidPortAndIntervalAreAccepted(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	content := "server:\n  port: 65535\ndaemon:\n  poll_interval: 1s\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("valid boundary values must be accepted, got %v", err)
+	}
+	if got.ServerPort != 65535 {
+		t.Fatalf("expected port 65535, got %d", got.ServerPort)
+	}
+	if got.DaemonPollInterval != time.Second {
+		t.Fatalf("expected poll interval 1s, got %v", got.DaemonPollInterval)
 	}
 }

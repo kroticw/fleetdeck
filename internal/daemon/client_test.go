@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -31,80 +32,137 @@ func serveOnce(t *testing.T, listener net.Listener, fn func(t *testing.T, req []
 		t.Fatalf("ReadString: %v", err)
 	}
 
-	resp := fn(t, []byte(line[:len(line)-1])) // strip \n
+	trimmed := strings.TrimSuffix(line, "\n")
+	resp := fn(t, []byte(trimmed))
 	conn.Write(resp)
 }
 
-func TestFixtureParsesThreeSessions(t *testing.T) {
+// loadFixtureLine reads the pretty-printed fixture and compacts it to the single-line
+// form the real daemon actually sends over the wire (see the addendum: a response is
+// one line terminated by '\n'). The fixture stays pretty-printed on disk for human review.
+func loadFixtureLine(t *testing.T) []byte {
+	t.Helper()
 	data, err := os.ReadFile("testdata/list_sessions.json")
 	if err != nil {
 		t.Fatalf("reading fixture: %v", err)
 	}
-
-	var resp struct {
-		Ok   bool      `json:"ok"`
-		Op   string    `json:"op"`
-		Jobs []Session `json:"jobs"`
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, data); err != nil {
+		t.Fatalf("compacting fixture: %v", err)
 	}
-	if err := json.Unmarshal(data, &resp); err != nil {
-		t.Fatalf("parsing fixture: %v", err)
-	}
+	buf.WriteByte('\n')
+	return buf.Bytes()
+}
 
-	if len(resp.Jobs) == 0 {
+// TestFixtureParsesViaListSessions serves the fixture over a fake socket and feeds it
+// through the production ListSessions parser, rather than unmarshalling it into a
+// locally declared struct. Renaming the "jobs" key in client.go must break this test.
+func TestFixtureParsesViaListSessions(t *testing.T) {
+	line := loadFixtureLine(t)
+
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return line
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	sessions, err := client.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) == 0 {
 		t.Fatal("fixture contains no sessions to test with")
-	}
-	if len(resp.Jobs) != 3 {
-		t.Errorf("expected 3 sessions, got %d", len(resp.Jobs))
 	}
 }
 
-func TestWaiting(t *testing.T) {
-	data, err := os.ReadFile("testdata/list_sessions.json")
+// TestWaitingAgainstFixture parses the fixture through ListSessions and checks that it
+// carries both real waiting forms plus a plainly working session, and that Waiting()
+// agrees with the raw fields on every record.
+func TestWaitingAgainstFixture(t *testing.T) {
+	line := loadFixtureLine(t)
+
+	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
-		t.Fatalf("reading fixture: %v", err)
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return line
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	sessions, err := client.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
 	}
 
-	var resp struct {
-		Jobs []Session `json:"jobs"`
-	}
-	if err := json.Unmarshal(data, &resp); err != nil {
-		t.Fatalf("parsing fixture: %v", err)
-	}
-
-	// Verify that the fixture has at least one waiting session
-	foundWaiting := false
-	foundNotWaiting := 0
-
-	for _, s := range resp.Jobs {
-		if s.Waiting() {
-			foundWaiting = true
-			// Verify the waiting session has tempo="blocked" and needs != ""
-			if s.Tempo != "blocked" {
-				t.Errorf("waiting session has tempo=%q, expected blocked", s.Tempo)
-			}
-			if s.Needs == "" {
-				t.Error("waiting session has empty needs")
-			}
-		} else {
-			foundNotWaiting++
+	var foundForm1, foundForm2, foundWorking bool
+	for _, s := range sessions {
+		want := s.State == "blocked" || s.Tempo == "blocked" || s.Needs != ""
+		if s.Waiting() != want {
+			t.Errorf("Waiting() disagrees with raw fields for %+v", s)
+		}
+		switch {
+		case s.State == "blocked" && s.Tempo != "blocked":
+			foundForm1 = true
+		case s.Tempo == "blocked" && s.Needs != "":
+			foundForm2 = true
+		case !s.Waiting():
+			foundWorking = true
 		}
 	}
 
-	if !foundWaiting {
-		t.Error("fixture should have at least one waiting session")
+	if !foundForm1 {
+		t.Error("fixture should contain the state=blocked waiting form")
 	}
-	if foundNotWaiting == 0 {
-		t.Error("fixture should have at least one non-waiting session")
+	if !foundForm2 {
+		t.Error("fixture should contain the tempo=blocked/needs waiting form")
 	}
+	if !foundWorking {
+		t.Error("fixture should contain at least one plainly working session")
+	}
+}
 
-	// Test the AND logic: Waiting() requires both tempo=="blocked" AND needs != ""
-	// A session with needs set but tempo not "blocked" should return false
-	sessionWithNeedsButNotBlocked := Session{
-		Tempo: "idle",
-		Needs: "answer: What color? (A · B)",
+// TestWaitingForm1 covers a session reporting through its own status that it awaits a
+// decision, with the reason in Detail. Tempo may still read "active" here.
+func TestWaitingForm1(t *testing.T) {
+	s := Session{State: "blocked", Tempo: "active", Needs: "", Detail: "awaiting a decision"}
+	if !s.Waiting() {
+		t.Error("state=blocked must be waiting even with tempo=active and empty needs")
 	}
-	if sessionWithNeedsButNotBlocked.Waiting() {
-		t.Error("session with needs set but tempo != \"blocked\" should not be waiting")
+}
+
+// TestWaitingForm2 covers the daemon detecting a session parked on a rendered question.
+func TestWaitingForm2(t *testing.T) {
+	s := Session{State: "working", Tempo: "blocked", Needs: "answer: Which colour should the probe use? (Red · Green · Blue)"}
+	if !s.Waiting() {
+		t.Error("tempo=blocked with a non-empty needs must be waiting")
+	}
+}
+
+// TestWaitingNegative covers a session that is not waiting by any form.
+func TestWaitingNegative(t *testing.T) {
+	s := Session{State: "working", Tempo: "active", Needs: ""}
+	if s.Waiting() {
+		t.Error("state=working, tempo=active, needs=\"\" must not be waiting")
 	}
 }
 
@@ -114,8 +172,11 @@ func TestMissingSocketErrDaemonUnavailable(t *testing.T) {
 	})
 
 	_, err := client.ListSessions(context.Background())
-	if err != ErrDaemonUnavailable {
+	if !errors.Is(err, ErrDaemonUnavailable) {
 		t.Errorf("expected ErrDaemonUnavailable, got %v", err)
+	}
+	if err.Error() == ErrDaemonUnavailable.Error() {
+		t.Errorf("expected the wrapped error to carry the underlying cause, got %v", err)
 	}
 }
 
@@ -150,15 +211,17 @@ func TestSilentDaemonTimesOut(t *testing.T) {
 	}
 	defer listener.Close()
 
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
-			t.Logf("Accept: %v", err)
 			return
 		}
 		defer conn.Close()
-		// Don't send anything; just wait
-		select {}
+		// Don't send anything; just hold the connection until the test cleans up.
+		<-stop
 	}()
 
 	client := New(listener.Addr().String(), func() (string, error) {
@@ -181,26 +244,46 @@ func TestListSessionsCachedProtoTimesOut(t *testing.T) {
 	}
 	defer listener.Close()
 
-	// First connection for ping (succeeds)
-	// Second connection for ListSessions (hangs)
-	connCount := 0
+	var (
+		mu        sync.Mutex
+		connCount int
+		hungConns []net.Conn
+	)
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range hungConns {
+			c.Close()
+		}
+	})
+
 	go func() {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				return
 			}
-			defer conn.Close()
+
+			mu.Lock()
 			connCount++
+			n := connCount
+			mu.Unlock()
 
 			reader := bufio.NewReader(conn)
 			_, _ = reader.ReadString('\n')
 
-			if connCount == 1 {
-				// First request (ping) - respond
+			if n == 1 {
+				// First request (ping) - respond, then close.
 				conn.Write([]byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":1}` + "\n"))
+				conn.Close()
+				continue
 			}
-			// Second request (list with cached proto) - never respond, just close
+
+			// Second request (list with cached proto) - never respond, just hold
+			// the connection open until the test cleans it up.
+			mu.Lock()
+			hungConns = append(hungConns, conn)
+			mu.Unlock()
 		}
 	}()
 
@@ -459,15 +542,11 @@ func TestErrorCodeEPEERUID(t *testing.T) {
 }
 
 func TestControlKeyMissingFile(t *testing.T) {
-	// Use a temp directory that doesn't exist
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-
 	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	key, err := ControlKey()
-	if err != ErrNoControlKey {
+	if !errors.Is(err, ErrNoControlKey) {
 		t.Errorf("expected ErrNoControlKey, got %v", err)
 	}
 	if key != "" {
@@ -584,7 +663,7 @@ func TestSendTextKeyFunctionFailure(t *testing.T) {
 	client.proto = 1
 
 	err = client.SendText(context.Background(), "session123", "hello", true)
-	if err != ErrNoControlKey {
+	if !errors.Is(err, ErrNoControlKey) {
 		t.Errorf("expected ErrNoControlKey, got %v", err)
 	}
 
@@ -761,7 +840,7 @@ func TestAttachOmitsAuthWhenKeyFails(t *testing.T) {
 
 		reader := bufio.NewReader(conn)
 		line, _ := reader.ReadString('\n')
-		if err := json.Unmarshal([]byte(line[:len(line)-1]), &capturedReq); err != nil {
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &capturedReq); err != nil {
 			errChan <- err
 			return
 		}
@@ -810,7 +889,7 @@ func TestAttachIncludesAuthWhenKeySucceeds(t *testing.T) {
 
 		reader := bufio.NewReader(conn)
 		line, _ := reader.ReadString('\n')
-		if err := json.Unmarshal([]byte(line[:len(line)-1]), &capturedReq); err != nil {
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &capturedReq); err != nil {
 			errChan <- err
 			return
 		}
@@ -891,6 +970,231 @@ func TestSendKeysWritesBytesToAttach(t *testing.T) {
 	expected := []byte("hello keys")
 	if !bytes.Equal(capturedKeys, expected) {
 		t.Errorf("expected keys %v, got %v", expected, capturedKeys)
+	}
+}
+
+func TestSendKeysAttachRefusedENOJOB(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	err = client.SendKeys(context.Background(), "missing", "x")
+	var nojobErr *ErrNojob
+	if !errors.As(err, &nojobErr) {
+		t.Errorf("expected *ErrNojob, got %T: %v", err, err)
+	}
+}
+
+func TestSendKeysAttachRefusedEAUTH(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	err = client.SendKeys(context.Background(), "session123", "x")
+	var authErr *ErrAuth
+	if !errors.As(err, &authErr) {
+		t.Errorf("expected *ErrAuth, got %T: %v", err, err)
+	}
+}
+
+func TestReadScreenAttachRefusedENOJOB(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	out, err := client.ReadScreen(context.Background(), "missing", 0)
+	var nojobErr *ErrNojob
+	if !errors.As(err, &nojobErr) {
+		t.Errorf("expected *ErrNojob, got %T: %v", err, err)
+	}
+	if out != "" {
+		t.Errorf("expected empty screen on refused attach, got %q", out)
+	}
+}
+
+func TestReadScreenAttachRefusedEAUTH(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	var authErr *ErrAuth
+	if !errors.As(err, &authErr) {
+		t.Errorf("expected *ErrAuth, got %T: %v", err, err)
+	}
+	if out != "" {
+		t.Errorf("expected empty screen on refused attach, got %q", out)
+	}
+}
+
+// TestReadScreenContextDeadlineReturnsPartialBuffer covers a session that prints
+// continuously (a spinner, say) and so never goes idle. The context deadline is the
+// only thing that ends the read, and what was accumulated is a real partial screen,
+// not a failure.
+func TestReadScreenContextDeadlineReturnsPartialBuffer(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := conn.Write([]byte("x")); err != nil {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	output, err := client.ReadScreen(ctx, "session123", 0)
+	if err != nil {
+		t.Fatalf("expected nil error for a partial screen on deadline, got %v", err)
+	}
+	if len(output) == 0 {
+		t.Fatal("expected a non-empty partial screen, got empty string")
+	}
+}
+
+// TestConcurrentListSessionsRace exercises the proto cache under concurrent use: a
+// *Client is shared between a poller and request handlers, so this must be clean
+// under `go test -race`.
+func TestConcurrentListSessionsRace(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				reader := bufio.NewReader(conn)
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				var m map[string]interface{}
+				_ = json.Unmarshal([]byte(line), &m)
+				switch m["op"] {
+				case "ping":
+					conn.Write([]byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":1}` + "\n"))
+				case "list":
+					conn.Write([]byte(`{"ok":true,"op":"list","jobs":[]}` + "\n"))
+				}
+			}(conn)
+		}
+	}()
+	t.Cleanup(func() {
+		listener.Close()
+		<-done
+	})
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := client.ListSessions(context.Background()); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("ListSessions failed: %v", err)
 	}
 }
 
@@ -986,6 +1290,9 @@ func TestReadScreenIdleDetection(t *testing.T) {
 	}
 	defer listener.Close()
 
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
 	go func() {
 		conn, _ := listener.Accept()
 		if conn == nil {
@@ -1002,9 +1309,10 @@ func TestReadScreenIdleDetection(t *testing.T) {
 		// Send some data
 		conn.Write([]byte("Initial output"))
 
-		// Hold the connection open without closing - don't send more data
-		// ReadScreen should detect idle and return promptly, not wait for deadline
-		select {}
+		// Hold the connection open without sending more data. ReadScreen should
+		// detect idle and return promptly, not wait for the deadline. Hold until
+		// the test cleans up, rather than forever, so the goroutine actually exits.
+		<-stop
 	}()
 
 	client := New(listener.Addr().String(), func() (string, error) {
