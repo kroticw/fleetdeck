@@ -160,14 +160,19 @@ func Load(path string) (Config, error) {
 }
 
 // validate rejects configuration values that would be silently harmful: an out-of-range
-// port, or a non-positive poll interval that would spin in a hot loop against the
-// daemon socket.
+// port, a non-positive poll interval that would spin in a hot loop against the daemon
+// socket, or a negative silence window that means either "always silent" or "never
+// silent" depending on how it is later compared — neither of which is what a negative
+// duration was meant to express.
 func validate(c Config) error {
 	if c.ServerPort < 1 || c.ServerPort > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.ServerPort)
 	}
 	if c.DaemonPollInterval <= 0 {
 		return fmt.Errorf("daemon.poll_interval must be positive, got %s", c.DaemonPollInterval)
+	}
+	if c.Notify.SilenceAfter < 0 {
+		return fmt.Errorf("notify.silence_after must not be negative, got %s", c.Notify.SilenceAfter)
 	}
 	return nil
 }

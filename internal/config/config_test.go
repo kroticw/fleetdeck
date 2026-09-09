@@ -287,6 +287,21 @@ func TestLoadNegativePollIntervalIsAnError(t *testing.T) {
 	}
 }
 
+// TestLoadNegativeSilenceAfterIsAnError covers the must-fix item that validate caught a
+// non-positive poll_interval but let a negative notify.silence_after through both Load
+// and Save. A negative silence window means either "always silent" or "never silent"
+// depending on how it is later compared, and the user meant neither. Modelled on
+// TestLoadNegativePollIntervalIsAnError.
+func TestLoadNegativeSilenceAfterIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("notify:\n  silence_after: -5m\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("a negative silence_after must be rejected")
+	}
+}
+
 func TestSaveRejectsInvalidConfigAndLeavesExistingFileUntouched(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
 	original := Default()

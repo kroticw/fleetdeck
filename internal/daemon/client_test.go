@@ -720,6 +720,38 @@ func TestPingNonNumberProtoIsError(t *testing.T) {
 	}
 }
 
+// TestPingProtoZeroIsError covers a reply of {"ok":true,"proto":0}: proto 0 is
+// indistinguishable from "not yet negotiated" in the client's cache (see ensureProto),
+// so accepting it would make ensureProto re-ping before every subsequent call — the
+// exact traffic doubling the comment in Ping claims to prevent — and then send
+// "proto": 0 on every request, earning an EPROTO from the daemon. Symmetric with
+// TestPingMissingProtoIsError and TestPingNonNumberProtoIsError.
+func TestPingProtoZeroIsError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":0}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	info, err := client.Ping(context.Background())
+	if err == nil {
+		t.Fatalf("expected an error for proto:0, got Info=%+v", info)
+	}
+	if info.Proto != 0 {
+		t.Errorf("expected a zero Info on error, got %+v", info)
+	}
+}
+
 // TestListSessionsErrorWithoutCodeIsCleanError covers an "ok":false list reply carrying
 // no code field at all: it must produce a clean "unknown error", never the dangling
 // "unknown error: " that daemonError(...) would otherwise build from an empty code.
@@ -2632,5 +2664,279 @@ func TestSendKeysDetectsEkicked(t *testing.T) {
 	}
 	if kicked.Detail != "evicted by another attacher" {
 		t.Errorf("expected detail %q, got %q", "evicted by another attacher", kicked.Detail)
+	}
+}
+
+// TestReadScreenKickMidStreamNoTrailingNewlineIsDetected covers Blocker 1 from the
+// fifth whole-branch review: findKickOpener used to accept the marker only at offset 0
+// or immediately after a '\n'. A terminal screen almost never ends with a trailing
+// newline — the daemon writes the marker "in place of" PTY bytes, flush against
+// whatever was already sent, mid-line — so that anchor never fired in the one
+// realistic case. This reproduces the reviewer's fake daemon exactly: a screen with no
+// trailing newline, then the marker, then close.
+func TestReadScreenKickMidStreamNoTrailingNewlineIsDetected(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		// No trailing newline before the marker — it lands flush against the screen
+		// bytes, exactly as the daemon writes it in place of PTY output.
+		conn.Write([]byte("\x1b[2J\x1b[H> waiting for input"))
+		conn.Write([]byte("EKICKED: another connection attached"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	var kicked *ErrKicked
+	if !errors.As(err, &kicked) {
+		t.Fatalf("expected *ErrKicked, got %T: %v (screen text %q)", err, err, out)
+	}
+	if kicked.Detail != "another connection attached" {
+		t.Errorf("expected detail %q, got %q", "another connection attached", kicked.Detail)
+	}
+	if out != "" {
+		t.Errorf("expected no screen content on a kicked attach, got %q", out)
+	}
+}
+
+// TestSendKeysKickMidStreamNoTrailingNewlineIsDetected is
+// TestReadScreenKickMidStreamNoTrailingNewlineIsDetected's SendKeys counterpart: the
+// daemon's very next bytes after the key write are ordinary screen content with no
+// trailing newline, immediately followed by the kick marker and a close.
+func TestSendKeysKickMidStreamNoTrailingNewlineIsDetected(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		if _, err := reader.ReadString('\n'); err != nil {
+			return
+		}
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		buf := make([]byte, 1024)
+		_, _ = conn.Read(buf) // read the key bytes
+
+		conn.Write([]byte("\x1b[2J\x1b[H> waiting for input"))
+		conn.Write([]byte("EKICKED: another connection attached"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	err = client.SendKeys(context.Background(), "session123", "x")
+	var kicked *ErrKicked
+	if !errors.As(err, &kicked) {
+		t.Fatalf("expected *ErrKicked, got %T: %v", err, err)
+	}
+	if kicked.Detail != "another connection attached" {
+		t.Errorf("expected detail %q, got %q", "another connection attached", kicked.Detail)
+	}
+}
+
+// TestReadScreenProductionDefaultsChattySessionReturnsPromptly covers Blocker 2: with
+// production defaults, ReadScreen against a session that redraws continuously (so the
+// idle timeout never fires) used to run all the way to defaultDeadline's 30 seconds,
+// because ReadScreen derived its own context deadline from defaultDeadline. It must now
+// use its own, much shorter, screenDeadline instead. Neither defaultDeadline nor
+// screenDeadline is overridden here — the point is to measure the actual production
+// ceiling, not one shortened by the test.
+func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := conn.Write([]byte("x")); err != nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	// Deliberately not touching client.defaultDeadline or client.screenDeadline: this
+	// test measures the production ceiling.
+
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = client.ReadScreen(context.Background(), "session123", 0)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ReadScreen did not return within 10s against a chattly redrawing session")
+	}
+	elapsed := time.Since(start)
+
+	if elapsed >= client.defaultDeadline {
+		t.Errorf("ReadScreen took %v, expected it to return well before defaultDeadline (%v) using its own shorter screenDeadline", elapsed, client.defaultDeadline)
+	}
+}
+
+// TestCollectUntilIdleOrClosedBoundsFirstByteWaitWithNoContextDeadline covers Must-fix
+// 3: with idleFromStart == false and a context carrying no deadline, the "bounded wait"
+// branch used to recompute time.Now().Add(idleTimeout) on every loop iteration, which
+// pushed the deadline forward by another idleTimeout each time a read timed out — so
+// gotFirstByte never became true, ctx.Err() never fired (context.Background() never
+// errors), and the loop never returned. This exercises collectUntilIdleOrClosed
+// directly (it is a package-level function with two callers, not reachable this way
+// through either ReadScreen or SendKeys today) against a connection that sends nothing
+// at all, and asserts it returns well within a bounded window instead of hanging.
+func TestCollectUntilIdleOrClosedBoundsFirstByteWaitWithNoContextDeadline(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+
+	idleTimeout := 100 * time.Millisecond
+
+	done := make(chan struct {
+		data   []byte
+		closed bool
+	}, 1)
+	go func() {
+		data, closed := collectUntilIdleOrClosed(context.Background(), clientConn, bufio.NewReader(clientConn), idleTimeout, maxAttachBytes, false)
+		done <- struct {
+			data   []byte
+			closed bool
+		}{data, closed}
+	}()
+
+	select {
+	case result := <-done:
+		if result.closed {
+			t.Errorf("expected closed=false for a connection that never closed, got true")
+		}
+		if len(result.data) != 0 {
+			t.Errorf("expected no data from a silent connection, got %q", result.data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("collectUntilIdleOrClosed did not return within 2s despite a 100ms idle timeout and no context deadline — it is looping forever")
+	}
+}
+
+// TestControlKeyWrapsCauseButKeepsGenericMessage covers the recommendation that
+// ControlKey's user-facing error collapsed every distinct cause into a bare
+// ErrNoControlKey with nothing behind it, making the failure impossible to diagnose.
+// The user-facing text must stay exactly "control key unavailable" with no
+// home-directory path, but the actual cause must still be reachable internally via
+// errors.Unwrap.
+func TestControlKeyWrapsCauseButKeepsGenericMessage(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.WriteFile(keyPath, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o640); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	_, err := ControlKey()
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Fatalf("expected ErrNoControlKey, got %v", err)
+	}
+	if err.Error() != ErrNoControlKey.Error() {
+		t.Errorf("user-facing text must stay exactly %q, got %q", ErrNoControlKey.Error(), err.Error())
+	}
+	if strings.Contains(err.Error(), tmpDir) {
+		t.Errorf("user-facing text must not name the home directory, got %q", err.Error())
+	}
+
+	cause := errors.Unwrap(err)
+	if cause == nil {
+		t.Fatal("expected the internal cause to be reachable via errors.Unwrap")
+	}
+	if !strings.Contains(cause.Error(), "group or other") {
+		t.Errorf("expected the wrapped cause to name the actual reason, got %q", cause.Error())
+	}
+}
+
+// TestControlKeyRefusesSymlinkWithClearInternalCause covers the recommendation's
+// related point: checkKeyFileSecurity uses Lstat, so a symlink's own mode (almost
+// always 0777) made it fall into the "readable or writable by group or other" branch
+// regardless of the symlink's target — a refusal that may well be right, but with a
+// cause that gives the operator nothing to act on. The symlink case is now detected
+// explicitly, with an internal cause that says so.
+func TestControlKeyRefusesSymlinkWithClearInternalCause(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	real := filepath.Join(tmpDir, "real.key")
+	if err := os.WriteFile(real, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o600); err != nil {
+		t.Fatalf("write real key file: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.Symlink(real, keyPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	_, err := ControlKey()
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Fatalf("expected ErrNoControlKey for a symlinked key file, got %v", err)
+	}
+	cause := errors.Unwrap(err)
+	if cause == nil || !strings.Contains(cause.Error(), "symlink") {
+		t.Errorf("expected the wrapped cause to name the symlink explicitly, got %v", cause)
 	}
 }

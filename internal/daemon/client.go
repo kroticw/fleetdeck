@@ -184,26 +184,62 @@ func (c *Client) setDeadline(ctx context.Context, conn net.Conn) {
 func ControlKey() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", ErrNoControlKey
+		return "", wrapNoControlKey(err)
 	}
 
 	keyPath := filepath.Join(homeDir, ".claude", "daemon", "control.key")
 
 	if err := checkKeyFileSecurity(keyPath, os.Getuid()); err != nil {
-		return "", ErrNoControlKey
+		return "", wrapNoControlKey(err)
 	}
 
 	data, err := os.ReadFile(keyPath)
 	if err != nil {
-		return "", ErrNoControlKey
+		return "", wrapNoControlKey(err)
 	}
 
 	key := strings.TrimSpace(string(data))
 	if key == "" {
-		return "", ErrNoControlKey
+		return "", wrapNoControlKey(errors.New("control key file is empty"))
 	}
 
 	return key, nil
+}
+
+// errNoControlKeyWithCause wraps ErrNoControlKey with an internal diagnostic cause
+// while keeping its Error() text identical to plain ErrNoControlKey. Per
+// docs/protocol/daemon-control-socket.md section 6, the user-facing message for a
+// missing or unreadable key is fixed and generic and names neither the key file's
+// path nor its contents — that requirement is about what the message says, not about
+// destroying the cause internally. errors.Is(err, ErrNoControlKey) still succeeds (via
+// Is below) and errors.As/errors.Unwrap still reach the wrapped cause, so the five
+// distinct causes ControlKey can hit (no $HOME, wrong owner, wrong mode, a read error,
+// an empty file) remain distinguishable for diagnosis without ever surfacing in the
+// text a user sees. The cause itself must never carry the key's value — none of the
+// causes constructed by this package do.
+type errNoControlKeyWithCause struct {
+	cause error
+}
+
+func (e *errNoControlKeyWithCause) Error() string {
+	return ErrNoControlKey.Error()
+}
+
+func (e *errNoControlKeyWithCause) Is(target error) bool {
+	return target == ErrNoControlKey
+}
+
+func (e *errNoControlKeyWithCause) Unwrap() error {
+	return e.cause
+}
+
+// wrapNoControlKey attaches an internal cause to ErrNoControlKey. A nil cause yields
+// plain ErrNoControlKey rather than a pointless wrapper around nothing.
+func wrapNoControlKey(cause error) error {
+	if cause == nil {
+		return ErrNoControlKey
+	}
+	return &errNoControlKeyWithCause{cause: cause}
 }
 
 // checkKeyFileSecurity refuses a control key file that is not owned by wantUID, or is
@@ -214,6 +250,19 @@ func checkKeyFileSecurity(path string, wantUID int) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		// Lstat reports the symlink's own mode, not the target's, and a symlink's mode
+		// bits are conventionally 0777 on every platform regardless of what it points
+		// to. Without this check, keyFileModeIsSecure below would refuse every symlink
+		// with "readable or writable by group or other" — a technically true but
+		// misleading cause, since it has nothing to do with the symlink's actual
+		// permissions. Refusing a symlink outright is still the right call (it lets the
+		// key file's real location, and its own security properties, be something
+		// other than what this check just verified), but the internal cause should say
+		// so plainly rather than blaming a permission bit that isn't the real reason.
+		return errors.New("control key file is a symlink, refusing to use it")
 	}
 
 	stat, ok := info.Sys().(*syscall.Stat_t)
@@ -254,6 +303,17 @@ type Client struct {
 	proto           int           // cached protocol number from ping
 	readIdleTimeout time.Duration // idle timeout for ReadScreen (default 300ms)
 	defaultDeadline time.Duration // default deadline when context carries none (default 30s)
+
+	// screenDeadline is the ceiling ReadScreen derives its own context deadline from,
+	// when the caller's context carries none. It is deliberately its own field, not
+	// defaultDeadline: defaultDeadline is sized for request/response operations
+	// (ping, list, reply) where 30s is a sensible worst case, but ReadScreen's stream
+	// never ends on its own for a working session (a redrawing spinner keeps it from
+	// ever going idle), so running it to a 30s ceiling means every poll of a busy
+	// session blocks for 30 seconds against a poll_interval whose own default is 2s. A
+	// field, rather than a constant, lets tests shorten it without touching
+	// defaultDeadline and thereby changing what request/response calls are measuring.
+	screenDeadline time.Duration // default 2s
 }
 
 // New creates a daemon client bound to an explicit socket path for its whole lifetime.
@@ -273,6 +333,7 @@ func New(socketPath string, key func() (string, error)) *Client {
 		keyFunc:         key,
 		readIdleTimeout: 300 * time.Millisecond,
 		defaultDeadline: 30 * time.Second,
+		screenDeadline:  2 * time.Second,
 	}
 }
 
@@ -469,28 +530,30 @@ const ekickedPrefix = "EKICKED:"
 // addressed).
 const maxAttachBytes = 1024 * 1024
 
-// findKickOpener returns the offset of the earliest occurrence of the kick marker that
-// opens the stream (offset 0) or opens a line (immediately preceded by '\n'), or -1 if
-// there is none. Only a marker at one of these positions is even a candidate: the same
-// literal text appearing mid-line, as ordinary screen content, must never be mistaken
-// for one. This is not hypothetical — this very document,
-// docs/protocol/daemon-control-socket.md, contains the string "EKICKED:" four times,
-// always mid-sentence, and fleetdeck reads the screens of Claude Code sessions, one of
-// which may well be editing that document.
+// findKickOpener returns the offset of the kick marker that qualifies as a real kick,
+// or -1 if there is none. The daemon writes the marker "in place of" PTY bytes
+// immediately before closing the connection (see docs/protocol/daemon-control-socket.md
+// section 8), so the marker and its reason are always the *last* bytes of the stream —
+// never anchored to offset 0 or to the start of a line. A terminal screen almost never
+// ends with a trailing newline: the last bytes in flight are wherever the cursor sits,
+// an escape sequence, a prompt, the tail of a line. Requiring the marker to open a line
+// missed exactly that, the common case, because the marker lands flush against
+// whatever screen bytes were already in the pipe.
+//
+// Using the *last* occurrence, rather than the first, matters because the same literal
+// text can appear earlier in the buffer as ordinary screen content — this very
+// document, docs/protocol/daemon-control-socket.md, contains the string "EKICKED:"
+// several times, always mid-sentence, and fleetdeck reads the screens of Claude Code
+// sessions, one of which may well be editing that document. Taking the first match
+// found could pick up such coincidental text and report a garbled or wrong reason (or,
+// worse, treat a truncation boundary that happens to leave that text at offset 0 as the
+// marker) instead of the real, trailing one. This function only locates a candidate
+// position; detectKick still requires the connection to have actually closed right
+// after before treating it as a kick, so ordinary screen content containing this text
+// on a connection that stays open — the common, non-kicked case — is never mistaken for
+// one.
 func findKickOpener(data []byte) int {
-	marker := []byte(ekickedPrefix)
-	searchFrom := 0
-	for {
-		rel := bytes.Index(data[searchFrom:], marker)
-		if rel < 0 {
-			return -1
-		}
-		pos := searchFrom + rel
-		if pos == 0 || data[pos-1] == '\n' {
-			return pos
-		}
-		searchFrom = pos + 1
-	}
+	return bytes.LastIndex(data, []byte(ekickedPrefix))
 }
 
 // parseKickedMarker reports whether data contains the daemon's kick marker at a
@@ -543,6 +606,15 @@ func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.
 	gotFirstByte := idleFromStart
 	ctxDeadline, hasCtxDeadline := ctx.Deadline()
 
+	// firstByteDeadline bounds the wait for the very first byte when neither a context
+	// deadline nor the idle window is yet in effect (only reachable when idleFromStart
+	// is false and ctx carries no deadline). It is computed once, here, rather than as
+	// time.Now().Add(idleTimeout) inside the loop: recomputing it from "now" on every
+	// iteration pushed the deadline forward by another idleTimeout each time a read
+	// timed out, so the loop never actually reached it — contradicting the "bounded
+	// wait" this is meant to provide and looping forever against a silent connection.
+	firstByteDeadline := lastReadTime.Add(idleTimeout)
+
 	buf := make([]byte, 4096)
 	for {
 		if ctx.Err() != nil {
@@ -561,9 +633,11 @@ func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.
 		}
 		if readDeadline.IsZero() {
 			// Neither a context deadline nor an idle window is in effect yet (only
-			// reachable when idleFromStart is false and ctx carries no deadline).
-			// Fall back to a bounded wait rather than blocking forever.
-			readDeadline = time.Now().Add(idleTimeout)
+			// reachable when idleFromStart is false and ctx carries no deadline). Use
+			// the fixed firstByteDeadline computed once above, rather than a fresh
+			// time.Now().Add(idleTimeout) — see its comment for why that recomputation
+			// never actually bounded anything.
+			readDeadline = firstByteDeadline
 		}
 		if err := conn.SetReadDeadline(readDeadline); err != nil {
 			return data, false
@@ -581,7 +655,18 @@ func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.
 
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				if gotFirstByte && time.Since(lastReadTime) >= idleTimeout {
+				if gotFirstByte {
+					if time.Since(lastReadTime) >= idleTimeout {
+						return data, false
+					}
+					continue
+				}
+				// Still waiting for the first byte. hasCtxDeadline == true would have
+				// made readDeadline the context's own deadline above, and ctx.Err()
+				// catches that at the top of the next iteration; here, with no context
+				// deadline, firstByteDeadline is the only thing bounding this wait, so
+				// it must be checked explicitly.
+				if !hasCtxDeadline && !time.Now().Before(firstByteDeadline) {
 					return data, false
 				}
 				continue
@@ -669,6 +754,13 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 	protoNum, ok := protoValue.(float64)
 	if !ok {
 		return Info{}, fmt.Errorf("ping reply proto field is not a number: %v", protoValue)
+	}
+	// A proto of 0 (or negative) is just as unusable as a missing field for the same
+	// reason described above: it is indistinguishable from "not yet negotiated" in the
+	// cache, so ensureProto would re-ping before every call, and the client would then
+	// send "proto": 0 on every subsequent request and earn an EPROTO from the daemon.
+	if protoNum < 1 {
+		return Info{}, fmt.Errorf("ping reply proto field must be a positive integer, got %v", protoValue)
 	}
 
 	info.Proto = int(protoNum)
@@ -770,7 +862,7 @@ func (c *Client) sendTextOnce(ctx context.Context, session, text string) error {
 	// Get the control key first, before making any network calls
 	key, err := c.keyFunc()
 	if err != nil {
-		return ErrNoControlKey
+		return wrapNoControlKey(err)
 	}
 
 	proto, err := c.ensureProto(ctx)
@@ -848,9 +940,14 @@ func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (stri
 	// timeout. When the caller's context carries none (context.Background() is the
 	// documented call path for a session poller), derive one here, once, so
 	// ctx.Err() is the loop's only exit condition instead of two competing clocks.
+	//
+	// This uses c.screenDeadline, not c.defaultDeadline: a chatty session (a redrawing
+	// spinner, say) never goes idle, so the idle timeout never fires and this derived
+	// deadline is what actually ends the read. defaultDeadline's 30s is sized for
+	// request/response operations, not for bounding a stream read on every poll tick.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.defaultDeadline)
+		ctx, cancel = context.WithTimeout(ctx, c.screenDeadline)
 		defer cancel()
 	}
 
@@ -960,7 +1057,7 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	// alone.
 	key, err := c.keyFunc()
 	if err != nil {
-		return ErrNoControlKey
+		return wrapNoControlKey(err)
 	}
 
 	proto, err := c.ensureProto(ctx)
