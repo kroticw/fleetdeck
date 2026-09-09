@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net"
 	"os"
 	"os/user"
@@ -53,40 +54,44 @@ func SocketPath() (string, error) {
 
 // resolveSocketCandidate tries each candidate socket path in order and returns the
 // first that is both safely owned and actually accepts a connection. It is split out
-// from SocketPath so the refusal-collection behaviour below can be tested directly,
+// from SocketPath so the error-collection behaviour below can be tested directly,
 // without needing to plant sockets under the real, uid-specific /tmp path SocketPath
 // globs.
 //
-// When one or more candidates exist but every one of them is refused on ownership
-// grounds, that refusal is returned instead of being silently discarded in favour of
-// ErrDaemonUnavailable. Ownership refusal is the one signal that exists for a foreign
-// socket planted in the world-writable /tmp ahead of the real daemon — reporting it as
-// plain unavailability, indistinguishable from "the daemon just isn't running", would
-// throw away the only evidence of a possible attack.
+// When one or more candidates exist but none of them yields a connection, whatever
+// caused each one to fail — an ownership refusal, or a dial error — is returned
+// instead of being silently discarded in favour of a bare ErrDaemonUnavailable.
+// Ownership refusal is the one signal that exists for a foreign socket planted in the
+// world-writable /tmp ahead of the real daemon; a dial error is the only diagnostic
+// evidence available when a socket file exists but nothing is listening on it (a
+// crashed daemon's stale socket, say). Reporting either as plain unavailability,
+// indistinguishable from "the daemon just isn't running", would throw away the only
+// evidence available for either case.
 func resolveSocketCandidate(matches []string) (string, error) {
 	if len(matches) == 0 {
 		return "", ErrDaemonUnavailable
 	}
 
-	var refusals []error
+	var causes []error
 	for _, candidate := range matches {
 		// /tmp is world-writable: skip any candidate that is not safely owned
 		// before even probing it, so a planted socket is never dialed just to
 		// check liveness.
 		if err := checkSocketOwnership(candidate); err != nil {
-			refusals = append(refusals, err)
+			causes = append(causes, err)
 			continue
 		}
 		conn, err := net.DialTimeout("unix", candidate, 500*time.Millisecond)
 		if err != nil {
+			causes = append(causes, err)
 			continue
 		}
 		_ = conn.Close()
 		return candidate, nil
 	}
 
-	if len(refusals) > 0 {
-		return "", errors.Join(append([]error{ErrDaemonUnavailable}, refusals...)...)
+	if len(causes) > 0 {
+		return "", errors.Join(append([]error{ErrDaemonUnavailable}, causes...)...)
 	}
 	return "", ErrDaemonUnavailable
 }
@@ -108,49 +113,130 @@ func resolveSocketCandidate(matches []string) (string, error) {
 // replacing them with their own — which would otherwise let an attacker recreate the
 // daemon's socket directory under their own ownership and still pass every check below
 // this boundary.
+//
+// The socket file itself is checked directly, with a plain Lstat: it must never be a
+// symlink, regardless of who owns that symlink, since a socket file is exactly what
+// this function exists to authenticate before dialling it. The enclosing directory
+// chain is a different matter: on macOS, /tmp — the real daemon's socket directory,
+// cc-daemon-<uid>, lives directly under it — is itself a symlink to /private/tmp, owned
+// by root. An unprivileged local attacker cannot replace a root-owned symlink any more
+// than a root-owned directory, so refusing it protects nothing and would make this
+// function refuse the one path shape the daemon actually uses in production. A symlink
+// owned by anyone else, at any level of the chain, is refused outright: see
+// checkSocketOwnershipWalk.
 func checkSocketOwnership(socketPath string) error {
 	uid := os.Getuid()
-	path := socketPath
 
-	for i := 0; i < 64; i++ {
-		info, err := os.Lstat(path)
+	sockStat, err := realLstat(socketPath)
+	if err != nil {
+		return fmt.Errorf("checking socket path %s: %w", socketPath, err)
+	}
+	if sockStat.symlink {
+		return fmt.Errorf("refusing socket %s: %s is a symlink, refusing to follow it", socketPath, socketPath)
+	}
+	if sockStat.uid != uid {
+		return fmt.Errorf("refusing socket %s: %s is owned by a different user", socketPath, socketPath)
+	}
+	if sockStat.mode&0o022 != 0 {
+		return fmt.Errorf("refusing socket %s: %s is writable by group or other", socketPath, socketPath)
+	}
+
+	return checkSocketOwnershipWalk(socketPath, filepath.Dir(socketPath), uid, realLstat)
+}
+
+// dirStat is the minimal ownership and mode information checkSocketOwnershipWalk needs
+// about one path component, decoupled from os.FileInfo (whose Sys() returns a
+// platform-specific *syscall.Stat_t) so a test can drive an exact, host-independent
+// directory shape through the injectable lstatFunc below.
+type dirStat struct {
+	uid     int
+	mode    os.FileMode
+	symlink bool
+	target  string // set only when symlink is true; the raw (possibly relative) link target
+}
+
+// lstatFunc abstracts the lstat-plus-readlink pair checkSocketOwnershipWalk needs at
+// each path component. realLstat is the production implementation; tests substitute a
+// fake to drive a specific directory shape (e.g. macOS's /tmp -> /private/tmp) without
+// depending on the host's actual filesystem.
+type lstatFunc func(path string) (dirStat, error)
+
+// realLstat is the production lstatFunc, backed by os.Lstat and os.Readlink.
+func realLstat(path string) (dirStat, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return dirStat{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
 		if err != nil {
-			return fmt.Errorf("checking socket path %s: %w", path, err)
+			return dirStat{}, err
 		}
-
-		if info.Mode()&os.ModeSymlink != 0 {
-			// checkKeyFileSecurity rejects a symlinked key file explicitly, rather than
-			// leaning on the fact that a symlink's own Lstat mode conventionally reads
-			// as 0777 (which would otherwise trip the "writable by group or other"
-			// check below for the wrong stated reason). This walk must do the same: it
-			// is lexical (filepath.Dir) and never inspects a link's target, so without
-			// an explicit check here it depends entirely on that same convention — on a
-			// platform or filesystem where a symlink's mode reads as something else
-			// (e.g. 0755), an intermediate symlinked directory owned by the current
-			// user would pass every check below this point, and net.Dial would follow
-			// the link to whatever a local attacker planted at the other end.
-			return fmt.Errorf("refusing socket %s: %s is a symlink, refusing to follow it", socketPath, path)
-		}
-
 		stat, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
-			return fmt.Errorf("cannot determine the owner of %s", path)
+			return dirStat{}, fmt.Errorf("cannot determine the owner of %s", path)
+		}
+		return dirStat{uid: int(stat.Uid), symlink: true, target: target}, nil
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return dirStat{}, fmt.Errorf("cannot determine the owner of %s", path)
+	}
+	return dirStat{uid: int(stat.Uid), mode: info.Mode()}, nil
+}
+
+// checkSocketOwnershipWalk walks the directory chain starting at start (checkSocketOwnership
+// calls it with socketPath's parent), moving upward via filepath.Dir exactly as before,
+// except that it now resolves a symlink encountered mid-walk instead of refusing every
+// symlink unconditionally:
+//
+//   - a symlink owned by root is followed. Root cannot be impersonated by an
+//     unprivileged local attacker, so a root-owned symlink (macOS's /tmp -> /private/tmp
+//     is exactly this) carries no more risk than a root-owned directory, and the walk
+//     continues from its target.
+//   - a symlink owned by anyone else is refused outright. This walk has no way to tell
+//     a legitimate symlink from one planted by a local attacker, and the daemon's own
+//     directory chain is never expected to contain one, so refusing is the only safe
+//     default.
+//   - an ordinary directory is checked exactly as before checkSocketOwnershipWalk
+//     existed: root-owned marks the boundary of the walk (subject to
+//     stickyBitSatisfiesRootBoundary), anything else must be owned by uid and must not
+//     be writable by group or other.
+func checkSocketOwnershipWalk(socketPath, start string, uid int, lstat lstatFunc) error {
+	path := start
+	for i := 0; i < 64; i++ {
+		info, err := lstat(path)
+		if err != nil {
+			return fmt.Errorf("checking socket path %s: %w", socketPath, err)
 		}
 
-		if i > 0 && int(stat.Uid) == 0 {
-			if !stickyBitSatisfiesRootBoundary(info.Mode()) {
+		if info.symlink {
+			if info.uid != 0 {
+				return fmt.Errorf("refusing socket %s: %s is a symlink owned by a non-root user, refusing to follow it", socketPath, path)
+			}
+			target := info.target
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			path = filepath.Clean(target)
+			continue
+		}
+
+		if info.uid == 0 {
+			if !stickyBitSatisfiesRootBoundary(info.mode) {
 				return fmt.Errorf("refusing socket %s: %s is root-owned, writable by group or other, and missing the sticky bit", socketPath, path)
 			}
-			// A root-owned enclosing directory (e.g. /tmp itself) that is either not
-			// writable by group/other, or is and carries the sticky bit, is outside a
-			// local attacker's control. Nothing further up needs checking.
+			// A root-owned enclosing directory (e.g. /private/tmp, the real target of
+			// macOS's /tmp symlink) that is either not writable by group/other, or is
+			// and carries the sticky bit, is outside a local attacker's control.
+			// Nothing further up needs checking.
 			return nil
 		}
 
-		if int(stat.Uid) != uid {
+		if info.uid != uid {
 			return fmt.Errorf("refusing socket %s: %s is owned by a different user", socketPath, path)
 		}
-		if info.Mode()&0o022 != 0 {
+		if info.mode&0o022 != 0 {
 			return fmt.Errorf("refusing socket %s: %s is writable by group or other", socketPath, path)
 		}
 
@@ -555,8 +641,7 @@ const ekickedPrefix = "EKICKED:"
 
 // maxAttachBytes bounds how much of an attach stream either path (screen-reading or
 // key-sending) accumulates before trimming from the front. It is shared so both build
-// on the same ceiling instead of drifting (see Finding 4 in the branch review this
-// addressed).
+// on the same ceiling instead of drifting apart.
 const maxAttachBytes = 1024 * 1024
 
 // kickSearchWindow bounds how far from the end of the accumulated stream the kick
@@ -595,21 +680,21 @@ func findKickOpener(data []byte) int {
 // reason rather than a screen (see detectKick). On success it returns the prefix —
 // everything before the marker, i.e. the screen accumulated up to that point — and the
 // reason text, trimmed of surrounding whitespace.
-func parseKickedMarker(data []byte) (prefix, detail string, kicked bool) {
+func parseKickedMarker(data []byte) (prefix []byte, detail string, kicked bool) {
 	pos := findKickOpener(data)
 	if pos < 0 {
-		return "", "", false
+		return nil, "", false
 	}
 	rest := data[pos+len(ekickedPrefix):]
-	// Third condition: a real "EKICKED: <reason>" is the very last thing the daemon
-	// sends before closing, so nothing of substance follows the reason itself. A
-	// newline in rest, or a rest this long, means what matched is ordinary screen
-	// content that happens to contain "EKICKED:" followed by more screen — exactly
-	// the false positive this rule exists to rule out.
+	// A real "EKICKED: <reason>" is the very last thing the daemon sends before
+	// closing, so nothing of substance follows the reason itself. A newline in rest,
+	// or a rest this long, means what matched is ordinary screen content that happens
+	// to contain "EKICKED:" followed by more screen — exactly the false positive this
+	// rule exists to rule out.
 	if len(rest) > maxKickReasonBytes || bytes.Contains(rest, []byte("\n")) {
-		return "", "", false
+		return nil, "", false
 	}
-	return string(data[:pos]), strings.TrimSpace(string(rest)), true
+	return data[:pos], strings.TrimSpace(string(rest)), true
 }
 
 // detectKick decides whether an attach stream was actually kicked, given the bytes
@@ -618,15 +703,16 @@ func parseKickedMarker(data []byte) (prefix, detail string, kicked bool) {
 // accumulated before the marker, so a caller need not discard it.
 //
 // Per docs/protocol/daemon-control-socket.md section 8, detection must never fire on the
-// marker's mere presence — only on it being the *last thing sent* immediately before a
-// close. That is a compound condition, and this detector has been wrong three times in
-// three different directions by treating some proper subset of it as sufficient: first
-// requiring the marker at offset 0, then requiring it to open a line (a terminal screen
-// almost never ends with a trailing newline, so this missed the common case), then
-// accepting merely its *last occurrence* plus a close (which fires on a screen that
-// displays the marker text and then exits normally — a session grepping this very
-// document for "EKICKED:" is a real, reproduced example). All three conditions below
-// are now required, and any one of them has already been shown insufficient alone:
+// marker's mere presence, or even on its *last occurrence* alone — only on it being the
+// *last thing sent*, immediately before a close. Each weaker rule fails in a specific,
+// observable way: anchoring to offset 0 or to a line boundary misses the marker
+// entirely, since the daemon writes it flush against whatever PTY bytes were already in
+// flight, never anchored to a line boundary — see condition 2. Accepting the marker's
+// last occurrence plus a close, with no check on what follows it, fires on a screen that
+// merely *displays* the marker text and then exits normally for an unrelated reason — a
+// session grepping this very document for "EKICKED:" is a real example — see condition
+// 3. All three conditions below are required together; each is individually
+// insufficient:
 //
 //  1. The connection actually closed. An ordinary, live, polled session's attach
 //     connection stays open indefinitely (it only closes on an actual kick or the
@@ -647,9 +733,24 @@ func parseKickedMarker(data []byte) (prefix, detail string, kicked bool) {
 //     alone does not catch when the coincidental marker happens to sit close to the
 //     end — see TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick, where the last
 //     occurrence of "EKICKED:" is immediately followed by " marker\n$ exit\n".
-func detectKick(data []byte, closed bool) (prefix, detail string, kicked bool) {
+//
+// Condition 1 has a deliberate, accepted residual risk: it requires closed to have been
+// observed, not merely a marker sitting at the very end of an idle or deadline-truncated
+// buffer. If the daemon writes the marker and closes the connection, but the EOF that
+// close produces is not read before ReadScreen's own ceiling (screenDeadline, 2s by
+// default) fires, collectUntilIdleOrClosed reports closed == false and this function
+// declines to call it a kick — the marker's bytes are then returned as ordinary screen
+// content instead of ErrKicked. This is deliberately not fixed by treating an
+// end-of-buffer marker as sufficient on its own, because that reintroduces exactly the
+// failure mode conditions 2 and 3 exist to rule out (a screen that merely displays the
+// marker and then goes idle for an unrelated reason). The risk is accepted because the
+// daemon writes the marker immediately before closing — the two arrive in close
+// succession on the wire — so a close that is not observed within a multi-second
+// ceiling is expected to be rare; see TestReadScreenMarkerAtEndWithoutObservedCloseIsNotAKick
+// for the documented, tested behaviour in that case.
+func detectKick(data []byte, closed bool) (prefix []byte, detail string, kicked bool) {
 	if !closed {
-		return "", "", false
+		return nil, "", false
 	}
 	return parseKickedMarker(data)
 }
@@ -845,7 +946,12 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 	// reason described above: it is indistinguishable from "not yet negotiated" in the
 	// cache, so ensureProto would re-ping before every call, and the client would then
 	// send "proto": 0 on every subsequent request and earn an EPROTO from the daemon.
-	if protoNum < 1 {
+	// A fractional value (e.g. 1.9) is rejected the same way, rather than silently
+	// truncated by int(protoNum) below: the envelope requires proto to be an integer
+	// compared strictly against the daemon's own, so a fractional reply is malformed,
+	// not a value this client should quietly round down to something the daemon never
+	// actually reported.
+	if protoNum < 1 || protoNum != math.Trunc(protoNum) {
 		return Info{}, fmt.Errorf("ping reply proto field must be a positive integer, got %v", protoValue)
 	}
 
@@ -1008,7 +1114,11 @@ func trimToRuneBoundary(b []byte) []byte {
 
 // ReadScreen sends an attach request and reads the terminal stream.
 // It returns the raw bytes that follow the JSON header line.
-// tail limits how much of the tail to keep; tail <= 0 means keep everything.
+// tail limits how much of the tail to keep; tail <= 0 keeps everything read, which is
+// itself never more than maxAttachBytes (1 MB) — collectUntilIdleOrClosed enforces that
+// cap regardless of tail. This limit applies identically whether or not the stream ends
+// in a kick (see ErrKicked): a caller that asked for the last few bytes gets the last
+// few bytes of the accumulated prefix either way, not the whole thing.
 //
 // cols/rows are fixed at 80x24 for this attach. This is not an open risk: the daemon's
 // own attach handler stores the requested geometry per-attacher
@@ -1095,17 +1205,26 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 	// docs/protocol/daemon-control-socket.md section 8). A real kick is a normal event —
 	// someone attached by hand and took over — so the screen accumulated before the
 	// marker is still returned alongside the typed error, rather than thrown away: the
-	// caller loses nothing it would otherwise have had.
+	// caller loses nothing it would otherwise have had. It is still subject to the same
+	// tail limit as the ordinary path below — the caller asked for the last tail bytes
+	// either way, and a kick is common enough (see docs/protocol/daemon-control-socket.md
+	// section 8) that skipping the limit here could hand back up to the full
+	// maxAttachBytes instead of what was actually requested.
 	if prefix, detail, kicked := detectKick(data, closed); kicked {
-		return prefix, &ErrKicked{Detail: detail}
+		return string(applyTail(prefix, tail)), &ErrKicked{Detail: detail}
 	}
 
-	// Apply tail limit if needed
+	return string(applyTail(data, tail)), nil
+}
+
+// applyTail trims data to at most the last tail bytes, without splitting a UTF-8 rune.
+// tail <= 0 means keep everything data already holds — which is itself never more than
+// maxAttachBytes, a limit collectUntilIdleOrClosed enforces regardless of tail.
+func applyTail(data []byte, tail int) []byte {
 	if tail > 0 && len(data) > tail {
-		data = trimToRuneBoundary(data[len(data)-tail:])
+		return trimToRuneBoundary(data[len(data)-tail:])
 	}
-
-	return string(data), nil
+	return data
 }
 
 // SendKeys sends key bytes via an attach connection. This is a write into a live

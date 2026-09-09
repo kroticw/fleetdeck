@@ -2,7 +2,7 @@ package daemon
 
 // testdata/list_sessions.json is an anonymised capture of a real `list` reply from a
 // live daemon (cwd, name, sessionId, nonce, pid and timestamps replaced; needs/intent/
-// detail rewritten to neutral text of the same shape). Three of its five records are
+// detail rewritten to neutral text of the same shape). Three of its records are
 // derived from that capture. The fourth (short "e4fa5037": tempo=active, state=blocked,
 // needs="") is added by hand, because the live capture used for this fixture did not
 // happen to contain that form. It is nonetheless attested: this form was observed live
@@ -17,6 +17,13 @@ package daemon
 // killed or retired carries this extra key, and its absence on every other record here
 // is exactly what is supposed to mean "alive". Its other fields are invented the same
 // way as e4fa5037's: plausible values of the same shape, not drawn from a live capture.
+//
+// Three more (short "d4bc7159", "07ea8b3c", "918cf4a2") are invented the same way, to
+// cover Waiting/Stalled's split of "needs is non-empty" into a real question versus a
+// stall no answer fixes: a needs beginning "answer:" with neither blocked flag
+// (d4bc7159), a needs reporting a usage limit with neither blocked flag (07ea8b3c), and
+// a tempo=blocked session whose needs is a non-question ("rate limited...") — proving
+// the blocked flag alone is enough to land it in Waiting, never Stalled (918cf4a2).
 
 import (
 	"bufio"
@@ -28,6 +35,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -114,14 +122,13 @@ func TestFixtureParsesViaListSessions(t *testing.T) {
 	}
 }
 
-// TestWaitingAgainstFixture parses the fixture through ListSessions and checks
-// Waiting() against a table of literal, explicit expectations keyed by each record's
-// short id. Every entry is a fact asserted about that specific fixture record, not an
-// expression recomputed from the Session's own fields — recomputing it (as an earlier
-// version of this test did with `s.State == "blocked" || s.Tempo == "blocked" ||
-// s.Needs != ""`) would make the test agree with any definition of Waiting(), including
-// a wrong one, since both sides change together.
-func TestWaitingAgainstFixture(t *testing.T) {
+// TestWaitingAndStalledAgainstFixture parses the fixture through ListSessions and
+// checks both Waiting() and Stalled() against a table of literal, explicit
+// expectations keyed by each record's short id. Every entry is a fact asserted about
+// that specific fixture record, not an expression recomputed from the Session's own
+// fields — recomputing it would make the test agree with any definition of
+// Waiting()/Stalled(), including a wrong one, since both sides change together.
+func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 	line := loadFixtureLine(t)
 
 	listener, err := net.Listen("unix", tempSocket(t))
@@ -146,21 +153,31 @@ func TestWaitingAgainstFixture(t *testing.T) {
 		t.Fatalf("ListSessions: %v", err)
 	}
 
-	want := map[string]bool{
-		// tempo=blocked, state=blocked: a "choose:" question is pending (waiting
-		// form 3 — tempo and state agree, both signal waiting).
-		"a1c92f04": true,
-		// tempo=active, state=working, needs="": plainly working, nothing pending.
-		"b2d83e15": false,
-		// tempo=active, state=working, needs="": plainly working, nothing pending.
-		"c3e94f26": false,
-		// tempo=active, state=blocked, needs="": waiting form 2, attested live (see
-		// the file-level comment above) — the record that specifically justifies
-		// checking State, since Tempo alone says "active" here.
-		"e4fa5037": true,
+	type expect struct{ waiting, stalled bool }
+	want := map[string]expect{
+		// tempo=blocked, state=blocked: a "choose:" question is pending — waiting via
+		// both flags, and also via the "choose:" prefix; never stalled.
+		"a1c92f04": {waiting: true, stalled: false},
+		// tempo=active, state=working, needs="": plainly working, neither.
+		"b2d83e15": {waiting: false, stalled: false},
+		// tempo=active, state=working, needs="": plainly working, neither.
+		"c3e94f26": {waiting: false, stalled: false},
+		// tempo=active, state=blocked, needs="": waiting via State alone — the record
+		// that specifically justifies checking State, since Tempo says "active" here.
+		"e4fa5037": {waiting: true, stalled: false},
 		// tempo=active, state=working, needs="", dying=true: a job being retired.
-		// Dying plays no part in Waiting() — this record is plainly not waiting.
-		"f5ab6148": false,
+		// Dying plays no part here — plainly neither.
+		"f5ab6148": {waiting: false, stalled: false},
+		// tempo=active, state=working, needs="answer: ...": neither flag is blocked,
+		// but the needs text itself is a question — waiting via the prefix alone.
+		"d4bc7159": {waiting: true, stalled: false},
+		// tempo=active, state=working, needs="usage limit reached...": a non-question
+		// needs with neither flag blocked — stalled, not waiting: no answer fixes this.
+		"07ea8b3c": {waiting: false, stalled: true},
+		// tempo=blocked, state=working, needs="rate limited...": the needs text is not
+		// a question, but tempo=blocked already makes this waiting — proving Waiting
+		// and Stalled stay mutually exclusive even with a non-question needs present.
+		"918cf4a2": {waiting: true, stalled: false},
 	}
 
 	if len(sessions) != len(want) {
@@ -168,12 +185,18 @@ func TestWaitingAgainstFixture(t *testing.T) {
 	}
 
 	for _, s := range sessions {
-		expect, ok := want[s.Short]
+		exp, ok := want[s.Short]
 		if !ok {
 			t.Fatalf("fixture contains short %q, which is not in the expectation table", s.Short)
 		}
-		if got := s.Waiting(); got != expect {
-			t.Errorf("Waiting() = %v for short %q, want %v", got, s.Short, expect)
+		if got := s.Waiting(); got != exp.waiting {
+			t.Errorf("Waiting() = %v for short %q, want %v", got, s.Short, exp.waiting)
+		}
+		if got := s.Stalled(); got != exp.stalled {
+			t.Errorf("Stalled() = %v for short %q, want %v", got, s.Short, exp.stalled)
+		}
+		if s.Waiting() && s.Stalled() {
+			t.Errorf("short %q is both Waiting and Stalled; the two must be mutually exclusive", s.Short)
 		}
 	}
 }
@@ -214,6 +237,9 @@ func TestFixtureDyingFieldParsesViaListSessions(t *testing.T) {
 		"c3e94f26": false,
 		"e4fa5037": false,
 		"f5ab6148": true,
+		"d4bc7159": false,
+		"07ea8b3c": false,
+		"918cf4a2": false,
 	}
 
 	if len(sessions) != len(wantDying) {
@@ -301,13 +327,16 @@ func TestFixtureFirstRecordAllFieldsLiteral(t *testing.T) {
 	}
 }
 
-// TestWaitingRateLimitedIsNotWaiting locks in the fix for Waiting() over-reaching: a
-// non-empty Needs on its own (as seen on a rate-limited or login-required session) must
-// not count as waiting for a human decision.
-func TestWaitingRateLimitedIsNotWaiting(t *testing.T) {
+// TestRateLimitedIsStalledNotWaiting covers the split between the two counters: a
+// non-empty Needs that is not one of the question forms (as seen on a rate-limited or
+// login-required session) is Stalled, since no answer fixes it, but never Waiting.
+func TestRateLimitedIsStalledNotWaiting(t *testing.T) {
 	s := Session{State: "working", Tempo: "active", Needs: "rate limited, retrying in 30s"}
 	if s.Waiting() {
-		t.Error("a rate-limited session with a non-empty Needs must not be Waiting()")
+		t.Error("a rate-limited session with a non-question Needs must not be Waiting()")
+	}
+	if !s.Stalled() {
+		t.Error("a rate-limited session with a non-question Needs must be Stalled()")
 	}
 }
 
@@ -318,6 +347,9 @@ func TestWaitingForm1(t *testing.T) {
 	if !s.Waiting() {
 		t.Error("state=blocked must be waiting even with tempo=active and empty needs")
 	}
+	if s.Stalled() {
+		t.Error("a Waiting session must never also be Stalled")
+	}
 }
 
 // TestWaitingForm2 covers the daemon detecting a session parked on a rendered question.
@@ -326,13 +358,31 @@ func TestWaitingForm2(t *testing.T) {
 	if !s.Waiting() {
 		t.Error("tempo=blocked with a non-empty needs must be waiting")
 	}
+	if s.Stalled() {
+		t.Error("a Waiting session must never also be Stalled")
+	}
 }
 
-// TestWaitingNegative covers a session that is not waiting by any form.
+// TestWaitingQuestionNeedsAloneIsWaitingNotStalled covers the third, independent
+// waiting form: neither flag is blocked, but the needs text itself is a question.
+func TestWaitingQuestionNeedsAloneIsWaitingNotStalled(t *testing.T) {
+	s := Session{State: "working", Tempo: "active", Needs: "choose: (1) A; (2) B"}
+	if !s.Waiting() {
+		t.Error("a \"choose:\" needs with neither flag blocked must be Waiting()")
+	}
+	if s.Stalled() {
+		t.Error("a Waiting session must never also be Stalled")
+	}
+}
+
+// TestWaitingNegative covers a session that is neither waiting nor stalled by any form.
 func TestWaitingNegative(t *testing.T) {
 	s := Session{State: "working", Tempo: "active", Needs: ""}
 	if s.Waiting() {
 		t.Error("state=working, tempo=active, needs=\"\" must not be waiting")
+	}
+	if s.Stalled() {
+		t.Error("state=working, tempo=active, needs=\"\" must not be stalled either")
 	}
 }
 
@@ -753,6 +803,38 @@ func TestPingProtoZeroIsError(t *testing.T) {
 	}
 }
 
+// TestPingFractionalProtoIsError covers a reply like {"proto": 1.9}: checking only
+// protoNum < 1 and then truncating with int(protoNum) would silently turn that into
+// proto 1 — a value the daemon never actually reported. A non-integer proto is just as
+// malformed as a missing or non-numeric one and must be rejected the same way,
+// symmetric with TestPingMissingProtoIsError, TestPingNonNumberProtoIsError and
+// TestPingProtoZeroIsError.
+func TestPingFractionalProtoIsError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":1.9}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	info, err := client.Ping(context.Background())
+	if err == nil {
+		t.Fatalf("expected an error for a fractional proto:1.9, got Info=%+v", info)
+	}
+	if info.Proto != 0 {
+		t.Errorf("expected a zero Info on error, got %+v", info)
+	}
+}
+
 // TestListSessionsErrorWithoutCodeIsCleanError covers an "ok":false list reply carrying
 // no code field at all: it must produce a clean "unknown error", never the dangling
 // "unknown error: " that daemonError(...) would otherwise build from an empty code.
@@ -826,6 +908,36 @@ func TestResolveSocketCandidateNoMatchesIsPlainUnavailable(t *testing.T) {
 	_, err := resolveSocketCandidate(nil)
 	if !errors.Is(err, ErrDaemonUnavailable) {
 		t.Errorf("expected ErrDaemonUnavailable, got %v", err)
+	}
+}
+
+// TestResolveSocketCandidateReportsDialFailure covers a candidate that passes the
+// ownership check but fails to dial: skipping it with a bare `continue` and no
+// collected cause would leave the caller with a plain ErrDaemonUnavailable and no
+// cause at all — throwing away the one piece of evidence resolveSocketCandidate exists
+// to preserve. The candidate here is a plain regular file, not a socket: it passes
+// checkSocketOwnership (correctly owned, tightly moded) but a dial against it fails,
+// since nothing is listening there.
+func TestResolveSocketCandidateReportsDialFailure(t *testing.T) {
+	base := shortTempDir(t)
+	secureDir := filepath.Join(base, "secure")
+	if err := os.Mkdir(secureDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	notASocket := filepath.Join(secureDir, "control.sock")
+	if err := os.WriteFile(notASocket, []byte("not a socket"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := resolveSocketCandidate([]string{notASocket})
+	if err == nil {
+		t.Fatal("expected an error when the only candidate fails to dial")
+	}
+	if !errors.Is(err, ErrDaemonUnavailable) {
+		t.Errorf("expected the error to still satisfy errors.Is(err, ErrDaemonUnavailable), got %v", err)
+	}
+	if err.Error() == ErrDaemonUnavailable.Error() {
+		t.Errorf("expected the dial failure's own cause to be included, got a bare %v", err)
 	}
 }
 
@@ -2025,10 +2137,10 @@ func TestNewNilKeyFuncReadScreenDoesNotPanic(t *testing.T) {
 
 	client := New(listener.Addr().String(), nil)
 	client.proto = 1
-	// No data is ever sent by the fake daemon here, and after the Finding 3 fix the
-	// idle timer only starts once the first byte arrives — so with nothing arriving at
-	// all, the context ceiling (not the idle timeout) is what bounds the wait. Keep it
-	// short so this test stays fast rather than waiting out the 30s default.
+	// No data is ever sent by the fake daemon here, and the idle timer only starts once
+	// the first byte arrives — so with nothing arriving at all, the context ceiling
+	// (not the idle timeout) is what bounds the wait. Keep it short so this test stays
+	// fast rather than waiting out the 30s default.
 	client.defaultDeadline = 200 * time.Millisecond
 
 	out, err := client.ReadScreen(context.Background(), "session123", 0)
@@ -2245,6 +2357,48 @@ func TestNonDiscoverableClientDoesNotRetryDeadSocket(t *testing.T) {
 	_, err = client.ListSessions(context.Background())
 	if !errors.Is(err, ErrDaemonUnavailable) {
 		t.Errorf("expected ErrDaemonUnavailable, got %v", err)
+	}
+}
+
+// --- checkSocketOwnership must accept the real production shape, not just the shape
+// t.TempDir() happens to produce ---
+
+// TestSocketPathFindsLiveDaemonSocket is a smoke test against whatever daemon socket
+// actually exists on this machine, not a fake one under a test's own temp directory.
+// Every other test in this file plants its socket under t.TempDir() (on macOS,
+// /var/folders/.../T/...), and the walk in checkSocketOwnership stops at a root-owned,
+// non-writable boundary (/var/folders/<hash>) before it ever reaches /var itself, which
+// is a symlink to /private/var — so none of those tests exercise a symlinked ancestor
+// at all. The real daemon socket lives under /tmp/cc-daemon-<uid>/<id>/control.sock, and
+// on macOS /tmp is itself a symlink to /private/tmp: this is the one shape that actually
+// matters in production, and it is exactly what SocketPath must resolve correctly.
+//
+// This must not print or assert the real path anywhere: the repository is public, and a
+// path under a user's real /tmp is exactly the kind of thing that must never end up in a
+// tracked test's output.
+func TestSocketPathFindsLiveDaemonSocket(t *testing.T) {
+	currentUser, err := user.Current()
+	if err != nil {
+		t.Fatalf("user.Current: %v", err)
+	}
+	pattern := filepath.Join("/tmp", fmt.Sprintf("cc-daemon-%s", currentUser.Uid), "*", "control.sock")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Skip("no live daemon socket on this machine; skipping")
+	}
+
+	// Deliberately not interpolating err into the failure message: its text can carry
+	// the real socket path (see dialChecked's %w wrapping), and that path must never
+	// land in this tracked test's output, including a future CI failure log.
+	path, err := SocketPath()
+	if err != nil {
+		t.Fatal("SocketPath failed to find a live daemon socket that filepath.Glob found; see the daemon package's own error for the (locally reproducible, not logged here) cause")
+	}
+	if path == "" {
+		t.Fatal("SocketPath returned an empty path despite a live socket existing")
 	}
 }
 
@@ -2466,6 +2620,50 @@ func TestReadScreenDetectsEkicked(t *testing.T) {
 	}
 }
 
+// TestReadScreenKickedRespectsTailLimit covers a kicked attach returning the whole
+// accumulated prefix unbounded, with tail applied only on the non-kicked path below
+// it. A caller that asked for the last few bytes could receive up to the full
+// maxAttachBytes (1 MB) on this path — a path the protocol document calls a normal
+// event, not a rare edge case.
+func TestReadScreenKickedRespectsTailLimit(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		conn.Write([]byte("0123456789ABCDEFGHIJ"))
+		conn.Write([]byte("EKICKED: another connection attached"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	out, err := client.ReadScreen(context.Background(), "session123", 5)
+	var kicked *ErrKicked
+	if !errors.As(err, &kicked) {
+		t.Fatalf("expected *ErrKicked, got %T: %v", err, err)
+	}
+	if kicked.Detail != "another connection attached" {
+		t.Errorf("expected detail %q, got %q", "another connection attached", kicked.Detail)
+	}
+	if out != "FGHIJ" {
+		t.Errorf("expected the kicked prefix trimmed to the last 5 bytes %q, got %q", "FGHIJ", out)
+	}
+}
+
 // TestReadScreenMidScreenEkickedTextIsNotAKick covers the blocker that the kick marker
 // was matched anywhere in the accumulated screen, so a screen that merely displays the
 // text "EKICKED:" reported a kick. This is self-referential: fleetdeck reads the screens
@@ -2668,13 +2866,12 @@ func TestSendKeysDetectsEkicked(t *testing.T) {
 	}
 }
 
-// TestReadScreenKickMidStreamNoTrailingNewlineIsDetected covers Blocker 1 from the
-// fifth whole-branch review: findKickOpener used to accept the marker only at offset 0
-// or immediately after a '\n'. A terminal screen almost never ends with a trailing
-// newline — the daemon writes the marker "in place of" PTY bytes, flush against
-// whatever was already sent, mid-line — so that anchor never fired in the one
-// realistic case. This reproduces the reviewer's fake daemon exactly: a screen with no
-// trailing newline, then the marker, then close.
+// TestReadScreenKickMidStreamNoTrailingNewlineIsDetected covers findKickOpener
+// accepting the marker only at offset 0 or immediately after a '\n': a terminal screen
+// almost never ends with a trailing newline — the daemon writes the marker "in place
+// of" PTY bytes, flush against whatever was already sent, mid-line — so that anchor
+// would never fire in the realistic case. This drives exactly that shape: a screen
+// with no trailing newline, then the marker, then close.
 func TestReadScreenKickMidStreamNoTrailingNewlineIsDetected(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -2766,13 +2963,12 @@ func TestSendKeysKickMidStreamNoTrailingNewlineIsDetected(t *testing.T) {
 	}
 }
 
-// TestReadScreenProductionDefaultsChattySessionReturnsPromptly covers Blocker 2: with
-// production defaults, ReadScreen against a session that redraws continuously (so the
-// idle timeout never fires) used to run all the way to defaultDeadline's 30 seconds,
-// because ReadScreen derived its own context deadline from defaultDeadline. It must now
-// use its own, much shorter, screenDeadline instead. Neither defaultDeadline nor
-// screenDeadline is overridden here — the point is to measure the actual production
-// ceiling, not one shortened by the test.
+// TestReadScreenProductionDefaultsChattySessionReturnsPromptly covers ReadScreen
+// against a session that redraws continuously, so the idle timeout never fires: it
+// must return well before defaultDeadline's 30 seconds, using its own, much shorter,
+// screenDeadline instead of deriving its context deadline from defaultDeadline.
+// Neither defaultDeadline nor screenDeadline is overridden here — the point is to
+// measure the actual production ceiling, not one shortened by the test.
 func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -2833,12 +3029,12 @@ func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) 
 	}
 }
 
-// TestCollectUntilIdleOrClosedBoundsFirstByteWaitWithNoContextDeadline covers Must-fix
-// 3: with idleFromStart == false and a context carrying no deadline, the "bounded wait"
-// branch used to recompute time.Now().Add(idleTimeout) on every loop iteration, which
-// pushed the deadline forward by another idleTimeout each time a read timed out — so
-// gotFirstByte never became true, ctx.Err() never fired (context.Background() never
-// errors), and the loop never returned. This exercises collectUntilIdleOrClosed
+// TestCollectUntilIdleOrClosedBoundsFirstByteWaitWithNoContextDeadline covers the
+// "bounded wait" branch with idleFromStart == false and a context carrying no
+// deadline: recomputing time.Now().Add(idleTimeout) on every loop iteration would push
+// the deadline forward by another idleTimeout each time a read timed out, so
+// gotFirstByte never becomes true, ctx.Err() never fires (context.Background() never
+// errors), and the loop never returns. This exercises collectUntilIdleOrClosed
 // directly (it is a package-level function with two callers, not reachable this way
 // through either ReadScreen or SendKeys today) against a connection that sends nothing
 // at all, and asserts it returns well within a bounded window instead of hanging.
@@ -2946,11 +3142,11 @@ func TestControlKeyRefusesSymlinkWithClearInternalCause(t *testing.T) {
 	}
 }
 
-// --- Sixth review, Blocker 1: kick detection must be a compound signal, not "the
-// marker's last occurrence plus a close" ---
+// --- Kick detection must be a compound signal, not "the marker's last occurrence
+// plus a close" ---
 
-// TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick is the sixth review's own
-// reproduction: a session that greps this very repository for the marker text (so the
+// TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick reproduces a session that
+// greps this very repository for the marker text (so the
 // literal string "EKICKED:" appears twice — once in the grep invocation, once in its
 // match line), then exits normally. bytes.LastIndex plus "the connection closed" fired
 // on this every time: it only required the marker to be the last *occurrence*, not the
@@ -2995,11 +3191,11 @@ func TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick(t *testing.T) {
 	}
 }
 
-// TestReadScreenLongMultilineTailAfterMarkerIsNotAKick covers the third required case
-// from the sixth review: the marker appears, but what follows it is long and contains
-// a newline — the shape of ordinary screen content, not the daemon's own short,
-// single-line reason. A real "EKICKED: <reason>" is always the very last thing the
-// daemon sends before closing the connection; nothing this verbose ever follows it.
+// TestReadScreenLongMultilineTailAfterMarkerIsNotAKick covers the marker appearing but
+// what follows it being long and containing a newline — the shape of ordinary screen
+// content, not the daemon's own short, single-line reason. A real "EKICKED: <reason>"
+// is always the very last thing the daemon sends before closing the connection;
+// nothing this verbose ever follows it.
 func TestReadScreenLongMultilineTailAfterMarkerIsNotAKick(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -3037,13 +3233,14 @@ func TestReadScreenLongMultilineTailAfterMarkerIsNotAKick(t *testing.T) {
 	}
 }
 
-// --- Sixth review, Blocker 2: dial must respect the caller's context ---
+// --- dial must respect the caller's context ---
 
-// TestDialRespectsCanceledContext covers Blocker 2: dial (and dialChecked) previously
-// ignored the caller's context entirely and called plain net.Dial with no timeout, so
-// neither the 2s screen ceiling nor any context.WithTimeout a caller supplied covered
-// the connect phase at all. A daemon that is alive but not accepting (a full backlog,
-// a wedged process) can make connect(2) on an AF_UNIX socket block indefinitely.
+// TestDialRespectsCanceledContext covers dial (and dialChecked) needing to honour the
+// caller's context during the connect itself, not only during the request/response
+// exchange that follows it: neither the 2s screen ceiling nor any context.WithTimeout
+// a caller supplies is worth anything if the connect phase ignores it entirely. A
+// daemon that is alive but not accepting (a full backlog, a wedged process) can make
+// connect(2) on an AF_UNIX socket block indefinitely.
 //
 // A genuine "full accept backlog blocks connect" fixture proved impractical on this
 // platform: verified empirically (a raw socket bound and listened with backlog 1, left
@@ -3079,8 +3276,8 @@ func TestDialRespectsCanceledContext(t *testing.T) {
 	}
 }
 
-// --- Sixth review, Blocker 3: checkSocketOwnership must reject a symlink explicitly,
-// not rely on a symlink's mode bits conventionally reading as 0777 ---
+// --- checkSocketOwnership must reject a symlink explicitly, not rely on a symlink's
+// mode bits conventionally reading as 0777 ---
 
 // TestCheckSocketOwnershipRefusesSymlinkedSocketPath covers the socket path itself
 // being a symlink to a real, correctly-owned socket elsewhere. checkKeyFileSecurity
@@ -3115,12 +3312,13 @@ func TestCheckSocketOwnershipRefusesSymlinkedSocketPath(t *testing.T) {
 }
 
 // TestCheckSocketOwnershipRefusesSymlinkedIntermediateDirectory covers an intermediate
-// directory in the walk being a symlink, rather than the socket file itself. The walk
-// is lexical (filepath.Dir) and never inspects a link's target, so without an explicit
-// check here, this shape depends entirely on the symlink's own Lstat mode happening to
-// trip the "writable by group or other" branch — true by convention on this platform,
-// but not guaranteed. The refusal must name the symlink, not that convention-dependent
-// mode check.
+// directory in the walk being a symlink owned by a non-root user (here, whichever user
+// runs the test — the same distinction checkSocketOwnershipWalk makes: a symlink that
+// an unprivileged local attacker could plausibly have planted must be refused, unlike
+// one owned by root, which no unprivileged attacker can replace — see
+// TestCheckSocketOwnershipWalkAcceptsRootOwnedSymlinkedAncestor for that accepted case,
+// exercised through the injectable lstatFunc since faking a real root-owned test
+// directory would need root.
 func TestCheckSocketOwnershipRefusesSymlinkedIntermediateDirectory(t *testing.T) {
 	base := shortTempDir(t)
 	actualDir := filepath.Join(base, "actual")
@@ -3141,14 +3339,72 @@ func TestCheckSocketOwnershipRefusesSymlinkedIntermediateDirectory(t *testing.T)
 
 	err = checkSocketOwnership(sockPath)
 	if err == nil {
-		t.Fatal("expected refusal when an enclosing directory in the path is a symlink")
+		t.Fatal("expected refusal when an enclosing directory in the path is a symlink owned by a non-root user")
 	}
 	if !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("expected the refusal to name the symlink explicitly, got: %v", err)
 	}
 }
 
-// --- Sixth review, recommendations ---
+// fakeLstat builds an lstatFunc backed by a fixed map, so a test can drive an exact
+// directory shape (ownership, mode, symlink target) without touching the real
+// filesystem — needed here since the shape that matters in production (macOS's
+// /tmp -> /private/tmp, both root-owned) cannot be reproduced under an unprivileged
+// test's own t.TempDir().
+func fakeLstat(entries map[string]dirStat) lstatFunc {
+	return func(path string) (dirStat, error) {
+		info, ok := entries[path]
+		if !ok {
+			return dirStat{}, fmt.Errorf("fakeLstat: no entry for %s", path)
+		}
+		return info, nil
+	}
+}
+
+// TestCheckSocketOwnershipWalkAcceptsRootOwnedSymlinkedAncestor covers refusing every
+// symlink unconditionally, including one owned by root — and macOS's /tmp is exactly
+// that: a symlink to /private/tmp, owned by root — which would refuse the real daemon
+// socket path (/tmp/cc-daemon-<uid>/<id>/control.sock) on every run on that platform.
+// This drives the exact shape via the injectable lstatFunc: /tmp (root, a symlink to
+// /private/tmp) -> /private/tmp (root, mode 041777, sticky) -> boundary, accepted.
+func TestCheckSocketOwnershipWalkAcceptsRootOwnedSymlinkedAncestor(t *testing.T) {
+	uid := os.Getuid()
+	lstat := fakeLstat(map[string]dirStat{
+		"/tmp/cc-daemon-x/b9184055": {uid: uid, mode: 0o700},
+		"/tmp/cc-daemon-x":          {uid: uid, mode: 0o700},
+		"/tmp":                      {uid: 0, symlink: true, target: "private/tmp"},
+		"/private/tmp":              {uid: 0, mode: os.ModeSticky | 0o777},
+	})
+
+	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/b9184055/control.sock", "/tmp/cc-daemon-x/b9184055", uid, lstat)
+	if err != nil {
+		t.Errorf("expected a root-owned symlinked ancestor (/tmp -> /private/tmp) to be accepted, got: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipWalkRefusesNonRootOwnedSymlinkedAncestor is the accepted
+// case's negative counterpart: the same shape, except /tmp is owned by a non-root uid
+// instead of root. An unprivileged local attacker could plant exactly this, so it must
+// be refused regardless of what it points to.
+func TestCheckSocketOwnershipWalkRefusesNonRootOwnedSymlinkedAncestor(t *testing.T) {
+	uid := os.Getuid()
+	lstat := fakeLstat(map[string]dirStat{
+		"/tmp/cc-daemon-x/b9184055": {uid: uid, mode: 0o700},
+		"/tmp/cc-daemon-x":          {uid: uid, mode: 0o700},
+		"/tmp":                      {uid: uid + 1, symlink: true, target: "private/tmp"},
+		"/private/tmp":              {uid: 0, mode: os.ModeSticky | 0o777},
+	})
+
+	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/b9184055/control.sock", "/tmp/cc-daemon-x/b9184055", uid, lstat)
+	if err == nil {
+		t.Fatal("expected a non-root-owned symlinked ancestor to be refused")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("expected the refusal to name the symlink explicitly, got: %v", err)
+	}
+}
+
+// --- Error message cleanliness ---
 
 // TestDaemonErrorEmptyCodeStringIsCleanError covers daemonError directly: a reply
 // carrying "code" as an actually-present, empty string (not merely an absent field —
@@ -3221,8 +3477,9 @@ func (alwaysWrappedTimeoutConn) SetReadDeadline(time.Time) error { return nil }
 // collectUntilIdleOrClosed used a plain `err.(net.Error)` type assertion, which only
 // worked because bufio.Reader.Read happens to return the transport error unwrapped
 // today. A wrapped timeout error must still be recognised as a timeout (and the idle
-// window honoured) rather than falling into the "connection closed" branch — which,
-// combined with Blocker 1, would have turned an ordinary timeout into a false kick.
+// window honoured) rather than falling into the "connection closed" branch — which
+// would turn an ordinary timeout into a false kick, since detectKick treats
+// "connection closed" as one of its three required conditions.
 func TestCollectUntilIdleOrClosedUnwrapsWrappedTimeoutError(t *testing.T) {
 	conn := alwaysWrappedTimeoutConn{}
 	reader := bufio.NewReader(conn)
@@ -3233,5 +3490,60 @@ func TestCollectUntilIdleOrClosedUnwrapsWrappedTimeoutError(t *testing.T) {
 	}
 	if len(data) != 0 {
 		t.Errorf("expected no data from a connection that only ever times out, got %q", data)
+	}
+}
+
+// --- A kick whose EOF arrives after the read ceiling is documented, accepted,
+// residual behaviour, not a bug to silently paper over ---
+
+// TestReadScreenMarkerAtEndWithoutObservedCloseIsNotAKick locks in the deliberate
+// decision recorded on detectKick and in docs/protocol/daemon-control-socket.md section
+// 8: condition 1 (an observed close) is required, so a marker sitting at the very end
+// of the buffer when the read ceiling fires — with the connection's EOF not yet
+// observed — is reported as ordinary screen content, not ErrKicked. The fake daemon
+// here writes the marker and then holds the connection open (never closes it) past a
+// deliberately short screenDeadline, reproducing exactly the residual case the
+// documentation describes; this is the current, accepted behaviour, and this test
+// exists so a future change to that decision is deliberate, not accidental.
+func TestReadScreenMarkerAtEndWithoutObservedCloseIsNotAKick(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		conn.Write([]byte("EKICKED: another connection attached"))
+
+		// Hold the connection open well past the client's short screenDeadline below,
+		// so its EOF is never observed within the read: closed stays false.
+		<-stop
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.readIdleTimeout = 2 * time.Second // long enough that idle never fires first
+	client.screenDeadline = 50 * time.Millisecond
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	if err != nil {
+		t.Fatalf("expected nil error (the marker is reported as ordinary content, per the documented residual risk), got %v", err)
+	}
+	if out != "EKICKED: another connection attached" {
+		t.Errorf("expected the marker's bytes as ordinary screen content, got %q", out)
 	}
 }

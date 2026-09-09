@@ -195,14 +195,23 @@ func Save(path string, c Config) error {
 	}
 
 	dir := filepath.Dir(path)
+	_, statErr := os.Stat(dir)
+	dirAlreadyExisted := statErr == nil
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	// MkdirAll's mode argument is a no-op when dir already exists, so an existing
-	// directory that was ever left group/other-writable would stay that way across
-	// every subsequent Save. Tighten it explicitly every time, not just on creation.
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("set config dir permissions: %w", err)
+	// MkdirAll's mode argument is subject to umask, so a directory it just created
+	// might not actually end up as 0700 without an explicit chmod. That chmod must
+	// only apply to a directory this call created itself: dir's path comes from
+	// outside (the --config flag), so unconditionally chmod'ing whatever directory it
+	// resolves to — as this used to do — would silently tighten a directory Save has
+	// no business touching (e.g. $HOME, the first time a caller points --config at a
+	// file directly inside it).
+	if !dirAlreadyExisted {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("set config dir permissions: %w", err)
+		}
 	}
 
 	f := configToFile(c)

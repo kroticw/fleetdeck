@@ -381,15 +381,17 @@ func TestSaveWritesFilePerms0600AndDirPerms0700(t *testing.T) {
 	}
 }
 
-// TestSaveTightensExistingDirectoryPermissions covers the recommendation that Save did
-// not tighten an already-existing directory's permissions: os.MkdirAll(dir, 0o700) is a
-// no-op when dir already exists with looser permissions, so a config directory that was
-// ever left (or created) group/other-writable stayed that way across every subsequent
-// Save. This is low priority — the config holds no secrets — but Save should still fix
-// it while writing, rather than only enforcing 0700 on the directory it creates itself.
-func TestSaveTightensExistingDirectoryPermissions(t *testing.T) {
+// TestSaveLeavesExistingDirectoryPermissionsUnchanged covers Save applying
+// os.Chmod(dir, 0o700) unconditionally, including to a directory it did not create,
+// whenever the path came from outside (the plan gives the binary a --config flag).
+// `fleetdeck --config ~/fleet.yaml` on a first save would then silently chmod 0700
+// $HOME — a destructive, unreversed side effect on a directory that has nothing to do
+// with the config. Save must tighten only the directory it created itself (see
+// TestSaveWritesFilePerms0600AndDirPerms0700 for that case) and leave an
+// already-existing directory's mode exactly as it found it, no matter how loose.
+func TestSaveLeavesExistingDirectoryPermissionsUnchanged(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o777); err != nil {
+	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
 	p := filepath.Join(dir, "c.yaml")
@@ -402,8 +404,8 @@ func TestSaveTightensExistingDirectoryPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
-		t.Errorf("expected Save to tighten an existing directory to mode 0700, got %o", perm)
+	if perm := dirInfo.Mode().Perm(); perm != 0o755 {
+		t.Errorf("expected Save to leave an existing directory's mode unchanged at 0755, got %o", perm)
 	}
 }
 

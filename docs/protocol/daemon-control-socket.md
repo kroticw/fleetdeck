@@ -108,9 +108,11 @@ Notes on specific fields:
 - `pinned` is out of scope for this client entirely: carrying it through would add a fourth source of truth to a design that intentionally has three (daemon session state, transcript, board card).
 - "Live" and "resumable", where a caller wants them, are derived rather than read: a session's mere presence in a `list` reply with no `dying` flag means it is alive.
 
-## 5. Determining whether a session is waiting for a human
+## 5. Determining whether a session is waiting for a human, or merely stalled
 
-Three forms have been observed on a live daemon (all examples below are illustrative, not verbatim from any real session):
+A session that has stopped making progress is in one of two distinct states, and a client must not conflate them: **waiting**, where a person has to answer something before the session moves again, and **stalled**, where no answer helps — the session needs time, or an action outside this client entirely (a usage limit resetting, a login refresh, an upstream API error clearing, a rate limit expiring). A counter that lumps both together, or that blinks on every rate limit the same way it does on a real question, teaches a person to stop trusting it — and under-reporting is the worse failure of the two, since it hides someone who is genuinely waiting on a person.
+
+Three forms of **waiting** have been observed on a live daemon (all examples below are illustrative, not verbatim from any real session):
 
 ```
 tempo=blocked  state=working  needs="answer: Which colour should the probe use? (Red · Green · Blue)"
@@ -118,7 +120,11 @@ tempo=active   state=blocked  needs=""    detail="awaiting user decision on a de
 tempo=blocked  state=blocked  needs="choose: (1) ... (2) ... (3) ..."
 ```
 
-The rule this implies: **a session is waiting when `state == "blocked"` OR `tempo == "blocked"`.** Neither field is sufficient on its own — the second form above has `tempo="active"` and is still waiting (via `state`); the first and third forms have a `state` value other than "blocked" and are still waiting (via `tempo`). `needs` being non-empty is neither necessary (form 2 has an empty `needs`) nor sufficient (a rate-limited or login-required session has a non-empty `needs` and is not waiting for a human decision) as a standalone signal, and must not be used as one.
+The rule: **a session is waiting when any of the following holds** — `state == "blocked"`, `tempo == "blocked"`, or `needs` itself renders a question (its text begins with `answer:` or `choose:`). No one of these is necessary on its own — the second form above has `tempo="active"` and an empty `needs`, and is still waiting via `state`; the first and third forms have a `state` value other than "blocked" and are still waiting via `tempo`; a session with neither flag blocked but a `needs` beginning `answer:` or `choose:` is waiting via that text alone.
+
+A session is **stalled** when `needs` is non-empty but is not one of those question forms (the rate-limited/login-required/usage-limit/API-error kind of text). Waiting and stalled are mutually exclusive by construction: a session with a blocked flag AND a non-question `needs` (e.g. a session paused on a rate limit that also happens to report `tempo=blocked`) is waiting, never stalled — the blocked flag takes priority, so the two counters never double-count the same session and never both miss it.
+
+The `answer:`/`choose:` prefix vocabulary comes from the daemon and may grow; treat it as a small, named list to check against, not a single string comparison.
 
 ## 6. The control key
 
@@ -162,3 +168,5 @@ A real kick requires all three of the following to hold; each has been tried alo
 A client should locate the marker relative to the end of the accumulated stream (condition 2), not relative to a line boundary, and validate what follows it (condition 3) before ever treating a close (condition 1) as evidence of a kick.
 
 A real kick is a normal event — someone attached by hand and took over — not a failure, so a client should not discard the screen accumulated before the marker when reporting it: the bytes preceding the marker's position are still a valid, complete screen up to that point.
+
+Condition 1 carries a deliberate, accepted residual risk. The daemon writes the marker and then closes the connection in close succession, but a client reading with a bounded ceiling (e.g. a 2-second screen-read deadline) can, in principle, receive the marker's bytes and hit its own ceiling before the resulting EOF is read. In that case, closed is never observed to be true, and the marker is reported as ordinary screen content rather than a kick. This is deliberately not addressed by treating an end-of-buffer marker as sufficient without an observed close — that reopens exactly the false-positive shape conditions 2 and 3 exist to rule out. The risk is accepted, not eliminated, because it requires the close to be delayed relative to the marker by longer than the read ceiling, which is not how the daemon actually writes it.
