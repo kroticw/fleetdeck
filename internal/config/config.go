@@ -205,18 +205,18 @@ func Save(path string, c Config) error {
 		return fmt.Errorf("create temp config file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
 
 	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write temp config file: %w", err)
 	}
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("set config file permissions: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("sync temp config file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
@@ -231,9 +231,9 @@ func Save(path string, c Config) error {
 	// not just the file's contents. This is best-effort: not every platform supports
 	// syncing a directory handle, and the rename has already succeeded and is readable
 	// either way — only the crash-durability guarantee would be weaker without it.
-	if dir, err := os.Open(dir); err == nil {
-		_ = dir.Sync()
-		dir.Close()
+	if dirHandle, err := os.Open(dir); err == nil {
+		_ = dirHandle.Sync()
+		_ = dirHandle.Close()
 	}
 
 	return nil

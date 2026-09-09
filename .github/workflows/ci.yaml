@@ -10,12 +10,35 @@ permissions:
 
 jobs:
   check:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        # macos-latest catches macOS-specific regressions this project actually cares
+        # about (it's the maintainer's own platform); ubuntu-latest is here because
+        # syscall.Stat_t and unix sockets build on Linux too, and macOS runners cost
+        # roughly ten times as much — a Linux-only regression would otherwise go
+        # uncaught for free.
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        id: setup-go
         with:
           go-version-file: go.mod
+      # install-mode: goinstall (rather than the default binary download) with
+      # GOTOOLCHAIN pinned to the exact toolchain setup-go just installed, because
+      # golangci-lint's own official release binaries are currently built with an older
+      # Go toolchain than this module's go.mod requires, and golangci-lint refuses to
+      # analyse code targeting a newer Go language version than it was itself built
+      # with. Building from source against the same toolchain go.mod requires avoids
+      # that mismatch, without hardcoding the version separately from go.mod.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ steps.setup-go.outputs.go-version }}
+        with:
+          version: v2.13.2
+          install-mode: goinstall
+          install-only: true
       - run: make lint
       - run: make test
       - run: make build

@@ -77,6 +77,26 @@
       "cliVersion": "2.1.263",
       "source": "shell",
       "needs": ""
+    },
+    {
+      "short": "f5ab6148",
+      "nonce": "6c3f9b27",
+      "sessionId": "f5ab6148-4d2e-4a6c-9f31-7b8e0d2a5c93",
+      "pid": 95678,
+      "attempt": 2,
+      "startedAt": 1783905123456,
+      "createdAt": 1783905123400,
+      "cwd": "/home/user/project",
+      "backend": "daemon",
+      "tempo": "active",
+      "state": "working",
+      "detail": "cleaning up after cancellation",
+      "intent": "",
+      "name": "worker-d",
+      "cliVersion": "2.1.263",
+      "source": "shell",
+      "needs": "",
+      "dying": true
     }
   ]
 }

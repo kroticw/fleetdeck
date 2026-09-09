@@ -2,7 +2,7 @@ package daemon
 
 // testdata/list_sessions.json is an anonymised capture of a real `list` reply from a
 // live daemon (cwd, name, sessionId, nonce, pid and timestamps replaced; needs/intent/
-// detail rewritten to neutral text of the same shape). Three of its four records are
+// detail rewritten to neutral text of the same shape). Three of its five records are
 // derived from that capture. The fourth (short "e4fa5037": tempo=active, state=blocked,
 // needs="") is added by hand, because the live capture used for this fixture did not
 // happen to contain that form. It is nonetheless attested: this form was observed live
@@ -11,6 +11,12 @@ package daemon
 // docs/protocol/daemon-control-socket.md section 5 as one of the three waiting forms
 // this client must handle, and it is exactly the form that justifies checking Session's
 // State field in Waiting(), not just Tempo.
+//
+// The fifth (short "f5ab6148") is also added by hand, to cover the `"dying": true` key
+// documented in docs/protocol/daemon-control-socket.md sections 4 and 8: a job being
+// killed or retired carries this extra key, and its absence on every other record here
+// is exactly what is supposed to mean "alive". Its other fields are invented the same
+// way as e4fa5037's: plausible values of the same shape, not drawn from a live capture.
 
 import (
 	"bufio"
@@ -151,6 +157,9 @@ func TestWaitingAgainstFixture(t *testing.T) {
 		// the file-level comment above) — the record that specifically justifies
 		// checking State, since Tempo alone says "active" here.
 		"e4fa5037": true,
+		// tempo=active, state=working, needs="", dying=true: a job being retired.
+		// Dying plays no part in Waiting() — this record is plainly not waiting.
+		"f5ab6148": false,
 	}
 
 	if len(sessions) != len(want) {
@@ -165,6 +174,129 @@ func TestWaitingAgainstFixture(t *testing.T) {
 		if got := s.Waiting(); got != expect {
 			t.Errorf("Waiting() = %v for short %q, want %v", got, s.Short, expect)
 		}
+	}
+}
+
+// TestFixtureDyingFieldParsesViaListSessions covers the blocker that Session dropped the
+// `dying` field entirely: encoding/json silently drops unknown keys, so a dying session
+// arriving from ListSessions was indistinguishable from a live one. This asserts the one
+// record carrying "dying": true parses as Dying == true, and every other record in the
+// fixture parses as Dying == false.
+func TestFixtureDyingFieldParsesViaListSessions(t *testing.T) {
+	line := loadFixtureLine(t)
+
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return line
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	sessions, err := client.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+
+	wantDying := map[string]bool{
+		"a1c92f04": false,
+		"b2d83e15": false,
+		"c3e94f26": false,
+		"e4fa5037": false,
+		"f5ab6148": true,
+	}
+
+	if len(sessions) != len(wantDying) {
+		t.Fatalf("fixture has %d sessions but the expectation table has %d entries; keep them in sync", len(sessions), len(wantDying))
+	}
+
+	for _, s := range sessions {
+		expect, ok := wantDying[s.Short]
+		if !ok {
+			t.Fatalf("fixture contains short %q, which is not in the expectation table", s.Short)
+		}
+		if s.Dying != expect {
+			t.Errorf("Dying = %v for short %q, want %v", s.Dying, s.Short, expect)
+		}
+	}
+}
+
+// TestFixtureFirstRecordAllFieldsLiteral covers the blocker that 15 of Session's 18
+// fields were never asserted anywhere: a wrong json tag on any field but short/state/
+// tempo would decode to a zero value and the suite would stay green. This asserts every
+// field of the fixture's first record (short "a1c92f04") against its literal, expected
+// value, parsed through the production ListSessions path.
+func TestFixtureFirstRecordAllFieldsLiteral(t *testing.T) {
+	line := loadFixtureLine(t)
+
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return line
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	sessions, err := client.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+
+	var got Session
+	found := false
+	for _, s := range sessions {
+		if s.Short == "a1c92f04" {
+			got = s
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("fixture does not contain short \"a1c92f04\"")
+	}
+
+	want := Session{
+		Short:      "a1c92f04",
+		Nonce:      "f3e8c142",
+		SessionID:  "a1c92f04-52b1-4b7d-9e3a-6f1d2c8b9a05",
+		PID:        51234,
+		Attempt:    1,
+		StartedAt:  1783900420704,
+		CreatedAt:  1783900420700,
+		CWD:        "/home/user/project",
+		Backend:    "daemon",
+		Tempo:      "blocked",
+		State:      "blocked",
+		Detail:     "3 decisions needed: rollout strategy, config validation, release notes wording",
+		Intent:     "read this and help decide on the rollout plan for the release",
+		Name:       "", // absent on this record; absence must decode to the zero value
+		Agent:      "claude",
+		CLIVersion: "2.1.259",
+		Source:     "fleet",
+		Needs:      "choose: (1) deploy via two staged releases or one combined release; (2) confirm the default configuration value; (3) use the short title or the more descriptive one",
+		Dying:      false,
+	}
+
+	if got != want {
+		t.Errorf("record a1c92f04 =\n%+v\nwant\n%+v", got, want)
 	}
 }
 
@@ -751,6 +883,125 @@ func TestControlKeyMissingFile(t *testing.T) {
 	}
 	if key != "" {
 		t.Errorf("expected empty key, got %q", key)
+	}
+}
+
+// TestControlKeyRefusesGroupReadableFile covers the also-fix item: ControlKey() did not
+// check the key file's mode, while the socket path is checked exhaustively. Section 6 of
+// the protocol document records the key as 0600 inside a 0700 directory; a group- or
+// world-readable key file must be refused the same generic way a missing one is.
+func TestControlKeyRefusesGroupReadableFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.WriteFile(keyPath, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o640); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	key, err := ControlKey()
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Errorf("expected ErrNoControlKey for a group-readable key file, got %v", err)
+	}
+	if key != "" {
+		t.Errorf("expected empty key, got %q", key)
+	}
+}
+
+// TestControlKeyRefusesWorldReadableFile covers the other half of the same permission
+// bits: a world-readable (but not group-readable) key file must be refused too.
+func TestControlKeyRefusesWorldReadableFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.WriteFile(keyPath, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o604); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	_, err := ControlKey()
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Errorf("expected ErrNoControlKey for a world-readable key file, got %v", err)
+	}
+}
+
+// TestControlKeyRefusesWrongOwner covers the ownership half of checkKeyFileSecurity.
+// checkKeyFileSecurity takes the expected uid as a parameter specifically so this can be
+// tested without a second real user account: passing a deliberately wrong uid simulates
+// the file being owned by someone else.
+func TestControlKeyRefusesWrongOwner(t *testing.T) {
+	tmpDir := t.TempDir()
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.WriteFile(keyPath, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	if err := checkKeyFileSecurity(keyPath, os.Getuid()+1); err == nil {
+		t.Error("expected a refusal for a key file not owned by the expected uid")
+	}
+	// The real owner must still be accepted.
+	if err := checkKeyFileSecurity(keyPath, os.Getuid()); err != nil {
+		t.Errorf("expected a correctly owned and moded key file to be accepted, got: %v", err)
+	}
+}
+
+// TestControlKeyAcceptsSecureFile is the positive control for the two refusal tests
+// above: a correctly owned, mode-0600 key file must keep working exactly as before.
+func TestControlKeyAcceptsSecureFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.WriteFile(keyPath, []byte("deadbeefdeadbeefdeadbeefdeadbeef\n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	key, err := ControlKey()
+	if err != nil {
+		t.Fatalf("expected success for a secure key file, got: %v", err)
+	}
+	if key != "deadbeefdeadbeefdeadbeefdeadbeef" {
+		t.Errorf("expected the trimmed key value, got %q", key)
+	}
+}
+
+// TestStickyBitSatisfiesRootBoundary covers the also-fix item: checkSocketOwnership's
+// early return for a root-owned enclosing directory was only sound while that directory
+// carries the sticky bit (as /tmp's usual 1777 mode does) — without it, a local attacker
+// could replace the whole cc-daemon-<uid> directory. This exercises the pure predicate
+// directly, since faking a real root-owned test directory would need root.
+func TestStickyBitSatisfiesRootBoundary(t *testing.T) {
+	cases := []struct {
+		name string
+		mode os.FileMode
+		want bool
+	}{
+		{"not writable by group or other", 0o755, true},
+		{"world-writable with sticky bit (/tmp's usual mode)", os.ModeSticky | 0o777, true},
+		{"world-writable without sticky bit", 0o777, false},
+		{"other-writable without sticky bit", 0o707, false},
+		{"group-writable without sticky bit", 0o770, false},
+	}
+	for _, c := range cases {
+		if got := stickyBitSatisfiesRootBoundary(c.mode); got != c.want {
+			t.Errorf("%s: stickyBitSatisfiesRootBoundary(%v) = %v, want %v", c.name, c.mode, got, c.want)
+		}
 	}
 }
 
@@ -1741,6 +1992,11 @@ func TestNewNilKeyFuncReadScreenDoesNotPanic(t *testing.T) {
 
 	client := New(listener.Addr().String(), nil)
 	client.proto = 1
+	// No data is ever sent by the fake daemon here, and after the Finding 3 fix the
+	// idle timer only starts once the first byte arrives — so with nothing arriving at
+	// all, the context ceiling (not the idle timeout) is what bounds the wait. Keep it
+	// short so this test stays fast rather than waiting out the 30s default.
+	client.defaultDeadline = 200 * time.Millisecond
 
 	out, err := client.ReadScreen(context.Background(), "session123", 0)
 	if err != nil {
@@ -2174,6 +2430,162 @@ func TestReadScreenDetectsEkicked(t *testing.T) {
 	}
 	if out != "" {
 		t.Errorf("expected no screen content on a kicked attach, got %q", out)
+	}
+}
+
+// TestReadScreenMidScreenEkickedTextIsNotAKick covers the blocker that the kick marker
+// was matched anywhere in the accumulated screen, so a screen that merely displays the
+// text "EKICKED:" reported a kick. This is self-referential: fleetdeck reads the screens
+// of Claude Code sessions, and a session working on fleetdeck itself displays
+// docs/protocol/daemon-control-socket.md, where "EKICKED:" appears four times.
+//
+// The fake daemon here sends ordinary screen content containing a line that opens with
+// "EKICKED: example" in the middle of the output, then holds the connection open (as a
+// live, polled session's attach connection normally stays open — the daemon only closes
+// it on an actual kick or session exit). ReadScreen must return the full text with a nil
+// error: the marker is never a kick unless the daemon actually closes the connection
+// right after writing it.
+func TestReadScreenMidScreenEkickedTextIsNotAKick(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		conn.Write([]byte("some normal output\nEKICKED: example\nmore normal output after it"))
+
+		// Hold the connection open, as a real daemon does for a live, polled session
+		// that was never kicked — the connection only closes on an actual kick or
+		// session exit, neither of which happened here.
+		<-stop
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.readIdleTimeout = 100 * time.Millisecond
+	client.defaultDeadline = 2 * time.Second
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	if err != nil {
+		t.Fatalf("expected nil error for a screen merely displaying the marker text, got %v", err)
+	}
+	expected := "some normal output\nEKICKED: example\nmore normal output after it"
+	if out != expected {
+		t.Errorf("expected full screen text %q, got %q", expected, out)
+	}
+}
+
+// TestReadScreenSlowFirstPaintReturnsData covers the blocker that ReadScreen returned
+// ("", nil) when the daemon was slow to paint: lastReadTime used to be set when the loop
+// was entered, so 300ms of silence after the header — a loaded machine, a large screen
+// buffer — looked identical to an honestly empty terminal. The idle timer must start only
+// after the first successful read, letting the context ceiling bound the wait for the
+// first byte.
+func TestReadScreenSlowFirstPaintReturnsData(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		time.Sleep(500 * time.Millisecond)
+		conn.Write([]byte("hello"))
+
+		<-stop
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.readIdleTimeout = 300 * time.Millisecond
+	client.defaultDeadline = 2 * time.Second
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	if err != nil {
+		t.Fatalf("ReadScreen failed: %v", err)
+	}
+	if out != "hello" {
+		t.Errorf("expected %q, got %q", "hello", out)
+	}
+}
+
+// TestSendKeysDetectsEkickedAcrossReads covers the blocker that sendKeysOnce's kick
+// detection was weaker than ReadScreen's: it read once into a fixed 256-byte buffer and
+// checked only that one chunk, so a marker split across two reads was missed. Here the
+// fake daemon writes the marker in two separate Write calls with a short delay between
+// them, forcing two client-side reads.
+func TestSendKeysDetectsEkickedAcrossReads(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		if _, err := reader.ReadString('\n'); err != nil {
+			return
+		}
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		buf := make([]byte, 1024)
+		_, _ = conn.Read(buf) // read the key bytes
+
+		conn.Write([]byte("EKI"))
+		time.Sleep(20 * time.Millisecond)
+		conn.Write([]byte("CKED: split across two reads"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.readIdleTimeout = 300 * time.Millisecond
+
+	err = client.SendKeys(context.Background(), "session123", "x")
+	var kicked *ErrKicked
+	if !errors.As(err, &kicked) {
+		t.Fatalf("expected *ErrKicked, got %T: %v", err, err)
+	}
+	if kicked.Detail != "split across two reads" {
+		t.Errorf("expected detail %q, got %q", "split across two reads", kicked.Detail)
 	}
 }
 

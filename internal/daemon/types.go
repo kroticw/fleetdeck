@@ -27,6 +27,11 @@ type Session struct {
 	CLIVersion string `json:"cliVersion"`
 	Source     string `json:"source"`
 	Needs      string `json:"needs"`
+	// Dying is true when the job is being killed or retired (see
+	// docs/protocol/daemon-control-socket.md sections 4 and 8). A session's presence in
+	// a `list` reply with no `dying` flag is what marks it as alive; without this field
+	// a dying session is indistinguishable from a live one at the parse boundary.
+	Dying bool `json:"dying"`
 }
 
 // Waiting reports whether the session is waiting for a human answer.

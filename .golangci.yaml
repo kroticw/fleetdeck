@@ -1,0 +1,39 @@
+version: "2"
+
+# A sensible, not-maximalist set for a young codebase: the linters.default "standard"
+# set (errcheck, govet, ineffassign, staticcheck, unused) plus a handful of widely
+# useful additions. Every finding these report must be fixed in the code, not silenced
+# with an inline //nolint — a rule that turns out to conflict with this codebase is
+# disabled below, with a one-line reason, rather than suppressed line by line.
+linters:
+  default: standard
+  enable:
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+
+  settings:
+    revive:
+      rules:
+        # exported-name-stuttering (e.g. daemon.ErrProto) is idiomatic Go in this
+        # package's own error-type family (ErrProto, ErrAuth, ErrKicked, ...) and
+        # renaming them would fight the standard library's own errors.As convention.
+        - name: exported
+          disabled: true
+
+  exclusions:
+    rules:
+      # Test files intentionally build small fake servers with unchecked Write/Close
+      # calls on throwaway connections (a failed write there just makes the test fail
+      # differently, never a real bug) — excluding errcheck there avoids noise without
+      # silencing errcheck anywhere it would catch a real unchecked error in
+      # non-test code.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

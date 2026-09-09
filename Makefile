@@ -23,6 +23,7 @@ test:
 lint:
 	go vet ./...
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	golangci-lint run ./...
 
 run: build
 	@if [ ! -x ./bin/fleetdeck ]; then \

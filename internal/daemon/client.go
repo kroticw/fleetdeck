@@ -81,7 +81,7 @@ func resolveSocketCandidate(matches []string) (string, error) {
 		if err != nil {
 			continue
 		}
-		conn.Close()
+		_ = conn.Close()
 		return candidate, nil
 	}
 
@@ -99,8 +99,15 @@ func resolveSocketCandidate(matches []string) (string, error) {
 // daemon's socket directory ahead of the real daemon and have a client hand it the
 // control key. The daemon defends its side with a peer-uid check on accept; this is
 // the client's symmetric check before it ever connects. A directory owned by root
-// (e.g. /tmp itself) is the natural boundary of the walk: it sits outside what a
-// local, non-root attacker can control, so there is nothing further to check above it.
+// (e.g. /tmp itself) is the natural boundary of the walk, but only when it is either
+// not writable by group/other, or carries the sticky bit if it is — see
+// stickyBitSatisfiesRootBoundary. Without that, "root-owned" alone would not actually
+// guarantee the directory is outside a local, non-root attacker's control: /tmp's usual
+// mode is 1777 (world-writable), and it is specifically the sticky bit that stops
+// another user from deleting or renaming this directory's real owner's entries and
+// replacing them with their own — which would otherwise let an attacker recreate the
+// daemon's socket directory under their own ownership and still pass every check below
+// this boundary.
 func checkSocketOwnership(socketPath string) error {
 	uid := os.Getuid()
 	path := socketPath
@@ -117,7 +124,11 @@ func checkSocketOwnership(socketPath string) error {
 		}
 
 		if i > 0 && int(stat.Uid) == 0 {
-			// A root-owned enclosing directory (e.g. /tmp itself) is outside a
+			if !stickyBitSatisfiesRootBoundary(info.Mode()) {
+				return fmt.Errorf("refusing socket %s: %s is root-owned, writable by group or other, and missing the sticky bit", socketPath, path)
+			}
+			// A root-owned enclosing directory (e.g. /tmp itself) that is either not
+			// writable by group/other, or is and carries the sticky bit, is outside a
 			// local attacker's control. Nothing further up needs checking.
 			return nil
 		}
@@ -139,16 +150,37 @@ func checkSocketOwnership(socketPath string) error {
 	return fmt.Errorf("refusing socket %s: too many parent directories to check", socketPath)
 }
 
+// stickyBitSatisfiesRootBoundary reports whether a root-owned enclosing directory is
+// safe to treat as the boundary of checkSocketOwnership's walk: either it is not
+// writable by group or other at all, or it is and carries the sticky bit, which is what
+// stops another local user from deleting or renaming another user's entries inside it
+// (the exact defence /tmp's usual 1777 mode relies on).
+func stickyBitSatisfiesRootBoundary(mode os.FileMode) bool {
+	if mode&0o022 == 0 {
+		return true
+	}
+	return mode&os.ModeSticky != 0
+}
+
 // setDeadline sets a deadline on the connection from context, or a fallback based on the client.
 func (c *Client) setDeadline(ctx context.Context, conn net.Conn) {
 	if deadline, ok := ctx.Deadline(); ok {
-		conn.SetDeadline(deadline)
+		_ = conn.SetDeadline(deadline)
 	} else {
-		conn.SetDeadline(time.Now().Add(c.defaultDeadline))
+		_ = conn.SetDeadline(time.Now().Add(c.defaultDeadline))
 	}
 }
 
 // ControlKey reads the control key from ~/.claude/daemon/control.key.
+//
+// Per docs/protocol/daemon-control-socket.md section 6, the key file is expected to be
+// mode 0600, owned by the user, inside a 0700 directory. checkKeyFileSecurity is the
+// symmetric client-side check for that expectation, parallel to checkSocketOwnership's
+// check on the socket path. Any failure here — missing, empty, unreadable, wrong owner,
+// or readable/writable by group or other — collapses to the same generic
+// ErrNoControlKey: per the same section, the user-facing error for a missing or
+// unreadable key names neither the file's path nor its contents, and that same rule
+// applies to a key file that fails this security check.
 func ControlKey() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -156,6 +188,11 @@ func ControlKey() (string, error) {
 	}
 
 	keyPath := filepath.Join(homeDir, ".claude", "daemon", "control.key")
+
+	if err := checkKeyFileSecurity(keyPath, os.Getuid()); err != nil {
+		return "", ErrNoControlKey
+	}
+
 	data, err := os.ReadFile(keyPath)
 	if err != nil {
 		return "", ErrNoControlKey
@@ -167,6 +204,36 @@ func ControlKey() (string, error) {
 	}
 
 	return key, nil
+}
+
+// checkKeyFileSecurity refuses a control key file that is not owned by wantUID, or is
+// readable or writable by group or other. wantUID is a parameter, rather than
+// checkKeyFileSecurity reading os.Getuid() itself, purely so a test can exercise the
+// ownership-mismatch branch without needing a second real user account.
+func checkKeyFileSecurity(path string, wantUID int) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("cannot determine the owner of the control key file")
+	}
+
+	if int(stat.Uid) != wantUID {
+		return errors.New("control key file is owned by a different user")
+	}
+	if !keyFileModeIsSecure(info.Mode()) {
+		return errors.New("control key file is readable or writable by group or other")
+	}
+	return nil
+}
+
+// keyFileModeIsSecure reports whether mode denies every group and other permission
+// bit, matching the 0600 docs/protocol/daemon-control-socket.md section 6 documents.
+func keyFileModeIsSecure(mode os.FileMode) bool {
+	return mode&0o077 == 0
 }
 
 // stubKeyFunc is substituted for a nil key function passed to New, so every call site
@@ -396,17 +463,134 @@ func readAttachHeader(reader *bufio.Reader) error {
 // the daemon otherwise dropped it. See docs/protocol/daemon-control-socket.md section 8.
 const ekickedPrefix = "EKICKED:"
 
-// parseKickedMarker reports whether data contains the daemon's kick marker and, if so,
-// returns the reason text that follows it, trimmed of surrounding whitespace. Both the
-// screen-reading path and the key-sending path must check for this marker rather than
-// treating the bytes as ordinary stream content or a successful delivery.
+// maxAttachBytes bounds how much of an attach stream either path (screen-reading or
+// key-sending) accumulates before trimming from the front. It is shared so both build
+// on the same ceiling instead of drifting (see Finding 4 in the branch review this
+// addressed).
+const maxAttachBytes = 1024 * 1024
+
+// findKickOpener returns the offset of the earliest occurrence of the kick marker that
+// opens the stream (offset 0) or opens a line (immediately preceded by '\n'), or -1 if
+// there is none. Only a marker at one of these positions is even a candidate: the same
+// literal text appearing mid-line, as ordinary screen content, must never be mistaken
+// for one. This is not hypothetical — this very document,
+// docs/protocol/daemon-control-socket.md, contains the string "EKICKED:" four times,
+// always mid-sentence, and fleetdeck reads the screens of Claude Code sessions, one of
+// which may well be editing that document.
+func findKickOpener(data []byte) int {
+	marker := []byte(ekickedPrefix)
+	searchFrom := 0
+	for {
+		rel := bytes.Index(data[searchFrom:], marker)
+		if rel < 0 {
+			return -1
+		}
+		pos := searchFrom + rel
+		if pos == 0 || data[pos-1] == '\n' {
+			return pos
+		}
+		searchFrom = pos + 1
+	}
+}
+
+// parseKickedMarker reports whether data contains the daemon's kick marker at a
+// qualifying position (see findKickOpener) and, if so, returns the reason text that
+// follows it, trimmed of surrounding whitespace.
 func parseKickedMarker(data []byte) (detail string, kicked bool) {
-	idx := bytes.Index(data, []byte(ekickedPrefix))
-	if idx < 0 {
+	pos := findKickOpener(data)
+	if pos < 0 {
 		return "", false
 	}
-	rest := data[idx+len(ekickedPrefix):]
+	rest := data[pos+len(ekickedPrefix):]
 	return strings.TrimSpace(string(rest)), true
+}
+
+// detectKick decides whether an attach stream was actually kicked, given the bytes
+// accumulated and whether the connection was observed to close (as opposed to going
+// idle or hitting a deadline). Per docs/protocol/daemon-control-socket.md section 8, the
+// marker is written "in place of" PTY bytes and is always followed by the connection
+// closing — a marker-shaped position with no observed close is never enough on its own,
+// since an ordinary, live, polled session's attach connection stays open indefinitely
+// (it only closes on an actual kick or the session exiting) and may happen to display
+// the literal marker text as part of its own screen content.
+func detectKick(data []byte, closed bool) (detail string, kicked bool) {
+	if !closed {
+		return "", false
+	}
+	return parseKickedMarker(data)
+}
+
+// collectUntilIdleOrClosed reads from reader into an accumulating buffer until: the
+// connection is observed to close (a non-timeout read error), the stream has gone idle
+// for idleTimeout with no new bytes, or ctx's deadline is reached. The buffer is capped
+// at maxBytes, trimming from the front (never splitting a UTF-8 rune) on overflow.
+//
+// When idleFromStart is false, the idle timer starts only once the first byte has been
+// read, letting ctx's deadline alone bound the wait for that first byte — a slow first
+// paint (a loaded machine, a large screen buffer) is normal, not idle. ReadScreen wants
+// this. When idleFromStart is true, the idle window is in effect from the very first
+// call, exactly like an ordinary idle detection with no special-cased "first byte" grace
+// period; SendKeys wants this, since silence for the whole window is itself the expected,
+// successful outcome for most key deliveries (see docs/protocol/daemon-control-socket.md
+// section 3, item 8: there is no per-delivery acknowledgement).
+//
+// Both ReadScreen and SendKeys build their kick detection on this one routine (paired
+// with detectKick) so they cannot drift apart on what counts as "the connection closing"
+// or "the marker arrived" — a marker or a close split across two reads is caught either
+// way, since data accumulates across calls to this function.
+func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.Reader, idleTimeout time.Duration, maxBytes int, idleFromStart bool) (data []byte, closed bool) {
+	lastReadTime := time.Now()
+	gotFirstByte := idleFromStart
+	ctxDeadline, hasCtxDeadline := ctx.Deadline()
+
+	buf := make([]byte, 4096)
+	for {
+		if ctx.Err() != nil {
+			return data, false
+		}
+
+		var readDeadline time.Time
+		if hasCtxDeadline {
+			readDeadline = ctxDeadline
+		}
+		if gotFirstByte {
+			idleDeadline := lastReadTime.Add(idleTimeout)
+			if readDeadline.IsZero() || idleDeadline.Before(readDeadline) {
+				readDeadline = idleDeadline
+			}
+		}
+		if readDeadline.IsZero() {
+			// Neither a context deadline nor an idle window is in effect yet (only
+			// reachable when idleFromStart is false and ctx carries no deadline).
+			// Fall back to a bounded wait rather than blocking forever.
+			readDeadline = time.Now().Add(idleTimeout)
+		}
+		if err := conn.SetReadDeadline(readDeadline); err != nil {
+			return data, false
+		}
+
+		n, err := reader.Read(buf)
+		if n > 0 {
+			gotFirstByte = true
+			lastReadTime = time.Now()
+			data = append(data, buf[:n]...)
+			if maxBytes > 0 && len(data) > maxBytes {
+				data = trimToRuneBoundary(data[len(data)-maxBytes:])
+			}
+		}
+
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				if gotFirstByte && time.Since(lastReadTime) >= idleTimeout {
+					return data, false
+				}
+				continue
+			}
+			// A real error (EOF, connection reset, etc.) means the daemon closed the
+			// connection.
+			return data, true
+		}
+	}
 }
 
 // daemonError converts a daemon error response into a typed error.
@@ -444,7 +628,7 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	c.setDeadline(ctx, conn)
 
@@ -517,7 +701,7 @@ func (c *Client) listSessionsOnce(ctx context.Context) ([]Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	c.setDeadline(ctx, conn)
 
@@ -598,7 +782,7 @@ func (c *Client) sendTextOnce(ctx context.Context, session, text string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	c.setDeadline(ctx, conn)
 
@@ -688,7 +872,7 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	c.setDeadline(ctx, conn)
 
@@ -719,76 +903,24 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 		return "", err
 	}
 
-	// Read the streamed bytes with idle detection.
-	// The daemon keeps the attach connection open, so we need to detect when
-	// the stream goes idle (no data for c.readIdleTimeout) and return promptly,
-	// not wait for the full context deadline.
-	const maxBytes = 1024 * 1024 // 1MB cap
-	const initialCap = 4096      // grow from a small buffer; most screens never approach the cap
-	data := make([]byte, 0, initialCap)
+	// Read the streamed bytes with idle detection. The daemon keeps the attach
+	// connection open for an ordinary, live session, so this needs to detect when the
+	// stream goes idle (no data for c.readIdleTimeout, counted from the first byte
+	// received — see collectUntilIdleOrClosed) and return promptly, not wait for the
+	// full context deadline; a session that prints continuously (a spinner, say) never
+	// goes idle, so the context deadline is what ends the read in that case, and what
+	// has been accumulated by then is a real, valid partial screen.
+	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false)
 
-	lastReadTime := time.Now()
-
-	// ctx is guaranteed to carry a deadline at this point (either the caller's own,
-	// or the one derived above), so it is the single ceiling this loop races the
-	// idle timeout against. Nothing inside the loop recomputes it.
-	ctxDeadline, _ := ctx.Deadline()
-
-readLoop:
-	for {
-		// A session that prints continuously (a spinner, say) never goes idle, so
-		// the context deadline is the only thing that ends the read. When it fires,
-		// what has been accumulated so far is a real, valid partial screen — return
-		// it rather than discarding it.
-		if ctx.Err() != nil {
-			break readLoop
-		}
-
-		// Use the shorter of the ceiling and the idle timeout.
-		readDeadline := ctxDeadline
-		idleDeadline := lastReadTime.Add(c.readIdleTimeout)
-		if idleDeadline.Before(readDeadline) {
-			readDeadline = idleDeadline
-		}
-
-		conn.SetReadDeadline(readDeadline)
-
-		buf := make([]byte, 4096)
-		n, err := reader.Read(buf)
-
-		if n > 0 {
-			// Got data - update last read time
-			lastReadTime = time.Now()
-			data = append(data, buf[:n]...)
-
-			// A kicked attach is otherwise indistinguishable from a normal one: the
-			// marker arrives as ordinary-looking bytes on this same read. Detect it
-			// on the accumulated buffer (the marker can straddle two reads) before
-			// treating anything here as screen content.
-			if detail, kicked := parseKickedMarker(data); kicked {
-				return "", &ErrKicked{Detail: detail}
-			}
-
-			if len(data) > maxBytes {
-				data = trimToRuneBoundary(data[len(data)-maxBytes:])
-			}
-		}
-
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// Read timeout occurred. Determine if it's because of idle or context deadline.
-				// If we've been idle for >= readIdleTimeout, the stream is idle.
-				if time.Since(lastReadTime) >= c.readIdleTimeout {
-					// Stream is idle - return what we have
-					break readLoop
-				}
-				// Otherwise the context deadline fired; loop back to the ctx.Err()
-				// check above, which returns the accumulated data.
-				continue
-			}
-			// Real error (EOF, connection closed, etc.) - stop reading
-			break readLoop
-		}
+	// The kick marker means this attach connection was evicted (see
+	// docs/protocol/daemon-control-socket.md section 8). It is only ever a kick when it
+	// opens the stream or a line AND the connection actually closed — never merely
+	// because the accumulated screen happens to contain that text, which an ordinary,
+	// still-open attach reading a live session's screen can do (this very document,
+	// displayed by a session working on fleetdeck itself, contains "EKICKED:" four
+	// times).
+	if detail, kicked := detectKick(data, closed); kicked {
+		return "", &ErrKicked{Detail: detail}
 	}
 
 	// Apply tail limit if needed
@@ -840,7 +972,7 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	c.setDeadline(ctx, conn)
 
@@ -878,33 +1010,27 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	// the session's PTY writer with no reply message of any kind. The only signal
 	// observable from here is the connection closing, which happens if another
 	// attacher kicks this one or the session exits — not a per-key acknowledgement.
-	// Give the daemon a brief window to produce that signal.
-	conn.SetReadDeadline(time.Now().Add(c.readIdleTimeout))
-	buf := make([]byte, 256)
-	n, err := reader.Read(buf)
-	if n > 0 {
-		if detail, kicked := parseKickedMarker(buf[:n]); kicked {
-			// The keys were written to the connection, but a kick observed in the
-			// same read means another attacher may have taken over before (or as)
-			// the daemon applied them — unlike a plain close, this is a signal
-			// worth surfacing distinctly rather than folding into "success".
-			return &ErrKicked{Detail: detail}
-		}
-	}
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			// Silence within the window is the best confirmation this protocol
-			// offers for an ordinary delivery.
-			return nil
-		}
-		// The write above already succeeded, so the keys are known to have reached
-		// the daemon. The connection closing now — because the session finished its
-		// turn, or another attacher took over, both of which can happen as a direct
-		// consequence of the very keys just delivered — is a normal outcome, not a
-		// delivery failure. Reporting it as an error here would invite a retry at a
-		// higher layer, and a retry means typing into a live session twice.
-		return nil
+	// Give the daemon a brief window to produce that signal, accumulating across
+	// reads with the same routine ReadScreen uses (see collectUntilIdleOrClosed) so a
+	// kick marker split across two reads, or arriving after a chunk of ordinary PTY
+	// bytes, is never missed the way a single fixed-size read would miss it.
+	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true)
+
+	if detail, kicked := detectKick(data, closed); kicked {
+		// The keys were written to the connection, but a kick observed right after
+		// means another attacher may have taken over before (or as) the daemon
+		// applied them — unlike a plain close with no marker, this is a signal worth
+		// surfacing distinctly rather than folding into "success".
+		return &ErrKicked{Detail: detail}
 	}
 
+	// Either silence within the window (the best confirmation this protocol offers for
+	// an ordinary delivery), or the connection closing with no kick marker present.
+	// The write above already succeeded, so the keys are known to have reached the
+	// daemon; the connection closing now — because the session finished its turn, or
+	// another attacher took over, both of which can happen as a direct consequence of
+	// the very keys just delivered — is a normal outcome, not a delivery failure.
+	// Reporting it as an error here would invite a retry at a higher layer, and a
+	// retry means typing into a live session twice.
 	return nil
 }
