@@ -158,11 +158,19 @@ class MainTest(unittest.TestCase):
             code = main(["validate_cards.py", *args])
         return code, out.getvalue() + err.getvalue()
 
-    def test_empty_directory_is_ok(self):
+    def test_empty_directory_reports_that_there_are_no_cards(self):
+        """Пустому каталогу отвечать «все карточки валидны» нельзя.
+
+        Проверять было нечего, а отчёт выглядит как успешная проверка —
+        враньё с видом достоверности. Пустая доска сама по себе нормальна:
+        сразу после развёртывания карточек ещё нет. Поэтому код возврата
+        остаётся нулевым, меняется только то, что валидатор говорит.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             code, output = self.run_main(tmp)
         self.assertEqual(code, 0)
-        self.assertIn("все карточки валидны", output)
+        self.assertNotIn("все карточки валидны", output)
+        self.assertIn("карточек не найдено", output)
 
     def test_directory_with_broken_card_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
