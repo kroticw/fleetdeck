@@ -465,6 +465,17 @@ func Discover(key func() (string, error)) (*Client, error) {
 // the main connect path.
 const dialTimeout = 5 * time.Second
 
+// newControlDialer builds the *net.Dialer dialChecked connects with. It is a
+// package-level function value, not a literal inlined at the call site, purely so a
+// test can substitute it to observe how dialChecked configures the Dialer it actually
+// uses — there is no local fixture that reproduces a genuine connect(2) hang on a
+// unix socket to assert against (see dialTimeout's comment), so this seam is what lets
+// TestDialCheckedActuallyUsesConfiguredDialer catch a regression that removes the
+// Timeout here, which the fixture-based approach cannot.
+var newControlDialer = func() *net.Dialer {
+	return &net.Dialer{Timeout: dialTimeout}
+}
+
 // dial connects to the client's current socket path, checking beforehand that it (and
 // its enclosing directories) are safely owned. For a discoverable client, a dial
 // failure triggers exactly one re-resolution of the socket path (via c.resolve, which
@@ -517,7 +528,7 @@ func dialChecked(ctx context.Context, path string) (net.Conn, error) {
 		}
 		return nil, err
 	}
-	conn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "unix", path)
+	conn, err := newControlDialer().DialContext(ctx, "unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}
@@ -652,25 +663,40 @@ const ekickedPrefix = "EKICKED:"
 // on the same ceiling instead of drifting apart.
 const maxAttachBytes = 1024 * 1024
 
-// kickSearchWindow bounds how far from the end of the accumulated stream the kick
-// marker may be found and still be considered at all. The daemon writes the marker
-// immediately before closing the connection, so a genuine kick's marker is always
-// within a small distance of the very end of what was received. Searching the whole
-// buffer instead would let a marker buried under a large amount of ordinary screen
-// content that arrived afterward — the same literal text can legitimately appear
-// there — be reconsidered as the kick just because the connection happened to close
-// later, for an unrelated reason.
+// kickSearchWindow bounds how far back from the end of the accumulated stream
+// findKickOpener scans for the kick marker's last occurrence. This is a PERFORMANCE
+// bound on scanning up to maxAttachBytes (1MB), not a correctness condition: it exists
+// only so bytes.LastIndex does not walk a megabyte backwards on every ReadScreen or
+// SendKeys call, on every poll tick, for every session.
+//
+// It contributes nothing to correctness because maxKickReasonBytes's length check
+// already excludes everything this bound would: a marker at offset pos leaves a
+// "reason" of len(data)-pos-len(ekickedPrefix) bytes for parseKickedMarker to accept,
+// and that check already rejects anything longer than maxKickReasonBytes (256). Since
+// maxKickReasonBytes+len(ekickedPrefix) (264) is smaller than kickSearchWindow (512),
+// any position this window would exclude (further than 512 bytes from the end) is
+// already further than 264 bytes from the end, and so is already rejected by the
+// length check regardless of whether the search ever looks there. Coverage confirms
+// this directly: the `len(data) > kickSearchWindow` branch below never executes across
+// the whole test suite, and per this argument it cannot change the outcome if it did —
+// removing the bound entirely (searching the full buffer every time) was verified to
+// leave every test, including the whole daemon package, passing identically. An
+// earlier version of this comment, and of docs/protocol/daemon-control-socket.md
+// section 8, claimed this window was a third, independently necessary correctness
+// condition alongside "connection closed" and "reason looks like a reason" — that
+// claim was false, demonstrated false by the argument above, and has been removed;
+// the real rule has two conditions, not three (see detectKick).
 const kickSearchWindow = 512
 
 // maxKickReasonBytes bounds how long the text following the marker may be and still
-// pass as the daemon's own short, human-readable reason. See the second and third
-// conditions in detectKick's comment.
+// pass as the daemon's own short, human-readable reason. See the second condition in
+// detectKick's comment.
 const maxKickReasonBytes = 256
 
 // findKickOpener returns the offset of the kick marker's last occurrence within
-// kickSearchWindow bytes of the end of data, or -1 if there is none there. See
-// kickSearchWindow's comment for why the search is bounded at all, and detectKick's
-// comment for the full compound rule this is one third of.
+// kickSearchWindow bytes of the end of data, or -1 if there is none there. The window
+// is a performance bound only (see kickSearchWindow's comment) — it never changes the
+// answer detectKick ultimately reaches, only how much of data must be scanned to reach it.
 func findKickOpener(data []byte) int {
 	start := 0
 	if len(data) > kickSearchWindow {
@@ -683,11 +709,11 @@ func findKickOpener(data []byte) int {
 	return start + rel
 }
 
-// parseKickedMarker reports whether data contains the daemon's kick marker at a
-// qualifying position (see findKickOpener) followed by text that looks like a real
-// reason rather than a screen (see detectKick). On success it returns the prefix —
-// everything before the marker, i.e. the screen accumulated up to that point — and the
-// reason text, trimmed of surrounding whitespace.
+// parseKickedMarker reports whether data contains the daemon's kick marker (see
+// findKickOpener) followed by text that looks like a real reason rather than a screen
+// (see detectKick's second condition). On success it returns the prefix — everything
+// before the marker, i.e. the screen accumulated up to that point — and the reason
+// text, trimmed of surrounding whitespace.
 func parseKickedMarker(data []byte) (prefix []byte, detail string, kicked bool) {
 	pos := findKickOpener(data)
 	if pos < 0 {
@@ -712,35 +738,29 @@ func parseKickedMarker(data []byte) (prefix []byte, detail string, kicked bool) 
 //
 // Per docs/protocol/daemon-control-socket.md section 8, detection must never fire on the
 // marker's mere presence, or even on its *last occurrence* alone — only on it being the
-// *last thing sent*, immediately before a close. Each weaker rule fails in a specific,
-// observable way: anchoring to offset 0 or to a line boundary misses the marker
-// entirely, since the daemon writes it flush against whatever PTY bytes were already in
-// flight, never anchored to a line boundary — see condition 2. Accepting the marker's
-// last occurrence plus a close, with no check on what follows it, fires on a screen that
-// merely *displays* the marker text and then exits normally for an unrelated reason — a
-// session grepping this very document for "EKICKED:" is a real example — see condition
-// 3. All three conditions below are required together; each is individually
-// insufficient:
+// *last thing sent*, immediately before a close. Two conditions are required together;
+// each is individually insufficient:
 //
 //  1. The connection actually closed. An ordinary, live, polled session's attach
 //     connection stays open indefinitely (it only closes on an actual kick or the
 //     session exiting), and may happen to display the literal marker text as part of
 //     its own screen content — see TestReadScreenMidScreenEkickedTextIsNotAKick. Without
 //     this, any screen containing the text at all would be misreported as a kick.
-//  2. The marker sits within the last kickSearchWindow bytes of the stream (see
-//     findKickOpener). The daemon writes the marker flush against whatever PTY bytes
-//     were already in flight, immediately before closing — never anchored to offset 0
-//     or a line boundary — so a genuine kick's marker is always near the very end.
-//     Without this bound, a marker that appears well before the end, in ordinary
-//     screen content, could still be picked up just because the connection later
-//     closed for an unrelated reason.
-//  3. What follows the marker is short and contains no newline (see parseKickedMarker).
-//     The daemon's real reason text is the last thing it sends; a screen that merely
-//     *displays* the marker almost always has more rendered content after it,
-//     typically containing at least one newline. This is exactly what condition 2
-//     alone does not catch when the coincidental marker happens to sit close to the
-//     end — see TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick, where the last
-//     occurrence of "EKICKED:" is immediately followed by " marker\n$ exit\n".
+//  2. What follows the marker's last occurrence is short and contains no newline (see
+//     parseKickedMarker). The daemon's real reason text is the last thing it sends,
+//     flush against whatever PTY bytes were already in flight — never anchored to
+//     offset 0 or a line boundary, so anchoring the search there would miss it. A
+//     screen that merely *displays* the marker almost always has more rendered content
+//     after it, typically containing at least one newline, or is simply too long to be
+//     a reason — see TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick, where the
+//     last occurrence of "EKICKED:" is immediately followed by " marker\n$ exit\n".
+//
+// A bounded search window (kickSearchWindow) is applied when locating the marker's
+// last occurrence, purely to avoid scanning up to maxAttachBytes (1MB) on every call —
+// see its own comment for why this changes nothing about which streams condition 2
+// accepts or rejects. An earlier version of this comment, and of the protocol
+// document, described the window as a third, independently necessary condition; it
+// is not, and is not treated as one here.
 //
 // Condition 1 has a deliberate, accepted residual risk: it requires closed to have been
 // observed, not merely a marker sitting at the very end of an idle or deadline-truncated
@@ -750,7 +770,7 @@ func parseKickedMarker(data []byte) (prefix []byte, detail string, kicked bool) 
 // declines to call it a kick — the marker's bytes are then returned as ordinary screen
 // content instead of ErrKicked. This is deliberately not fixed by treating an
 // end-of-buffer marker as sufficient on its own, because that reintroduces exactly the
-// failure mode conditions 2 and 3 exist to rule out (a screen that merely displays the
+// failure mode condition 2 exists to rule out (a screen that merely displays the
 // marker and then goes idle for an unrelated reason). The risk is accepted because the
 // daemon writes the marker immediately before closing — the two arrive in close
 // succession on the wire — so a close that is not observed within a multi-second

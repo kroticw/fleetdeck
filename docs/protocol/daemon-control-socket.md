@@ -101,8 +101,8 @@ pid, sessionId, short, source, startedAt, state, tempo
 Notes on specific fields:
 
 - **There is no `options` field anywhere in the protocol.** A session waiting on a multiple-choice question does not carry its choices as structured data; they are glued into `needs` as plain text (see below). Do not invent a structured type for this.
-- `needs` is one pre-rendered, human-readable string. When a session is waiting it looks like `"answer: <question> (A · B · C)"` or `"choose: <description>"` — the available options, when there are discrete ones, are glued into the text inside parentheses, separated by ` · `. This must be treated as an opaque string and never parsed into structured choices; the parentheses-and-dot format is a rendering choice on the daemon's side, not a contract. `needs` is also non-empty, independent of waiting, for sessions that are merely rate-limited or need a login refresh (forms like "usage limit reached ...", "rate limited ...", "login required ..."). A non-empty `needs` on its own does **not** mean the session is waiting for a human answer; see the waiting forms below.
-- `detail` is the session's own short status line. On a waiting session it typically holds the question or decision text without the glued-in choices.
+- `needs` is one pre-rendered, human-readable string. When a session is waiting on an actual question it looks like `"answer: <question> (A · B · C)"` or `"choose: <description>"` — the available options, when there are discrete ones, are glued into the text inside parentheses, separated by ` · `. This must be treated as an opaque string and never parsed into structured choices; the parentheses-and-dot format is a rendering choice on the daemon's side, not a contract. `needs` is also non-empty, independent of waiting, for sessions stopped on a reason no answer fixes — a closed vocabulary of prefixes such as `"usage limit reached ..."`, `"rate limited ..."`, `"login required ..."`, `"API error ..."` (see section 5). A non-empty `needs` on its own does **not** mean the session is waiting for a human answer; see the determination rule below.
+- `detail` is the session's own short status line. On a session waiting via a rendered question in `needs`, it typically holds the same decision text without the glued-in choices. On a session stalled purely by `state`/`tempo` with an empty `needs` (see section 5, rule 2), `detail` is the only field that can still say whether the stop is actually a person-facing decision or just the session coordinating its own subagents — a client must show it verbatim in that case, not discard it because the session landed in the quiet counter.
 - `intent` is the last prompt submitted into the session. It is not a question and must never be presented as one.
 - There is no `id`, `title`, `label`, `status`, `kind`, `effect`, `streamTail`, `options`, `live`, `pinned`, or `resumable` field on the wire. Anything using those names is synthesised elsewhere, not carried by the socket.
 - `pinned` is out of scope for this client entirely: carrying it through would add a fourth source of truth to a design that intentionally has three (daemon session state, transcript, board card).
@@ -110,21 +110,41 @@ Notes on specific fields:
 
 ## 5. Determining whether a session is waiting for a human, or merely stalled
 
-A session that has stopped making progress is in one of two distinct states, and a client must not conflate them: **waiting**, where a person has to answer something before the session moves again, and **stalled**, where no answer helps — the session needs time, or an action outside this client entirely (a usage limit resetting, a login refresh, an upstream API error clearing, a rate limit expiring). A counter that lumps both together, or that blinks on every rate limit the same way it does on a real question, teaches a person to stop trusting it — and under-reporting is the worse failure of the two, since it hides someone who is genuinely waiting on a person.
+A session that has stopped making progress is in one of two distinct states, and a client must not conflate them: **waiting**, where a person has to answer something before the session moves again, and **stalled**, where no answer helps — the session needs time, or an action outside this client entirely (a usage limit resetting, a login refresh, an upstream API error clearing, a rate limit expiring, or simply its own subagents still working). A counter that lumps both together, or that blinks on every rate limit the same way it does on a real question, teaches a person to stop trusting it — and under-reporting is the worse failure of the two, since it hides someone who is genuinely waiting on a person.
 
-Three forms of **waiting** have been observed on a live daemon (all examples below are illustrative, not verbatim from any real session):
+`state` and `tempo` are set by a mechanism the session does not control, and that mechanism cannot tell "waiting for a person" apart from "waiting on its own subagents" — both look identical in those two flags. Only `needs`, and where `needs` is empty `detail`, say anything in words about *why* the session stopped. The rule below is built on that fact: the flags alone can promote a session to **stalled**, never to **waiting**; only words can make it **waiting**.
+
+The rule:
+
+1. **`needs` non-empty — it decides, and the flags are never read.** A value matching the closed vocabulary below (a usage limit, a login prompt, an upstream API error, a rate limit) means **stalled**. Everything else, including a prefix this client has never seen before, means **waiting**.
+2. **`needs` empty and `state == "blocked"` or `tempo == "blocked"` — stalled, never waiting.** With no words from the daemon, a bare flag cannot be told apart from a session that is merely coordinating its own subagents; it is never promoted to the counter a person is expected to act on.
+3. **Everything else — neither.** The session is making ordinary progress.
+
+Illustrative examples (not verbatim from any real session):
 
 ```
-tempo=blocked  state=working  needs="answer: Which colour should the probe use? (Red · Green · Blue)"
-tempo=active   state=blocked  needs=""    detail="awaiting user decision on a dependency version"
-tempo=blocked  state=blocked  needs="choose: (1) ... (2) ... (3) ..."
+tempo=blocked  state=working  needs="answer: Which colour should the probe use? (Red · Green · Blue)"   -> waiting  (rule 1)
+tempo=active   state=blocked  needs=""                                                                   -> stalled  (rule 2)
+tempo=blocked  state=blocked  needs="choose: (1) ... (2) ... (3) ..."                                    -> waiting  (rule 1: words outrank both flags)
 ```
 
-The rule: **a session is waiting when any of the following holds** — `state == "blocked"`, `tempo == "blocked"`, or `needs` itself renders a question (its text begins with `answer:` or `choose:`). No one of these is necessary on its own — the second form above has `tempo="active"` and an empty `needs`, and is still waiting via `state`; the first and third forms have a `state` value other than "blocked" and are still waiting via `tempo`; a session with neither flag blocked but a `needs` beginning `answer:` or `choose:` is waiting via that text alone.
+The closed "no person needed" vocabulary — matched by prefix, case-sensitively, against the daemon's own wording, extracted from the installed CLI 2.1.263 binary:
 
-A session is **stalled** when `needs` is non-empty but is not one of those question forms (the rate-limited/login-required/usage-limit/API-error kind of text). Waiting and stalled are mutually exclusive by construction: a session with a blocked flag AND a non-question `needs` (e.g. a session paused on a rate limit that also happens to report `tempo=blocked`) is waiting, never stalled — the blocked flag takes priority, so the two counters never double-count the same session and never both miss it.
+```
+usage limit reached   (limit)
+login required        (login)
+API error              \
+API overloaded          } (API error)
+API unavailable        /
+invalid API request   /
+rate limited           (rate limit)
+```
 
-The `answer:`/`choose:` prefix vocabulary comes from the daemon and may grow; treat it as a small, named list to check against, not a single string comparison.
+This list is closed **on purpose**. The vocabulary belongs to the daemon and will grow, and this client cannot know in advance whether a future prefix means "no person needed" or "someone must act". So an unfamiliar value is never guessed into the quiet counter — it always falls to **waiting**, the loud one. Calling someone unnecessarily is a cost that gets noticed and corrected on the spot; staying silent about a session that actually needed a person is a cost that is never noticed at all. The daemon also emits a few other non-question forms that this client deliberately does **not** treat as "no person needed" — `"account on hold ..."`, `"org disabled OAuth ..."`, and `"request too large ..."` (fixing the last one means a person running `/compact` inside the session) — so these fall to waiting under rule 1 above, same as any unrecognised value.
+
+Waiting and stalled are mutually exclusive by construction under this rule: a session with `needs` non-empty lands in exactly one of the two depending on whether it matches the closed vocabulary; a session with `needs` empty can only be stalled (via the flags) or neither — never waiting.
+
+**A stalled-by-rule-2 session must still show its `detail` verbatim.** Once `needs` is empty, `detail` is the *only* field left that can distinguish "awaiting a decision from a person" from "awaiting my own work" — a client that hides it because the session landed in the quiet counter throws away the one piece of evidence a person could use to notice they are actually needed. This is a presentation obligation on whatever renders the session, not something `Waiting`/`Stalled` themselves can or should encode: the interface that honours it is out of scope for this document.
 
 ## 6. The control key
 
@@ -159,13 +179,14 @@ The marker is written flush against whatever PTY bytes were already in flight �
 
 Detection must never fire on the marker's presence alone, or even on its *last occurrence* alone — only on it being the **last thing sent**, immediately before a close. "Last occurrence" and "last thing sent" are different things: the same literal text can legitimately appear earlier in an ordinary screen as unrelated content (this very document contains the string `EKICKED:` several times), and a session can display that text — for example by grepping this document — and then exit normally, with the marker's last occurrence sitting mid-screen, followed by more ordinary output and then a completely unrelated close. A detector that accepts the last occurrence plus a close fires on exactly that case, which is not a kick.
 
-A real kick requires all three of the following to hold; each has been tried alone and shown insufficient:
+A real kick requires both of the following to hold; each is individually insufficient:
 
 1. **The connection actually closed.** An ordinary, live, polled session's attach connection stays open indefinitely — it only closes on an actual kick or the session exiting — and may happen to display the literal marker text as part of its own screen content while remaining open. Without this, any screen containing the text at all would be misreported as a kick.
-2. **The marker sits within a bounded window of the end of the stream** (a few hundred bytes is ample). The daemon writes the marker immediately before closing, so a genuine kick's marker is always near the very end of what was received. Without this bound, a marker well before the end, in ordinary screen content, could still be picked up merely because the connection later closed for an unrelated reason.
-3. **What follows the marker looks like a short reason, not a screen**: no newline in it, and bounded in length (256 bytes is ample). The daemon's real reason text is the last thing it sends, so nothing of substance follows it. A screen that merely *displays* the marker almost always has more rendered content after it, typically containing at least one newline — this is exactly what condition 2 alone misses when the coincidental occurrence happens to sit close to the end of the stream (the grep-and-exit case above: the last occurrence of `EKICKED:` is immediately followed by ` marker\n$ exit\n`, which condition 3 catches on the embedded newline).
+2. **What follows the marker's last occurrence looks like a short reason, not a screen**: no newline in it, and bounded in length (256 bytes is ample). The daemon's real reason text is the last thing it sends, so nothing of substance follows it. A screen that merely *displays* the marker almost always has more rendered content after it, typically containing at least one newline, or is simply too long to be a reason — the grep-and-exit case above is caught this way: the last occurrence of `EKICKED:` is immediately followed by ` marker\n$ exit\n`, which this condition rejects on the embedded newline.
 
-A client should locate the marker relative to the end of the accumulated stream (condition 2), not relative to a line boundary, and validate what follows it (condition 3) before ever treating a close (condition 1) as evidence of a kick.
+A client should locate the marker's last occurrence relative to the end of the accumulated stream, not relative to a line boundary (the marker is written flush against whatever PTY bytes were already in flight, never anchored to offset 0 or a line boundary — see above), and validate what follows it (condition 2) before ever treating a close (condition 1) as evidence of a kick.
+
+**An earlier version of this section listed a third condition — "the marker sits within a bounded window of the end of the stream" — as independently necessary, alongside a claim that "each has been tried alone and shown insufficient." That claim was false.** With the daemon's marker fixed at `EKICKED:` (8 bytes) and the reason-length ceiling at 256 bytes, condition 2 above already rejects any occurrence more than 264 bytes from the end of the stream — a tighter bound than any window a client might apply on top of it. A window of a few hundred bytes therefore never changes which streams are accepted as a kick; it can only ever agree with condition 2, never overrule it in either direction. A client implementation may still bound how far back it *searches* for the marker's last occurrence, purely as a performance guard against scanning a stream that can grow to a megabyte on every poll tick — but that bound is an implementation detail of locating the marker, not a fourth fact this document asserts about the protocol, and it must not be presented as a correctness condition the way conditions 1 and 2 are.
 
 A real kick is a normal event — someone attached by hand and took over — not a failure, so a client should not discard the screen accumulated before the marker when reporting it: the bytes preceding the marker's position are still a valid, complete screen up to that point.
 

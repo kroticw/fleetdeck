@@ -7,10 +7,13 @@ package daemon
 // needs="") is added by hand, because the live capture used for this fixture did not
 // happen to contain that form. It is nonetheless attested: this form was observed live
 // on this machine, a session parked for roughly an hour with
-// detail="awaiting user decision on a dependency version" — recorded in
-// docs/protocol/daemon-control-socket.md section 5 as one of the three waiting forms
-// this client must handle, and it is exactly the form that justifies checking Session's
-// State field in Waiting(), not just Tempo.
+// detail="awaiting user decision on a dependency version". Under the current rule
+// (docs/protocol/daemon-control-socket.md section 3.1) a bare blocked flag with empty
+// needs is Stalled, never Waiting — State and Tempo are set by a mechanism the session
+// does not control, so this record cannot be told apart from one merely coordinating
+// its own subagents by the flags alone, even though its Detail text reads like a
+// person-facing decision. That gap is exactly why the protocol obliges Detail to be
+// shown verbatim for a session stalled this way.
 //
 // The fifth (short "f5ab6148") is also added by hand, to cover the `"dying": true` key
 // documented in docs/protocol/daemon-control-socket.md sections 4 and 8: a job being
@@ -19,18 +22,39 @@ package daemon
 // way as e4fa5037's: plausible values of the same shape, not drawn from a live capture.
 //
 // Three more (short "d4bc7159", "07ea8b3c", "918cf4a2") are invented the same way, to
-// cover Waiting/Stalled's split of "needs is non-empty" into a real question versus a
-// stall no answer fixes: a needs beginning "answer:" with neither blocked flag
-// (d4bc7159), a needs reporting a usage limit with neither blocked flag (07ea8b3c), and
-// a tempo=blocked session whose needs is a non-question ("rate limited...") — proving
-// the blocked flag alone is enough to land it in Waiting, never Stalled (918cf4a2).
+// cover Waiting/Stalled's split of "needs is non-empty" into a value from the closed
+// stalledNeedsPrefixes vocabulary versus everything else: a needs beginning "answer:",
+// which is not in that vocabulary, with neither blocked flag (d4bc7159); a needs
+// reporting a usage limit, which is in the vocabulary, with neither blocked flag
+// (07ea8b3c); and a tempo=blocked session whose needs matches the vocabulary too
+// ("rate limited...") -- proving Needs decides regardless of the flags, so this one
+// lands in Stalled, not Waiting, even with tempo=blocked (918cf4a2).
 //
 // The eighth (short "2b91d6f7") is invented the same way, to cover the blocker that
 // Waiting/Stalled ignored Dying entirely: unlike f5ab6148 above (dying but otherwise
-// plainly working), this one carries every trigger Waiting checks for at once
+// plainly working), this one carries every trigger Waiting used to check for at once
 // (state=blocked, tempo=blocked, and a "choose:" question in needs) alongside
 // "dying": true, to prove Dying overrides all of them rather than merely the weakest.
-
+// Under the current rule it also independently proves that a question needs outranks
+// both blocked flags (were it not for Dying, this record's needs alone would already
+// make it Waiting, per a1c92f04 below).
+//
+// Three more (short "6a3d8f52", "c7f2a916", "3e9b5c04") are invented the same way, to
+// cover needs-driven cases the rest of the fixture does not: a needs matching
+// stalledNeedsPrefixes with tempo=blocked, Stalled (6a3d8f52, same shape as
+// 918cf4a2 but recorded directly against the fixture rather than only as a unit test);
+// a needs with an unfamiliar prefix, not in the closed vocabulary, with neither
+// blocked flag, which must be Waiting because the vocabulary is closed on purpose
+// (c7f2a916); and a needs beginning "request too large", which the design spec's
+// closed list deliberately omits (fixing it takes a person running /compact inside
+// the session), which must also be Waiting (3e9b5c04).
+//
+// The twelfth (short "8b4e2f71") is invented the same way, to cover the flags-only
+// side of the current rule with tempo, rather than state, carrying the blocked flag:
+// tempo=blocked, needs="", state="working". This must be Stalled, not Waiting, for the
+// same reason as e4fa5037 — State and Tempo cannot distinguish "waiting on a person"
+// from "waiting on my own subagents" — and it carries a Detail of its own so the
+// protocol's obligation to show it verbatim has something concrete to point at.
 import (
 	"bufio"
 	"bytes"
@@ -160,34 +184,64 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 	}
 
 	type expect struct{ waiting, stalled bool }
+	// Every expectation below is derived directly from the current rule (see Waiting's
+	// and Stalled's doc comments): needs non-empty decides alone, matching
+	// stalledNeedsPrefixes or not; needs empty falls to state/tempo, which can only
+	// ever produce Stalled or neither, never Waiting; Dying overrides both to neither.
 	want := map[string]expect{
-		// tempo=blocked, state=blocked: a "choose:" question is pending — waiting via
-		// both flags, and also via the "choose:" prefix; never stalled.
+		// needs="choose: (1) ...": non-empty, does not match stalledNeedsPrefixes —
+		// waiting, regardless of tempo=blocked and state=blocked both being set. This
+		// is the record that proves words outrank flags: were needs read second, both
+		// flags being blocked would suggest stalled, but the question text decides.
 		"a1c92f04": {waiting: true, stalled: false},
-		// tempo=active, state=working, needs="": plainly working, neither.
+		// needs="": empty, and neither flag is blocked — neither.
 		"b2d83e15": {waiting: false, stalled: false},
-		// tempo=active, state=working, needs="": plainly working, neither.
+		// needs="": empty, and neither flag is blocked — neither.
 		"c3e94f26": {waiting: false, stalled: false},
-		// tempo=active, state=blocked, needs="": waiting via State alone — the record
-		// that specifically justifies checking State, since Tempo says "active" here.
-		"e4fa5037": {waiting: true, stalled: false},
-		// tempo=active, state=working, needs="", dying=true: a job being retired.
-		// Dying plays no part here — plainly neither.
+		// needs="", state=blocked: needs is empty, so state/tempo decide — stalled,
+		// never waiting, even though Detail's text ("awaiting user decision on a
+		// dependency version") reads like a person-facing decision. State alone cannot
+		// license that inference: it is set by a mechanism the session does not
+		// control, indistinguishable from a session merely coordinating its own
+		// subagents. This is exactly why the protocol obliges Detail to be shown
+		// verbatim for a session stalled this way.
+		"e4fa5037": {waiting: false, stalled: true},
+		// needs="", dying=true: a job being retired. Dying overrides before either
+		// needs or the flags are even read — plainly neither.
 		"f5ab6148": {waiting: false, stalled: false},
-		// tempo=active, state=working, needs="answer: ...": neither flag is blocked,
-		// but the needs text itself is a question — waiting via the prefix alone.
+		// needs="answer: ...": non-empty, does not match stalledNeedsPrefixes —
+		// waiting, with neither flag blocked.
 		"d4bc7159": {waiting: true, stalled: false},
-		// tempo=active, state=working, needs="usage limit reached...": a non-question
-		// needs with neither flag blocked — stalled, not waiting: no answer fixes this.
+		// needs="usage limit reached...": non-empty, matches stalledNeedsPrefixes —
+		// stalled, not waiting, with neither flag blocked.
 		"07ea8b3c": {waiting: false, stalled: true},
-		// tempo=blocked, state=working, needs="rate limited...": the needs text is not
-		// a question, but tempo=blocked already makes this waiting — proving Waiting
-		// and Stalled stay mutually exclusive even with a non-question needs present.
-		"918cf4a2": {waiting: true, stalled: false},
-		// tempo=blocked, state=blocked, needs="choose: ...", dying=true: every trigger
-		// Waiting checks for is satisfied, but the session is being killed — Dying
-		// overrides all of them, so this must land in neither counter.
+		// needs="rate limited...", tempo=blocked: non-empty, matches
+		// stalledNeedsPrefixes — stalled. The flags play no part in this outcome at
+		// all under the current rule; they are consulted only when needs is empty.
+		"918cf4a2": {waiting: false, stalled: true},
+		// needs="choose: ...", state=blocked, tempo=blocked, dying=true: every trigger
+		// Waiting or Stalled could otherwise fire on is present at once, but Dying
+		// overrides all of them — neither. Absent Dying, needs alone (non-empty, not
+		// in stalledNeedsPrefixes) would already make this Waiting, per a1c92f04 above.
 		"2b91d6f7": {waiting: false, stalled: false},
+		// needs="rate limited...", tempo=blocked: the same shape as 918cf4a2, recorded
+		// directly against the fixture — non-empty needs matching stalledNeedsPrefixes
+		// makes this stalled regardless of tempo=blocked.
+		"6a3d8f52": {waiting: false, stalled: true},
+		// needs="disk full...": non-empty, an unfamiliar prefix not in
+		// stalledNeedsPrefixes — the closed list is deliberately narrow, so this must
+		// be waiting, not stalled, with neither flag blocked.
+		"c7f2a916": {waiting: true, stalled: false},
+		// needs="request too large...": non-empty, in the daemon's own vocabulary but
+		// deliberately outside the design spec's closed list (fixing it takes a person
+		// running /compact inside the session) — waiting, with neither flag blocked.
+		"3e9b5c04": {waiting: true, stalled: false},
+		// needs="", tempo=blocked: needs is empty, so state/tempo decide — stalled,
+		// never waiting, the same reasoning as e4fa5037 but via Tempo rather than
+		// State, and with a Detail whose own text explicitly denies being a
+		// person-wait ("no reply needed from a person") — shown verbatim regardless,
+		// since the protocol's obligation does not depend on what Detail happens to say.
+		"8b4e2f71": {waiting: false, stalled: true},
 	}
 
 	if len(sessions) != len(want) {
@@ -251,6 +305,10 @@ func TestFixtureDyingFieldParsesViaListSessions(t *testing.T) {
 		"07ea8b3c": false,
 		"918cf4a2": false,
 		"2b91d6f7": true,
+		"6a3d8f52": false,
+		"c7f2a916": false,
+		"3e9b5c04": false,
+		"8b4e2f71": false,
 	}
 
 	if len(sessions) != len(wantDying) {
@@ -351,23 +409,47 @@ func TestRateLimitedIsStalledNotWaiting(t *testing.T) {
 	}
 }
 
-// TestWaitingForm1 covers a session reporting through its own status that it awaits a
-// decision, with the reason in Detail. Tempo may still read "active" here.
-func TestWaitingForm1(t *testing.T) {
+// TestBareBlockedStateWithEmptyNeedsIsStalledNotWaiting covers the rule that a blocked
+// flag alone, with no words in Needs, can never promote a session to Waiting: State
+// and Tempo are set by a mechanism the session does not control, so a session
+// reporting state=blocked cannot be told apart, by the flags alone, from one merely
+// coordinating its own subagents. This holds even though Detail's text here
+// ("awaiting a decision") reads exactly like a person-facing decision — Detail is not
+// consulted by Waiting or Stalled at all; it is surfaced by the UI once a session
+// lands in Stalled this way (see docs/protocol/daemon-control-socket.md section 3.1),
+// not read by either method here.
+func TestBareBlockedStateWithEmptyNeedsIsStalledNotWaiting(t *testing.T) {
 	s := Session{State: "blocked", Tempo: "active", Needs: "", Detail: "awaiting a decision"}
-	if !s.Waiting() {
-		t.Error("state=blocked must be waiting even with tempo=active and empty needs")
+	if s.Waiting() {
+		t.Error("state=blocked with empty needs must never be Waiting(), regardless of tempo or detail")
 	}
-	if s.Stalled() {
-		t.Error("a Waiting session must never also be Stalled")
+	if !s.Stalled() {
+		t.Error("state=blocked with empty needs must be Stalled()")
 	}
 }
 
-// TestWaitingForm2 covers the daemon detecting a session parked on a rendered question.
-func TestWaitingForm2(t *testing.T) {
-	s := Session{State: "working", Tempo: "blocked", Needs: "answer: Which colour should the probe use? (Red · Green · Blue)"}
+// TestBareBlockedTempoWithEmptyNeedsIsStalledNotWaiting covers the same rule via
+// Tempo rather than State: tempo=blocked with empty needs is stalled, never waiting,
+// for the identical reason — the flag alone cannot say whether a person or the
+// session's own subagents are the reason for the stop.
+func TestBareBlockedTempoWithEmptyNeedsIsStalledNotWaiting(t *testing.T) {
+	s := Session{State: "working", Tempo: "blocked", Needs: ""}
+	if s.Waiting() {
+		t.Error("tempo=blocked with empty needs must never be Waiting()")
+	}
+	if !s.Stalled() {
+		t.Error("tempo=blocked with empty needs must be Stalled()")
+	}
+}
+
+// TestQuestionNeedsOutranksBothBlockedFlags covers the rule that a non-empty Needs not
+// matching stalledNeedsPrefixes decides Waiting regardless of State or Tempo: with
+// both flags blocked, a naive "check the flags" reading would call this stalled, but
+// the question text in Needs makes it Waiting.
+func TestQuestionNeedsOutranksBothBlockedFlags(t *testing.T) {
+	s := Session{State: "blocked", Tempo: "blocked", Needs: "answer: Which colour should the probe use? (Red · Green · Blue)"}
 	if !s.Waiting() {
-		t.Error("tempo=blocked with a non-empty needs must be waiting")
+		t.Error("a question needs must be Waiting() even with both state and tempo blocked")
 	}
 	if s.Stalled() {
 		t.Error("a Waiting session must never also be Stalled")
@@ -418,26 +500,67 @@ func TestDyingSessionIsNeverWaitingOrStalled(t *testing.T) {
 	}
 }
 
-// TestDialCheckedDialerConfiguredWithTimeout covers blocker 2: dialChecked dialled with
-// a bare &net.Dialer{}, which carries no Timeout of its own, so a context with no
-// deadline (context.Background() — the documented call path for ListSessions, SendText,
-// SendKeys and Ping; only ReadScreen derives one) left the connect itself unbounded. A
-// daemon that is alive but not accepting connections (a full backlog, a wedged process)
-// can make connect(2) on an AF_UNIX socket block indefinitely, and nothing could break a
-// caller out of that.
+// TestDialCheckedActuallyUsesConfiguredDialer covers blocker 2: dialChecked used to
+// dial with a bare &net.Dialer{}, which carries no Timeout of its own, so a context
+// with no deadline (context.Background() — the documented call path for ListSessions,
+// SendText, SendKeys and Ping; only ReadScreen derives one) left the connect itself
+// unbounded. A daemon that is alive but not accepting connections (a full backlog, a
+// wedged process) can make connect(2) on an AF_UNIX socket block indefinitely, and
+// nothing could break a caller out of that.
 //
-// On macOS, connecting to a listening-but-unaccepted unix socket returns immediately
-// regardless of backlog state — there is no local fixture that reproduces a genuine
-// connect(2) hang to assert against. Per the review, this is verified at the
-// configuration level instead: dialTimeout, the Timeout dialChecked's Dialer is
-// constructed with, must be a positive, bounded duration that applies independently of
-// whatever deadline ctx does or does not carry.
-func TestDialCheckedDialerConfiguredWithTimeout(t *testing.T) {
-	if dialTimeout <= 0 {
-		t.Fatalf("dialChecked's dialer must have a positive Timeout independent of ctx, got %v", dialTimeout)
+// The previous version of this test never called dialChecked at all: it asserted
+// 0 < dialTimeout <= 30s, properties of a constant that hold regardless of whether
+// anything actually uses it. Deleting "Timeout: dialTimeout" from the Dialer
+// dialChecked builds left that test green.
+//
+// This version calls dialChecked for real, against a live listener, and substitutes
+// newControlDialer (the seam dialChecked now builds its Dialer through) to capture the
+// *net.Dialer that call actually used. It asserts that Dialer's Timeout equals
+// dialTimeout, so removing "Timeout: dialTimeout" from newControlDialer's construction
+// fails this test.
+//
+// What this does NOT prove: that an unbounded connect(2) against a wedged, non-
+// accepting daemon is actually interrupted after dialTimeout. On macOS, connecting to
+// a listening-but-unaccepted unix socket returns immediately regardless of backlog
+// state, so there is no local fixture that reproduces that hang to assert against.
+// This test proves the wiring — the value in effect is the one the comments claim —
+// not the runtime behaviour under a genuinely wedged peer.
+func TestDialCheckedActuallyUsesConfiguredDialer(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
 	}
-	if dialTimeout > 30*time.Second {
-		t.Fatalf("dialChecked's dialer Timeout (%v) is too large to bound a connect against a wedged daemon promptly", dialTimeout)
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	origNewControlDialer := newControlDialer
+	var gotTimeout time.Duration
+	sawCall := false
+	newControlDialer = func() *net.Dialer {
+		sawCall = true
+		d := origNewControlDialer()
+		gotTimeout = d.Timeout
+		return d
+	}
+	defer func() { newControlDialer = origNewControlDialer }()
+
+	conn, err := dialChecked(context.Background(), listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialChecked: %v", err)
+	}
+	defer conn.Close()
+
+	if !sawCall {
+		t.Fatal("dialChecked did not build its Dialer through newControlDialer")
+	}
+	if gotTimeout != dialTimeout {
+		t.Errorf("dialChecked's Dialer.Timeout = %v, want dialTimeout (%v)", gotTimeout, dialTimeout)
 	}
 }
 
@@ -1020,6 +1143,15 @@ func TestErrorCodeEPROTO(t *testing.T) {
 	}
 }
 
+// TestErrorCodeEAUTH covers EAUTH mapping on a path that actually carries a
+// credential. ListSessions' request carries only proto and op — there is no auth
+// field anywhere on that path — so with client.proto left at its zero value, this
+// test previously exercised the *ping* that ensureProto sends first, not any op that
+// authenticates: serveOnce only answers one request, and it answered that ping with
+// EAUTH before ListSessions' own "list" request was ever sent. SendText (op "reply")
+// is the path that actually puts the control key on the wire (see req["auth"] below);
+// client.proto is pre-set here specifically so ensureProto skips the ping and the
+// single serveOnce response answers the "reply" request itself.
 func TestErrorCodeEAUTH(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -1027,8 +1159,12 @@ func TestErrorCodeEAUTH(t *testing.T) {
 	}
 	defer listener.Close()
 
+	var capturedReq map[string]interface{}
 	go func() {
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			if err := json.Unmarshal(req, &capturedReq); err != nil {
+				t.Errorf("unmarshalling captured request: %v", err)
+			}
 			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
 		})
 	}()
@@ -1036,11 +1172,19 @@ func TestErrorCodeEAUTH(t *testing.T) {
 	client := New(listener.Addr().String(), func() (string, error) {
 		return "test-key", nil
 	})
+	client.proto = 1 // skip the ping, so the one served response answers "reply"
 
-	_, err = client.ListSessions(context.Background())
+	err = client.SendText(context.Background(), "session123", "hello", true)
 	var eaErr *ErrAuth
 	if !errors.As(err, &eaErr) {
 		t.Errorf("expected *ErrAuth, got %T: %v", err, err)
+	}
+
+	// Sanity check that this test actually exercises a path carrying the credential:
+	// without this, a future change back to a credential-less op would make the
+	// assertions above pass for the wrong reason again.
+	if auth, _ := capturedReq["auth"].(string); auth != "test-key" {
+		t.Fatalf("request never carried the control key (auth=%q); this test no longer exercises an authenticated path", auth)
 	}
 
 	// Error message should not contain the control key
@@ -1205,6 +1349,15 @@ func TestStickyBitSatisfiesRootBoundary(t *testing.T) {
 	}
 }
 
+// TestNoControlKeyLeakedInError covers the same gap as TestErrorCodeEAUTH's comment
+// explains: ListSessions never carries the control key at all (client.proto left at
+// zero routes the single served response to the ping ensureProto sends first, so
+// "list" itself, which has no auth field regardless, is never even reached), so "the
+// error contains no key" was trivially true on that path and would have stayed true
+// even if a write path started leaking one. This exercises SendKeys instead — an
+// attach carrying "auth" in its request, a distinct credential-bearing path from
+// TestErrorCodeEAUTH's SendText/"reply" — with client.proto pre-set so the served
+// response answers the attach itself.
 func TestNoControlKeyLeakedInError(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -1212,8 +1365,12 @@ func TestNoControlKeyLeakedInError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	var capturedReq map[string]interface{}
 	go func() {
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			if err := json.Unmarshal(req, &capturedReq); err != nil {
+				t.Errorf("unmarshalling captured request: %v", err)
+			}
 			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
 		})
 	}()
@@ -1221,10 +1378,19 @@ func TestNoControlKeyLeakedInError(t *testing.T) {
 	client := New(listener.Addr().String(), func() (string, error) {
 		return "my-secret-key-12345", nil
 	})
+	client.proto = 1 // skip the ping, so the one served response answers the attach
 
-	_, err = client.ListSessions(context.Background())
+	err = client.SendKeys(context.Background(), "session123", "x")
+
+	// Sanity check that this test actually exercises a path carrying the credential.
+	if auth, _ := capturedReq["auth"].(string); auth != "my-secret-key-12345" {
+		t.Fatalf("request never carried the control key (auth=%q); this test no longer exercises an authenticated path", auth)
+	}
 
 	// Error message should not contain the key
+	if err == nil {
+		t.Fatal("expected an error for a refused attach")
+	}
 	if strings.Contains(err.Error(), "my-secret-key-12345") {
 		t.Error("control key leaked into error message")
 	}
@@ -2132,6 +2298,16 @@ func TestListSessionsEmptyJobsArrayIsNotError(t *testing.T) {
 // from time.Now(), sliding forward forever instead of acting as a ceiling, so
 // ctx.Err() was never satisfied and the loop spun until the fake socket's writer
 // stopped (never, here).
+//
+// The ceiling that actually ends the read is client.screenDeadline:
+// readScreenWithDeadline always derives a context deadline from it when ctx carries
+// none of its own (context.Background(), exactly this test's call), so
+// client.defaultDeadline's fallback in setDeadline is never reached from ReadScreen at
+// all. A previous version of this test set client.defaultDeadline instead, and its
+// failure message named a "1s defaultDeadline ceiling" — that ceiling never governed
+// anything on this path, and the test kept passing in ~2s (production's default
+// screenDeadline), not the ~1s the message implied, whatever defaultDeadline was set
+// to. Setting client.screenDeadline here both fixes that and keeps the test fast.
 func TestReadScreenNoCtxDeadlineChattySession(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -2170,7 +2346,7 @@ func TestReadScreenNoCtxDeadlineChattySession(t *testing.T) {
 		return "key", nil
 	})
 	client.proto = 1
-	client.defaultDeadline = 1 * time.Second
+	client.screenDeadline = 1 * time.Second
 
 	done := make(chan struct{})
 	go func() {
@@ -2181,7 +2357,7 @@ func TestReadScreenNoCtxDeadlineChattySession(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("ReadScreen did not return within 5s despite a 1s defaultDeadline ceiling")
+		t.Fatal("ReadScreen did not return within 5s despite a 1s screenDeadline ceiling")
 	}
 }
 
@@ -2222,10 +2398,16 @@ func TestReadScreenIdleDetection(t *testing.T) {
 	})
 	client.proto = 1
 	client.readIdleTimeout = 200 * time.Millisecond // Short timeout for testing
-	client.defaultDeadline = 2 * time.Second        // Short deadline so test doesn't hang
+	// The ceiling this call would hit if idle detection failed to fire is
+	// client.screenDeadline, not client.defaultDeadline: readScreenWithDeadline
+	// always derives ReadScreen's context deadline from screenDeadline when ctx (here,
+	// context.Background()) carries none of its own, so setDeadline's fallback to
+	// defaultDeadline is never reached on this path at all. Setting it here would be a
+	// no-op; screenDeadline is the field that actually bounds this call.
+	client.screenDeadline = 2 * time.Second
 
 	// This should return quickly (within ~500ms) due to idle detection,
-	// not wait for the full 2-second deadline
+	// not wait for the full 2-second ceiling
 	start := time.Now()
 	output, err := client.ReadScreen(context.Background(), "session123", 0)
 	elapsed := time.Since(start)
@@ -2275,9 +2457,15 @@ func TestNewNilKeyFuncReadScreenDoesNotPanic(t *testing.T) {
 	client.proto = 1
 	// No data is ever sent by the fake daemon here, and the idle timer only starts once
 	// the first byte arrives — so with nothing arriving at all, the context ceiling
-	// (not the idle timeout) is what bounds the wait. Keep it short so this test stays
-	// fast rather than waiting out the 30s default.
-	client.defaultDeadline = 200 * time.Millisecond
+	// (not the idle timeout) is what bounds the wait. That ceiling is
+	// client.screenDeadline, not client.defaultDeadline: readScreenWithDeadline always
+	// derives ReadScreen's context deadline from screenDeadline when ctx carries none
+	// of its own, so defaultDeadline's fallback in setDeadline is never reached on this
+	// path. A previous version of this test set defaultDeadline instead, believing it
+	// kept the test fast — it did not, and the test actually ran against production's
+	// 2s screenDeadline default, not the 200ms named here. Set screenDeadline itself so
+	// the comment and the actual runtime agree, and this test stays fast.
+	client.screenDeadline = 200 * time.Millisecond
 
 	out, err := client.ReadScreen(context.Background(), "session123", 0)
 	if err != nil {
@@ -2859,7 +3047,11 @@ func TestReadScreenMidScreenEkickedTextIsNotAKick(t *testing.T) {
 	})
 	client.proto = 1
 	client.readIdleTimeout = 100 * time.Millisecond
-	client.defaultDeadline = 2 * time.Second
+	// Idle detection is what actually ends this read (the fake daemon writes once and
+	// then falls silent); client.screenDeadline is the ceiling that would apply if it
+	// didn't, and is set here rather than client.defaultDeadline, which ReadScreen
+	// never consults at all (see readScreenWithDeadline).
+	client.screenDeadline = 2 * time.Second
 
 	out, err := client.ReadScreen(context.Background(), "session123", 0)
 	if err != nil {
@@ -2909,7 +3101,11 @@ func TestReadScreenSlowFirstPaintReturnsData(t *testing.T) {
 	})
 	client.proto = 1
 	client.readIdleTimeout = 300 * time.Millisecond
-	client.defaultDeadline = 2 * time.Second
+	// The first byte's wait is bounded by the context deadline readScreenWithDeadline
+	// derives from client.screenDeadline (ReadScreen never consults defaultDeadline at
+	// all), and it must exceed the fake daemon's 500ms sleep above for the read to
+	// succeed rather than time out before the first byte arrives.
+	client.screenDeadline = 2 * time.Second
 
 	out, err := client.ReadScreen(context.Background(), "session123", 0)
 	if err != nil {
@@ -3114,8 +3310,18 @@ func TestSendKeysKickMidStreamNoTrailingNewlineIsDetected(t *testing.T) {
 
 // TestReadScreenProductionDefaultsChattySessionReturnsPromptly covers ReadScreen
 // against a session that redraws continuously, so the idle timeout never fires: it
-// must return well before defaultDeadline's 30 seconds, using its own, much shorter,
-// screenDeadline instead of deriving its context deadline from defaultDeadline.
+// must return at its own screenDeadline ceiling (2s in production), not defaultDeadline
+// (30s), since readScreenWithDeadline derives its context deadline from screenDeadline,
+// never from defaultDeadline.
+//
+// The previous version of this test asserted `elapsed >= client.defaultDeadline`
+// (30s) as its failure condition, while a 10s watchdog (see the select below) fires
+// first — that assertion could never be reached, so the test actually proved nothing
+// past "returns within 10s". Raising screenDeadline to 9s — nowhere near the 30s it
+// was compared against — passed the old assertion outright. This version asserts
+// against screenDeadline itself, the value that actually governs, so that regression
+// is caught.
+//
 // Neither defaultDeadline nor screenDeadline is overridden here — the point is to
 // measure the actual production ceiling, not one shortened by the test.
 func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) {
@@ -3173,8 +3379,21 @@ func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) 
 	}
 	elapsed := time.Since(start)
 
-	if elapsed >= client.defaultDeadline {
-		t.Errorf("ReadScreen took %v, expected it to return well before defaultDeadline (%v) using its own shorter screenDeadline", elapsed, client.defaultDeadline)
+	// The actual ceiling is client.screenDeadline (2s in production, per New's
+	// default), not defaultDeadline (30s). wantCeiling is a literal, not
+	// client.screenDeadline read back: this test deliberately does not touch
+	// client.screenDeadline (see the comment above), so reading the field back would
+	// just restate whatever New() happens to set it to and could never catch a
+	// regression to that default. The margin is a proportion of wantCeiling (50%) for
+	// scheduling slack, rather than a fixed duration that would either be too tight
+	// on a loaded CI runner or too loose to catch a regression.
+	const wantCeiling = 2 * time.Second
+	if client.screenDeadline != wantCeiling {
+		t.Fatalf("New()'s default screenDeadline changed to %v; update wantCeiling in this test to match the new production default", client.screenDeadline)
+	}
+	margin := wantCeiling / 2
+	if elapsed >= wantCeiling+margin {
+		t.Errorf("ReadScreen took %v, expected it to return at its screenDeadline ceiling (%v, +%v margin)", elapsed, wantCeiling, margin)
 	}
 }
 
@@ -3186,8 +3405,12 @@ func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) 
 // read deadline is recomputed from lastReadTime on every byte received — so a session
 // that keeps printing more often than the idle timeout never lets the loop's idle branch
 // fire, and with no context deadline in play either, nothing ever ends the call. This
-// server sends one byte every 100ms, forever, to reproduce exactly that: SendKeys must
-// still return well before defaultDeadline's 30 seconds.
+// server sends one byte every 100ms, forever, to reproduce exactly that: SendKeys
+// reuses client.screenDeadline (2s in production, see sendKeysOnce) as its own until
+// ceiling, not defaultDeadline (30s), so this asserts against screenDeadline for the
+// same reason TestReadScreenProductionDefaultsChattySessionReturnsPromptly does — the
+// previous `elapsed >= client.defaultDeadline` assertion was unreachable behind this
+// test's 10s watchdog and stayed green even with screenDeadline raised to 9s.
 func TestSendKeysProductionDefaultsChattySessionReturnsPromptly(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -3246,8 +3469,17 @@ func TestSendKeysProductionDefaultsChattySessionReturnsPromptly(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	if elapsed >= client.defaultDeadline {
-		t.Errorf("SendKeys took %v, expected it to return well before defaultDeadline (%v)", elapsed, client.defaultDeadline)
+	// The actual ceiling is client.screenDeadline (2s in production), not
+	// defaultDeadline: see TestReadScreenProductionDefaultsChattySessionReturnsPromptly's
+	// comment for why wantCeiling is a literal rather than client.screenDeadline read
+	// back, and why the margin is proportional rather than a fixed duration.
+	const wantCeiling = 2 * time.Second
+	if client.screenDeadline != wantCeiling {
+		t.Fatalf("New()'s default screenDeadline changed to %v; update wantCeiling in this test to match the new production default", client.screenDeadline)
+	}
+	margin := wantCeiling / 2
+	if elapsed >= wantCeiling+margin {
+		t.Errorf("SendKeys took %v, expected it to return at its screenDeadline ceiling (%v, +%v margin)", elapsed, wantCeiling, margin)
 	}
 }
 

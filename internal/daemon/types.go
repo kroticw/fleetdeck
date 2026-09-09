@@ -37,16 +37,36 @@ type Session struct {
 	Dying bool `json:"dying"`
 }
 
-// questionNeedsPrefixes are the daemon's own renderings of a needs string that pose an
-// actual question to a human, as opposed to reporting a stall no answer can fix (a
-// usage limit, a login prompt, an API error, a rate limit). The daemon's own text is
-// the source of truth for this vocabulary and it may grow, so the comparison lives here
-// once rather than being repeated at each call site.
-var questionNeedsPrefixes = []string{"answer:", "choose:"}
+// stalledNeedsPrefixes is the closed "no person needed" vocabulary: the daemon's own
+// non-question needs renderings, matched by prefix, case-sensitively, against the
+// daemon's own wording. Extracted from the installed CLI 2.1.263 binary (see
+// docs/protocol/daemon-control-socket.md section 3.1), it covers the design spec's
+// four stall categories:
+//
+//	limit      -> "usage limit reached"
+//	login      -> "login required"
+//	API error  -> "API error", "API overloaded", "API unavailable", "invalid API request"
+//	rate limit -> "rate limited"
+//
+// The list is closed deliberately: this vocabulary belongs to the daemon and will
+// grow, so a value with an unfamiliar prefix -- including one that looks like a stall
+// but isn't listed here -- must fall through to Waiting (the loud counter), never
+// Stalled (the quiet one). Calling someone unnecessarily gets noticed and corrected;
+// staying silent about a session that actually needs a person never does.
+var stalledNeedsPrefixes = []string{
+	"usage limit reached",
+	"login required",
+	"API error",
+	"API overloaded",
+	"API unavailable",
+	"invalid API request",
+	"rate limited",
+}
 
-// isQuestionNeeds reports whether needs is one of the daemon's question renderings.
-func isQuestionNeeds(needs string) bool {
-	for _, prefix := range questionNeedsPrefixes {
+// isStalledNeeds reports whether needs matches one of the daemon's closed non-question
+// renderings, per stalledNeedsPrefixes.
+func isStalledNeeds(needs string) bool {
+	for _, prefix := range stalledNeedsPrefixes {
 		if strings.HasPrefix(needs, prefix) {
 			return true
 		}
@@ -54,53 +74,66 @@ func isQuestionNeeds(needs string) bool {
 	return false
 }
 
-// Waiting reports whether a person has to answer before this session moves.
+// Waiting reports whether a person must answer before this session can move.
 //
-// Three forms have been observed on a live daemon (see
-// docs/protocol/daemon-control-socket.md section 5 for the full account):
+// Only the daemon's words (Needs) decide this — never State or Tempo. State and Tempo
+// are set by a mechanism the session does not control, so a session waiting on its own
+// subagents and one waiting on a person are indistinguishable in those two flags alone;
+// only Needs (and, in the flag-only case documented on Stalled, Detail) says in words
+// what is actually happening. See docs/protocol/daemon-control-socket.md section 3.1.
 //
-//	tempo=blocked  state=working  needs="answer: ... (A · B · C)"
-//	tempo=active   state=blocked  needs=""    detail="awaiting a decision"
-//	tempo=blocked  state=blocked  needs="choose: ..."
+// Needs empty means never Waiting: with no words from the daemon, there is nothing to
+// tell "waiting on a person" apart from "waiting on my own subagents", and guessing the
+// former from a bare flag is exactly the ambiguity this rule exists to avoid.
 //
-// Neither State nor Tempo alone accounts for every form — the second form above has
-// Tempo == "active" and is still waiting via State; the first and third have a State
-// value other than "blocked" and are still waiting via Tempo — so either being
-// "blocked" is sufficient and both must be checked.
+// Needs non-empty decides alone: a value matching stalledNeedsPrefixes (a usage limit,
+// a login prompt, an API error, a rate limit) means the session is Stalled, not
+// Waiting -- no answer fixes it. Everything else, including an unfamiliar prefix,
+// means Waiting: the closed list is deliberately narrow, so an unrecognised value must
+// land in the counter a person actually watches.
 //
-// A third, independent form is a needs string that itself poses a question (its text
-// begins with "answer:" or "choose:", per isQuestionNeeds) while neither State nor
-// Tempo reports "blocked". This and Stalled are deliberately kept mutually exclusive:
-// a needs string that is non-empty but is not a question (a usage limit, a login
-// prompt, a rate limit) means the session is Stalled, not Waiting on a person.
-//
-// A Dying session is never Waiting, regardless of what State, Tempo, or Needs say: it
-// is being killed or retired, so no one has to answer it. This overrides every other
-// form above, including a session that happens to satisfy all three at once.
+// A Dying session is never Waiting, regardless of what Needs says: it is being killed
+// or retired, so no one has to answer it.
 func (s Session) Waiting() bool {
 	if s.Dying {
 		return false
 	}
-	return s.State == "blocked" || s.Tempo == "blocked" || isQuestionNeeds(s.Needs)
+	if s.Needs == "" {
+		return false
+	}
+	return !isStalledNeeds(s.Needs)
 }
 
-// Stalled reports whether the session is stopped for a reason no answer will fix: a
-// non-empty Needs that is not one of the question forms Waiting recognises (a usage
-// limit, a login prompt, an API error, a rate limit). It is defined as the complement
-// of Waiting given a non-empty Needs, so every session lands in exactly one of Waiting
-// or Stalled whenever it is stopped at all — the UI shows these as two separate
-// counters, and a session counted in both (or neither, while stopped) would make the
-// totals lie.
+// Stalled reports whether the session is stopped for a reason no answer will fix, or
+// stopped with no words to say why.
 //
-// A Dying session is never Stalled either, for the same reason Waiting excludes it: it
-// needs no one's attention, not even the kind Stalled reports. Without this explicit
-// check, a dying session with a non-empty, non-question Needs would fall straight
-// through Waiting's own Dying guard above and still land here.
+//  1. Needs non-empty and matching stalledNeedsPrefixes (a usage limit, a login
+//     prompt, an API error, a rate limit): stalled, exactly the complement of Waiting's
+//     first rule.
+//  2. Needs empty and State == "blocked" or Tempo == "blocked": stalled, never
+//     Waiting -- per Waiting's own doc comment, a bare flag with no words cannot be
+//     told apart from a session waiting on its own subagents, so it is never promoted
+//     to the counter a person is expected to act on. It still must not be hidden
+//     entirely: docs/protocol/daemon-control-socket.md section 3.1 requires a session
+//     stalled by this rule to be presented with Detail shown verbatim, since Detail is
+//     the only field that can still distinguish "awaiting a decision from a person"
+//     from "awaiting my own work" once Needs has nothing to say.
+//
+// Every session with Needs non-empty lands in exactly one of Waiting or Stalled (rule 1
+// above is a full partition of that case); a session with Needs empty can only be
+// Stalled (via the flags) or neither, never Waiting. The UI shows Waiting and Stalled
+// as two separate counters, and a session counted in both would make the totals lie.
+//
+// A Dying session is never Stalled, for the same reason Waiting excludes it: it needs
+// no one's attention, not even the kind Stalled reports.
 func (s Session) Stalled() bool {
 	if s.Dying {
 		return false
 	}
-	return !s.Waiting() && s.Needs != ""
+	if s.Needs != "" {
+		return isStalledNeeds(s.Needs)
+	}
+	return s.State == "blocked" || s.Tempo == "blocked"
 }
 
 // Info holds daemon version and protocol information.
