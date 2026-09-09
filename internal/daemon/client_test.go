@@ -207,18 +207,18 @@ func TestListSessionsCachedProtoTimesOut(t *testing.T) {
 	client := New(listener.Addr().String(), func() (string, error) {
 		return "key", nil
 	})
+	// Set a short deadline so test doesn't wait 30 seconds
+	client.defaultDeadlineSecs = 1
 
 	// Prime the cache with a ping
 	_, _ = client.Ping(context.Background())
 
-	// Now call ListSessions with context.Background() and a short timeout
+	// Now call ListSessions with context.Background() (no deadline).
 	// Without the deadline fallback, this would hang forever.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	_, err = client.ListSessions(ctx)
+	// With it, it should timeout after defaultDeadlineSecs (1 second).
+	_, err = client.ListSessions(context.Background())
 	if err == nil {
-		t.Error("expected timeout error for ListSessions with cached proto, got nil")
+		t.Error("expected timeout error for ListSessions with cached proto and no context deadline, got nil")
 	}
 }
 
@@ -917,5 +917,121 @@ func TestErrorMessageNoControlKey(t *testing.T) {
 	// The error message should not contain the control key
 	if strings.Contains(err.Error(), "super-secret-key-abc123xyz789") {
 		t.Error("error message contains control key value")
+	}
+}
+
+func TestListSessionsMissingJobsKeyIsError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			// Reply with ok=true but no jobs field at all - malformed response
+			return []byte(`{"ok":true,"op":"list"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	sessions, err := client.ListSessions(context.Background())
+	if err == nil {
+		t.Errorf("expected error for missing jobs field, got nil; sessions=%v", sessions)
+	}
+	if err != nil && !strings.Contains(err.Error(), "jobs") {
+		t.Errorf("expected error to mention 'jobs' field, got: %v", err)
+	}
+}
+
+func TestListSessionsEmptyJobsArrayIsNotError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			// Reply with ok=true and empty jobs array - valid response
+			return []byte(`{"ok":true,"op":"list","jobs":[]}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	sessions, err := client.ListSessions(context.Background())
+	if err != nil {
+		t.Errorf("expected nil error for empty jobs array, got: %v", err)
+	}
+	if sessions == nil {
+		t.Error("expected empty slice for empty jobs array, got nil")
+	}
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions, got %d", len(sessions))
+	}
+}
+
+func TestReadScreenIdleDetection(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n') // read the attach request
+
+		// Send header line
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		// Send some data
+		conn.Write([]byte("Initial output"))
+
+		// Hold the connection open without closing - don't send more data
+		// ReadScreen should detect idle and return promptly, not wait for deadline
+		select {}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.readIdleTimeout = 200 * time.Millisecond // Short timeout for testing
+	client.defaultDeadlineSecs = 2                  // Short deadline so test doesn't hang
+
+	// This should return quickly (within ~500ms) due to idle detection,
+	// not wait for the full 2-second deadline
+	start := time.Now()
+	output, err := client.ReadScreen(context.Background(), "session123", 0)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ReadScreen failed: %v", err)
+	}
+
+	expected := "Initial output"
+	if output != expected {
+		t.Errorf("expected output %q, got %q", expected, output)
+	}
+
+	// Verify it returned promptly (should be < 1s with 200ms idle timeout).
+	// Without idle detection, it would wait the full 2 seconds.
+	if elapsed > 1*time.Second {
+		t.Errorf("ReadScreen took too long (%v), indicates idle detection not working", elapsed)
 	}
 }

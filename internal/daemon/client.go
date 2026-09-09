@@ -34,12 +34,12 @@ func SocketPath() (string, error) {
 	return matches[0], nil
 }
 
-// setDeadline sets a deadline on the connection from context, or a 30-second fallback.
-func setDeadline(ctx context.Context, conn net.Conn) {
+// setDeadline sets a deadline on the connection from context, or a fallback based on the client.
+func (c *Client) setDeadline(ctx context.Context, conn net.Conn) {
 	if deadline, ok := ctx.Deadline(); ok {
 		conn.SetDeadline(deadline)
 	} else {
-		conn.SetDeadline(time.Now().Add(30 * time.Second))
+		conn.SetDeadline(time.Now().Add(time.Duration(c.defaultDeadlineSecs) * time.Second))
 	}
 }
 
@@ -66,17 +66,21 @@ func ControlKey() (string, error) {
 
 // Client represents a connection to the daemon control socket.
 type Client struct {
-	socketPath string
-	keyFunc    func() (string, error)
-	proto      int // cached protocol number from ping
+	socketPath          string
+	keyFunc             func() (string, error)
+	proto               int           // cached protocol number from ping
+	readIdleTimeout     time.Duration // idle timeout for ReadScreen (default 300ms)
+	defaultDeadlineSecs int           // default deadline in seconds when context has none (default 30)
 }
 
 // New creates a new daemon client.
 func New(socketPath string, key func() (string, error)) *Client {
 	return &Client{
-		socketPath: socketPath,
-		keyFunc:    key,
-		proto:      0,
+		socketPath:          socketPath,
+		keyFunc:             key,
+		proto:               0,
+		readIdleTimeout:     300 * time.Millisecond,
+		defaultDeadlineSecs: 30,
 	}
 }
 
@@ -150,7 +154,7 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 	}
 	defer conn.Close()
 
-	setDeadline(ctx, conn)
+	c.setDeadline(ctx, conn)
 
 	// Send ping request with no proto field
 	req := map[string]interface{}{
@@ -198,7 +202,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 	}
 	defer conn.Close()
 
-	setDeadline(ctx, conn)
+	c.setDeadline(ctx, conn)
 
 	// Send list request with proto
 	req := map[string]interface{}{
@@ -218,9 +222,9 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 	}
 
 	var resp struct {
-		Ok   bool      `json:"ok"`
-		Jobs []Session `json:"jobs"`
-		Code string    `json:"code,omitempty"`
+		Ok   bool       `json:"ok"`
+		Jobs *[]Session `json:"jobs"`
+		Code string     `json:"code,omitempty"`
 	}
 
 	if err := json.Unmarshal([]byte(line), &resp); err != nil {
@@ -233,7 +237,12 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 		return nil, daemonError(errResp)
 	}
 
-	return resp.Jobs, nil
+	// Distinguish between missing jobs key and empty jobs array
+	if resp.Jobs == nil {
+		return nil, fmt.Errorf("daemon reply missing jobs field")
+	}
+
+	return *resp.Jobs, nil
 }
 
 // SendText sends text into a session via the reply operation.
@@ -261,7 +270,7 @@ func (c *Client) SendText(ctx context.Context, session, text string, submit bool
 	}
 	defer conn.Close()
 
-	setDeadline(ctx, conn)
+	c.setDeadline(ctx, conn)
 
 	// Send reply request with proto and auth
 	req := map[string]interface{}{
@@ -306,7 +315,7 @@ func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (stri
 	}
 	defer conn.Close()
 
-	setDeadline(ctx, conn)
+	c.setDeadline(ctx, conn)
 
 	// Get control key if available
 	key, _ := c.keyFunc()
@@ -335,20 +344,66 @@ func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (stri
 		return "", err
 	}
 
-	// Read the streamed bytes from the buffered reader until the connection closes or we reach a cap
+	// Read the streamed bytes with idle detection.
+	// The daemon keeps the attach connection open, so we need to detect when
+	// the stream goes idle (no data for c.readIdleTimeout) and return promptly,
+	// not wait for the full context deadline.
 	const maxBytes = 1024 * 1024 // 1MB cap
 	data := make([]byte, 0, maxBytes)
 
+	lastReadTime := time.Now()
+
 	for {
+		// Check if context is already done
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		// Calculate the read deadline: use the shorter of context deadline and idle timeout
+		var readDeadline time.Time
+		if deadline, ok := ctx.Deadline(); ok {
+			readDeadline = deadline
+		} else {
+			// Use the defaultDeadlineSecs as the hard ceiling
+			readDeadline = time.Now().Add(time.Duration(c.defaultDeadlineSecs) * time.Second)
+		}
+
+		// Also consider idle timeout: if no data arrives within readIdleTimeout, we're idle
+		idleDeadline := lastReadTime.Add(c.readIdleTimeout)
+		if idleDeadline.Before(readDeadline) {
+			readDeadline = idleDeadline
+		}
+
+		conn.SetReadDeadline(readDeadline)
+
 		buf := make([]byte, 4096)
 		n, err := reader.Read(buf)
+
 		if n > 0 {
+			// Got data - update last read time
+			lastReadTime = time.Now()
 			data = append(data, buf[:n]...)
 			if len(data) > maxBytes {
 				data = data[len(data)-maxBytes:]
 			}
 		}
+
 		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Read timeout occurred. Determine if it's because of idle or context deadline.
+				// If we've been idle for >= readIdleTimeout, the stream is idle.
+				if time.Since(lastReadTime) >= c.readIdleTimeout {
+					// Stream is idle - return what we have
+					break
+				}
+				// Check if context is done
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return "", ctxErr
+				}
+				// Shouldn't normally reach here, but continue the loop if we do
+				continue
+			}
+			// Real error (EOF, connection closed, etc.) - stop reading
 			break
 		}
 	}
@@ -376,7 +431,7 @@ func (c *Client) SendKeys(ctx context.Context, session, keys string) error {
 	}
 	defer conn.Close()
 
-	setDeadline(ctx, conn)
+	c.setDeadline(ctx, conn)
 
 	// Get control key if available
 	key, _ := c.keyFunc()
