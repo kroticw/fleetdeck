@@ -1,5 +1,17 @@
 package daemon
 
+// testdata/list_sessions.json is an anonymised capture of a real `list` reply from a
+// live daemon (cwd, name, sessionId, nonce, pid and timestamps replaced; needs/intent/
+// detail rewritten to neutral text of the same shape). Three of its four records are
+// derived from that capture. The fourth (short "e4fa5037": tempo=active, state=blocked,
+// needs="") is added by hand, because the live capture used for this fixture did not
+// happen to contain that form. It is nonetheless attested: this form was observed live
+// on this machine, a session parked for roughly an hour with
+// detail="awaiting user decision on a dependency version" — recorded in
+// docs/protocol/daemon-control-socket.md section 5 as one of the three waiting forms
+// this client must handle, and it is exactly the form that justifies checking Session's
+// State field in Waiting(), not just Tempo.
+
 import (
 	"bufio"
 	"bytes"
@@ -95,9 +107,13 @@ func TestFixtureParsesViaListSessions(t *testing.T) {
 	}
 }
 
-// TestWaitingAgainstFixture parses the fixture through ListSessions and checks that it
-// carries both real waiting forms plus a plainly working session, and that Waiting()
-// agrees with the raw fields on every record.
+// TestWaitingAgainstFixture parses the fixture through ListSessions and checks
+// Waiting() against a table of literal, explicit expectations keyed by each record's
+// short id. Every entry is a fact asserted about that specific fixture record, not an
+// expression recomputed from the Session's own fields — recomputing it (as an earlier
+// version of this test did with `s.State == "blocked" || s.Tempo == "blocked" ||
+// s.Needs != ""`) would make the test agree with any definition of Waiting(), including
+// a wrong one, since both sides change together.
 func TestWaitingAgainstFixture(t *testing.T) {
 	line := loadFixtureLine(t)
 
@@ -123,30 +139,42 @@ func TestWaitingAgainstFixture(t *testing.T) {
 		t.Fatalf("ListSessions: %v", err)
 	}
 
-	var foundForm1, foundForm2, foundWorking bool
-	for _, s := range sessions {
-		want := s.State == "blocked" || s.Tempo == "blocked" || s.Needs != ""
-		if s.Waiting() != want {
-			t.Errorf("Waiting() disagrees with raw fields for %+v", s)
-		}
-		switch {
-		case s.State == "blocked" && s.Tempo != "blocked":
-			foundForm1 = true
-		case s.Tempo == "blocked" && s.Needs != "":
-			foundForm2 = true
-		case !s.Waiting():
-			foundWorking = true
-		}
+	want := map[string]bool{
+		// tempo=blocked, state=blocked: a "choose:" question is pending (waiting
+		// form 3 — tempo and state agree, both signal waiting).
+		"a1c92f04": true,
+		// tempo=active, state=working, needs="": plainly working, nothing pending.
+		"b2d83e15": false,
+		// tempo=active, state=working, needs="": plainly working, nothing pending.
+		"c3e94f26": false,
+		// tempo=active, state=blocked, needs="": waiting form 2, attested live (see
+		// the file-level comment above) — the record that specifically justifies
+		// checking State, since Tempo alone says "active" here.
+		"e4fa5037": true,
 	}
 
-	if !foundForm1 {
-		t.Error("fixture should contain the state=blocked waiting form")
+	if len(sessions) != len(want) {
+		t.Fatalf("fixture has %d sessions but the expectation table has %d entries; keep them in sync", len(sessions), len(want))
 	}
-	if !foundForm2 {
-		t.Error("fixture should contain the tempo=blocked/needs waiting form")
+
+	for _, s := range sessions {
+		expect, ok := want[s.Short]
+		if !ok {
+			t.Fatalf("fixture contains short %q, which is not in the expectation table", s.Short)
+		}
+		if got := s.Waiting(); got != expect {
+			t.Errorf("Waiting() = %v for short %q, want %v", got, s.Short, expect)
+		}
 	}
-	if !foundWorking {
-		t.Error("fixture should contain at least one plainly working session")
+}
+
+// TestWaitingRateLimitedIsNotWaiting locks in the fix for Waiting() over-reaching: a
+// non-empty Needs on its own (as seen on a rate-limited or login-required session) must
+// not count as waiting for a human decision.
+func TestWaitingRateLimitedIsNotWaiting(t *testing.T) {
+	s := Session{State: "working", Tempo: "active", Needs: "rate limited, retrying in 30s"}
+	if s.Waiting() {
+		t.Error("a rate-limited session with a non-empty Needs must not be Waiting()")
 	}
 }
 
@@ -181,6 +209,9 @@ func TestMissingSocketErrDaemonUnavailable(t *testing.T) {
 	})
 
 	_, err := client.ListSessions(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for a missing socket, got nil")
+	}
 	if !errors.Is(err, ErrDaemonUnavailable) {
 		t.Errorf("expected ErrDaemonUnavailable, got %v", err)
 	}
@@ -300,14 +331,14 @@ func TestListSessionsCachedProtoTimesOut(t *testing.T) {
 		return "key", nil
 	})
 	// Set a short deadline so test doesn't wait 30 seconds
-	client.defaultDeadlineSecs = 1
+	client.defaultDeadline = 1 * time.Second
 
 	// Prime the cache with a ping
 	_, _ = client.Ping(context.Background())
 
 	// Now call ListSessions with context.Background() (no deadline).
 	// Without the deadline fallback, this would hang forever.
-	// With it, it should timeout after defaultDeadlineSecs (1 second).
+	// With it, it should timeout after defaultDeadline (1 second).
 	_, err = client.ListSessions(context.Background())
 	if err == nil {
 		t.Error("expected timeout error for ListSessions with cached proto and no context deadline, got nil")
@@ -497,6 +528,139 @@ func TestPingNoProtoField(t *testing.T) {
 	case err := <-errChan:
 		t.Fatalf("error in server: %v", err)
 	default:
+	}
+}
+
+// TestPingMissingProtoIsError covers the case that used to silently produce
+// Info{Proto: 0}, nil: a ping reply with no proto field at all. Proto 0 is
+// indistinguishable from "not yet negotiated" in the client's cache, so accepting it
+// would make ensureProto re-ping on every subsequent call.
+func TestPingMissingProtoIsError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":true,"op":"ping","version":"2.1.263"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	info, err := client.Ping(context.Background())
+	if err == nil {
+		t.Fatalf("expected an error for a ping reply with no proto field, got Info=%+v", info)
+	}
+	if info.Proto != 0 {
+		t.Errorf("expected a zero Info on error, got %+v", info)
+	}
+}
+
+// TestPingNonNumberProtoIsError covers a proto field present but not a number.
+func TestPingNonNumberProtoIsError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":"1"}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	info, err := client.Ping(context.Background())
+	if err == nil {
+		t.Fatalf("expected an error for a non-numeric proto field, got Info=%+v", info)
+	}
+	if info.Proto != 0 {
+		t.Errorf("expected a zero Info on error, got %+v", info)
+	}
+}
+
+// TestListSessionsErrorWithoutCodeIsCleanError covers an "ok":false list reply carrying
+// no code field at all: it must produce a clean "unknown error", never the dangling
+// "unknown error: " that daemonError(...) would otherwise build from an empty code.
+func TestListSessionsErrorWithoutCodeIsCleanError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	_, err = client.ListSessions(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for an ok:false reply with no code, got nil")
+	}
+	if err.Error() != "unknown error" {
+		t.Errorf("expected a clean %q, got %q", "unknown error", err.Error())
+	}
+}
+
+// --- resolveSocketCandidate: an ownership refusal must not collapse into a bare
+// ErrDaemonUnavailable when every candidate is refused ---
+
+// TestResolveSocketCandidateReportsOwnershipRefusal covers the one situation the
+// client-side ownership check exists for: a foreign socket planted ahead of the real
+// daemon. When every candidate is refused on ownership grounds, that refusal must be
+// visible in the returned error, not silently discarded in favour of a bare
+// ErrDaemonUnavailable that would read exactly like "the daemon just isn't running".
+func TestResolveSocketCandidateReportsOwnershipRefusal(t *testing.T) {
+	base := shortTempDir(t)
+	insecureDir := filepath.Join(base, "insecure")
+	if err := os.Mkdir(insecureDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Chmod(insecureDir, 0o777); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	sockPath := filepath.Join(insecureDir, "control.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	_, err = resolveSocketCandidate([]string{sockPath})
+	if err == nil {
+		t.Fatal("expected an error when the only candidate fails the ownership check")
+	}
+	if !errors.Is(err, ErrDaemonUnavailable) {
+		t.Errorf("expected the error to still satisfy errors.Is(err, ErrDaemonUnavailable), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "writable by group or other") {
+		t.Errorf("expected the ownership refusal to be visible in the error, got: %v", err)
+	}
+}
+
+// TestResolveSocketCandidateNoMatchesIsPlainUnavailable covers the ordinary case: no
+// candidates at all (the daemon simply is not running) stays a bare ErrDaemonUnavailable
+// with no refusal noise attached.
+func TestResolveSocketCandidateNoMatchesIsPlainUnavailable(t *testing.T) {
+	_, err := resolveSocketCandidate(nil)
+	if !errors.Is(err, ErrDaemonUnavailable) {
+		t.Errorf("expected ErrDaemonUnavailable, got %v", err)
 	}
 }
 
@@ -730,6 +894,52 @@ func TestSendTextKeyFunctionFailure(t *testing.T) {
 	defer mu.Unlock()
 	if requestReceived {
 		t.Error("server should not have received any request")
+	}
+}
+
+// TestSendKeysKeyFunctionFailure covers the security blocker: SendKeys is a write into
+// a live session's PTY, exactly like SendText writing into a session's prompt, and must
+// refuse the same way when no control key is available — never falling back to an
+// unauthenticated attach that the daemon would let through on its peer-uid check alone.
+// This asserts the fake server sees no connection at all, not merely that an error came
+// back, so it fails if a future change dials before checking the key.
+func TestSendKeysKeyFunctionFailure(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	var (
+		mu              sync.Mutex
+		requestReceived bool
+	)
+	go func() {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			mu.Lock()
+			requestReceived = true
+			mu.Unlock()
+			conn.Close()
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "", ErrNoControlKey
+	})
+	client.proto = 1
+
+	// SendKeys must return ErrNoControlKey before it ever dials, so by the time this
+	// call returns there is nothing left to wait for.
+	err = client.SendKeys(context.Background(), "session123", "hello")
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Errorf("expected ErrNoControlKey, got %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if requestReceived {
+		t.Error("server should not have received any connection at all")
 	}
 }
 
@@ -1314,6 +1524,9 @@ func TestErrorMessageNoControlKey(t *testing.T) {
 	client.proto = 1
 
 	err = client.SendText(context.Background(), "session123", "text", true)
+	if err == nil {
+		t.Fatal("expected an error for an EAUTH reply, got nil")
+	}
 
 	// The error message should not contain the control key
 	if strings.Contains(err.Error(), "super-secret-key-abc123xyz789") {
@@ -1425,7 +1638,7 @@ func TestReadScreenNoCtxDeadlineChattySession(t *testing.T) {
 		return "key", nil
 	})
 	client.proto = 1
-	client.defaultDeadlineSecs = 1
+	client.defaultDeadline = 1 * time.Second
 
 	done := make(chan struct{})
 	go func() {
@@ -1436,7 +1649,7 @@ func TestReadScreenNoCtxDeadlineChattySession(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("ReadScreen did not return within 5s despite a 1s defaultDeadlineSecs ceiling")
+		t.Fatal("ReadScreen did not return within 5s despite a 1s defaultDeadline ceiling")
 	}
 }
 
@@ -1477,7 +1690,7 @@ func TestReadScreenIdleDetection(t *testing.T) {
 	})
 	client.proto = 1
 	client.readIdleTimeout = 200 * time.Millisecond // Short timeout for testing
-	client.defaultDeadlineSecs = 2                  // Short deadline so test doesn't hang
+	client.defaultDeadline = 2 * time.Second        // Short deadline so test doesn't hang
 
 	// This should return quickly (within ~500ms) due to idle detection,
 	// not wait for the full 2-second deadline
@@ -1545,6 +1758,47 @@ func TestNewNilKeyFuncSendTextReturnsErrNoControlKey(t *testing.T) {
 	err := client.SendText(context.Background(), "session123", "hello", true)
 	if !errors.Is(err, ErrNoControlKey) {
 		t.Errorf("expected ErrNoControlKey, got %v", err)
+	}
+}
+
+// TestNewNilKeyFuncSendKeysReturnsErrNoControlKeyAndDialsNothing is the exact
+// reproduction of the security blocker: a client built with New(sock, nil) — a
+// guaranteed-unavailable key — must not attach with no auth field and let arbitrary
+// bytes through on the daemon's peer-uid check alone. It must refuse before dialling at
+// all, the same as SendText does.
+func TestNewNilKeyFuncSendKeysReturnsErrNoControlKeyAndDialsNothing(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	var (
+		mu         sync.Mutex
+		sawConnect bool
+	)
+	go func() {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			mu.Lock()
+			sawConnect = true
+			mu.Unlock()
+			conn.Close()
+		}
+	}()
+
+	client := New(listener.Addr().String(), nil)
+	client.proto = 1
+
+	err = client.SendKeys(context.Background(), "session123", "rm -rf /\n")
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Errorf("expected ErrNoControlKey, got %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if sawConnect {
+		t.Error("the fake daemon should never have received a connection at all")
 	}
 }
 
@@ -1789,10 +2043,19 @@ func TestClientRefusesInsecureSocketDirectory(t *testing.T) {
 
 // --- SendKeys: no per-key acknowledgement exists, but a fast close is surfaced ---
 
-// TestSendKeysReturnsErrorWhenConnectionClosesRightAfterWrite covers the one signal
-// this protocol does offer past the header: the connection closing (a kick, or the
-// session exiting) right after delivery. This must not be reported as success.
-func TestSendKeysReturnsErrorWhenConnectionClosesRightAfterWrite(t *testing.T) {
+// TestSendKeysConnectionClosingAfterDeliveryIsNotAnError covers the one signal this
+// protocol offers past the header — the connection closing right after the keys are
+// written — and asserts it is treated as the normal outcome it actually is. The keys
+// were already confirmed written (conn.Write succeeded) before the daemon closed the
+// connection; closing then happens because the session finished its turn or another
+// attacher took over, both of which can happen as a direct consequence of the very keys
+// just delivered. Reporting this as an error would invite a caller to retry, and a
+// retry here means typing into a live session a second time.
+//
+// This replaces a previous version of this test, which asserted the opposite (that a
+// post-write close must be an error) — enshrining exactly the bug this test now guards
+// against.
+func TestSendKeysConnectionClosingAfterDeliveryIsNotAnError(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -1821,7 +2084,141 @@ func TestSendKeysReturnsErrorWhenConnectionClosesRightAfterWrite(t *testing.T) {
 	client.proto = 1
 
 	err = client.SendKeys(context.Background(), "session123", "x")
-	if err == nil {
-		t.Fatal("expected an error when the connection closes right after the keys are written")
+	if err != nil {
+		t.Fatalf("expected nil: the keys were delivered and the connection closing afterward is normal, got %v", err)
+	}
+}
+
+// TestSendKeysWriteFailureReturnsErrKeysNotDelivered covers the other, genuinely
+// distinct outcome: the write of the key bytes itself fails, before any bytes are
+// confirmed sent. Closing the connection immediately after the header — before the
+// client's conn.Write call — reliably provokes a write error on the client side. This
+// must surface as the typed *ErrKeysNotDelivered, distinguishable from the "delivered,
+// then closed" case above, which returns nil.
+func TestSendKeysWriteFailureReturnsErrKeysNotDelivered(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		reader := bufio.NewReader(conn)
+		if _, err := reader.ReadString('\n'); err != nil {
+			conn.Close()
+			return
+		}
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		conn.Close() // close before the client ever writes the key bytes
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	// Give the fake server's close a moment to actually land before we write, so the
+	// write reliably fails rather than racing a still-open connection.
+	time.Sleep(50 * time.Millisecond)
+
+	err = client.SendKeys(context.Background(), "session123", "x")
+	var notDelivered *ErrKeysNotDelivered
+	if !errors.As(err, &notDelivered) {
+		t.Errorf("expected *ErrKeysNotDelivered, got %T: %v", err, err)
+	}
+}
+
+// --- EKICKED: the daemon evicting an attacher must not look like a normal outcome ---
+
+// TestReadScreenDetectsEkicked covers the read path: the daemon writes a plain-text
+// "EKICKED: ..." marker into the stream in place of PTY bytes when this attach is
+// evicted, then closes. Before the fix, ReadScreen returned those bytes as ordinary
+// screen content with a nil error — a poller calling ReadScreen on a cadence would meet
+// this regularly and never notice it had been kicked.
+func TestReadScreenDetectsEkicked(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		conn.Write([]byte("EKICKED: another connection attached"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	var kicked *ErrKicked
+	if !errors.As(err, &kicked) {
+		t.Fatalf("expected *ErrKicked, got %T: %v", err, err)
+	}
+	if kicked.Detail != "another connection attached" {
+		t.Errorf("expected detail %q, got %q", "another connection attached", kicked.Detail)
+	}
+	if out != "" {
+		t.Errorf("expected no screen content on a kicked attach, got %q", out)
+	}
+}
+
+// TestSendKeysDetectsEkicked covers the key-delivery path: the keys are written, but
+// the daemon's very next bytes are the EKICKED marker rather than silence or a close.
+// Before the fix, sendKeysOnce read those bytes into its buffer, saw a nil error (data
+// was read, not a close), and reported success — indistinguishable from an ordinary
+// delivery.
+func TestSendKeysDetectsEkicked(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		if _, err := reader.ReadString('\n'); err != nil {
+			return
+		}
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+
+		buf := make([]byte, 1024)
+		_, _ = conn.Read(buf) // read the key bytes
+
+		conn.Write([]byte("EKICKED: evicted by another attacher"))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	err = client.SendKeys(context.Background(), "session123", "x")
+	var kicked *ErrKicked
+	if !errors.As(err, &kicked) {
+		t.Fatalf("expected *ErrKicked, got %T: %v", err, err)
+	}
+	if kicked.Detail != "evicted by another attacher" {
+		t.Errorf("expected detail %q, got %q", "evicted by another attacher", kicked.Detail)
 	}
 }

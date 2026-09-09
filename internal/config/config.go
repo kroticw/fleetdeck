@@ -141,6 +141,17 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
+	// A config file must be a single YAML document. A second document after a "---"
+	// separator is silently ignored by decoder.Decode above if we stop here — far more
+	// likely to be a mistake (a leftover block from editing, a botched merge) than
+	// intentional multi-document YAML, which this format was never designed to carry.
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); err == nil {
+		return Config{}, fmt.Errorf("parse config %s: file contains more than one YAML document", path)
+	} else if !errors.Is(err, io.EOF) {
+		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
+	}
+
 	c := fileToConfig(f)
 	if err := validate(c); err != nil {
 		return Config{}, fmt.Errorf("invalid config %s: %w", path, err)
@@ -167,9 +178,12 @@ func validate(c Config) error {
 // Load would refuse — the UI writes here whenever the user toggles notifications or
 // pins the orchestrator session, so a bad write would be a live way to brick the next
 // startup. The write itself goes through a temporary file in the same directory
-// followed by a rename, so a write interrupted by a full disk or a killed process
-// leaves the previous file intact rather than a truncated one: rename is atomic on
-// the same filesystem, which a same-directory temp file guarantees.
+// followed by a rename, so a write interrupted by a killed process leaves the previous
+// file intact rather than a truncated one: rename is atomic on the same filesystem,
+// which a same-directory temp file guarantees. The temp file is fsynced before the
+// rename (and the directory fsynced, best-effort, after it) so that guarantee also
+// holds across a crash or power loss, not only a killed process: without the sync, the
+// rename can reach disk before the data it points to does.
 func Save(path string, c Config) error {
 	if err := validate(c); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
@@ -201,6 +215,10 @@ func Save(path string, c Config) error {
 		tmp.Close()
 		return fmt.Errorf("set config file permissions: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp config file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp config file: %w", err)
 	}
@@ -208,5 +226,15 @@ func Save(path string, c Config) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("replace config file: %w", err)
 	}
+
+	// Fsync the directory too, so the rename entry itself is durable across a crash,
+	// not just the file's contents. This is best-effort: not every platform supports
+	// syncing a directory handle, and the rename has already succeeded and is readable
+	// either way — only the crash-durability guarantee would be weaker without it.
+	if dir, err := os.Open(dir); err == nil {
+		_ = dir.Sync()
+		dir.Close()
+	}
+
 	return nil
 }

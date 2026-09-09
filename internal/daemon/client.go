@@ -1,7 +1,15 @@
+// Package daemon implements a client for the fleetdeck daemon's Unix control socket.
+//
+// The wire protocol (framing, envelope, operations, error codes, the control key's
+// rules, and the three observed forms of a session "waiting for a human") is documented
+// in full at docs/protocol/daemon-control-socket.md, tracked in this repository. Do not
+// look for it under .superpowers/ — that directory is gitignored and carries no
+// authoritative information for a public checkout.
 package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,15 +48,33 @@ func SocketPath() (string, error) {
 		return "", err
 	}
 
+	return resolveSocketCandidate(matches)
+}
+
+// resolveSocketCandidate tries each candidate socket path in order and returns the
+// first that is both safely owned and actually accepts a connection. It is split out
+// from SocketPath so the refusal-collection behaviour below can be tested directly,
+// without needing to plant sockets under the real, uid-specific /tmp path SocketPath
+// globs.
+//
+// When one or more candidates exist but every one of them is refused on ownership
+// grounds, that refusal is returned instead of being silently discarded in favour of
+// ErrDaemonUnavailable. Ownership refusal is the one signal that exists for a foreign
+// socket planted in the world-writable /tmp ahead of the real daemon — reporting it as
+// plain unavailability, indistinguishable from "the daemon just isn't running", would
+// throw away the only evidence of a possible attack.
+func resolveSocketCandidate(matches []string) (string, error) {
 	if len(matches) == 0 {
 		return "", ErrDaemonUnavailable
 	}
 
+	var refusals []error
 	for _, candidate := range matches {
 		// /tmp is world-writable: skip any candidate that is not safely owned
 		// before even probing it, so a planted socket is never dialed just to
 		// check liveness.
 		if err := checkSocketOwnership(candidate); err != nil {
+			refusals = append(refusals, err)
 			continue
 		}
 		conn, err := net.DialTimeout("unix", candidate, 500*time.Millisecond)
@@ -59,6 +85,9 @@ func SocketPath() (string, error) {
 		return candidate, nil
 	}
 
+	if len(refusals) > 0 {
+		return "", errors.Join(append([]error{ErrDaemonUnavailable}, refusals...)...)
+	}
 	return "", ErrDaemonUnavailable
 }
 
@@ -115,7 +144,7 @@ func (c *Client) setDeadline(ctx context.Context, conn net.Conn) {
 	if deadline, ok := ctx.Deadline(); ok {
 		conn.SetDeadline(deadline)
 	} else {
-		conn.SetDeadline(time.Now().Add(time.Duration(c.defaultDeadlineSecs) * time.Second))
+		conn.SetDeadline(time.Now().Add(c.defaultDeadline))
 	}
 }
 
@@ -149,15 +178,15 @@ func stubKeyFunc() (string, error) {
 
 // Client represents a connection to the daemon control socket.
 type Client struct {
-	pathMu              sync.Mutex // guards socketPath; a discoverable client can re-resolve it under concurrent use
-	socketPath          string
-	discoverable        bool                   // true for a client created with Discover; re-resolves its socket on a dial failure
-	resolve             func() (string, error) // re-resolves the socket path; set to SocketPath by Discover, injectable in tests
-	keyFunc             func() (string, error)
-	protoMu             sync.Mutex    // guards proto; the client is shared between a poller and request handlers
-	proto               int           // cached protocol number from ping
-	readIdleTimeout     time.Duration // idle timeout for ReadScreen (default 300ms)
-	defaultDeadlineSecs int           // default deadline in seconds when context has none (default 30)
+	pathMu          sync.Mutex // guards socketPath; a discoverable client can re-resolve it under concurrent use
+	socketPath      string
+	discoverable    bool                   // true for a client created with Discover; re-resolves its socket on a dial failure
+	resolve         func() (string, error) // re-resolves the socket path; set to SocketPath by Discover, injectable in tests
+	keyFunc         func() (string, error)
+	protoMu         sync.Mutex    // guards proto; the client is shared between a poller and request handlers
+	proto           int           // cached protocol number from ping
+	readIdleTimeout time.Duration // idle timeout for ReadScreen (default 300ms)
+	defaultDeadline time.Duration // default deadline when context carries none (default 30s)
 }
 
 // New creates a daemon client bound to an explicit socket path for its whole lifetime.
@@ -173,10 +202,10 @@ func New(socketPath string, key func() (string, error)) *Client {
 		key = stubKeyFunc
 	}
 	return &Client{
-		socketPath:          socketPath,
-		keyFunc:             key,
-		readIdleTimeout:     300 * time.Millisecond,
-		defaultDeadlineSecs: 30,
+		socketPath:      socketPath,
+		keyFunc:         key,
+		readIdleTimeout: 300 * time.Millisecond,
+		defaultDeadline: 30 * time.Second,
 	}
 }
 
@@ -362,6 +391,24 @@ func readAttachHeader(reader *bufio.Reader) error {
 	return nil
 }
 
+// ekickedPrefix is the plain-text marker the daemon writes into an attach stream, in
+// place of PTY bytes, when it evicts this connection — another attacher took over, or
+// the daemon otherwise dropped it. See docs/protocol/daemon-control-socket.md section 8.
+const ekickedPrefix = "EKICKED:"
+
+// parseKickedMarker reports whether data contains the daemon's kick marker and, if so,
+// returns the reason text that follows it, trimmed of surrounding whitespace. Both the
+// screen-reading path and the key-sending path must check for this marker rather than
+// treating the bytes as ordinary stream content or a successful delivery.
+func parseKickedMarker(data []byte) (detail string, kicked bool) {
+	idx := bytes.Index(data, []byte(ekickedPrefix))
+	if idx < 0 {
+		return "", false
+	}
+	rest := data[idx+len(ekickedPrefix):]
+	return strings.TrimSpace(string(rest)), true
+}
+
 // daemonError converts a daemon error response into a typed error.
 func daemonError(resp map[string]interface{}) error {
 	code, ok := resp["code"].(string)
@@ -424,12 +471,26 @@ func (c *Client) Ping(ctx context.Context) (Info, error) {
 	if version, ok := resp["version"].(string); ok {
 		info.Version = version
 	}
-	if proto, ok := resp["proto"].(float64); ok {
-		info.Proto = int(proto)
-		c.protoMu.Lock()
-		c.proto = info.Proto
-		c.protoMu.Unlock()
+
+	// A ping reply without a usable proto is an error about the reply itself, not a
+	// silent Info{Proto: 0}. Proto 0 is indistinguishable from "not yet negotiated" in
+	// the cache (see ensureProto), so accepting it here would make every subsequent
+	// call re-ping, roughly doubling request volume against a poller — and it would
+	// surface downstream as a spurious "proto mismatch" even though the daemon never
+	// actually disagreed about a version.
+	protoValue, ok := resp["proto"]
+	if !ok {
+		return Info{}, errors.New("ping reply missing proto field")
 	}
+	protoNum, ok := protoValue.(float64)
+	if !ok {
+		return Info{}, fmt.Errorf("ping reply proto field is not a number: %v", protoValue)
+	}
+
+	info.Proto = int(protoNum)
+	c.protoMu.Lock()
+	c.proto = info.Proto
+	c.protoMu.Unlock()
 
 	return info, nil
 }
@@ -487,6 +548,13 @@ func (c *Client) listSessionsOnce(ctx context.Context) ([]Session, error) {
 	}
 
 	if !resp.Ok {
+		// A reply with no code at all must not become &ErrUnknown{Code: ""}, which
+		// daemonError would otherwise happily build — that prints as "unknown error: "
+		// with a dangling colon and nothing after it. Every other error path in this
+		// function already produces a clean message when there is no code; match that.
+		if resp.Code == "" {
+			return nil, errors.New("unknown error")
+		}
 		// Reconstruct error response for daemonError
 		errResp := map[string]interface{}{"code": resp.Code}
 		return nil, daemonError(errResp)
@@ -561,9 +629,15 @@ func (c *Client) sendTextOnce(ctx context.Context, session, text string) error {
 }
 
 // trimToRuneBoundary drops leading bytes that are the tail end of a multi-byte UTF-8
-// sequence whose start was cut off. It guards against handing a caller a byte slice
-// that begins mid-rune (which would also garble an ANSI escape sequence cut the same
-// way) after we truncate a byte buffer from the front.
+// sequence whose start was cut off, so a byte-oriented truncation never hands the
+// caller a slice that begins mid-rune.
+//
+// It does NOT reconstruct or otherwise protect a truncated ANSI escape sequence. Cutting
+// off the front of, say, "\x1b[31m" leaves "[31m" — every byte of which is a perfectly
+// valid, ordinary rune, so this function has no reason to touch it — and it will render
+// as the literal text "[31m" rather than a colour change. Fixing that would require
+// parsing escape sequences, which this function deliberately does not attempt: it only
+// protects rune boundaries, nothing more.
 func trimToRuneBoundary(b []byte) []byte {
 	for len(b) > 0 {
 		r, size := utf8.DecodeRune(b)
@@ -592,7 +666,7 @@ func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (stri
 	// ctx.Err() is the loop's only exit condition instead of two competing clocks.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(c.defaultDeadlineSecs)*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, c.defaultDeadline)
 		defer cancel()
 	}
 
@@ -686,6 +760,15 @@ readLoop:
 			// Got data - update last read time
 			lastReadTime = time.Now()
 			data = append(data, buf[:n]...)
+
+			// A kicked attach is otherwise indistinguishable from a normal one: the
+			// marker arrives as ordinary-looking bytes on this same read. Detect it
+			// on the accumulated buffer (the marker can straddle two reads) before
+			// treating anything here as screen content.
+			if detail, kicked := parseKickedMarker(data); kicked {
+				return "", &ErrKicked{Detail: detail}
+			}
+
 			if len(data) > maxBytes {
 				data = trimToRuneBoundary(data[len(data)-maxBytes:])
 			}
@@ -716,7 +799,16 @@ readLoop:
 	return string(data), nil
 }
 
-// SendKeys sends key bytes via an attach connection.
+// SendKeys sends key bytes via an attach connection. This is a write into a live
+// session's terminal, exactly like SendText: it requires a control key and returns
+// ErrNoControlKey before dialling when none is available, rather than silently
+// degrading to some read-only behaviour.
+//
+// SendKeys must never be retried blindly by a caller. The attach protocol offers no
+// per-delivery acknowledgement (see sendKeysOnce), so even the errors it returns do not
+// always mean "nothing happened": a write failure ([ErrKeysNotDelivered]) can still have
+// delivered a partial prefix of the keys to the daemon before failing. A caller that
+// retries on any non-nil error risks typing into the session a second time.
 func (c *Client) SendKeys(ctx context.Context, session, keys string) error {
 	err := c.sendKeysOnce(ctx, session, keys)
 	if isProtoErr(err) {
@@ -729,6 +821,16 @@ func (c *Client) SendKeys(ctx context.Context, session, keys string) error {
 }
 
 func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
+	// Get the control key first, before making any network calls. SendKeys types into
+	// a live session's PTY exactly like SendText types into its prompt; both are
+	// writes, and both must be refused the same way when no key is available, rather
+	// than silently attaching with no auth and relying on the daemon's peer-uid check
+	// alone.
+	key, err := c.keyFunc()
+	if err != nil {
+		return ErrNoControlKey
+	}
+
 	proto, err := c.ensureProto(ctx)
 	if err != nil {
 		return err
@@ -742,20 +844,13 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 
 	c.setDeadline(ctx, conn)
 
-	// Get control key if available
-	key, _ := c.keyFunc()
-
-	// Build attach request. Only include auth if key is available.
 	req := map[string]interface{}{
 		"proto": proto,
 		"op":    "attach",
 		"short": session,
 		"cols":  80,
 		"rows":  24,
-	}
-
-	if key != "" {
-		req["auth"] = key
+		"auth":  key,
 	}
 
 	if err := c.writeRequest(conn, req); err != nil {
@@ -768,9 +863,13 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 		return err
 	}
 
-	// Write the key bytes.
+	// Write the key bytes. A failure here means delivery could not be confirmed at
+	// all — not that nothing happened: a stream socket write can fail after writing a
+	// partial prefix of its argument, so the daemon may already have received some of
+	// the keys. Report it distinctly from a post-write close (below), which is a
+	// confirmed delivery.
 	if _, err := conn.Write([]byte(keys)); err != nil {
-		return fmt.Errorf("writing keys: %w", err)
+		return &ErrKeysNotDelivered{Err: err}
 	}
 
 	// The attach protocol has no per-delivery acknowledgement past the header:
@@ -779,15 +878,32 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	// the session's PTY writer with no reply message of any kind. The only signal
 	// observable from here is the connection closing, which happens if another
 	// attacher kicks this one or the session exits — not a per-key acknowledgement.
-	// Give the daemon a brief window to produce that signal; silence within it is
-	// the best confirmation this protocol offers, so treat a timeout as success.
+	// Give the daemon a brief window to produce that signal.
 	conn.SetReadDeadline(time.Now().Add(c.readIdleTimeout))
 	buf := make([]byte, 256)
-	if _, err := reader.Read(buf); err != nil {
+	n, err := reader.Read(buf)
+	if n > 0 {
+		if detail, kicked := parseKickedMarker(buf[:n]); kicked {
+			// The keys were written to the connection, but a kick observed in the
+			// same read means another attacher may have taken over before (or as)
+			// the daemon applied them — unlike a plain close, this is a signal
+			// worth surfacing distinctly rather than folding into "success".
+			return &ErrKicked{Detail: detail}
+		}
+	}
+	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			// Silence within the window is the best confirmation this protocol
+			// offers for an ordinary delivery.
 			return nil
 		}
-		return fmt.Errorf("connection closed while delivering keys: %w", err)
+		// The write above already succeeded, so the keys are known to have reached
+		// the daemon. The connection closing now — because the session finished its
+		// turn, or another attacher took over, both of which can happen as a direct
+		// consequence of the very keys just delivered — is a normal outcome, not a
+		// delivery failure. Reporting it as an error here would invite a retry at a
+		// higher layer, and a retry means typing into a live session twice.
+		return nil
 	}
 
 	return nil

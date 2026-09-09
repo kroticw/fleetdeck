@@ -51,11 +51,26 @@ func TestLoadCommentOnlyFileReturnsDefaults(t *testing.T) {
 
 func TestLoadBrokenFileIsAnError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "broken.yaml")
-	if err := os.WriteFile(p, []byte("server_port: [1,2\n"), 0o600); err != nil {
+	// This must be malformed for exactly one reason: invalid YAML syntax (an unclosed
+	// flow sequence), under a key ("server.port") that Load actually recognises. The
+	// previous fixture, "server_port: [1,2", was invalid YAML AND an unknown top-level
+	// key at once, so it was green whether or not the syntax-error path worked at all.
+	if err := os.WriteFile(p, []byte("server:\n  port: [1,2\n"), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
 	if _, err := Load(p); err == nil {
 		t.Fatal("a broken config must fail loudly, not fall back to defaults")
+	}
+}
+
+func TestLoadMultipleDocumentsIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "multi.yaml")
+	content := "server:\n  port: 1234\n---\nboard:\n  path: /x\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("a second YAML document after '---' must be rejected, not silently ignored")
 	}
 }
 
@@ -321,6 +336,33 @@ func TestSaveWritesCompleteValidYAML(t *testing.T) {
 	}
 	if got.BoardPath != want.BoardPath {
 		t.Fatalf("round trip lost data: %+v", got)
+	}
+}
+
+func TestSaveWritesFilePerms0600AndDirPerms0700(t *testing.T) {
+	// Use a subdirectory Save must create itself via MkdirAll, so the directory's
+	// permissions are also Save's doing, not an artefact of t.TempDir().
+	dir := filepath.Join(t.TempDir(), "sub", "dir")
+	p := filepath.Join(dir, "c.yaml")
+
+	if err := Save(p, Default()); err != nil {
+		t.Fatal(err)
+	}
+
+	fileInfo, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fileInfo.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected config file mode 0600, got %o", perm)
+	}
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+		t.Errorf("expected config dir mode 0700, got %o", perm)
 	}
 }
 
