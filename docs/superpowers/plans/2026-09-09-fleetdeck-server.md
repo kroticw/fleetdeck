@@ -6,13 +6,13 @@
 
 **Architecture:** три источника данных, каждый в своём пакете `internal/`, не знающем о вебе: демон через unix-сокет, транскрипты через чтение `jsonl`, доска через файлы с YAML-frontmatter и git. Пакет `internal/state` собирает из них снимок и определяет события, `internal/server` отдаёт снимок наружу, тонкий `cmd/fleetdeck` связывает всё вместе.
 
-**Tech Stack:** Go 1.25, стандартная библиотека, `gopkg.in/yaml.v3` для конфигурации и frontmatter, `github.com/fsnotify/fsnotify` для слежения за карточками, `github.com/coder/websocket` для WebSocket. Больше зависимостей не добавлять без явного решения.
+**Tech Stack:** Go 1.27, стандартная библиотека, `gopkg.in/yaml.v3` для конфигурации и frontmatter, `github.com/fsnotify/fsnotify` для слежения за карточками, `github.com/coder/websocket` для WebSocket. Больше зависимостей не добавлять без явного решения.
 
 **Spec:** `docs/superpowers/specs/2026-09-09-fleetdeck-design.md`
 
 ## Global Constraints
 
-- Go 1.25 или новее; модуль называется `github.com/kroticw/fleetdeck`.
+- Go 1.27 или новее; модуль называется `github.com/kroticw/fleetdeck`. В `go.mod` записывается `go 1.27.1`: `GOTOOLCHAIN` по умолчанию `auto`, поэтому машина с более старым Go сама подтянет нужный toolchain, и требовать ручной установки не нужно.
 - Сервер слушает только `127.0.0.1`, порт по умолчанию `7777`.
 - OAuth-токен из Keychain отправляется только на `api.anthropic.com`, не логируется, не пишется на диск, не попадает в ответы API.
 - Три источника правды не смешиваются: демон отвечает за жизнь сессии, транскрипт за то, что она делала, файлы доски за смысл задачи. Состояние сессии никогда не пишется в карточку.

@@ -6,7 +6,7 @@
 
 **Architecture:** фронтенд без сборщика и без фреймворка — обычные ES-модули и CSS, встроенные в бинарь через `go:embed`. Единственная сторонняя библиотека, xterm.js, вендорится файлами в репозиторий, поэтому у пользователя нет ни npm, ни node. Состояние приходит одним снимком по WebSocket раз в секунду, записи идут отдельными HTTP-запросами.
 
-**Tech Stack:** Go 1.25 с `embed`, ES-модули без транспиляции, CSS без препроцессора, xterm.js 5.x вендором, launchd для автозапуска, GitHub Actions для релизов.
+**Tech Stack:** Go 1.27 с `embed`, ES-модули без транспиляции, CSS без препроцессора, xterm.js 5.x вендором, launchd для автозапуска, GitHub Actions для релизов.
 
 **Spec:** `docs/superpowers/specs/2026-09-09-fleetdeck-design.md`
 
@@ -49,7 +49,7 @@
 | `cmd/fleetdeck/init.go` | Подкоманда `init`: конфигурация, launchd, statusline, доска |
 | `plugin/` | Переехавший плагин Claude Code |
 | `.github/workflows/release.yaml` | Публикация релизных архивов по тегу |
-| `README.md`, `docs/en/`, `docs/ru/` | Документация |
+| `README.md`, `README.ru.md`, `docs/en/`, `docs/ru/` | Документация |
 
 Каждый модуль в `web/js/` экспортирует одну функцию отрисовки и подписывается на хранилище сам. Модули не знают друг о друге и общаются только через хранилище.
 
@@ -1544,30 +1544,34 @@ git commit --signoff -m "feat(plugin): move the board convention into the public
 Спека, раздел 10.1: английский — основной, русский — полноценный перевод, а не огрызок. Английский текст пишется первым, русский переводится с него.
 
 **Files:**
-- Create: `README.md`, `docs/en/getting-started.md`, `docs/en/board-convention.md`, `docs/en/configuration.md`, `docs/ru/README.md`, `docs/ru/getting-started.md`, `docs/ru/board-convention.md`, `docs/ru/configuration.md`
+- Create: `README.md`, `README.ru.md`, `docs/en/getting-started.md`, `docs/en/board-convention.md`, `docs/en/configuration.md`, `docs/ru/getting-started.md`, `docs/ru/board-convention.md`, `docs/ru/configuration.md`
 - Modify: `.github/workflows/ci.yaml`
 
 **Interfaces:**
 - Consumes: конфигурация из плана 1, `fleetdeck init` из задачи 9
 - Produces: ничего для кода
 
-- [ ] **Step 1: Написать `README.md`.** Разделы: что это (пульт для флота фоновых сессий Claude Code), почему (TUI показывает снимок, а не состояние; вопрос сессии не видно, пока не откроешь), снимок экрана, установка, `fleetdeck init`, ссылка на `docs/ru/README.md` первой строкой под заголовком. Ограничения назвать честно: только macOS, только локальный демон, читает домашний каталог пользователя.
+- [ ] **Step 1: Написать `README.md`.** Разделы: что это (пульт для флота фоновых сессий Claude Code), почему (TUI показывает снимок, а не состояние; вопрос сессии не видно, пока не откроешь), снимок экрана, установка, `fleetdeck init`, ссылка на `README.ru.md` первой строкой под заголовком. Ограничения назвать честно: только macOS, только локальный демон, читает домашний каталог пользователя.
 
-- [ ] **Step 2: Написать `docs/en/getting-started.md`.** Установка бинарника, `fleetdeck init`, `launchctl load`, открыть `http://127.0.0.1:7717`, создать первую карточку, связать её с сессией через поле `session`. Отдельный абзац: почему `session` — единственное поле, которым доска связана с демоном.
+- [ ] **Step 2: Написать `docs/en/getting-started.md`.** Установка бинарника, `fleetdeck init`, `launchctl load`, открыть `http://127.0.0.1:7777`, создать первую карточку, связать её с сессией через поле `session`. Отдельный абзац: почему `session` — единственное поле, которым доска связана с демоном.
 
 - [ ] **Step 3: Написать `docs/en/board-convention.md`.** Формат карточки, все поля фронтматтера с допустимыми значениями (`zone`, `stage`, `progress`, `session`, `repo`, `created`), правило разделения: поля правит пульт, тело правят агенты. Показать пример карточки целиком.
 
 - [ ] **Step 4: Написать `docs/en/configuration.md`.** Все ключи `config.yaml` с типами, значениями по умолчанию и тем, что сломается при неверном значении. Отдельно — где живут файлы: конфигурация, launch agent, лог.
 
-- [ ] **Step 5: Перевести на русский.** Четыре файла в `docs/ru/`, полный перевод, не сокращённый пересказ. Термины: session — сессия, board — доска, card — карточка, stage — стадия, zone — зона, digest — выжимка.
+- [ ] **Step 5: Перевести на русский.** `README.ru.md` в корне и три файла в `docs/ru/`, полный перевод, не сокращённый пересказ; `README.ru.md` ссылается на `README.md` первой строкой. Термины: session — сессия, board — доска, card — карточка, stage — стадия, zone — зона, digest — выжимка.
 
 - [ ] **Step 6: Проверить, что переводы не разъехались.** Команда — сверить число заголовков в каждой паре:
 
 ```bash
+check() {
+  en=$(grep --count '^#' "$1")
+  ru=$(grep --count '^#' "$2")
+  [ "$en" = "$ru" ] || echo "$1 vs $2: en=$en ru=$ru"
+}
+check README.md README.ru.md
 for f in getting-started board-convention configuration; do
-  en=$(grep --count '^#' docs/en/$f.md)
-  ru=$(grep --count '^#' docs/ru/$f.md)
-  [ "$en" = "$ru" ] || echo "$f: en=$en ru=$ru"
+  check "docs/en/$f.md" "docs/ru/$f.md"
 done
 ```
 
@@ -1578,7 +1582,7 @@ done
 - [ ] **Step 8: Коммит**
 
 ```bash
-git add README.md docs .github
+git add README.md README.ru.md docs .github
 git commit --signoff -m "docs: english and russian documentation with a parity check"
 ```
 
@@ -1717,7 +1721,7 @@ git commit --signoff -m "build: version subcommand, release archives and publish
 
 План закончен, когда выполнено всё перечисленное:
 
-- пульт открывается на `http://127.0.0.1:7717` и показывает три колонки: оркестр слева, канбан по центру, список сессий справа;
+- пульт открывается на `http://127.0.0.1:7777` и показывает три колонки: оркестр слева, канбан по центру, список сессий справа;
 - в шапке живут обе шкалы лимитов и счётчик ждущих ответа сессий, и они обновляются без перезагрузки страницы;
 - у каждой сессии в списке видна занятость контекста, а отсутствие данных показано прочерком, а не нулём;
 - карточка открывается панелью поверх доски, стадия и прогресс правятся из панели, отказ записи виден в интерфейсе и значение возвращается назад;
