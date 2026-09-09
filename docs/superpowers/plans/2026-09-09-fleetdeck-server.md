@@ -32,6 +32,7 @@
 | --- | --- |
 | `go.mod` | Модуль и зависимости |
 | `Makefile` | `build`, `test`, `lint`, `run` |
+| `.github/workflows/ci.yaml` | Линт, тесты и сборка на каждый PR |
 | `internal/version/version.go` | Версия сборки |
 | `internal/config/config.go` | Чтение и запись `config.yaml`, умолчания |
 | `internal/daemon/types.go` | Типы сессии и ответа демона |
@@ -62,7 +63,7 @@
 ## Task 1: Каркас модуля
 
 **Files:**
-- Create: `go.mod`, `Makefile`, `.gitignore`, `internal/version/version.go`, `internal/version/version_test.go`
+- Create: `go.mod`, `Makefile`, `.gitignore`, `.github/workflows/ci.yaml`, `internal/version/version.go`, `internal/version/version_test.go`
 
 **Interfaces:**
 - Consumes: ничего
@@ -120,7 +121,7 @@ func String() string {
 
 - [ ] **Step 4: Прогнать тесты.** Команда `go test ./internal/version/`, ожидается PASS, два теста.
 
-- [ ] **Step 5: Добавить Makefile и .gitignore**
+- [ ] **Step 5: Добавить Makefile, .gitignore и CI**
 
 ```makefile
 BINARIES := fleetdeck fleetdeck-status
@@ -148,11 +149,35 @@ bin/
 .superpowers/
 ```
 
+```yaml
+# .github/workflows/ci.yaml
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make lint
+      - run: make test
+      - run: make build
+```
+
+Сборка стоит в CI с первой задачи намеренно: второй план встраивает статику через `go:embed`, а она ломается тихо — тест проходит, бинарник не собирается.
+
 - [ ] **Step 6: Коммит**
 
 ```bash
-git add go.mod Makefile .gitignore internal/version
-git commit --signoff -m "chore: module skeleton with build version"
+git add go.mod Makefile .gitignore .github internal/version
+git commit --signoff -m "chore: module skeleton with build version and CI"
 ```
 
 ---

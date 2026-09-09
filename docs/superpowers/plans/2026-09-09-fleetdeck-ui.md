@@ -48,7 +48,7 @@
 | `web/vendor/LICENSE.xterm` | Лицензия вендора |
 | `cmd/fleetdeck/init.go` | Подкоманда `init`: конфигурация, launchd, statusline, доска |
 | `plugin/` | Переехавший плагин Claude Code |
-| `.github/workflows/release.yaml` | Сборка релизов |
+| `.github/workflows/release.yaml` | Публикация релизных архивов по тегу |
 | `README.md`, `docs/en/`, `docs/ru/` | Документация |
 
 Каждый модуль в `web/js/` экспортирует одну функцию отрисовки и подписывается на хранилище сам. Модули не знают друг о друге и общаются только через хранилище.
@@ -1584,73 +1584,90 @@ git commit --signoff -m "docs: english and russian documentation with a parity c
 
 ---
 
-## Task 12: Сборка и релизы
+## Task 12: Релизы
+
+Каркас сборки уже стоит: первый план создаёт `Makefile` с целями `build`, `test`, `lint`, `run`, версию через `internal/version` и `.github/workflows/ci.yaml`. Эта задача добавляет только то, чего там нет: подкоманду `version`, цель `dist` и публикацию релиза по тегу.
 
 **Files:**
-- Create: `.github/workflows/release.yaml`, `Makefile`
-- Modify: `.github/workflows/ci.yaml`, `cmd/fleetdeck/main.go`
+- Create: `cmd/fleetdeck/version.go`, `cmd/fleetdeck/version_test.go`, `.github/workflows/release.yaml`
+- Modify: `Makefile`, `.gitignore`, `cmd/fleetdeck/main.go`
 
 **Interfaces:**
-- Consumes: всё предыдущее
-- Produces: `make build`, `make test`, релизные архивы для `darwin/arm64` и `darwin/amd64`
+- Consumes: `version.String()` из первого плана, `make build`
+- Produces: подкоманда `fleetdeck version`, цель `make dist`
 
-- [ ] **Step 1: Написать тест на версию**
+- [ ] **Step 1: Написать падающий тест**
 
 ```go
 // cmd/fleetdeck/version_test.go
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestVersionIsSetAtBuildTime(t *testing.T) {
-	if version == "" {
-		t.Fatal("version must never be empty: an unversioned binary cannot be supported")
+func TestRunVersionPrintsBuildVersion(t *testing.T) {
+	var out strings.Builder
+	runVersion(&out)
+	got := strings.TrimSpace(out.String())
+	if got == "" {
+		t.Fatal("version output must never be empty: an unversioned binary cannot be supported")
+	}
+	if strings.Contains(got, "\n") {
+		t.Fatalf("version must be a single line, got %q", got)
 	}
 }
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает.** Команда `go test ./cmd/fleetdeck/ -run Version`, ожидается FAIL: переменной нет.
+- [ ] **Step 2: Прогнать и убедиться, что падает.** Команда `go test ./cmd/fleetdeck/ -run Version`, ожидается FAIL: функции `runVersion` нет.
 
-- [ ] **Step 3: Добавить версию и флаг**
+- [ ] **Step 3: Реализовать подкоманду**
 
 ```go
-// в cmd/fleetdeck/main.go
-var version = "dev" // overridden at build time via -ldflags
+// cmd/fleetdeck/version.go
+package main
 
-// в разбор аргументов:
+import (
+	"fmt"
+	"io"
+
+	"github.com/kroticw/fleetdeck/internal/version"
+)
+
+// runVersion writes the build version. It takes a writer rather than printing
+// directly so the behaviour is testable without capturing os.Stdout.
+func runVersion(w io.Writer) {
+	fmt.Fprintln(w, version.String())
+}
+```
+
+В `cmd/fleetdeck/main.go`, рядом с разбором подкоманды `init` из задачи 9, добавить ветку:
+
+```go
 if len(os.Args) > 1 && os.Args[1] == "version" {
-	fmt.Println(version)
+	runVersion(os.Stdout)
 	return
 }
 ```
 
-- [ ] **Step 4: Написать `Makefile`**
+- [ ] **Step 4: Прогнать тест.** Команда `go test ./cmd/fleetdeck/ -run Version`, ожидается PASS.
 
-```make
-VERSION ?= $(shell git describe --tags --always --dirty)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+- [ ] **Step 5: Добавить цель `dist` в существующий `Makefile`.** Переменные `BINARIES`, `VERSION` и `LDFLAGS` уже объявлены первым планом — переиспользовать их, не объявлять заново. Добавить `dist` в список `.PHONY` и следующую цель:
 
-.PHONY: build test lint dist
-
-build:
-	go build -ldflags '$(LDFLAGS)' -o bin/fleetdeck ./cmd/fleetdeck
-	go build -ldflags '$(LDFLAGS)' -o bin/fleetdeck-status ./cmd/fleetdeck-status
-
-test:
-	go test ./...
-
-lint:
-	golangci-lint run
-
+```makefile
 dist:
 	@for arch in arm64 amd64; do \
-		GOOS=darwin GOARCH=$$arch go build -ldflags '$(LDFLAGS)' -o dist/darwin-$$arch/fleetdeck ./cmd/fleetdeck; \
-		GOOS=darwin GOARCH=$$arch go build -ldflags '$(LDFLAGS)' -o dist/darwin-$$arch/fleetdeck-status ./cmd/fleetdeck-status; \
+		for b in $(BINARIES); do \
+			GOOS=darwin GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o dist/darwin-$$arch/$$b ./cmd/$$b; \
+		done; \
 		tar --create --gzip --file dist/fleetdeck-$(VERSION)-darwin-$$arch.tar.gz --directory dist/darwin-$$arch .; \
 	done
 ```
 
-- [ ] **Step 5: Написать `.github/workflows/release.yaml`**
+В `.gitignore` добавить `dist/`.
+
+- [ ] **Step 6: Написать `.github/workflows/release.yaml`**
 
 ```yaml
 name: release
@@ -1676,22 +1693,22 @@ jobs:
       - name: Test
         run: make test
       - name: Build archives
-        run: make dist
+        run: make dist VERSION=${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish
         run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --generate-notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-- [ ] **Step 6: Дополнить `.github/workflows/ci.yaml`.** Шаги `make test`, `make lint`, `make build` и шаг `docs-parity` из задачи 11. Сборка обязана быть в CI: `go:embed all:../../web` ломается тихо, если каталог переименовать, и без шага сборки это найдётся только у пользователя.
-
-- [ ] **Step 7: Проверить руками.** Команды `make test` и `make dist`, затем распаковать один архив во временный каталог и запустить `./fleetdeck version` — ожидается номер версии, а не `dev`. Значение `dev` в архиве означает, что `-ldflags` не доехали.
+- [ ] **Step 7: Проверить руками.** Команда `make dist VERSION=v0.1.0`, затем распаковать `dist/fleetdeck-v0.1.0-darwin-arm64.tar.gz` во временный каталог и запустить `./fleetdeck version` — ожидается `v0.1.0`. Значение `dev` означает, что `-ldflags` не доехали до сборки, и релизные архивы врут о своей версии.
 
 - [ ] **Step 8: Коммит**
 
 ```bash
-git add Makefile .github cmd/fleetdeck
-git commit --signoff -m "build: makefile, versioned binaries and release workflow"
+git add Makefile .gitignore .github cmd/fleetdeck
+git commit --signoff -m "build: version subcommand, release archives and publish workflow"
 ```
 
 ---
