@@ -198,6 +198,12 @@ func Save(path string, c Config) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
+	// MkdirAll's mode argument is a no-op when dir already exists, so an existing
+	// directory that was ever left group/other-writable would stay that way across
+	// every subsequent Save. Tighten it explicitly every time, not just on creation.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("set config dir permissions: %w", err)
+	}
 
 	f := configToFile(c)
 	raw, err := yaml.Marshal(f)

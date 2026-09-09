@@ -118,6 +118,20 @@ func checkSocketOwnership(socketPath string) error {
 			return fmt.Errorf("checking socket path %s: %w", path, err)
 		}
 
+		if info.Mode()&os.ModeSymlink != 0 {
+			// checkKeyFileSecurity rejects a symlinked key file explicitly, rather than
+			// leaning on the fact that a symlink's own Lstat mode conventionally reads
+			// as 0777 (which would otherwise trip the "writable by group or other"
+			// check below for the wrong stated reason). This walk must do the same: it
+			// is lexical (filepath.Dir) and never inspects a link's target, so without
+			// an explicit check here it depends entirely on that same convention — on a
+			// platform or filesystem where a symlink's mode reads as something else
+			// (e.g. 0755), an intermediate symlinked directory owned by the current
+			// user would pass every check below this point, and net.Dial would follow
+			// the link to whatever a local attacker planted at the other end.
+			return fmt.Errorf("refusing socket %s: %s is a symlink, refusing to follow it", socketPath, path)
+		}
+
 		stat, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
 			return fmt.Errorf("cannot determine the owner of %s", path)
@@ -359,10 +373,20 @@ func Discover(key func() (string, error)) (*Client, error) {
 // Discover wires to SocketPath) and one retry — covering a daemon that has restarted
 // under a new directory — never a loop. A client created with an explicit path (New,
 // not discoverable) never re-resolves.
-func (c *Client) dial() (net.Conn, error) {
+//
+// ctx bounds the connect itself, not just the request/response exchange that follows
+// it. Before this, dial called plain net.Dial with no timeout at all: c.setDeadline
+// only runs on the connection dial already returned, so neither the 2s ReadScreen
+// ceiling nor any context.WithTimeout a caller supplied covered the connect phase. A
+// daemon that is alive but not accepting connections (a full backlog, a wedged
+// process) can make connect(2) on an AF_UNIX socket block indefinitely, and nothing
+// could break a poller's goroutine out of that. resolveSocketCandidate already dialled
+// its liveness probes with net.DialTimeout for exactly this reason; this is the same
+// fix applied to the main connect path, which had been overlooked.
+func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	path := c.currentSocketPath()
 
-	conn, err := dialChecked(path)
+	conn, err := dialChecked(ctx, path)
 	if err == nil {
 		return conn, nil
 	}
@@ -375,7 +399,7 @@ func (c *Client) dial() (net.Conn, error) {
 		return nil, err
 	}
 
-	conn, err = dialChecked(newPath)
+	conn, err = dialChecked(ctx, newPath)
 	if err != nil {
 		return nil, err
 	}
@@ -387,16 +411,21 @@ func (c *Client) dial() (net.Conn, error) {
 // ErrDaemonUnavailable with its cause. A socket that simply does not exist yet is
 // "unavailable", the same as one that refuses the connection; only a socket that
 // exists but fails the ownership check is treated as a distinct security refusal.
-func dialChecked(path string) (net.Conn, error) {
+//
+// The underlying cause is wrapped with its own %w (not %v), alongside
+// ErrDaemonUnavailable, so a context error (context.Canceled,
+// context.DeadlineExceeded) surfacing from DialContext below remains reachable via
+// errors.Is/As by a caller, not just by string inspection.
+func dialChecked(ctx context.Context, path string) (net.Conn, error) {
 	if err := checkSocketOwnership(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("%w: %v", ErrDaemonUnavailable, err)
+			return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 		}
 		return nil, err
 	}
-	conn, err := net.Dial("unix", path)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrDaemonUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}
 	return conn, nil
 }
@@ -530,55 +559,97 @@ const ekickedPrefix = "EKICKED:"
 // addressed).
 const maxAttachBytes = 1024 * 1024
 
-// findKickOpener returns the offset of the kick marker that qualifies as a real kick,
-// or -1 if there is none. The daemon writes the marker "in place of" PTY bytes
-// immediately before closing the connection (see docs/protocol/daemon-control-socket.md
-// section 8), so the marker and its reason are always the *last* bytes of the stream —
-// never anchored to offset 0 or to the start of a line. A terminal screen almost never
-// ends with a trailing newline: the last bytes in flight are wherever the cursor sits,
-// an escape sequence, a prompt, the tail of a line. Requiring the marker to open a line
-// missed exactly that, the common case, because the marker lands flush against
-// whatever screen bytes were already in the pipe.
-//
-// Using the *last* occurrence, rather than the first, matters because the same literal
-// text can appear earlier in the buffer as ordinary screen content — this very
-// document, docs/protocol/daemon-control-socket.md, contains the string "EKICKED:"
-// several times, always mid-sentence, and fleetdeck reads the screens of Claude Code
-// sessions, one of which may well be editing that document. Taking the first match
-// found could pick up such coincidental text and report a garbled or wrong reason (or,
-// worse, treat a truncation boundary that happens to leave that text at offset 0 as the
-// marker) instead of the real, trailing one. This function only locates a candidate
-// position; detectKick still requires the connection to have actually closed right
-// after before treating it as a kick, so ordinary screen content containing this text
-// on a connection that stays open — the common, non-kicked case — is never mistaken for
-// one.
+// kickSearchWindow bounds how far from the end of the accumulated stream the kick
+// marker may be found and still be considered at all. The daemon writes the marker
+// immediately before closing the connection, so a genuine kick's marker is always
+// within a small distance of the very end of what was received. Searching the whole
+// buffer instead would let a marker buried under a large amount of ordinary screen
+// content that arrived afterward — the same literal text can legitimately appear
+// there — be reconsidered as the kick just because the connection happened to close
+// later, for an unrelated reason.
+const kickSearchWindow = 512
+
+// maxKickReasonBytes bounds how long the text following the marker may be and still
+// pass as the daemon's own short, human-readable reason. See the second and third
+// conditions in detectKick's comment.
+const maxKickReasonBytes = 256
+
+// findKickOpener returns the offset of the kick marker's last occurrence within
+// kickSearchWindow bytes of the end of data, or -1 if there is none there. See
+// kickSearchWindow's comment for why the search is bounded at all, and detectKick's
+// comment for the full compound rule this is one third of.
 func findKickOpener(data []byte) int {
-	return bytes.LastIndex(data, []byte(ekickedPrefix))
+	start := 0
+	if len(data) > kickSearchWindow {
+		start = len(data) - kickSearchWindow
+	}
+	rel := bytes.LastIndex(data[start:], []byte(ekickedPrefix))
+	if rel < 0 {
+		return -1
+	}
+	return start + rel
 }
 
 // parseKickedMarker reports whether data contains the daemon's kick marker at a
-// qualifying position (see findKickOpener) and, if so, returns the reason text that
-// follows it, trimmed of surrounding whitespace.
-func parseKickedMarker(data []byte) (detail string, kicked bool) {
+// qualifying position (see findKickOpener) followed by text that looks like a real
+// reason rather than a screen (see detectKick). On success it returns the prefix —
+// everything before the marker, i.e. the screen accumulated up to that point — and the
+// reason text, trimmed of surrounding whitespace.
+func parseKickedMarker(data []byte) (prefix, detail string, kicked bool) {
 	pos := findKickOpener(data)
 	if pos < 0 {
-		return "", false
+		return "", "", false
 	}
 	rest := data[pos+len(ekickedPrefix):]
-	return strings.TrimSpace(string(rest)), true
+	// Third condition: a real "EKICKED: <reason>" is the very last thing the daemon
+	// sends before closing, so nothing of substance follows the reason itself. A
+	// newline in rest, or a rest this long, means what matched is ordinary screen
+	// content that happens to contain "EKICKED:" followed by more screen — exactly
+	// the false positive this rule exists to rule out.
+	if len(rest) > maxKickReasonBytes || bytes.Contains(rest, []byte("\n")) {
+		return "", "", false
+	}
+	return string(data[:pos]), strings.TrimSpace(string(rest)), true
 }
 
 // detectKick decides whether an attach stream was actually kicked, given the bytes
 // accumulated and whether the connection was observed to close (as opposed to going
-// idle or hitting a deadline). Per docs/protocol/daemon-control-socket.md section 8, the
-// marker is written "in place of" PTY bytes and is always followed by the connection
-// closing — a marker-shaped position with no observed close is never enough on its own,
-// since an ordinary, live, polled session's attach connection stays open indefinitely
-// (it only closes on an actual kick or the session exiting) and may happen to display
-// the literal marker text as part of its own screen content.
-func detectKick(data []byte, closed bool) (detail string, kicked bool) {
+// idle or hitting a deadline). On a real kick it also returns prefix, the screen
+// accumulated before the marker, so a caller need not discard it.
+//
+// Per docs/protocol/daemon-control-socket.md section 8, detection must never fire on the
+// marker's mere presence — only on it being the *last thing sent* immediately before a
+// close. That is a compound condition, and this detector has been wrong three times in
+// three different directions by treating some proper subset of it as sufficient: first
+// requiring the marker at offset 0, then requiring it to open a line (a terminal screen
+// almost never ends with a trailing newline, so this missed the common case), then
+// accepting merely its *last occurrence* plus a close (which fires on a screen that
+// displays the marker text and then exits normally — a session grepping this very
+// document for "EKICKED:" is a real, reproduced example). All three conditions below
+// are now required, and any one of them has already been shown insufficient alone:
+//
+//  1. The connection actually closed. An ordinary, live, polled session's attach
+//     connection stays open indefinitely (it only closes on an actual kick or the
+//     session exiting), and may happen to display the literal marker text as part of
+//     its own screen content — see TestReadScreenMidScreenEkickedTextIsNotAKick. Without
+//     this, any screen containing the text at all would be misreported as a kick.
+//  2. The marker sits within the last kickSearchWindow bytes of the stream (see
+//     findKickOpener). The daemon writes the marker flush against whatever PTY bytes
+//     were already in flight, immediately before closing — never anchored to offset 0
+//     or a line boundary — so a genuine kick's marker is always near the very end.
+//     Without this bound, a marker that appears well before the end, in ordinary
+//     screen content, could still be picked up just because the connection later
+//     closed for an unrelated reason.
+//  3. What follows the marker is short and contains no newline (see parseKickedMarker).
+//     The daemon's real reason text is the last thing it sends; a screen that merely
+//     *displays* the marker almost always has more rendered content after it,
+//     typically containing at least one newline. This is exactly what condition 2
+//     alone does not catch when the coincidental marker happens to sit close to the
+//     end — see TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick, where the last
+//     occurrence of "EKICKED:" is immediately followed by " marker\n$ exit\n".
+func detectKick(data []byte, closed bool) (prefix, detail string, kicked bool) {
 	if !closed {
-		return "", false
+		return "", "", false
 	}
 	return parseKickedMarker(data)
 }
@@ -654,7 +725,13 @@ func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.
 		}
 
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			// errors.As, not a plain err.(net.Error) type assertion: the latter only
+			// works today because bufio.Reader.Read happens to return the transport
+			// error unwrapped. A wrapped timeout error would fall straight into the
+			// "connection closed" branch below and, combined with the kick detection
+			// this feeds, turn an ordinary timeout into a false kick.
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				if gotFirstByte {
 					if time.Since(lastReadTime) >= idleTimeout {
 						return data, false
@@ -679,9 +756,18 @@ func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.
 }
 
 // daemonError converts a daemon error response into a typed error.
+//
+// A "code" that is absent entirely, not a string, or present as an empty string, must
+// all collapse to the same clean "unknown error" — never "unknown error: " with a
+// dangling colon and nothing after it. The empty-string case is not merely academic:
+// listSessionsOnce used to guard against it with its own separate check before calling
+// this function, which meant every other caller (Ping, sendTextOnce,
+// readAttachHeader) that reaches daemonError with an "ok":false, code-less reply did
+// not get the same protection. The guard now lives here, once, so it can't drift out
+// of sync with any one call site again.
 func daemonError(resp map[string]interface{}) error {
-	code, ok := resp["code"].(string)
-	if !ok {
+	code, _ := resp["code"].(string)
+	if code == "" {
 		return errors.New("unknown error")
 	}
 
@@ -709,7 +795,7 @@ func daemonError(resp map[string]interface{}) error {
 
 // Ping sends a ping request and caches the daemon's protocol version.
 func (c *Client) Ping(ctx context.Context) (Info, error) {
-	conn, err := c.dial()
+	conn, err := c.dial(ctx)
 	if err != nil {
 		return Info{}, err
 	}
@@ -789,7 +875,7 @@ func (c *Client) listSessionsOnce(ctx context.Context) ([]Session, error) {
 		return nil, err
 	}
 
-	conn, err := c.dial()
+	conn, err := c.dial(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -824,14 +910,9 @@ func (c *Client) listSessionsOnce(ctx context.Context) ([]Session, error) {
 	}
 
 	if !resp.Ok {
-		// A reply with no code at all must not become &ErrUnknown{Code: ""}, which
-		// daemonError would otherwise happily build — that prints as "unknown error: "
-		// with a dangling colon and nothing after it. Every other error path in this
-		// function already produces a clean message when there is no code; match that.
-		if resp.Code == "" {
-			return nil, errors.New("unknown error")
-		}
-		// Reconstruct error response for daemonError
+		// daemonError itself now cleanly handles an empty/absent code (see its comment),
+		// so there is no need for a separate guard here that could drift out of sync
+		// with it again.
 		errResp := map[string]interface{}{"code": resp.Code}
 		return nil, daemonError(errResp)
 	}
@@ -870,7 +951,7 @@ func (c *Client) sendTextOnce(ctx context.Context, session, text string) error {
 		return err
 	}
 
-	conn, err := c.dial()
+	conn, err := c.dial(ctx)
 	if err != nil {
 		return err
 	}
@@ -965,7 +1046,7 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 		return "", err
 	}
 
-	conn, err := c.dial()
+	conn, err := c.dial(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -1009,15 +1090,14 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 	// has been accumulated by then is a real, valid partial screen.
 	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false)
 
-	// The kick marker means this attach connection was evicted (see
-	// docs/protocol/daemon-control-socket.md section 8). It is only ever a kick when it
-	// opens the stream or a line AND the connection actually closed — never merely
-	// because the accumulated screen happens to contain that text, which an ordinary,
-	// still-open attach reading a live session's screen can do (this very document,
-	// displayed by a session working on fleetdeck itself, contains "EKICKED:" four
-	// times).
-	if detail, kicked := detectKick(data, closed); kicked {
-		return "", &ErrKicked{Detail: detail}
+	// The kick marker means this attach connection was evicted (see detectKick's
+	// comment for the full three-condition rule, and
+	// docs/protocol/daemon-control-socket.md section 8). A real kick is a normal event —
+	// someone attached by hand and took over — so the screen accumulated before the
+	// marker is still returned alongside the typed error, rather than thrown away: the
+	// caller loses nothing it would otherwise have had.
+	if prefix, detail, kicked := detectKick(data, closed); kicked {
+		return prefix, &ErrKicked{Detail: detail}
 	}
 
 	// Apply tail limit if needed
@@ -1065,7 +1145,7 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 		return err
 	}
 
-	conn, err := c.dial()
+	conn, err := c.dial(ctx)
 	if err != nil {
 		return err
 	}
@@ -1113,11 +1193,12 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	// bytes, is never missed the way a single fixed-size read would miss it.
 	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true)
 
-	if detail, kicked := detectKick(data, closed); kicked {
+	if _, detail, kicked := detectKick(data, closed); kicked {
 		// The keys were written to the connection, but a kick observed right after
 		// means another attacher may have taken over before (or as) the daemon
 		// applied them — unlike a plain close with no marker, this is a signal worth
-		// surfacing distinctly rather than folding into "success".
+		// surfacing distinctly rather than folding into "success". SendKeys has no use
+		// for the accumulated prefix (there is no screen to hand back on this path).
 		return &ErrKicked{Detail: detail}
 	}
 

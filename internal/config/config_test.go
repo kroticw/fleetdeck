@@ -381,6 +381,32 @@ func TestSaveWritesFilePerms0600AndDirPerms0700(t *testing.T) {
 	}
 }
 
+// TestSaveTightensExistingDirectoryPermissions covers the recommendation that Save did
+// not tighten an already-existing directory's permissions: os.MkdirAll(dir, 0o700) is a
+// no-op when dir already exists with looser permissions, so a config directory that was
+// ever left (or created) group/other-writable stayed that way across every subsequent
+// Save. This is low priority — the config holds no secrets — but Save should still fix
+// it while writing, rather than only enforcing 0700 on the directory it creates itself.
+func TestSaveTightensExistingDirectoryPermissions(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	p := filepath.Join(dir, "c.yaml")
+
+	if err := Save(p, Default()); err != nil {
+		t.Fatal(err)
+	}
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+		t.Errorf("expected Save to tighten an existing directory to mode 0700, got %o", perm)
+	}
+}
+
 func TestLoadValidPortAndIntervalAreAccepted(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
 	content := "server:\n  port: 65535\ndaemon:\n  poll_interval: 1s\n"

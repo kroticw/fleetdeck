@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -2710,8 +2711,12 @@ func TestReadScreenKickMidStreamNoTrailingNewlineIsDetected(t *testing.T) {
 	if kicked.Detail != "another connection attached" {
 		t.Errorf("expected detail %q, got %q", "another connection attached", kicked.Detail)
 	}
-	if out != "" {
-		t.Errorf("expected no screen content on a kicked attach, got %q", out)
+	// Recommendation: a real kick is a normal event (someone attached by hand) and must
+	// not throw away the screen accumulated before it — the caller gets the prefix up to
+	// the marker alongside the typed error, instead of an empty string.
+	wantPrefix := "\x1b[2J\x1b[H> waiting for input"
+	if out != wantPrefix {
+		t.Errorf("expected the accumulated screen prefix %q on a kicked attach, got %q", wantPrefix, out)
 	}
 }
 
@@ -2938,5 +2943,295 @@ func TestControlKeyRefusesSymlinkWithClearInternalCause(t *testing.T) {
 	cause := errors.Unwrap(err)
 	if cause == nil || !strings.Contains(cause.Error(), "symlink") {
 		t.Errorf("expected the wrapped cause to name the symlink explicitly, got %v", cause)
+	}
+}
+
+// --- Sixth review, Blocker 1: kick detection must be a compound signal, not "the
+// marker's last occurrence plus a close" ---
+
+// TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick is the sixth review's own
+// reproduction: a session that greps this very repository for the marker text (so the
+// literal string "EKICKED:" appears twice — once in the grep invocation, once in its
+// match line), then exits normally. bytes.LastIndex plus "the connection closed" fired
+// on this every time: it only required the marker to be the last *occurrence*, not the
+// last *thing sent*. The text after the last occurrence here is " marker\n$ exit\n" — a
+// newline right there, followed by more screen content — which a real
+// "EKICKED: <reason>" is never followed by, since the daemon closes immediately after
+// writing the reason.
+func TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		conn.Write([]byte("$ grep -n EKICKED: docs/protocol/daemon-control-socket.md\n42: EKICKED: marker\n$ exit\n"))
+		// The session exited and the daemon closed the connection right after writing
+		// this — the close is real, but it must not be reported as a kick.
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	if err != nil {
+		t.Fatalf("expected nil error for a screen that merely displayed the marker text before exiting, got %v", err)
+	}
+	want := "$ grep -n EKICKED: docs/protocol/daemon-control-socket.md\n42: EKICKED: marker\n$ exit\n"
+	if out != want {
+		t.Errorf("expected the complete screen text %q, got %q", want, out)
+	}
+}
+
+// TestReadScreenLongMultilineTailAfterMarkerIsNotAKick covers the third required case
+// from the sixth review: the marker appears, but what follows it is long and contains
+// a newline — the shape of ordinary screen content, not the daemon's own short,
+// single-line reason. A real "EKICKED: <reason>" is always the very last thing the
+// daemon sends before closing the connection; nothing this verbose ever follows it.
+func TestReadScreenLongMultilineTailAfterMarkerIsNotAKick(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	tail := strings.Repeat("a", 10) + "\n" + strings.Repeat("b", 290)
+	screen := "EKICKED: " + tail
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		conn.Write([]byte(screen))
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+
+	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	if err != nil {
+		t.Fatalf("expected nil error for a marker followed by a long, multi-line tail, got %v", err)
+	}
+	if out != screen {
+		t.Errorf("expected the complete screen text, got %q", out)
+	}
+}
+
+// --- Sixth review, Blocker 2: dial must respect the caller's context ---
+
+// TestDialRespectsCanceledContext covers Blocker 2: dial (and dialChecked) previously
+// ignored the caller's context entirely and called plain net.Dial with no timeout, so
+// neither the 2s screen ceiling nor any context.WithTimeout a caller supplied covered
+// the connect phase at all. A daemon that is alive but not accepting (a full backlog,
+// a wedged process) can make connect(2) on an AF_UNIX socket block indefinitely.
+//
+// A genuine "full accept backlog blocks connect" fixture proved impractical on this
+// platform: verified empirically (a raw socket bound and listened with backlog 1, left
+// unaccepted) that connect(2) against a full backlog on macOS returns ECONNREFUSED
+// immediately rather than blocking, so there is nothing here for a context to
+// interrupt. Instead, this proves the context actually reaches the dial by canceling
+// it before the call and requiring the dial to fail with that cancellation, rather than
+// ignoring it and succeeding or blocking.
+func TestDialRespectsCanceledContext(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) { return "key", nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = client.dial(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled to be reachable via errors.Is, got %v", err)
+	}
+}
+
+// --- Sixth review, Blocker 3: checkSocketOwnership must reject a symlink explicitly,
+// not rely on a symlink's mode bits conventionally reading as 0777 ---
+
+// TestCheckSocketOwnershipRefusesSymlinkedSocketPath covers the socket path itself
+// being a symlink to a real, correctly-owned socket elsewhere. checkKeyFileSecurity
+// already refuses this shape explicitly for the control key file, with a clear
+// internal cause; checkSocketOwnership must do the same instead of depending on the
+// convention that a symlink's own Lstat mode reads as 0777.
+func TestCheckSocketOwnershipRefusesSymlinkedSocketPath(t *testing.T) {
+	base := shortTempDir(t)
+	secureDir := filepath.Join(base, "secure")
+	if err := os.Mkdir(secureDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	realSock := filepath.Join(secureDir, "real.sock")
+	listener, err := net.Listen("unix", realSock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	linkSock := filepath.Join(secureDir, "control.sock")
+	if err := os.Symlink(realSock, linkSock); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	err = checkSocketOwnership(linkSock)
+	if err == nil {
+		t.Fatal("expected refusal for a symlinked socket path")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("expected the refusal to name the symlink explicitly, got: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipRefusesSymlinkedIntermediateDirectory covers an intermediate
+// directory in the walk being a symlink, rather than the socket file itself. The walk
+// is lexical (filepath.Dir) and never inspects a link's target, so without an explicit
+// check here, this shape depends entirely on the symlink's own Lstat mode happening to
+// trip the "writable by group or other" branch — true by convention on this platform,
+// but not guaranteed. The refusal must name the symlink, not that convention-dependent
+// mode check.
+func TestCheckSocketOwnershipRefusesSymlinkedIntermediateDirectory(t *testing.T) {
+	base := shortTempDir(t)
+	actualDir := filepath.Join(base, "actual")
+	if err := os.Mkdir(actualDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	linkedDir := filepath.Join(base, "linked")
+	if err := os.Symlink(actualDir, linkedDir); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	sockPath := filepath.Join(linkedDir, "control.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	err = checkSocketOwnership(sockPath)
+	if err == nil {
+		t.Fatal("expected refusal when an enclosing directory in the path is a symlink")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("expected the refusal to name the symlink explicitly, got: %v", err)
+	}
+}
+
+// --- Sixth review, recommendations ---
+
+// TestDaemonErrorEmptyCodeStringIsCleanError covers daemonError directly: a reply
+// carrying "code" as an actually-present, empty string (not merely an absent field —
+// see TestListSessionsErrorWithoutCodeIsCleanError for that case, which went through
+// listSessionsOnce's own separate guard) must still produce a clean "unknown error",
+// never "unknown error: " with a dangling colon. This guard now lives inside
+// daemonError itself so Ping, sendTextOnce and readAttachHeader — which never had
+// listSessionsOnce's separate guard — get it too.
+func TestDaemonErrorEmptyCodeStringIsCleanError(t *testing.T) {
+	err := daemonError(map[string]interface{}{"code": ""})
+	if err.Error() != "unknown error" {
+		t.Errorf("expected a clean %q, got %q", "unknown error", err.Error())
+	}
+}
+
+// TestPingErrorWithoutCodeIsCleanError covers the same guard reached through Ping,
+// which had no separate guard of its own before this fix — an "ok":false ping reply
+// with no code field used to come back as "unknown error: ".
+func TestPingErrorWithoutCodeIsCleanError(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			return []byte(`{"ok":false}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	_, err = client.Ping(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for an ok:false ping reply with no code, got nil")
+	}
+	if err.Error() != "unknown error" {
+		t.Errorf("expected a clean %q, got %q", "unknown error", err.Error())
+	}
+}
+
+// wrappedTimeoutNetErr is a net.Error whose Timeout() reports true, used below wrapped
+// inside another error via fmt.Errorf's %w so it is no longer, itself, the concrete
+// type a plain `err.(net.Error)` type assertion would match.
+type wrappedTimeoutNetErr struct{}
+
+func (wrappedTimeoutNetErr) Error() string   { return "fake wrapped timeout" }
+func (wrappedTimeoutNetErr) Timeout() bool   { return true }
+func (wrappedTimeoutNetErr) Temporary() bool { return true }
+
+// alwaysWrappedTimeoutConn is a minimal net.Conn whose Read always fails with a
+// timeout error wrapped inside another error, rather than the raw net.Error the
+// standard library's own bufio.Reader normally passes through unwrapped. That pass-
+// through behaviour is the only reason a plain `err.(net.Error)` type assertion has
+// worked so far in collectUntilIdleOrClosed; this fake proves the code is correct even
+// when a reader wraps its errors instead.
+type alwaysWrappedTimeoutConn struct{ net.Conn }
+
+func (alwaysWrappedTimeoutConn) Read([]byte) (int, error) {
+	time.Sleep(2 * time.Millisecond)
+	return 0, fmt.Errorf("read: %w", wrappedTimeoutNetErr{})
+}
+
+func (alwaysWrappedTimeoutConn) SetReadDeadline(time.Time) error { return nil }
+
+// TestCollectUntilIdleOrClosedUnwrapsWrappedTimeoutError covers the recommendation:
+// collectUntilIdleOrClosed used a plain `err.(net.Error)` type assertion, which only
+// worked because bufio.Reader.Read happens to return the transport error unwrapped
+// today. A wrapped timeout error must still be recognised as a timeout (and the idle
+// window honoured) rather than falling into the "connection closed" branch — which,
+// combined with Blocker 1, would have turned an ordinary timeout into a false kick.
+func TestCollectUntilIdleOrClosedUnwrapsWrappedTimeoutError(t *testing.T) {
+	conn := alwaysWrappedTimeoutConn{}
+	reader := bufio.NewReader(conn)
+
+	data, closed := collectUntilIdleOrClosed(context.Background(), conn, reader, 20*time.Millisecond, 0, true)
+	if closed {
+		t.Fatal("expected a wrapped timeout error to be recognised as a timeout, not a closed connection")
+	}
+	if len(data) != 0 {
+		t.Errorf("expected no data from a connection that only ever times out, got %q", data)
 	}
 }
