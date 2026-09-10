@@ -1,6 +1,6 @@
 # Getting started
 
-This page walks through installing fleetdeck, opening the panel, creating a first board card, and connecting it to a running Claude Code session. The panel has no web interface yet; the section on opening it says exactly what answers at that address today. The last section, about the `session` field, describes the design as it exists today and is the part worth reading carefully.
+This page walks through installing fleetdeck, opening the panel, creating a first board card, and connecting it to a running Claude Code session. The last section, about the `session` field, describes the design as it exists today and is the part worth reading carefully.
 
 ## Installing the binary
 
