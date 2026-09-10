@@ -135,3 +135,136 @@ test("nothing at all renders as nothing", () => {
   // The documentation section calls it with an empty set and no cards to link.
   assert.equal(renderMarkdown(null), "");
 });
+
+// --- tables ---
+//
+// The fleet's reports are full of them and none of them rendered: a table came
+// out as literal vertical bars. The scope here is exactly what those reports
+// contain — a header, the separator under it, body rows, and alignment by
+// colons in the separator. Nothing else, because the source of these tables is
+// one and is known.
+
+const TABLE = [
+  "| Сессия | Чем занята |",
+  "| --- | --- |",
+  "| 06a1f607 | оркестрация |",
+  "| 80b7dc38 | панель карточки |",
+].join("\n");
+
+test("a table becomes a table, not a row of vertical bars", () => {
+  const html = renderMarkdown(TABLE, new Set());
+  assert.ok(html.includes("<table"), "the whole point");
+  assert.equal((html.match(/<th\b/g) ?? []).length, 2, "two header cells");
+  assert.equal((html.match(/<tr\b/g) ?? []).length, 3, "a header row and two body rows");
+  assert.equal((html.match(/<td\b/g) ?? []).length, 4, "four body cells");
+  assert.ok(!html.includes("| Сессия"), "and no bars left over");
+});
+
+test("a table's cells are rendered, so bold and code inside one work", () => {
+  const html = renderMarkdown("| a | b |\n| --- | --- |\n| **bold** | `code` |", new Set());
+  assert.ok(html.includes("<strong>bold</strong>"));
+  assert.ok(html.includes("<code>code</code>"));
+});
+
+test("alignment comes from the colons in the separator", () => {
+  const html = renderMarkdown("| l | c | r |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |", new Set());
+  assert.ok(/class="[^"]*md-left/.test(html), "a leading colon aligns left");
+  assert.ok(/class="[^"]*md-center/.test(html), "colons on both sides centre");
+  assert.ok(/class="[^"]*md-right/.test(html), "a trailing colon aligns right");
+});
+
+test("a table scrolls inside its own box, never widening the page", () => {
+  // Four columns in a narrow column is the normal case here, not the edge one.
+  const html = renderMarkdown(TABLE, new Set());
+  assert.ok(/<div class="md-table">\s*<table/.test(html), "the table is wrapped in something that can scroll");
+});
+
+// --- the control cases: text that LOOKS like a table must stay text ---
+
+test("a single line with a bar is a paragraph, not a table", () => {
+  const html = renderMarkdown("this | that", new Set());
+  assert.ok(!html.includes("<table"), "one line cannot be a table: there is no separator under it");
+  assert.ok(html.includes("this | that"));
+
+  // With a separator underneath it, only the missing outer bars still say this
+  // is not a table — so this half of the test holds when the other half cannot.
+  const withSeparator = renderMarkdown("this | that\n| --- | --- |", new Set());
+  assert.ok(!withSeparator.includes("<table"), "a row is fenced by bars on both sides or it is prose");
+});
+
+test("a header with no separator under it is not a table", () => {
+  const html = renderMarkdown("| a | b |\nplain text follows", new Set());
+  assert.ok(!html.includes("<table"), "the separator is what confirms a table, and there is none");
+});
+
+test("a separator with no header above it is not a table", () => {
+  const html = renderMarkdown("| --- | --- |\n| 1 | 2 |", new Set());
+  assert.ok(!html.includes("<table"), "a table has two ends, and this one has no beginning");
+});
+
+test("bars inside a fenced code block stay inside the code block", () => {
+  const html = renderMarkdown("```\n| a | b |\n| --- | --- |\n```", new Set());
+  assert.ok(!html.includes("<table"), "code is code, whatever it looks like");
+  assert.ok(html.includes("| a | b |"));
+});
+
+test("a bar inside an inline code span does not start a table", () => {
+  const html = renderMarkdown("use `a | b` in a pipe\n| --- | --- |", new Set());
+  assert.ok(!html.includes("<table"));
+});
+
+test("prose about a table is prose", () => {
+  const html = renderMarkdown("The column reads | Сессия | Чем занята | and that is the bug.", new Set());
+  assert.ok(!html.includes("<table"));
+  assert.ok(html.includes("Чем занята"));
+
+  const followed = renderMarkdown(
+    "The column reads | Сессия | Чем занята | and that is the bug.\n| --- | --- |",
+    new Set(),
+  );
+  assert.ok(!followed.includes("<table"), "a sentence does not become a header because a separator follows it");
+});
+
+test("a table ends where its rows end, and what follows is not swallowed", () => {
+  const html = renderMarkdown(`${TABLE}\n\nA sentence after the table.`, new Set());
+  assert.ok(html.includes("<table"));
+  assert.ok(html.includes("<p>A sentence after the table.</p>"), "finding the start is not finding the whole");
+  assert.ok(html.indexOf("</table>") < html.indexOf("A sentence after"), "and the table closed before it");
+});
+
+test("a row with fewer cells than the header is still a row, not a dropped line", () => {
+  const html = renderMarkdown("| a | b |\n| --- | --- |\n| only one |", new Set());
+  assert.ok(html.includes("<table"));
+  assert.ok(html.includes("only one"), "a short row is malformed, not invisible");
+});
+
+test("a cell cannot bring its own markup", () => {
+  const html = renderMarkdown('| a |\n| --- |\n| <img src=x onerror=alert(1)> |', new Set());
+  assert.ok(!html.includes("<img"), "cells go through the same escaping as everything else");
+  assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
+});
+
+test("a separator has to contain a dash — colons alone are not one", () => {
+  const html = renderMarkdown("| a | b |\n| : | : |\n| 1 | 2 |", new Set());
+  assert.ok(!html.includes("<table"), "without a dash that line is just another row");
+});
+
+test("a separator narrower than its header does not make a table", () => {
+  const html = renderMarkdown("| a | b |\n| --- |\n| 1 | 2 |", new Set());
+  assert.ok(!html.includes("<table"), "a separator that does not match the header describes a different table");
+});
+
+test("a table is rendered once, and its rows are not read a second time", () => {
+  const html = renderMarkdown(TABLE, new Set());
+  assert.equal((html.match(/<table\b/g) ?? []).length, 1, "one table");
+  assert.equal((html.match(/оркестрация/g) ?? []).length, 1, "and each row appears once");
+  assert.ok(!html.includes("<p>| ---"), "the separator is consumed, not printed as a paragraph");
+});
+
+test("an empty cell is a cell, not a gap that shifts the row", () => {
+  const html = renderMarkdown("| a | b | c |\n| --- | --- | --- |\n| 1 |  | 3 |", new Set());
+  const row = html.slice(html.indexOf("<tbody>"));
+  assert.equal((row.match(/<td\b/g) ?? []).length, 3, "three cells, one of them empty");
+  assert.ok(row.includes("<td></td>"), "an empty cell keeps its place");
+});
+

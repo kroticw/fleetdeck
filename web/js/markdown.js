@@ -46,6 +46,16 @@ const HEADING = /^(#{1,4})\s+(.*)$/;
 // Matches internal/board's own linkRe, so the panel renders a link exactly where
 // the server extracted one. A narrower pattern here would leave "[[note|alias]]"
 // as literal text on a card whose backlinks the server had already resolved.
+// A table row is a line fenced by vertical bars on both sides. Requiring both
+// is what keeps prose out: "the column reads | a | b | and that is the bug" is a
+// sentence, and a line that merely contains a bar is a line.
+const TABLE_ROW = /^\s*\|(.*)\|\s*$/;
+
+// The separator is the second end of the table, and a table is only a table
+// when both ends are there. A header alone is a paragraph that happens to have
+// bars in it; this line under it is what says otherwise.
+const TABLE_SEPARATOR = /^\s*\|[\s:|-]*-[\s:|-]*\|\s*$/;
+
 const WIKILINK = /\[\[([^[\]\r\n]+?)\]\]/g;
 const CODE_SPAN = /`([^`]+)`/g;
 const BOLD = /\*\*([^*]+)\*\*/g;
@@ -102,6 +112,44 @@ function inline(text, knownCards) {
 // and without ".md" — and decides only whether a wiki link is clickable. Callers
 // with nothing to link against pass an empty Set; the signature is shared with
 // the documentation section, which does exactly that.
+// cellsOf splits one table row into its cells. The fencing bars are dropped and
+// everything between the inner ones is a cell, empty cells included: a blank
+// cell is a value a table legitimately holds.
+function cellsOf(line) {
+  const inner = TABLE_ROW.exec(line);
+  if (!inner) return null;
+  return inner[1].split("|").map((cell) => cell.trim());
+}
+
+// alignmentsOf reads the colons in the separator. ":---" is left, "---:" is
+// right, ":---:" is centre, and a bare "---" leaves the cell to the stylesheet.
+function alignmentsOf(line) {
+  return (cellsOf(line) ?? []).map((cell) => {
+    const left = cell.startsWith(":");
+    const right = cell.endsWith(":");
+    if (left && right) return "md-center";
+    if (right) return "md-right";
+    if (left) return "md-left";
+    return "";
+  });
+}
+
+// renderTable turns a header, a separator and the rows under them into a table.
+// The wrapper is not decoration: a table wider than its column has to scroll
+// inside its own box, because a page that scrolls sideways moves every other
+// column with it, and these columns are narrow.
+function renderTable(header, alignments, rows, known) {
+  const cell = (tag, text, index) => {
+    const className = alignments[index] ? ` class="${alignments[index]}"` : "";
+    return `<${tag}${className}>${inline(text, known)}</${tag}>`;
+  };
+  const head = `<tr>${header.map((text, i) => cell("th", text, i)).join("")}</tr>`;
+  const body = rows
+    .map((cells) => `<tr>${cells.map((text, i) => cell("td", text, i)).join("")}</tr>`)
+    .join("");
+  return `<div class="md-table"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
 export function renderMarkdown(text, knownCards) {
   const known = knownCards ?? new Set();
   const lines = escapeHTML(text).split("\n");
@@ -123,8 +171,10 @@ export function renderMarkdown(text, knownCards) {
     }
   };
 
-  for (const raw of lines) {
-    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+  const clean = (raw) => (raw.endsWith("\r") ? raw.slice(0, -1) : raw);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = clean(lines[i]);
     if (FENCE.test(line)) {
       if (inCode) {
         closeCode();
@@ -157,6 +207,30 @@ export function renderMarkdown(text, knownCards) {
       out.push(`<li>${inline(line.replace(BULLET, ""), known)}</li>`);
       continue;
     }
+    // A table is recognised by its first TWO lines, never by one: the header
+    // and the separator under it. Finding a header alone is not finding a
+    // table, and treating it as one would turn a sentence with bars in it into
+    // a grid.
+    const header = cellsOf(line);
+    const next = i + 1 < lines.length ? clean(lines[i + 1]) : "";
+    if (header && TABLE_SEPARATOR.test(next) && (cellsOf(next) ?? []).length === header.length) {
+      closeList();
+      const alignments = alignmentsOf(next);
+      const rows = [];
+      let j = i + 2;
+      // The table ends where its rows end — the second end again. Everything
+      // after that line belongs to whatever comes next and must not be eaten.
+      while (j < lines.length) {
+        const cells = cellsOf(clean(lines[j]));
+        if (!cells) break;
+        rows.push(cells);
+        j += 1;
+      }
+      out.push(renderTable(header, alignments, rows, known));
+      i = j - 1;
+      continue;
+    }
+
     closeList();
     const heading = line.match(HEADING);
     if (heading) {
