@@ -23,6 +23,7 @@
 // them and where a test can put its own.
 
 import { fetchDigest, fetchScreen, sendKeys, sendText } from "./api.js";
+import { get } from "./store.js";
 import { t } from "./i18n.js";
 
 // How many transcript steps the digest asks for, and how often each tab
@@ -132,10 +133,31 @@ function defaultTerminalFactory(host) {
 // It returns a stop function; calling it, or the panel's own close button,
 // leaves no timer and no terminal behind.
 //
-// timers exists for the tests, which cannot wait three real seconds to watch a
-// second poll arrive. It defaults to the global clock, so nothing in the shipped
-// path is a stand-in.
-export function renderSession(root, sessionId, onClose, { timers = globalThis } = {}) {
+// The panel is opened with a short id, because that is the identity the session
+// list hands over — and the two tabs are keyed differently, which is the one
+// thing about this panel that cannot be guessed from the routes' names. The
+// daemon knows a session by its short id and answers EUNKNOWN to the full one,
+// so the screen, the keys and the text go out under `short`. The transcript is
+// a file named after the full session id and the digest route resolves nothing
+// shorter, so the digest needs that instead. Sending either to the other route
+// fails at runtime and in no other way: the panel said "transcript not found"
+// on every session until the two were told apart.
+//
+// The full id is looked up in the snapshot on every digest pass rather than
+// captured when the panel opens. Captured once, a panel opened before the first
+// snapshot arrives holds an empty id for as long as it stays open, and says the
+// session is not listed while the session sits in the list beside it — seen in a
+// screenshot, not deduced.
+//
+// timers and lookup exist for the tests, which cannot wait three real seconds
+// for a second poll or drive a live WebSocket. Both default to the real thing,
+// so nothing in the shipped path is a stand-in.
+export function renderSession(
+  root,
+  short,
+  onClose,
+  { timers = globalThis, lookup = (id) => (get()?.sessions ?? []).find((s) => s.short === id) } = {},
+) {
 
   let tab = "digest";
   let poller = null;
@@ -201,6 +223,14 @@ export function renderSession(root, sessionId, onClose, { timers = globalThis } 
   // both tabs. Whatever was last drawn stays under the message, so one failed
   // poll does not blank a pane that was full a second ago.
   const digestPass = async () => {
+    const sessionId = lookup(short)?.sessionId ?? "";
+    if (!sessionId) {
+      // No snapshot yet, or a session that has left the fleet. Saying so beats
+      // asking the server for /api/sessions//digest and reporting whatever that
+      // returns — and because this runs on every pass, the tab starts working
+      // by itself once the session is in a snapshot.
+      throw new Error(t("session_not_listed"));
+    }
     renderSteps(await fetchDigest(sessionId, DIGEST_LIMIT));
     showError("");
   };
@@ -225,7 +255,7 @@ export function renderSession(root, sessionId, onClose, { timers = globalThis } 
     // what arrived before the attach broke. Draw that and show the message
     // beside it rather than discarding both. Anything worse than that — the
     // request never completing at all — throws, and createPoller reports it.
-    const { screen, error } = await fetchScreen(sessionId);
+    const { screen, error } = await fetchScreen(short);
     if (screen !== "") {
       term.reset();
       term.write(screen);
@@ -253,7 +283,7 @@ export function renderSession(root, sessionId, onClose, { timers = globalThis } 
 
   const pressKey = async (key) => {
     try {
-      await sendKeys(sessionId, key.bytes);
+      await sendKeys(short, key.bytes);
       showError("");
     } catch (err) {
       showError(err.message);
@@ -267,7 +297,7 @@ export function renderSession(root, sessionId, onClose, { timers = globalThis } 
     if (typed.trim() === "") return;
     input.value = "";
     try {
-      await sendText(sessionId, typed.trim());
+      await sendText(short, typed.trim());
       showError("");
     } catch (err) {
       // The one failure this panel must not have. Losing what somebody typed

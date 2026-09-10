@@ -15,7 +15,6 @@ subscribe((snap, connected) => {
 
 const sessionPanel = document.getElementById("session-panel");
 const cardPanel = createCardPanel(document.getElementById("card-panel"));
-const tabs = document.getElementById("tabs");
 
 // Exactly one session panel at a time, and its stop function held here.
 //
@@ -45,11 +44,20 @@ renderHeader(document.getElementById("header"));
 renderBoard(document.getElementById("board"), cardPanel.open);
 renderOrchestrator(document.getElementById("orchestrator"));
 
-// The centre column's two sections. The documentation one is built on its first
+// The centre column's two sections.
+//
+// Neither panel is closed when a section is switched, and does not need to be:
+// both are absolute overlays over the whole column, tab bar included, so while
+// one is up the switcher cannot be reached — checked in a browser, not deduced.
+// The way out of a panel is its own close button. If the overlays are ever moved
+// to cover only the section area, a section switch has to close them, or a
+// terminal ends up drawn over the documentation.
+//
+// The documentation section is built on its first
 // show rather than here: it fetches when it is built, and a panel with no
 // documentation directories configured would otherwise ask for them — and take
 // the server's 404 — before the operator had opened that section at all.
-createSections(tabs, [
+createSections(document.getElementById("tabs"), [
   { id: "board", label: t("tab_board"), root: document.getElementById("board") },
   {
     id: "docs",
@@ -58,16 +66,5 @@ createSections(tabs, [
     onFirstShow: () => renderDocs(document.getElementById("docs")),
   },
 ]);
-
-// Both panels in this column are overlays: they cover whichever section is
-// showing rather than being a section themselves, so the switcher — which only
-// knows how to hide section roots — cannot take them down. Switching section
-// with one open would leave a terminal drawn over the documentation. Asking for
-// another section is an answer to "am I still reading this one", so the click
-// closes both, and closing the session panel is what stops it polling.
-tabs.addEventListener("click", () => {
-  closeSession();
-  cardPanel.close();
-});
 
 connect();

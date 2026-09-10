@@ -14,7 +14,8 @@ import assert from "node:assert/strict";
 import { installDOM, fireEvent, settle } from "./fake-dom.js";
 import { KEYS, createPoller, renderSession } from "../js/session.js";
 
-const SESSION = "sess-1";
+const SHORT = "sess-1";
+const FULL = "sess-1-4f2c-11ee-9d3a-0242ac120002";
 
 let dom;
 let calls;
@@ -121,13 +122,13 @@ afterEach(() => {
   else globalThis.Terminal = realTerminal;
 });
 
-async function mount() {
+async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }) } = {}) {
   const root = dom.element("div");
   const timers = fakeTimers();
   let closed = 0;
-  const stop = renderSession(root, SESSION, () => {
+  const stop = renderSession(root, SHORT, () => {
     closed += 1;
-  }, { timers });
+  }, { timers, lookup });
   await settle(); // let the first poll land
 
   const errorText = () => {
@@ -155,6 +156,60 @@ async function mount() {
     },
   };
 }
+
+// --- the two identifiers ---------------------------------------------------
+
+test("the digest goes out under the full session id and everything else under the short one", async () => {
+  // Found by opening the panel, not by reading the routes: the daemon knows a
+  // session by its short id and answers EUNKNOWN to the full one, while the
+  // transcript is a file named after the full id and the digest route resolves
+  // nothing shorter. The panel showed "transcript not found: sess-1" on every
+  // session until the two were told apart, and both routes are spelled
+  // /api/sessions/{id}/… so nothing but a running panel would have said which
+  // id each wanted.
+  installTerminal();
+  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  const panel = await mount();
+
+  assert.equal(calls[0].url, `/api/sessions/${FULL}/digest?limit=30`);
+
+  await panel.openScreenTab();
+  assert.equal(calls[calls.length - 1].url, `/api/sessions/${SHORT}/screen`);
+
+  await panel.click("[data-key=enter]");
+  assert.equal(calls[calls.length - 1].url, `/api/sessions/${SHORT}/keys`);
+
+  panel.input().value = "hello";
+  await panel.pressEnter();
+  assert.equal(calls[calls.length - 1].url, `/api/sessions/${SHORT}/text`);
+});
+
+test("a session the snapshot does not hold says so instead of asking for an empty id", async () => {
+  stubFetch(answer({ body: [] }));
+  const panel = await mount({ lookup: () => undefined });
+
+  assert.equal(calls.length, 0, "no request may go out with an empty id in the path");
+  assert.notEqual(panel.errorText(), "");
+});
+
+test("a panel opened before the first snapshot starts working when the session appears", async () => {
+  // The failure this pins was a picture, not a test: opened before the socket's
+  // first frame, the panel captured an empty full id and went on saying the
+  // session was not listed while the session sat in the list beside it. The id
+  // is looked up on every pass now, so the tab recovers on its own.
+  let known;
+  stubFetch(answer({ body: [{ role: "user", text: "there it is" }] }));
+  const panel = await mount({ lookup: () => known });
+
+  assert.notEqual(panel.errorText(), "", "before the snapshot: says so");
+  assert.equal(calls.length, 0);
+
+  known = { short: SHORT, sessionId: FULL };
+  await panel.timers.tick();
+
+  assert.equal(panel.errorText(), "", "after the snapshot: recovered without being reopened");
+  assert.equal(calls[calls.length - 1].url, `/api/sessions/${FULL}/digest?limit=30`);
+});
 
 // --- polling ---------------------------------------------------------------
 
@@ -339,7 +394,7 @@ test("every key button sends its escape sequence, never the word on its face", a
     await panel.click(`[data-key=${key.id}]`);
 
     const { url, init } = calls[calls.length - 1];
-    assert.equal(url, `/api/sessions/${SESSION}/keys`);
+    assert.equal(url, `/api/sessions/${SHORT}/keys`);
     assert.equal(init.headers["Content-Type"], "application/json");
     const sent = JSON.parse(init.body).keys;
     assert.equal(sent, expected[key.id], `${key.id} must send bytes`);
