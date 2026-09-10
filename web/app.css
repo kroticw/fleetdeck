@@ -1567,3 +1567,42 @@ main {
   opacity: 0.8;
   padding: 2px 0;
 }
+
+/* The session row's label and its card control.
+ *
+ * Own block at the end, so a task rewriting this stylesheet moves one piece.
+ *
+ * The card control is a button now — it used to be a div with no handler, whose
+ * clicks reached the row and opened the session — so it needs the flat styling a
+ * button does not have by default. Everything else it inherits.
+ */
+
+.ctx-label {
+  color: var(--text-muted);
+}
+
+/* Only what a <button> needs that the existing .scard rule above does not give
+ * it. Its margin, size and colour are already set there and are not repeated
+ * here: two rules for one selector saying overlapping things is how a
+ * stylesheet stops being readable. */
+.scard {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.scard:hover,
+.scard:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* <abbr> comes underlined in some browsers and dotted in others; stated here so
+ * the estimate mark does not read as a link. The existing .est rule above keeps
+ * the help cursor. */
+.est {
+  text-decoration: none;
+}
+
