@@ -59,3 +59,176 @@ main {
 .col-sessions {
   flex: 1 1 25%;
 }
+
+/* Session list (web/js/sessions.js)
+ *
+ * Tokens defined on :root so both a light and a dark system theme read
+ * correctly — nothing here hardcodes a single-theme palette. Waiting gets a
+ * strong, unmistakable highlight; Stalled gets its own quieter marker that
+ * must never be confused with Waiting — that distinction is the point of
+ * this task.
+ */
+:root {
+  --srow-bg: color-mix(in srgb, currentColor 4%, transparent);
+  --srow-border: color-mix(in srgb, currentColor 12%, transparent);
+  --waiting-bg: color-mix(in srgb, orange 22%, transparent);
+  --waiting-border: darkorange;
+  --stalled-bg: color-mix(in srgb, gray 18%, transparent);
+  --stalled-border: gray;
+  --ctx-track-bg: color-mix(in srgb, currentColor 14%, transparent);
+  --ctx-cool: seagreen;
+  --ctx-warm: goldenrod;
+  --ctx-hot: crimson;
+  --muted: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+.col-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+}
+
+.sempty {
+  padding: 1em;
+  text-align: center;
+  color: var(--muted);
+}
+
+.sempty-error {
+  color: crimson;
+  font-weight: 600;
+}
+
+.srow {
+  border: 1px solid var(--srow-border);
+  background: var(--srow-bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: var(--gap);
+  cursor: pointer;
+}
+
+.srow:hover {
+  border-color: var(--muted);
+}
+
+.srow-waiting {
+  background: var(--waiting-bg);
+  border-color: var(--waiting-border);
+  border-width: 2px;
+}
+
+.srow-stalled {
+  background: var(--stalled-bg);
+  border-color: var(--stalled-border);
+  border-style: dashed;
+}
+
+.srow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sname {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Flex items default to min-width: auto, which resolves to min-content —
+     with nowrap that's the full unwrapped text width, so without this the
+     item never shrinks and the ellipsis never triggers. */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sbadge {
+  flex: none;
+  font-size: 0.7em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.sbadge-waiting {
+  background: var(--waiting-border);
+  color: #fff;
+}
+
+.sbadge-stalled {
+  background: var(--stalled-border);
+  color: #fff;
+}
+
+.smeta {
+  display: flex;
+  gap: 8px;
+  font-size: 0.85em;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.sreason {
+  font-size: 0.85em;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.scard {
+  margin-top: 4px;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+.ctx {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8em;
+  margin-top: 6px;
+}
+
+.ctx-unknown {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.ctx-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ctx-track-bg);
+  overflow: hidden;
+  display: inline-block;
+}
+
+.ctx-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+}
+
+.ctx-cool .ctx-fill {
+  background: var(--ctx-cool);
+}
+
+.ctx-warm .ctx-fill {
+  background: var(--ctx-warm);
+}
+
+.ctx-hot .ctx-fill {
+  background: var(--ctx-hot);
+}
+
+.ctx-pct {
+  flex: none;
+  color: var(--muted);
+}
+
+.est {
+  cursor: help;
+}
