@@ -17,7 +17,7 @@
 // half a change belongs to.
 
 import { renderMarkdown } from "./markdown.js";
-import { unwrapEnvelope } from "./envelope.js";
+import { stripToolNote, unwrapEnvelope } from "./envelope.js";
 
 
 
@@ -82,7 +82,10 @@ export function fillStep(row, step, classFor) {
   }
 
   const body = element("div", "step-body");
-  const text = wrapper ? wrapper.body : step.text;
+  // Applied to the step either way, envelope or not: one of the two notes
+  // arrives on a message that has no envelope at all, so keying this to
+  // unwrapping would have left that one on screen.
+  const text = stripToolNote(wrapper ? wrapper.body : step.text);
   // A wrapper whose whole content was the envelope leaves nothing to render;
   // the attribution line is then the entire step, which is honest — that is all
   // the notification actually said.
