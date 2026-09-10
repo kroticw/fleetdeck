@@ -805,11 +805,21 @@ main {
 /* Centre-column sections (web/js/sections.js) and the documentation section
  * (web/js/docs.js).
  *
- * #docs is a sibling of #board inside the centre column and is shown one at a
- * time by the switcher, which toggles the `hidden` attribute — so nothing here
- * may set `display` on #docs itself, or the hidden section would keep its box
- * and sit under the visible one.
- */
+ * The switcher shows one section at a time with the `hidden` attribute, and
+ * `hidden` is only `display: none` from the user-agent stylesheet — which any
+ * author rule outranks. #board already carries `display: flex` for its columns,
+ * so hiding it did nothing at all: the board stayed on screen with the
+ * documentation section stacked under it. Seen in a screenshot, not in a test,
+ * which is why this rule is here and why an accompanying test now pins it.
+ *
+ * Declared for every element rather than for the two sections by name: the next
+ * section added to this column would otherwise repeat the same silent failure,
+ * and there is no case in this panel where something marked hidden should be
+ * laid out anyway. */
+
+[hidden] {
+  display: none !important;
+}
 
 #tabs {
   flex: none;

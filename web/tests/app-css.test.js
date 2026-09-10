@@ -85,19 +85,27 @@ test("the documentation section's rules are top-level rules", () => {
   }
 });
 
-// The switcher hides a section with the hidden attribute. A `display` on #docs
-// would override that — hidden is display:none from the user-agent stylesheet
-// and loses to any author rule — leaving the documentation section stacked under
-// the board instead of put away.
-test("no rule gives #docs a display of its own", () => {
-  const { topLevel } = scan(css);
+// The switcher hides a section with the hidden attribute, and `hidden` is only
+// display:none from the user-agent stylesheet: any author rule outranks it.
+// #board carries display:flex for its columns, so hiding it did nothing until
+// this rule existed — the board stayed on screen with the documentation section
+// stacked under it, which no test saw and one screenshot did.
+test("hidden actually hides, whatever display a section's own rule sets", () => {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.ok(topLevel.includes("#docs"), "#docs is not a top-level rule in web/app.css");
-  const block = /#docs\s*\{([^}]*)\}/.exec(stripped);
-  assert.ok(block, "web/app.css no longer declares a #docs rule");
-  assert.doesNotMatch(
-    block[1],
-    /(^|;)\s*display\s*:/,
-    "#docs sets display, which defeats the hidden attribute the section switcher uses",
+  const block = /\[hidden\]\s*\{([^}]*)\}/.exec(stripped);
+  assert.ok(block, "web/app.css has no [hidden] rule, so hiding a section is at the mercy of its own display");
+  assert.match(
+    block[1].replace(/\s+/g, " "),
+    /display\s*:\s*none\s*!important/,
+    "[hidden] must force display:none, or a section with its own display stays on screen",
   );
+
+  // The rule only matters for elements that have a display of their own. Both
+  // sections do, which is exactly why the guarantee has to be unconditional.
+  for (const selector of ["#board", "#docs"]) {
+    assert.ok(
+      new RegExp(`${selector}\\s*\\{`).test(stripped),
+      `${selector} is not a top-level rule in web/app.css`,
+    );
+  }
 });
