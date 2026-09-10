@@ -17,6 +17,35 @@ LDFLAGS  = -X github.com/kroticw/fleetdeck/internal/version.value=$(VERSION)
 # different order depending on which machine built the release.
 BIN_NAMES := $(sort $(notdir $(patsubst %/,%,$(wildcard cmd/*/))))
 
+# DIST_BIN_NAMES is what `dist` and its verification actually package -- BIN_NAMES minus
+# fleetdeck-window. `dist`'s DIST_ARCHES loop below cross-builds both architectures from
+# one host via a plain GOARCH switch, which Go answers by quietly turning cgo off for
+# whichever arch is not the host's own, and fleetdeck-window has no non-cgo fallback at
+# all, so it fails to compile rather than link -- loud, not silent, but still a `dist`
+# that cannot finish. This is a deliberate, single exception, not the "second list" the
+# paragraph above warns about: that warning is about a *CLI* command someone adds and
+# forgets to wire in, and this is a GUI window that was never meant to ride the same
+# cross-arch release path without its own C cross-toolchain setup -- that belongs with
+# codesigning the release build, when that is taken up on purpose.
+DIST_BIN_NAMES := $(filter-out fleetdeck-window,$(BIN_NAMES))
+
+# HOST_GOOS drives the same exclusion for `build`, but conditionally rather than always:
+# a plain `go build ./cmd/fleetdeck-window` (same arch, no cross toolchain) really does
+# work on darwin, cgo included -- see cmd/fleetdeck-window's own tests. On any other host
+# it is the *package itself* that has no darwin build to offer, not a cgo/arch mismatch:
+# `go build ./cmd/fleetdeck-window` on linux fails outright with "build constraints
+# exclude all Go files", the same failure `make build` hit inside CI's ubuntu-latest leg
+# (via cmd/fleetdeck's own version_test.go, which shells out to `make build`) before this
+# was made conditional -- confirmed from that job's own log, not assumed from reading the
+# tag. `go env GOOS` reports the host unless a cross build overrides it, which nothing
+# here does.
+HOST_GOOS := $(shell go env GOOS)
+ifeq ($(HOST_GOOS),darwin)
+BUILD_BIN_NAMES := $(BIN_NAMES)
+else
+BUILD_BIN_NAMES := $(DIST_BIN_NAMES)
+endif
+
 ifeq ($(strip $(BIN_NAMES)),)
 $(error no command directories found under cmd/: there is nothing to build)
 endif
@@ -30,11 +59,12 @@ DISTDIR  ?= dist
 # project (spec section 1), so this is the whole list, not a default subset.
 DIST_ARCHES ?= arm64 amd64
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist window-app
 
-# Build every command under ./cmd into $(BINDIR).
+# Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
+# see BUILD_BIN_NAMES above.
 build:
-	@for b in $(BIN_NAMES); do \
+	@for b in $(BUILD_BIN_NAMES); do \
 		go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$$b ./cmd/$$b || exit 1; \
 	done
 
@@ -125,11 +155,11 @@ dist:
 	@for arch in $(DIST_ARCHES); do \
 		stage="$(DISTDIR)/darwin-$$arch"; \
 		mkdir -p "$$stage"; \
-		for b in $(BIN_NAMES); do \
+		for b in $(DIST_BIN_NAMES); do \
 			GOOS=darwin GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o "$$stage/$$b" ./cmd/$$b || exit 1; \
 		done; \
 		COPYFILE_DISABLE=1 tar --create --gzip --file "$(DISTDIR)/fleetdeck-$(VERSION)-darwin-$$arch.tar.gz" \
-			--directory "$$stage" $(BIN_NAMES) || exit 1; \
+			--directory "$$stage" $(DIST_BIN_NAMES) || exit 1; \
 	done
 	@$(MAKE) --no-print-directory verify-dist
 
@@ -139,7 +169,7 @@ dist:
 # of its own, so the gate between building and publishing is visible in the workflow
 # rather than implied by a target it happens to call.
 verify-dist:
-	@scripts/verify-dist.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)"
+	@scripts/verify-dist.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(DIST_BIN_NAMES)" "$(LDFLAGS)"
 
 run: build
 	@if [ ! -x $(BINDIR)/fleetdeck ]; then \
@@ -147,3 +177,16 @@ run: build
 		exit 1; \
 	fi
 	$(BINDIR)/fleetdeck
+
+# window-app stages a launchable .app bundle around cmd/fleetdeck-window: a Dock icon
+# and a double-click launch, nothing more. It is deliberately not part of `dist` -- see
+# DIST_BIN_NAMES above -- and codesigning it is a separate, not-yet-taken-up task; a
+# bundle built and run locally (this target does both) never picks up the
+# com.apple.quarantine attribute Gatekeeper acts on, so none is needed for that case.
+# If this bundle is ever downloaded instead of built locally, it will.
+window-app:
+	@rm -rf "$(BINDIR)/fleetdeck.app"
+	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/MacOS"
+	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
+	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
+	@echo "window-app: $(BINDIR)/fleetdeck.app (open it, or: open $(BINDIR)/fleetdeck.app)"
