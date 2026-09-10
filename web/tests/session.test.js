@@ -13,6 +13,10 @@ import assert from "node:assert/strict";
 
 import { installDOM, fireEvent, settle } from "./fake-dom.js";
 import { KEYS, createPoller, renderSession } from "../js/session.js";
+// The panel's own dictionary, not a copy of its strings: what is pinned below is
+// that the label the operator reads comes from a key that exists, in whichever
+// language this machine runs in.
+import { t } from "../js/i18n.js";
 
 const SHORT = "sess-1";
 const FULL = "sess-1-4f2c-11ee-9d3a-0242ac120002";
@@ -398,8 +402,10 @@ test("a missing terminal library is a visible error, not a blank tab", async () 
 // --- writing into the session ----------------------------------------------
 
 test("every key button sends its escape sequence, never the word on its face", async () => {
-  stubFetch(answer({ status: 204 }));
+  installTerminal();
+  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "" } }) : answer({ status: 204 })));
   const panel = await mount();
+  await panel.openScreenTab();
 
   const expected = {
     escape: "\u001b",
@@ -425,12 +431,15 @@ test("every key button sends its escape sequence, never the word on its face", a
 });
 
 test("a key that could not be sent is reported", async () => {
-  stubFetch((url) =>
-    url.includes("/keys")
-      ? answer({ status: 502, statusText: "Bad Gateway", body: { error: "session is gone" } })
-      : answer({ body: [] }),
-  );
+  installTerminal();
+  stubFetch((url) => {
+    if (url.includes("/keys")) {
+      return answer({ status: 502, statusText: "Bad Gateway", body: { error: "session is gone" } });
+    }
+    return url.includes("/screen") ? answer({ body: { screen: "" } }) : answer({ body: [] });
+  });
   const panel = await mount();
+  await panel.openScreenTab();
 
   await panel.click("[data-key=enter]");
 
@@ -521,4 +530,66 @@ test("a transcript with no readable steps says so rather than showing nothing", 
   const empty = panel.root.querySelector(".s-empty");
   assert.notEqual(empty, null);
   assert.notEqual(empty.textContent, "");
+});
+
+// --- the two classes of control, and which is which ------------------------
+//
+// The operator's first look at this panel produced one sentence: "непонятно
+// зачем нужны эти кнопки" — it is not clear what these buttons are for, about a
+// bare `Esc ↑ ↓ Enter ✕` row in the top-right corner of the header. That corner
+// is where every window on his machine puts controls that act on the window,
+// and four of those five buttons do not: they press a key inside a Claude Code
+// session running somewhere else, which no undo reaches. The three tests below
+// are what stops that row from coming back.
+
+test("the keys are drawn on the screen tab and on no other", async () => {
+  // A control that does nothing meaningful where it is shown teaches the person
+  // that controls in this panel need not be understood — and the digest tab,
+  // which opens first, is where the keys were met before they were needed.
+  installTerminal();
+  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  const panel = await mount();
+
+  assert.equal(panel.root.querySelectorAll("[data-key]").length, 0, "no keys on the digest tab");
+
+  await panel.openScreenTab();
+  assert.equal(panel.root.querySelectorAll("[data-key]").length, KEYS.length, "every key on the screen tab");
+
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  assert.equal(panel.root.querySelectorAll("[data-key]").length, 0, "and gone again on the way back");
+});
+
+test("the keys carry a label saying where the press lands", async () => {
+  // Four bare glyphs say nothing about their destination. The label is the only
+  // thing on screen that does, so it is not allowed to be absent, empty, or the
+  // untranslated name of its own dictionary key.
+  installTerminal();
+  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  const label = panel.root.querySelector(".s-keys-label");
+  assert.notEqual(label, null, "the key row has no label at all");
+  assert.equal(label.textContent, t("keys_to_session"), "the label is not the panel's own string");
+  assert.notEqual(label.textContent, "keys_to_session", "the label fell through to its own key name");
+  assert.notEqual(label.textContent.trim(), "");
+});
+
+test("the close button is not one of the keys, and the keys are not in the header", async () => {
+  // ✕ closes this panel and nothing leaves the machine; the four keys land in
+  // somebody's running work. Drawn as one row of five they read as one set, and
+  // the operator read them as exactly that.
+  installTerminal();
+  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  const head = panel.root.querySelector(".s-head");
+  const keys = panel.root.querySelector(".s-keys");
+  assert.notEqual(head.querySelector(".s-close"), null, "the close button belongs to the header");
+  assert.equal(head.querySelectorAll("[data-key]").length, 0, "no session key sits in the header row");
+  assert.notEqual(keys, null, "the keys have no group of their own");
+  assert.equal(keys.querySelector(".s-close"), null, "the close button is inside the key group");
+  assert.equal(head.contains(keys), false, "the key group is still nested in the header");
 });

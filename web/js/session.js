@@ -373,17 +373,6 @@ export function renderSession(
       tabs.appendChild(button);
     }
 
-    const actions = el("div", "s-actions");
-    for (const key of KEYS) {
-      const button = el("button", "s-key", key.label);
-      button.type = "button";
-      button.dataset.key = key.id;
-      button.addEventListener("click", () => {
-        void pressKey(key);
-      });
-      actions.appendChild(button);
-    }
-
     const close = el("button", "s-close", "✕");
     close.type = "button";
     close.title = t("close_session");
@@ -392,9 +381,46 @@ export function renderSession(
       onClose();
     });
 
+    // The header holds the two controls that act on this panel and nothing
+    // else: the tabs, and the button that closes it. Both are undone by
+    // reopening the panel.
     head.appendChild(tabs);
-    head.appendChild(actions);
     head.appendChild(close);
+
+    // The keys are not among them, and this is the change the operator's first
+    // look at this panel bought. Drawn where they used to be — a bare
+    // `Esc ↑ ↓ Enter ✕` row in the top-right corner, opposite the tabs — they
+    // are in the exact place every window on the operator's machine puts
+    // controls that act on the window, and he read them as that and asked what
+    // they were for. They are not that: each one presses a key inside a Claude
+    // Code session running somewhere else, in work that is somebody's, and
+    // nothing takes it back. A button whose purpose is unclear is either never
+    // pressed or pressed to find out, and `↓` pressed to find out moves a menu
+    // selection in that session.
+    //
+    // So they sit down here instead, against the box that writes into the same
+    // session, under a label that names the destination. Grouped by where the
+    // press lands, not by which corner had room.
+    //
+    // Only on the screen tab. The digest is transcript text already spoken, and
+    // it is the tab the panel opens on: the first meeting with these buttons was
+    // on the one tab where pressing them answers nothing on the screen in front
+    // of you. A control that does nothing meaningful where it is shown teaches a
+    // person that controls in this panel need not be understood.
+    let keys = null;
+    if (tab === "screen") {
+      keys = el("div", "s-keys");
+      keys.appendChild(el("span", "s-keys-label", t("keys_to_session")));
+      for (const key of KEYS) {
+        const button = el("button", "s-key", key.label);
+        button.type = "button";
+        button.dataset.key = key.id;
+        button.addEventListener("click", () => {
+          void pressKey(key);
+        });
+        keys.appendChild(button);
+      }
+    }
 
     body = el("div", "s-body");
 
@@ -419,7 +445,10 @@ export function renderSession(
     });
     form.appendChild(input);
 
-    root.replaceChildren(head, body, errorLine, form);
+    // keys is absent on the digest tab, and filtered out rather than replaced by
+    // an empty node: an empty container still takes the row's gap and leaves the
+    // writing area sitting at a different height on each tab.
+    root.replaceChildren(...[head, body, errorLine, keys, form].filter(Boolean));
   }
 
   drawShell();

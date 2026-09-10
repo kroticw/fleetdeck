@@ -122,4 +122,12 @@ test("the session panel's rules are top-level rules", () => {
   // text in the box was not sent, that the screen could not be read. Unstyled it
   // is a line of body text among the terminal's own output.
   assert.ok(selectors.has(".session-panel .s-error"), ".session-panel .s-error is not a top-level rule in web/app.css");
+
+  // The keys write into a live session and the close button writes nothing
+  // anywhere; these two rules are what keeps them apart on screen. Nested, the
+  // keys fall back into the header's top-right corner beside ✕ — read as one
+  // row of window controls, which is the complaint this panel was fixed for.
+  for (const selector of [".session-panel .s-keys", ".session-panel .s-keys-label", ".session-panel .s-close"]) {
+    assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
+  }
 });
