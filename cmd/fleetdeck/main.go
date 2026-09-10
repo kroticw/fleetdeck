@@ -194,12 +194,19 @@ func main() {
 		return
 	}
 
+	// `fleetdeck version` is read here for the same reason, and answered by the same
+	// function as the --version flag below.
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		runVersion(os.Stdout)
+		return
+	}
+
 	configPath := flag.String("config", defaultConfigPath(), "path to the configuration file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(version.String())
+		runVersion(os.Stdout)
 		return
 	}
 

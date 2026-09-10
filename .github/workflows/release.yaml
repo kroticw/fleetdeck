@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Read-only by default. Only the job that publishes gets contents: write, and it gets
+# it for the whole job because gh release create needs it — this workflow is the one
+# place in the repository holding a token that can write to it, which is also why every
+# action below is pinned to a commit rather than a tag.
+permissions:
+  contents: read
+
+concurrency:
+  # Never two publishes of the same tag at once, and never cancel one part way: a
+  # cancelled run can leave a release created with only some of its archives attached.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # macOS only, and macOS arm64 in particular: the archives hold darwin binaries for
+    # both architectures, and the verification below runs the one this host can
+    # execute. Building them elsewhere would still produce archives, but nothing would
+    # ever have run one before it was published.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # --generate-notes below writes the release notes from the commits since the
+          # previous tag, and it cannot see them in a shallow clone.
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: make test
+
+      # The tag reaches the build through the environment rather than being
+      # interpolated into the shell command, so a tag name is data here and never a
+      # fragment of the script that runs with a token that can write to this
+      # repository.
+      - name: Build the release archives
+        run: make dist VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+
+      # make dist verifies what it just built, so this step normally passes on work
+      # already done. It is a step of its own anyway: the gate between building an
+      # archive and publishing it must be visible in the workflow, not an implementation
+      # detail of a target that happens to call a script. It unpacks each archive,
+      # checks it holds exactly the release binaries, checks both were built with the
+      # ldflags carrying this tag, and runs `fleetdeck version` from the archive built
+      # for this runner's architecture — a release that reports a version other than the
+      # tag it was cut from must not be reachable by anyone, and once it is published it
+      # cannot be taken back.
+      - name: Verify the archives before anything is published
+        run: make verify-dist VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+
+      - name: Publish
+        run: gh release create "$RELEASE_VERSION" dist/*.tar.gz --generate-notes
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
