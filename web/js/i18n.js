@@ -94,6 +94,13 @@ const en = {
   theme_auto: "theme: auto",
   theme_light: "theme: light",
   theme_dark: "theme: dark",
+
+  // The operator's own name for a session (web/js/orchestrator.js's picker
+  // and pinned title, web/js/sessions.js's row) — edited in place, not
+  // through a dialog.
+  edit_label: "edit the name",
+  label_save_failed: "the name was not saved",
+  current_orchestrator: "the current orchestrator",
 };
 
 const ru = {
@@ -158,6 +165,10 @@ const ru = {
   theme_auto: "тема: авто",
   theme_light: "тема: светлая",
   theme_dark: "тема: тёмная",
+
+  edit_label: "изменить имя",
+  label_save_failed: "имя не сохранено",
+  current_orchestrator: "текущий оркестратор",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;

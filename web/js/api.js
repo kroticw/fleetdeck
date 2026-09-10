@@ -153,6 +153,28 @@ export async function setOrchestratorSession(id) {
   }
 }
 
+// setSessionLabel writes, or given an empty label removes, the operator's own
+// name for one session. sessionId is the transcript UUID
+// (internal/server's route is PATCH /api/sessions/{id}/label, keyed the same
+// way the digest route is — never the daemon's short id, which is reassigned
+// on every restart and cannot durably name anything).
+//
+// An empty label is a legal value and means "forget this session's name": the
+// route takes a pointer, so an absent key is a 400 and an explicit empty
+// string is the removal. Which is why this sends the key unconditionally
+// rather than omitting it, the same reasoning setOrchestratorSession's own
+// comment gives.
+export async function setSessionLabel(sessionId, label) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/label`, {
+    method: "PATCH",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ label: String(label ?? "") }),
+  });
+  if (!response.ok) {
+    throw await refusal(response);
+  }
+}
+
 // fetchDigest returns a session's most recent readable steps, oldest first, as
 // {role, text, at} (internal/transcript.Step).
 //

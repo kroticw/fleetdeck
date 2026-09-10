@@ -41,6 +41,32 @@ test("a session that is neither waiting nor stalled has no reason row at all", (
   assert.equal(html.includes("sreason"), false, "an absent reason is absent, not an empty box");
 });
 
+// --- the operator's own name for a session ---
+
+test("the row prefers the operator's own label, then the name, then the short id", () => {
+  assert.match(rowHtml({ short: "ee55", label: "my name for it", name: "n" }), /class="sname">my name for it</);
+  assert.match(rowHtml({ short: "ee55", label: "", name: "n" }), /class="sname">n</);
+  assert.match(rowHtml({ short: "ee55", name: "" }), /class="sname">ee55</);
+});
+
+test("a hostile label reaches the row only as escaped text, never as markup", () => {
+  const nasty = 'he said "go" <img src=x onerror=alert(1)>';
+  const html = rowHtml({ short: "ff66", label: nasty, name: "n" });
+  assert.ok(!html.includes("<img"), "the label must never reach the DOM as markup");
+  assert.ok(html.includes("&quot;go&quot;"), "the quote is escaped, not left to break an attribute");
+  assert.ok(html.includes("&lt;img"), "the tag itself is escaped, not stripped or interpreted");
+});
+
+test("the edit button carries the session's transcript UUID, not its short id", () => {
+  const html = rowHtml({ short: "gg77", name: "n", sessionId: "11111111-1111-1111-1111-111111111111" });
+  assert.match(html, /class="label-edit-btn" data-session-id="11111111-1111-1111-1111-111111111111"/);
+});
+
+test("a session with no transcript UUID gets no edit button — there is nothing to write a label against", () => {
+  const html = rowHtml({ short: "hh88", name: "n" });
+  assert.equal(html.includes("label-edit-btn"), false);
+});
+
 // --- the orchestrator belongs to the other column ---
 //
 // The operator asked for the two columns to stop showing the same thing: the
@@ -223,3 +249,15 @@ test("a card path cannot break out of the attribute it lands in", () => {
 // that is a change to a file two other sessions are working in, not a change
 // this task asked for.
 
+// Editing a task's own name in place (startEditing, inside renderSessions)
+// is NOT covered here on purpose. This column rebuilds with a single
+// root.innerHTML = ... write (see renderSessions), and fake-dom.js's own
+// header says why that is invisible to it: "innerHTML is stored and never
+// parsed" — so none of .srow, .sname or .label-edit-btn ever become real,
+// queryable nodes in this harness, the same reason renderSessions' own
+// pre-existing click-to-select was never exercised here either. rowHtml's
+// output — the label priority, the escaping, the edit button's presence and
+// its data-session-id — is fully covered above because it is a pure string
+// function. The interactive behavior (Enter/Esc/blur, the freeze-while-
+// editing guard, the visible failure message) was verified by hand against
+// a real running panel in a real browser instead.
