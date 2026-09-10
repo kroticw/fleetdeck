@@ -96,18 +96,25 @@ function gauge(label, window_) {
 
 // stalledList renders the "M stalled" counter's reason rows: up to
 // MAX_STALL_REASONS reasons shown verbatim (escaped -- see escapeHTML),
-// then a "+N more" tail. The count itself is never truncated -- only the
-// listed reason text is. Sessions with no reason text (the flag-only
-// Stalled branch with an empty detail) are dropped from the joined list
-// rather than leaving a stray empty entry between separators.
+// then a "+N more" tail. The stalled *count* is never truncated -- only
+// this reason list is, and only the reason list's own truncation is what
+// the tail counts.
+//
+// Invariant: filter empty reasons out FIRST, across every stalled session,
+// then slice the resulting reason list for display. The tail is exactly
+// (total non-empty reasons) - (reasons shown). A session with no reason
+// text (the flag-only Stalled branch with an empty detail) never had a
+// reason to display in the first place, so it must never inflate the
+// "+N more" count -- it is absence, not truncation. Slicing session
+// objects first and filtering empties second would undercount real,
+// visible reasons that exist past the cap whenever an empty-reason session
+// happens to occupy one of the first MAX_STALL_REASONS slots; do not
+// reorder these two steps.
 export function stalledList(stalledSessions) {
   if (stalledSessions.length === 0) return "";
-  const shown = stalledSessions
-    .slice(0, MAX_STALL_REASONS)
-    .map((s) => stallReason(s))
-    .filter((reason) => reason !== "")
-    .map((reason) => escapeHTML(reason));
-  const rest = stalledSessions.length - Math.min(stalledSessions.length, MAX_STALL_REASONS);
+  const reasons = stalledSessions.map((s) => stallReason(s)).filter((reason) => reason !== "");
+  const shown = reasons.slice(0, MAX_STALL_REASONS).map((reason) => escapeHTML(reason));
+  const rest = reasons.length - shown.length;
   const tail = rest > 0 ? ` +${rest} more` : "";
   return `<span class="stall-reasons">${shown.join("; ")}${tail}</span>`;
 }
