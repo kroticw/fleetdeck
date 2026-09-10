@@ -1,6 +1,7 @@
 import { subscribe, get } from "./store.js";
 import { sendText, setOrchestratorSession } from "./api.js";
 import { t } from "./i18n.js";
+import { escapeHTML } from "./header.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column and its own input.
@@ -11,8 +12,54 @@ import { t } from "./i18n.js";
 // POST /api/sessions/{short}/text takes — while `sessionId` is the
 // transcript UUID that GET /api/sessions/{sessionId}/digest matches on via
 // transcript.Locate. A SessionView carries both; it has no `.id` field.
+
+// resolveOrchestrator is the pure core of "which session, if any, does the
+// pin point at right now" — kept free of get()/DOM so it can be tested
+// directly against fixture snapshots instead of only through a full render.
+export function resolveOrchestrator(snap) {
+  const sessions = snap?.sessions ?? [];
+  const short = snap?.orchestratorSession ?? "";
+  const session = short ? sessions.find((s) => s.short === short) : undefined;
+  return { sessions, short, session };
+}
+
+// contextPercent turns a transcript.Usage-shaped object into a rounded
+// percentage, or null when there is nothing to show. transcript.Usage's JSON
+// fields are exactly `tokens`/`window`/`estimated` — there is no `percent`
+// field to read instead.
+export function contextPercent(ctx) {
+  return ctx?.window ? Math.round((ctx.tokens / ctx.window) * 100) : null;
+}
+
+// pickerItemsHTML renders the picker's session buttons. Session data comes
+// from the daemon, not from this codebase (spec 3.1: the fleet is open), so
+// `short` and `name` are untrusted content escaped the same way header.js
+// already treats needs/detail — including inside the `data-short` attribute,
+// where a stray quote would otherwise break out of it.
+export function pickerItemsHTML(sessions) {
+  return sessions
+    .filter((s) => s.short)
+    .map((s) => `<button type="button" class="o-pick-item" data-short="${escapeHTML(s.short)}">${escapeHTML(s.name || s.short)}</button>`)
+    .join("");
+}
+
+// staleBannerHTML is the visible signal that store.js's own contract
+// requires (see its module doc): a dropped socket must never look like a
+// live one. Structure only is asserted in tests — the translated wording is
+// i18n's concern, not this function's.
+export function staleBannerHTML(connected) {
+  return connected ? "" : `<div class="o-stale">${escapeHTML(t("offline"))}</div>`;
+}
+
 export function renderOrchestrator(root) {
   let steps = [];
+
+  // Set by the store subscription on every push (including the initial
+  // synchronous one) and read by draw() whenever it runs — including the
+  // redraws triggered from inside this module itself (a send, a pick), which
+  // happen between socket pushes and must still reflect the last known
+  // connection state rather than assuming "connected" by default.
+  let isConnected = false;
 
   // Two independent error slots, deliberately not one shared `error`. A
   // single variable let a successful background digest poll silently erase
@@ -39,10 +86,7 @@ export function renderOrchestrator(root) {
 
   const resolve = () => {
     const snap = get();
-    const sessions = snap?.sessions ?? [];
-    const short = snap?.orchestratorSession ?? "";
-    const session = short ? sessions.find((s) => s.short === short) : undefined;
-    return { snap, sessions, short, session };
+    return { snap, ...resolveOrchestrator(snap) };
   };
 
   const formHTML = () => `
@@ -103,28 +147,23 @@ export function renderOrchestrator(root) {
     const prevArea = root.querySelector(".o-form textarea");
     const hadFocus = prevArea != null && document.activeElement === prevArea;
 
+    const stale = staleBannerHTML(isConnected);
+
     // Nothing pinned, and nothing to pick from either: the socket may simply
     // not be connected yet, or the daemon has no sessions. Say so plainly —
     // this is not a failure.
     if (!short && (!snap || sessions.length === 0)) {
-      root.innerHTML = `<div class="o-pick"><p class="o-pick-empty">${escapeHTML(t("pick_orchestrator"))}</p></div>`;
+      root.innerHTML = `<div class="o-pick">${stale}<p class="o-pick-empty">${escapeHTML(t("pick_orchestrator"))}</p></div>`;
       return;
     }
 
     // Nothing pinned, but there is something to choose from: offer the picker.
     if (!short) {
-      const pickable = sessions.filter((s) => s.short);
       root.innerHTML = `
         <div class="o-pick">
+          ${stale}
           <p class="o-pick-empty">${escapeHTML(t("pick_orchestrator"))}</p>
-          <div class="o-pick-list">
-            ${pickable
-              .map(
-                (s) =>
-                  `<button type="button" class="o-pick-item" data-short="${escapeHTML(s.short)}">${escapeHTML(s.name || s.short)}</button>`,
-              )
-              .join("")}
-          </div>
+          <div class="o-pick-list">${pickerItemsHTML(sessions)}</div>
           ${sendError ? `<div class="o-error o-error-send">${escapeHTML(sendError)}</div>` : ""}
         </div>`;
       root.querySelectorAll(".o-pick-item").forEach((btn) => {
@@ -145,18 +184,19 @@ export function renderOrchestrator(root) {
     // nothing to resolve a digest against, so none is requested.
     if (!session) {
       root.innerHTML = `
+        ${stale}
         <div class="o-head"><span class="o-name">${escapeHTML(short)}</span></div>
         ${sendError ? `<div class="o-error o-error-send">${escapeHTML(sendError)}</div>` : ""}
-        <div class="o-thread"><div class="o-msg o-dead">session is not currently listed by the daemon</div></div>
+        <div class="o-thread"><div class="o-msg o-dead">${escapeHTML(t("session_not_listed"))}</div></div>
         ${formHTML()}`;
       wireForm(short, hadFocus);
       return;
     }
 
-    const ctx = session.context;
-    const pct = ctx?.window ? Math.round((ctx.tokens / ctx.window) * 100) : null;
+    const pct = contextPercent(session.context);
 
     root.innerHTML = `
+      ${stale}
       <div class="o-head">
         <span class="o-name">${escapeHTML(session.name || session.short)}</span>
         ${pct === null ? "" : `<span class="o-ctx">${pct}%</span>`}
@@ -188,10 +228,9 @@ export function renderOrchestrator(root) {
     draw();
   };
 
-  subscribe(draw);
+  subscribe((_snap, connected) => {
+    isConnected = connected;
+    draw();
+  });
   setInterval(refreshDigest, 3000);
-}
-
-function escapeHTML(s) {
-  return String(s).replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[ch]);
 }

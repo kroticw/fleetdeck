@@ -194,6 +194,22 @@ main {
   opacity: 0.85;
 }
 
+/* .o-stale marks the whole column as showing a snapshot the socket is no
+ * longer confirming as live (store.js: "a stale board that looks live is
+ * worse than an empty one that says it is stale"). It stays visible above
+ * whatever branch draw() rendered rather than replacing it, since the last
+ * known conversation and a working textarea (sendText is a plain fetch, not
+ * tied to the socket) both remain genuinely useful while reconnecting. */
+.o-stale {
+  flex: none;
+  margin: var(--gap) var(--gap) 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, orange 20%, transparent);
+  font-size: 0.85em;
+  text-align: center;
+}
+
 .o-thread {
   flex: 1;
   min-height: 0;
