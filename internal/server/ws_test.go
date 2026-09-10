@@ -39,7 +39,7 @@ func wsDeps() Deps {
 	}
 }
 
-func readSnapshot(t *testing.T, ctx context.Context, conn *websocket.Conn) state.Snapshot {
+func readSnapshot(ctx context.Context, t *testing.T, conn *websocket.Conn) state.Snapshot {
 	t.Helper()
 	typ, data, err := conn.Read(ctx)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestWebSocketPushesASnapshotOnConnect(t *testing.T) {
 	}
 	defer conn.CloseNow()
 
-	snap := readSnapshot(t, ctx, conn)
+	snap := readSnapshot(ctx, t, conn)
 	if len(snap.Cards) != 1 || snap.Cards[0].Path != "/b/c.md" {
 		t.Fatalf("the push did not carry the snapshot: %+v", snap)
 	}
@@ -91,7 +91,7 @@ func TestWebSocketKeepsPushingOnItsCadence(t *testing.T) {
 	defer conn.CloseNow()
 
 	for i := range 3 {
-		if snap := readSnapshot(t, ctx, conn); len(snap.Cards) != 1 {
+		if snap := readSnapshot(ctx, t, conn); len(snap.Cards) != 1 {
 			t.Fatalf("push %d did not carry the snapshot: %+v", i, snap)
 		}
 	}
@@ -135,7 +135,7 @@ func TestWebSocketAcceptsTheLocalOrigin(t *testing.T) {
 		t.Fatalf("the panel's own origin must be accepted: %v", err)
 	}
 	defer conn.CloseNow()
-	readSnapshot(t, ctx, conn)
+	readSnapshot(ctx, t, conn)
 }
 
 // A closed browser tab must end the push loop. If it does not, every reload
@@ -151,7 +151,7 @@ func TestWebSocketHandlerReturnsWhenTheClientGoesAway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	readSnapshot(t, ctx, conn)
+	readSnapshot(ctx, t, conn)
 	if err := conn.Close(websocket.StatusNormalClosure, "done"); err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestWebSocketRefusesAMessageFromTheClient(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.CloseNow()
-	readSnapshot(t, ctx, conn)
+	readSnapshot(ctx, t, conn)
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"text":"do something"}`)); err != nil {
 		t.Fatalf("write: %v", err)

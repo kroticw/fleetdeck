@@ -46,7 +46,7 @@ func (d Deps) handleWS(w http.ResponseWriter, r *http.Request) {
 		// 400 for a malformed handshake); there is nothing left to write.
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
