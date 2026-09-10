@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -91,6 +92,30 @@ func sessionRuleSets(sessions []SessionView, silenceAfter time.Duration) map[str
 	return sets
 }
 
+// humanDuration renders a duration the way a person writes one — "30m", "1h 30m",
+// "2h", "45s" — rather than the way Go prints one, which turns a plain half hour into
+// "30m0s". Zero components are dropped rather than printed, since a banner is read at
+// a glance. Anything under a second has no whole unit to render and is left to Go's
+// own formatting; it never reaches a banner in practice, as such a threshold would
+// have turned the silence rule off long before (see Diff).
+func humanDuration(d time.Duration) string {
+	if d < time.Second {
+		return d.String()
+	}
+	d = d.Round(time.Second)
+	parts := make([]string, 0, 3)
+	if h := int(d / time.Hour); h > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", h))
+	}
+	if m := int(d % time.Hour / time.Minute); m > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", m))
+	}
+	if sec := int(d % time.Minute / time.Second); sec > 0 {
+		parts = append(parts, fmt.Sprintf("%ds", sec))
+	}
+	return strings.Join(parts, " ")
+}
+
 // sessionRuleText is the banner body for a rule that has just become true.
 func sessionRuleText(rule string, silenceAfter time.Duration) string {
 	switch rule {
@@ -99,7 +124,7 @@ func sessionRuleText(rule string, silenceAfter time.Duration) string {
 	case kindFailed:
 		return "ended in failure"
 	case kindSilent:
-		return fmt.Sprintf("has been silent for over %s", silenceAfter)
+		return fmt.Sprintf("has been silent for over %s", humanDuration(silenceAfter))
 	}
 	return ""
 }

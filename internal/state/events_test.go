@@ -521,3 +521,38 @@ func TestUnmeasuredSilenceNeverFires(t *testing.T) {
 		t.Fatalf("a session whose silence was never measured must not fire the silence rule: %+v", fire)
 	}
 }
+
+// TestHumanDurationReadsLikeAPerson pins item 10: the silence banner rendered the
+// threshold with Go's own formatting, so a half-hour window came out as "has been
+// silent for over 30m0s". A banner is read by a person at a glance.
+func TestHumanDurationReadsLikeAPerson(t *testing.T) {
+	for _, tc := range []struct {
+		in   time.Duration
+		want string
+	}{
+		{30 * time.Minute, "30m"},
+		{90 * time.Minute, "1h 30m"},
+		{2 * time.Hour, "2h"}, // a zero minute component is dropped, not printed
+		{45 * time.Second, "45s"},
+		{90 * time.Second, "1m 30s"},
+		{2*time.Hour + 5*time.Second, "2h 5s"},
+		{500 * time.Millisecond, "500ms"}, // below a second there is nothing to round to
+	} {
+		if got := humanDuration(tc.in); got != tc.want {
+			t.Errorf("humanDuration(%s) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSilenceBannerTextUsesTheHumanDuration(t *testing.T) {
+	before := idleView("a")
+	before.SilentFor = time.Minute
+	after := idleView("a")
+	after.SilentFor = 2 * time.Hour
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{before}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{after}}
+	fire, _ := Diff(prev, next, 30*time.Minute)
+	if len(fire) != 1 || fire[0].Text != "has been silent for over 30m" {
+		t.Fatalf("the banner must read the way a person writes a duration: %+v", fire)
+	}
+}
