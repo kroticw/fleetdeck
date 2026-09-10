@@ -13,7 +13,18 @@ import { t } from "./i18n.js";
 // transcript.Locate. A SessionView carries both; it has no `.id` field.
 export function renderOrchestrator(root) {
   let steps = [];
-  let error = "";
+
+  // Two independent error slots, deliberately not one shared `error`. A
+  // single variable let a successful background digest poll silently erase
+  // the message from a failed send: sendText fails, refreshDigest is kicked
+  // off right after it regardless, and if the transcript itself is still
+  // readable that poll succeeds and blanks the very error the operator needed
+  // to see. sendError covers sendText and the picker's setOrchestratorSession
+  // — anything the operator directly triggered — and is cleared only by the
+  // next such attempt. digestError covers the periodic digest poll alone and
+  // is cleared only by that poll succeeding. Neither may clear the other.
+  let sendError = "";
+  let digestError = "";
 
   // The transcript UUID the digest was last fetched for. A change of pin, or
   // the pinned session reappearing after being absent, is detected by
@@ -55,9 +66,9 @@ export function renderOrchestrator(root) {
       draftText = "";
       try {
         await sendText(targetShort, text);
-        error = "";
+        sendError = "";
       } catch (err) {
-        error = err.message;
+        sendError = err.message;
         area.value = text;
         draftText = text;
       }
@@ -82,6 +93,9 @@ export function renderOrchestrator(root) {
     } else if (!session && fetchedFor !== null) {
       fetchedFor = null;
       steps = [];
+      // Nothing is being polled for any more, so a stale poll failure from
+      // the session that just disappeared has nothing left to describe.
+      digestError = "";
     }
 
     // Capture whether the textarea (if one is on screen right now) has focus,
@@ -111,15 +125,15 @@ export function renderOrchestrator(root) {
               )
               .join("")}
           </div>
-          ${error ? `<div class="o-error">${escapeHTML(error)}</div>` : ""}
+          ${sendError ? `<div class="o-error o-error-send">${escapeHTML(sendError)}</div>` : ""}
         </div>`;
       root.querySelectorAll(".o-pick-item").forEach((btn) => {
         btn.addEventListener("click", async () => {
           try {
             await setOrchestratorSession(btn.dataset.short);
-            error = "";
+            sendError = "";
           } catch (err) {
-            error = err.message;
+            sendError = err.message;
           }
           draw();
         });
@@ -132,7 +146,7 @@ export function renderOrchestrator(root) {
     if (!session) {
       root.innerHTML = `
         <div class="o-head"><span class="o-name">${escapeHTML(short)}</span></div>
-        ${error ? `<div class="o-error">${escapeHTML(error)}</div>` : ""}
+        ${sendError ? `<div class="o-error o-error-send">${escapeHTML(sendError)}</div>` : ""}
         <div class="o-thread"><div class="o-msg o-dead">session is not currently listed by the daemon</div></div>
         ${formHTML()}`;
       wireForm(short, hadFocus);
@@ -147,10 +161,11 @@ export function renderOrchestrator(root) {
         <span class="o-name">${escapeHTML(session.name || session.short)}</span>
         ${pct === null ? "" : `<span class="o-ctx">${pct}%</span>`}
       </div>
-      ${error ? `<div class="o-error">${escapeHTML(error)}</div>` : ""}
+      ${digestError ? `<div class="o-error o-error-digest">${escapeHTML(digestError)}</div>` : ""}
       <div class="o-thread">
         ${steps.map((s) => `<div class="o-msg o-${escapeHTML(s.role)}">${escapeHTML(s.text)}</div>`).join("")}
       </div>
+      ${sendError ? `<div class="o-error o-error-send">${escapeHTML(sendError)}</div>` : ""}
       ${formHTML()}`;
     wireForm(session.short, hadFocus);
 
@@ -165,10 +180,10 @@ export function renderOrchestrator(root) {
       const res = await fetch(`/api/sessions/${encodeURIComponent(session.sessionId)}/digest?limit=20`);
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText);
       steps = await res.json();
-      error = "";
+      digestError = "";
     } catch (err) {
       steps = [];
-      error = err.message;
+      digestError = err.message;
     }
     draw();
   };

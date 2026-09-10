@@ -183,6 +183,17 @@ main {
   word-break: break-word;
 }
 
+/* .o-error-send (a failed send or picker choice) and .o-error-digest (a
+ * failed background digest poll) are independent states shown at once when
+ * both apply — the send error must never be mistaken for, or hidden behind,
+ * a transient poll failure. The digest one is visually quieter: it is a
+ * background refresh retried automatically every few seconds, not something
+ * the operator needs to act on the way a failed send does. */
+.o-error-digest {
+  background: color-mix(in srgb, orange 12%, transparent);
+  opacity: 0.85;
+}
+
 .o-thread {
   flex: 1;
   min-height: 0;
