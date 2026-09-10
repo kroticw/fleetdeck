@@ -162,13 +162,29 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 		}
 	}
 
-	notifiableStage := func(stage string) bool { return stage == "blocked" || stage == "review" }
-
+	// A card board.Scan could not parse arrives as Card{Path, ParseError} with an
+	// empty Stage, and an empty Stage is not a stage — it is the absence of a
+	// reading. Diffing against it turns one edit into two banners: the half-written
+	// file reads as "left blocked", and the finished write on the next tick reads as
+	// "entered blocked". Such a card is therefore skipped on both sides, so the next
+	// tick has no phantom empty stage to diff against either. It is still counted as
+	// present below, because it has not been deleted — only, for the moment, read.
 	prevStage := map[string]string{}
 	for _, c := range prev.Cards {
+		if c.ParseError != "" {
+			continue
+		}
 		prevStage[c.Path] = c.Stage
 	}
+	inNext := map[string]bool{}
 	for _, c := range next.Cards {
+		inNext[c.Path] = true
+	}
+
+	for _, c := range next.Cards {
+		if c.ParseError != "" {
+			continue
+		}
 		was, existed := prevStage[c.Path]
 		// A card this diff has never seen before has no prior stage to compare
 		// against, so — unlike a session, whose mere appearance already
@@ -190,5 +206,22 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 			cleared = append(cleared, fmt.Sprintf("card:%s:%s", c.Path, was))
 		}
 	}
+
+	// A card in prev and not in next was deleted or moved out of the board. Like an
+	// ended session, it never left its stage by a move anyone can see, so its key has
+	// to be released here or it stays raised forever.
+	var deleted []string
+	for path, stage := range prevStage {
+		if !inNext[path] && notifiableStage(stage) {
+			deleted = append(deleted, fmt.Sprintf("card:%s:%s", path, stage))
+		}
+	}
+	sort.Strings(deleted)
+	cleared = append(cleared, deleted...)
+
 	return fire, cleared
 }
+
+// notifiableStage reports whether a stage is one of the two the spec's fourth rule
+// names (section 6: "карточка ушла в blocked или review").
+func notifiableStage(stage string) bool { return stage == "blocked" || stage == "review" }

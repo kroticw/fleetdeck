@@ -423,3 +423,21 @@ func TestStalledSessionSilentPastThresholdStillFires(t *testing.T) {
 		t.Fatalf("a stalled session silent past the threshold must still fire: %+v", fire)
 	}
 }
+
+// TestCardRecoveringFromParseErrorIsNotANewStage covers the other half of item 4: the
+// tick after the unparseable one. The card was never read as "" — an empty Stage is
+// the absence of a reading, not a stage it stood in — so the finished write must not
+// come out as "entered blocked". Skipping the card only on the next side would leave
+// that phantom empty stage in the prev map and fire the second of the two banners the
+// skip exists to prevent.
+func TestCardRecoveringFromParseErrorIsNotANewStage(t *testing.T) {
+	prev := Snapshot{At: observedAt, Cards: []board.Card{{Path: "/b/c.md", ParseError: "no frontmatter block"}}}
+	next := Snapshot{At: observedAt.Add(time.Second), Cards: []board.Card{{Path: "/b/c.md", Stage: "blocked"}}}
+	fire, cleared := Diff(prev, next, time.Hour)
+	if len(fire) != 0 {
+		t.Fatalf("a card that only just became readable again has not moved anywhere: %+v", fire)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("nothing was standing to be cleared: %v", cleared)
+	}
+}
