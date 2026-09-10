@@ -69,7 +69,7 @@
 - Consumes: ничего
 - Produces: `version.String() string` — версия сборки, подставляемая через ldflags
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 ```go
 // internal/version/version_test.go
@@ -93,9 +93,9 @@ func TestStringUsesInjectedValue(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает.** Команда `go test ./internal/version/`, ожидается FAIL: пакет не существует.
+- [x] **Step 2: Прогнать и убедиться, что падает.** Команда `go test ./internal/version/`, ожидается FAIL: пакет не существует.
 
-- [ ] **Step 3: Создать модуль и реализацию**
+- [x] **Step 3: Создать модуль и реализацию**
 
 ```bash
 cd ~/claude/fleetdeck/.claude/worktrees/design-spec
@@ -119,9 +119,9 @@ func String() string {
 }
 ```
 
-- [ ] **Step 4: Прогнать тесты.** Команда `go test ./internal/version/`, ожидается PASS, два теста.
+- [x] **Step 4: Прогнать тесты.** Команда `go test ./internal/version/`, ожидается PASS, два теста.
 
-- [ ] **Step 5: Добавить Makefile, .gitignore и CI**
+- [x] **Step 5: Добавить Makefile, .gitignore и CI**
 
 ```makefile
 BINARIES := fleetdeck fleetdeck-status
@@ -173,7 +173,7 @@ jobs:
 
 Сборка стоит в CI с первой задачи намеренно: второй план встраивает статику через `go:embed`, а она ломается тихо — тест проходит, бинарник не собирается.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add go.mod Makefile .gitignore .github internal/version
@@ -184,6 +184,20 @@ git commit --signoff -m "chore: module skeleton with build version and CI"
 
 ## Task 2: Конфигурация
 
+> **Поправка (пост-фактум, ветка feat/server).** Ниже описан плоский формат ключей
+> (`board_path`, `server_port` и так далее) и прямой `yaml.Unmarshal` в `Config`. Это не то,
+> что в итоге пошло в код: реализация заменила его на вложенный формат
+> (`board.path`, `server.port`, `notify.enabled.*`, `daemon.poll_interval`, `usage.enabled`)
+> с отдельным приватным типом `file` для (де)сериализации и `yaml.KnownFields(true)`, чтобы
+> неизвестные и плоские ключи были ошибкой, а не молча игнорировались. `Config` вообще не
+> сериализуется напрямую и не несёт yaml-тегов. Блоки кода ниже — исторический черновик,
+> сохранённый как есть; они замещены фактическим `internal/config/config.go`.
+>
+> Ещё два расхождения с итоговым кодом: `Load` на пустом файле или файле из одних
+> комментариев теперь тоже возвращает умолчания (а не ошибку `EOF`), и добавлена валидация
+> `server.port` (диапазон 1–65535) и `daemon.poll_interval` (строго positive) — оба
+> проверяются при загрузке и дают ошибку при недопустимом значении.
+
 **Files:**
 - Create: `internal/config/config.go`, `internal/config/config_test.go`
 
@@ -191,7 +205,7 @@ git commit --signoff -m "chore: module skeleton with build version and CI"
 - Consumes: ничего
 - Produces: `type Config struct { BoardPath string; DocsPaths []string; OrchestratorSession string; Notify NotifyConfig; DaemonPollInterval time.Duration; UsageEnabled bool; ServerPort int }`, `type NotifyConfig struct { Waiting, Failed, Silent, CardBlocked bool; SilenceAfter time.Duration }`, `func Default() Config`, `func Load(path string) (Config, error)` (отсутствующий файл возвращает умолчания и `nil`), `func Save(path string, c Config) error`
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты** — тесты ниже писались против плоского формата ключей; итоговый `config_test.go` покрывает вложенный формат (см. поправку выше) и дополнительно валидацию `port`/`poll_interval`.
 
 ```go
 // internal/config/config_test.go
@@ -255,9 +269,9 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает.** Команда `go test ./internal/config/`, ожидается FAIL: пакет не существует.
+- [x] **Step 2: Прогнать и убедиться, что падает.** Команда `go test ./internal/config/`, ожидается FAIL: пакет не существует.
 
-- [ ] **Step 3: Реализовать**
+- [x] **Step 3: Реализовать** — реализация пошла по поправке выше (вложенный формат, отдельный тип `file`, `KnownFields(true)`, умолчания для пустого файла, валидация диапазона порта и положительности интервала), а не по черновику ниже.
 
 ```go
 // internal/config/config.go
@@ -336,9 +350,9 @@ func Save(path string, c Config) error {
 }
 ```
 
-- [ ] **Step 4: Прогнать тесты.** Команда `go test ./internal/config/`, ожидается PASS, четыре теста.
+- [x] **Step 4: Прогнать тесты.** Команда `go test ./internal/config/`, ожидается PASS — фактически прошло больше четырёх тестов: пакет с тех пор разросся правками ревью (валидация порта, интервала, `silence_after`, атомарная запись).
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add internal/config go.mod go.sum
@@ -351,10 +365,11 @@ git commit --signoff -m "feat(config): load and save configuration with defaults
 
 > **Поправка, внесённая после зонда на живом демоне.** Код и тесты ниже написаны под протокол, которого не существует: конверт `{"type":"list_sessions"}` и имена `read_screen`, `send_text` — это словарь тулов MCP `claude-agents`, а не команды сокета. Тесты на поддельном сокете от этого зеленеют, а клиент против живого демона не работает вообще — ровно тот отказ, от которого предостерегает раздел 9 спеки.
 >
-> Авторитет — раздел 3.1 спеки, переписанный по результатам зонда. Реальный конверт: одна строка JSON с `\n` в конце, `{"proto":<int>,"op":"<name>"}`. Нужные операции: `list`, `attach`, `reply`, `ping`. Запись требует control key из `~/.claude/daemon/control.key`, без него `EAUTH`. Фикстура снимается с живого сокета, а не командой `claude agents --json`: та отдаёт сшитый MCP объект с полями, которых демон не даёт.
+> Авторитет — раздел 3.1 спеки, переписанный по результатам зонда, и `docs/protocol/daemon-control-socket.md`, где протокол разобран подробно и который, в отличие от черновых заметок в `.superpowers/`, отслеживается в репозитории. Реальный конверт: одна строка JSON с `\n` в конце, `{"proto":<int>,"op":"<name>"}`. Нужные операции: `list`, `attach`, `reply`, `ping`. Запись требует control key из `~/.claude/daemon/control.key`, без него `EAUTH`. Фикстура снимается с живого сокета, а не командой `claude agents --json`: та отдаёт сшитый MCP объект с полями, которых демон не даёт.
+>
+> Итоговый `Session` несёт ровно поля живого `list`-ответа, без `ID`, `Title`, `Kind`, `Status`, `Live`, `Pinned`, `Resumable`, `Options`, `StreamTail` — их синтезирует MCP, а не сокет. Открытый вопрос о вариантах ответа закрыт: поля `options` в протоколе нет.
 >
 > Шаги ниже исполняются по спеке, а не по буквальному коду в них. Код оставлен как есть намеренно: он показывает форму клиента и структуру тестов, и переписывать его задним числом значит потерять след того, где план ошибся.
-
 
 Эта задача содержит **проверку открытого вопроса спеки**: несут ли поля `needs`, `intent`, `detail`, `options` ожидающий вопрос с вариантами ответа. Результат проверки нужно записать в отчёт исполнителя дословно — от него зависит устройство панели ответа во втором плане.
 
@@ -365,7 +380,7 @@ git commit --signoff -m "feat(config): load and save configuration with defaults
 - Consumes: ничего
 - Produces: `type Option struct { Label, Value string }`, `type Session struct { ID, SessionID, Name, Title, CWD, Kind, State, Status string; PID int; StartedAt int64; Live, Pinned, Resumable bool; Needs, Intent, Detail string; Options []Option; StreamTail string }`, `func (Session) Waiting() bool`, `func New(socketPath string) *Client`, `func SocketPath() (string, error)`, `func (c *Client) ListSessions(ctx context.Context) ([]Session, error)`, `func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (string, error)`, `func (c *Client) SendText(ctx context.Context, session, text string, submit bool) error`, `func (c *Client) SendKeys(ctx context.Context, session, keys string) error`, `var ErrDaemonUnavailable`
 
-- [ ] **Step 1: Снять живой ответ демона в фикстуру**
+- [x] **Step 1: Снять живой ответ демона в фикстуру** — `testdata/list_sessions.json` собран по настоящему протоколу (`jobs`, реальный набор полей, см. поправку выше), не по черновому `sessions`-формату ниже; обезличен вручную перед коммитом.
 
 ```bash
 mkdir -p internal/daemon/testdata
@@ -374,7 +389,7 @@ mkdir -p internal/daemon/testdata
 
 Затем обезличить файл вручную: заменить пути в `cwd` на `/home/user/project`, имена сессий на нейтральные, `sessionId` на случайные UUID. Файл едет в публичный репозиторий, поэтому прочитать его глазами целиком перед коммитом.
 
-- [ ] **Step 2: Написать падающие тесты**
+- [x] **Step 2: Написать падающие тесты** — тесты написаны против настоящего протокола из `docs/protocol/daemon-control-socket.md` (envelope `proto`/`op`, `list`/`jobs`, `attach`), не против черновика ниже; со временем разрослись многократными правками ревью до заметно большего набора.
 
 ```go
 // internal/daemon/client_test.go
@@ -472,9 +487,9 @@ func TestSilentDaemonTimesOut(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Прогнать и убедиться, что падает.** Команда `go test ./internal/daemon/`, ожидается FAIL: пакет не существует.
+- [x] **Step 3: Прогнать и убедиться, что падает.** Команда `go test ./internal/daemon/`, ожидается FAIL: пакет не существует.
 
-- [ ] **Step 4: Реализовать типы**
+- [x] **Step 4: Реализовать типы** — `Session` несёт поля настоящего `list`-ответа (`short`, `nonce`, `tempo`, `dying`, ...), без `ID`/`Title`/`Kind`/`Options`/`Live`/`Pinned`/`Resumable`/`StreamTail`; `Option` не существует (см. поправку выше и раздел 4 протокола).
 
 ```go
 // internal/daemon/types.go
@@ -517,7 +532,7 @@ func (s Session) Waiting() bool {
 }
 ```
 
-- [ ] **Step 5: Реализовать клиент**
+- [x] **Step 5: Реализовать клиент** — реализация пошла по настоящему протоколу (proto-negotiation, `attach` с JSON-заголовком и потоком PTY, проверка владельца сокета и ключа, kick-детект), а не по черновому `call`/`type` ниже; клиент существенно отличается от черновика и продолжал получать правки по итогам последующих ревью веток.
 
 ```go
 // internal/daemon/client.go
@@ -621,9 +636,9 @@ func (c *Client) SendKeys(ctx context.Context, session, keys string) error {
 }
 ```
 
-- [ ] **Step 6: Прогнать тесты.** Команда `go test ./internal/daemon/`, ожидается PASS, пять тестов.
+- [x] **Step 6: Прогнать тесты.** Команда `go test ./internal/daemon/`, ожидается PASS — фактически прошло намного больше пяти тестов: пакет получил многократные раунды правок по итогам ревью веток и вырос соответственно.
 
-- [ ] **Step 7: Проверить открытый вопрос спеки на живой сессии**
+- [x] **Step 7: Проверить открытый вопрос спеки на живой сессии** — вопрос закрыт с ответом «нет»: варианты не приходят структурно, поля `needs`/`intent`/`detail` несут plain text (варианты склеены в `needs` через ` · `), поле `options` в протоколе не существует. Результат зафиксирован в `docs/protocol/daemon-control-socket.md`, раздел 4 (заметки к полям) и раздел 5 (три формы ожидания), а не отдельным дословным отчётом исполнителя.
 
 ```bash
 cd /tmp && /opt/homebrew/bin/claude --bg --name "fleetdeck probe" --dangerously-skip-permissions
@@ -631,7 +646,7 @@ cd /tmp && /opt/homebrew/bin/claude --bg --name "fleetdeck probe" --dangerously-
 
 Дождаться, пока пробная сессия задаст вопрос с вариантами, и снять её запись из списка командой `/opt/homebrew/bin/claude agents --json`. Записать в отчёт дословно, что лежит в полях `needs`, `intent`, `detail`, `options` у ожидающей сессии. Если варианты приходят структурно — отметить, что второй план рисует список вариантов; если поля пусты — отметить, что остаётся путь `read_screen` плюс `send_keys`. Погасить пробную сессию командой `/opt/homebrew/bin/claude stop <id>`.
 
-- [ ] **Step 8: Коммит**
+- [x] **Step 8: Коммит**
 
 ```bash
 git add internal/daemon
@@ -2605,6 +2620,16 @@ git commit --signoff -m "feat(server): snapshot API, session input and card patc
 ---
 
 ## Task 11: Связывание и запуск
+
+> **Поправка ревью.** Инъекция версии через `-X .../internal/version.value` (Task 1,
+> `Makefile`) сегодня ничем не проверена: символ молча перестанет подставляться, если
+> его переименуют или пакет переедет, а `internal/version/version_test.go` присваивает
+> `value` напрямую и знать не знает о `Makefile`. До этой задачи собирать было
+> нечего — `cmd/` не существовало. Здесь появляется первый бинарь, поэтому именно тут
+> должен появиться тест уровня `make build`: `make build VERSION=x.y.z`, затем
+> запустить получившийся бинарь (например, `fleetdeck --version` или эквивалент) и
+> убедиться, что он отвечает `x.y.z`. Заглушку под это не изобретать — дождаться
+> реального бинаря из шагов ниже и проверить именно его.
 
 **Files:**
 - Create: `cmd/fleetdeck/main.go`, `cmd/fleetdeck/collect.go`, `cmd/fleetdeck/collect_test.go`
