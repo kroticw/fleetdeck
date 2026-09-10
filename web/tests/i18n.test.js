@@ -63,6 +63,10 @@ const KEYS = [
   "theme_auto",
   "theme_light",
   "theme_dark",
+
+  // web/js/header.js's stale-usage notice, added alongside the fresh
+  // usage_down muting -- same reason as everything else on this list.
+  "usage_down_stale",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

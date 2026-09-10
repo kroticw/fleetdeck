@@ -18,7 +18,20 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isWaiting, isStalled, stallReason, escapeHTML, stalledList } from "../header.js";
+import {
+  isWaiting,
+  isStalled,
+  stallReason,
+  escapeHTML,
+  stalledList,
+  createStalledTracker,
+  BLOCKED_SETTLE_MS,
+  createUsageErrorTracker,
+  USAGE_ERROR_STALE_MS,
+  alarmHTML,
+  usageProblemHTML,
+} from "../header.js";
+import { t } from "../i18n.js";
 
 // The reasons a person actually sees, in order. Each reason is its own
 // element so the stylesheet can clip each one independently, so "what is
@@ -211,4 +224,135 @@ test("the counter's title keeps the reason exactly as it arrived", () => {
 test("a reason that is not an envelope is untouched", () => {
   const html = stalledList([{ needs: "usage limit reached" }]);
   assert.ok(html.includes("usage limit reached"));
+});
+
+// --- createStalledTracker ---------------------------------------------
+//
+// A flag-only stall (empty needs, state/tempo === "blocked") is exactly
+// what a session looks like for the length of one message delivery too, so
+// the counter must not promote one to "stalled" until it has held for at
+// least BLOCKED_SETTLE_MS. A needs-based stall carries the daemon's own
+// words and is real the instant it appears -- unaffected by the threshold.
+// Time is always supplied as an explicit nowMs, never read from a real
+// clock, so these are deterministic.
+
+test("a needs-based stall counts immediately, with no threshold to wait out", () => {
+  const tracker = createStalledTracker();
+  const s = { short: "a", needs: "usage limit reached" };
+  const result = tracker.update([s], 1000);
+  assert.deepEqual(result, [s]);
+});
+
+test("a flag-only stall does not count on first sight", () => {
+  const tracker = createStalledTracker();
+  const s = { short: "a", needs: "", state: "blocked", detail: "" };
+  const result = tracker.update([s], 1000);
+  assert.deepEqual(result, []);
+});
+
+test("a flag-only stall counts once it has held for BLOCKED_SETTLE_MS", () => {
+  const tracker = createStalledTracker();
+  const s = { short: "a", needs: "", state: "blocked", detail: "" };
+  tracker.update([s], 0);
+  const stillFresh = tracker.update([s], BLOCKED_SETTLE_MS - 1);
+  const nowStale = tracker.update([s], BLOCKED_SETTLE_MS);
+  assert.deepEqual(stillFresh, [], "one millisecond short of the threshold must not count yet");
+  assert.deepEqual(nowStale, [s], "having held for exactly the threshold must count");
+});
+
+test("control case: a session that clears before the threshold never counts, one held past it does", () => {
+  const tracker = createStalledTracker();
+  const clearsQuickly = { short: "quick", needs: "", state: "blocked", detail: "" };
+  const staysBlocked = { short: "slow", needs: "", state: "blocked", detail: "" };
+
+  tracker.update([clearsQuickly, staysBlocked], 0);
+  // "quick" resolves well before the threshold -- gone from the next snapshot.
+  const midway = tracker.update([staysBlocked], BLOCKED_SETTLE_MS / 2);
+  const atThreshold = tracker.update([staysBlocked], BLOCKED_SETTLE_MS);
+
+  assert.deepEqual(midway, [], "the session that resolved quickly must never have counted");
+  assert.deepEqual(
+    atThreshold,
+    [staysBlocked],
+    "the session that stayed blocked the whole time must count once the threshold passes",
+  );
+});
+
+test("a session that clears and re-blocks starts a fresh clock, not a stale one", () => {
+  const tracker = createStalledTracker();
+  const s = { short: "a", needs: "", state: "blocked", detail: "" };
+  tracker.update([s], 0);
+  tracker.update([], BLOCKED_SETTLE_MS); // resolved: absent from this snapshot
+  // Re-enters blocked well past what the old timestamp would have needed.
+  const rightAfterReentry = tracker.update([s], BLOCKED_SETTLE_MS + 10);
+  assert.deepEqual(rightAfterReentry, [], "re-entering blocked must not reuse the old clock");
+});
+
+test("a session that gains needs text stops being flag-only and is judged by the needs rule instead", () => {
+  const tracker = createStalledTracker();
+  const s = { short: "a", needs: "", state: "blocked", detail: "" };
+  tracker.update([s], 0);
+  const withQuestion = { ...s, needs: "answer: pick one" };
+  const result = tracker.update([withQuestion], BLOCKED_SETTLE_MS / 2);
+  assert.deepEqual(result, [], "a question in needs is Waiting, not Stalled, at any age");
+});
+
+test("no exception for any particular session identity, orchestrator included", () => {
+  const tracker = createStalledTracker();
+  const orchestrator = { short: "06a1f607", needs: "", state: "blocked", detail: "" };
+  const ordinary = { short: "abc123", needs: "", state: "blocked", detail: "" };
+  tracker.update([orchestrator, ordinary], 0);
+  const result = tracker.update([orchestrator, ordinary], BLOCKED_SETTLE_MS);
+  assert.deepEqual(
+    result.map((s) => s.short).sort(),
+    ["06a1f607", "abc123"],
+    "the threshold applies the same way regardless of which session it is",
+  );
+});
+
+// --- createUsageErrorTracker -------------------------------------------
+
+test("usageError inactive reads as none", () => {
+  const tracker = createUsageErrorTracker();
+  assert.equal(tracker.update(false, 1000), "none");
+});
+
+test("usageError active reads as fresh under the threshold", () => {
+  const tracker = createUsageErrorTracker();
+  tracker.update(true, 0);
+  assert.equal(tracker.update(true, USAGE_ERROR_STALE_MS - 1), "fresh");
+});
+
+test("control case: usageError past the threshold reads as stale, distinct from fresh", () => {
+  const tracker = createUsageErrorTracker();
+  tracker.update(true, 0);
+  const fresh = tracker.update(true, USAGE_ERROR_STALE_MS - 1);
+  const stale = tracker.update(true, USAGE_ERROR_STALE_MS);
+  assert.equal(fresh, "fresh");
+  assert.equal(stale, "stale");
+  assert.notEqual(fresh, stale, "the two ages must render differently or the threshold is dead code");
+});
+
+test("usageError clearing and reappearing starts a fresh clock", () => {
+  const tracker = createUsageErrorTracker();
+  tracker.update(true, 0);
+  tracker.update(false, USAGE_ERROR_STALE_MS); // recovered
+  const rightAfter = tracker.update(true, USAGE_ERROR_STALE_MS + 10);
+  assert.equal(rightAfter, "fresh", "a fresh failure must not inherit the old clock");
+});
+
+// --- alarmHTML / usageProblemHTML ---------------------------------------
+
+test("offline and daemon_down still render as the red .problem span", () => {
+  const html = alarmHTML(false, {});
+  assert.equal(html.includes('class="problem"'), true);
+  assert.equal(html.includes(t("offline")), true);
+});
+
+test("usage_down never joins the red .problem span, at any severity", () => {
+  assert.equal(usageProblemHTML("none"), "");
+  assert.equal(usageProblemHTML("fresh").includes("problem-quiet"), true);
+  assert.equal(usageProblemHTML("stale").includes("problem-notice"), true);
+  assert.equal(usageProblemHTML("fresh").includes('class="problem"'), false);
+  assert.equal(usageProblemHTML("stale").includes('class="problem"'), false);
 });

@@ -32,11 +32,120 @@ export function isWaiting(s) {
 
 // stalled: stopped for a reason no answer fixes, or stopped with no words at
 // all. Order matters: needs decides first; the state/tempo flags are only
-// consulted when needs is empty (spec 3.1).
+// consulted when needs is empty (spec 3.1). This mirrors
+// daemon.Session.Stalled() exactly -- timeless, per-snapshot -- and stays
+// that way for the sake of that mirror; the counter below does not use it
+// directly, see isFlagOnlyStalled and createStalledTracker.
 export function isStalled(s) {
   if (s.dying) return false;
   if (s.needs) return isStalledNeeds(s.needs);
   return s.state === "blocked" || s.tempo === "blocked";
+}
+
+// isStalled's two branches, split apart so the counter can treat them
+// differently: a needs-based stall is a word from the daemon and is real the
+// instant it appears; a flag-only stall (state/tempo === "blocked" with no
+// needs text) is exactly what a session looks like for the length of one
+// message delivery too, and has been observed to read as stalled twice in
+// one hour on live sessions that were not actually stalled at all --
+// including the orchestrator's own. See createStalledTracker.
+function isNeedsStalled(s) {
+  if (s.dying) return false;
+  if (!s.needs) return false;
+  return isStalledNeeds(s.needs);
+}
+
+function isFlagOnlyStalled(s) {
+  if (s.dying) return false;
+  if (s.needs) return false;
+  return s.state === "blocked" || s.tempo === "blocked";
+}
+
+// How long a flag-only stall must hold before the counter shows it. No live
+// daemon was available to stopwatch the actual delivery-to-settle window for
+// this fix, so this is an architecture-derived estimate, not a measured
+// one: daemon.poll_interval defaults to 2s (internal/config.go), so the
+// registry itself can lag a message's arrival by up to one poll cycle
+// before state/needs catch up, and the panel's own snapshot push adds up to
+// ~1s more (see the comment on subscribe(), in store.js). 4 poll cycles is
+// a deliberately generous multiple of that floor, not a number read off a
+// stopwatch -- replace it with a real one if a live daemon ever supplies it.
+export const BLOCKED_SETTLE_MS = 8000;
+
+// Session identity for tracking how long a flag-only stall has held.
+// Mirrors the field sessions.js keys its own DOM rows on (data-short).
+function sessionKey(s) {
+  return s.short ?? s.sessionId ?? "";
+}
+
+// createStalledTracker holds, per session, the moment a flag-only stall was
+// first observed. update(sessions, nowMs) is called once per snapshot and
+// returns the sessions the counter should show as stalled right now: every
+// needs-based stall immediately, plus every flag-only stall that has held
+// continuously for at least BLOCKED_SETTLE_MS. nowMs is always supplied by
+// the caller rather than read from Date.now() in here, so a test can drive
+// the threshold without waiting on a real clock.
+export function createStalledTracker() {
+  const since = new Map();
+  return {
+    update(sessions, nowMs) {
+      const seen = new Set();
+      const result = [];
+      for (const s of sessions) {
+        if (isNeedsStalled(s)) {
+          result.push(s);
+          continue;
+        }
+        if (!isFlagOnlyStalled(s)) continue;
+        const key = sessionKey(s);
+        seen.add(key);
+        let startedAt = since.get(key);
+        if (startedAt === undefined) {
+          startedAt = nowMs;
+          since.set(key, startedAt);
+        }
+        if (nowMs - startedAt >= BLOCKED_SETTLE_MS) result.push(s);
+      }
+      // Forget sessions no longer flag-only stalled -- resolved, gone, or now
+      // carrying needs text -- so a later re-entry starts a fresh clock
+      // instead of reusing a stale timestamp from an unrelated stall.
+      for (const key of since.keys()) {
+        if (!seen.has(key)) since.delete(key);
+      }
+      return result;
+    },
+  };
+}
+
+// How long usageError must hold before it stops reading as a quiet,
+// self-resolving blip and becomes a worded notice. Measured: a live
+// usage_down was observed to clear on its own within about 3 minutes on
+// master (this card's own log, 2026-09-10). Chosen: 15 minutes -- well past
+// that single sample, not tuned to it, so an ordinary network hiccup never
+// crosses it while a genuinely expired token (which never self-resolves)
+// does not sit muted for long.
+export const USAGE_ERROR_STALE_MS = 15 * 60 * 1000;
+
+// createUsageErrorTracker holds the moment usageError last turned true.
+// update(active, nowMs) is called once per snapshot and returns "none" (not
+// failing), "fresh" (failing, under the threshold -- read calmly, the
+// gauges already show dashes instead of a number) or "stale" (failing past
+// the threshold -- the quiet reading would now be a quiet lie, so this
+// becomes a visible, worded notice instead). nowMs is always supplied by the
+// caller, never read from Date.now() in here, for the same reason as
+// createStalledTracker.
+export function createUsageErrorTracker() {
+  let since = null;
+  return {
+    update(active, nowMs) {
+      if (!active) {
+        since = null;
+        return "none";
+      }
+      if (since === null) since = nowMs;
+      return nowMs - since >= USAGE_ERROR_STALE_MS ? "stale" : "fresh";
+    },
+  };
 }
 
 // The row text a person reads for a stalled session. needs wins when present
@@ -160,8 +269,34 @@ function themeButtonHTML() {
   return `<button type="button" class="theme-toggle">${t(themeLabelKey(currentTheme()))}</button>`;
 }
 
+// alarmHTML renders the two problems that genuinely mean "you see no live
+// data and something may need fixing" — always red, as before.
+export function alarmHTML(connected, snap) {
+  const alarms = [];
+  if (!connected) alarms.push(t("offline"));
+  if (snap.daemonError) alarms.push(t("daemon_down"));
+  return alarms.length ? `<span class="problem">${alarms.join(" · ")}</span>` : "";
+}
+
+// usageProblemHTML renders usage_down at the severity createUsageErrorTracker
+// decided: nothing while the endpoint answers, a calm muted line while it has
+// only just started failing, or a visible worded notice once it has failed
+// long enough that "wait, it will come back" would be a lie.
+export function usageProblemHTML(severity) {
+  if (severity === "fresh") return `<span class="problem-quiet">${t("usage_down")}</span>`;
+  if (severity === "stale") return `<span class="problem-notice">${t("usage_down_stale")}</span>`;
+  return "";
+}
+
 export function renderHeader(root) {
   initTheme();
+
+  // One tracker per renderHeader() call, outside subscribe: both hold state
+  // across snapshots (since-timestamps keyed by session, or a single
+  // since-timestamp for usageError) that must survive from one snapshot to
+  // the next, not be rebuilt on every render.
+  const stalledTracker = createStalledTracker();
+  const usageTracker = createUsageErrorTracker();
 
   // Delegated and attached once, outside the render below: root.innerHTML is
   // replaced whole on every snapshot (subscribe below fires roughly once a
@@ -177,14 +312,11 @@ export function renderHeader(root) {
   subscribe((rawSnap, connected) => {
     const snap = rawSnap ?? {};
     const sessions = snap.sessions ?? [];
+    const nowMs = Date.now();
     const waitingCount = sessions.filter(isWaiting).length;
-    const stalledSessions = sessions.filter(isStalled);
+    const stalledSessions = stalledTracker.update(sessions, nowMs);
     const stalledCount = stalledSessions.length;
-
-    const problems = [];
-    if (!connected) problems.push(t("offline"));
-    if (snap.daemonError) problems.push(t("daemon_down"));
-    if (snap.usageError) problems.push(t("usage_down"));
+    const usageSeverity = usageTracker.update(!!snap.usageError, nowMs);
 
     root.innerHTML = `
       <div class="brand">fleetdeck</div>
@@ -194,7 +326,8 @@ export function renderHeader(root) {
         ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay) : gauge(t("limit_7d"), null)}
       </div>
       <div class="counters">
-        ${problems.length ? `<span class="problem">${problems.join(" · ")}</span>` : ""}
+        ${alarmHTML(connected, snap)}
+        ${usageProblemHTML(usageSeverity)}
         <span class="counter counter-waiting ${waitingCount > 0 ? "counter-on" : ""}">${waitingCount} ${t("waiting_count")}</span>
         <span class="counter counter-stalled ${stalledCount > 0 ? "counter-on" : ""}">${stalledCount} ${t("stalled_count")} ${stalledList(stalledSessions)}</span>
       </div>`;
