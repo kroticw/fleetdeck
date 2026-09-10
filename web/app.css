@@ -1326,6 +1326,19 @@ main {
   font-weight: 400;
 }
 
+/* The name of the session this panel is pointing at, beside the tabs. It is a
+ * session's own name and can be any length, so it shrinks and clips with an
+ * ellipsis rather than pushing the close button off the row — min-width:0
+ * because a flex item will not shrink below its content without it. */
+.session-panel .s-who {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
 /* The body is the one part that scrolls: the tabs, the error line and the
  * input must stay put while a session talks. */
 .session-panel .s-body {

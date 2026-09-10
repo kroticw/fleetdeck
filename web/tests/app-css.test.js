@@ -127,7 +127,14 @@ test("the session panel's rules are top-level rules", () => {
   // anywhere; these two rules are what keeps them apart on screen. Nested, the
   // keys fall back into the header's top-right corner beside ✕ — read as one
   // row of window controls, which is the complaint this panel was fixed for.
-  for (const selector of [".session-panel .s-keys", ".session-panel .s-keys-label", ".session-panel .s-close"]) {
+  // .s-who names the open session in the header. Unstyled it has no ellipsis,
+  // and a long session name pushes the close button off the row.
+  for (const selector of [
+    ".session-panel .s-keys",
+    ".session-panel .s-keys-label",
+    ".session-panel .s-close",
+    ".session-panel .s-who",
+  ]) {
     assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
   }
 });

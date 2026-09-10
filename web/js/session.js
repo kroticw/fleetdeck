@@ -213,12 +213,37 @@ export function renderSession(
   let body = null;
   let errorLine = null;
   let input = null;
+  let nameLine = null;
 
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
+  };
+
+  // The name of the session this panel is pointing at, and the short id when the
+  // snapshot does not name it. The short id is never nothing: it is the identity
+  // the session list shows for an unnamed session and the one an operator can
+  // match against that list, whereas a blank header says only that the panel
+  // does not know where it points — under a key row that promises to press keys
+  // in "the live session".
+  const currentName = () => lookup(short)?.name || short;
+
+  // Resolved on every poll pass rather than captured when the panel opens, for
+  // the same reason the digest's full session id is (see the note above
+  // renderSession): a panel opened before the first snapshot lands would
+  // otherwise hold whatever was known then — nothing — for as long as it stays
+  // open, while the session sits named in the list beside it.
+  //
+  // Written only when it actually changed. A header rewritten once a second
+  // drops any selection inside it and costs the work for no visible difference,
+  // which is invisible in the resulting tree and therefore a counted assertion
+  // in session.test.js rather than a comment here alone.
+  const refreshName = () => {
+    if (!nameLine) return;
+    const name = currentName();
+    if (nameLine.textContent !== name) nameLine.textContent = name;
   };
 
   // showError writes into a line of its own above the input, rather than
@@ -313,8 +338,17 @@ export function renderSession(
 
   const startPolling = () => {
     const isDigest = tab === "digest";
+    const pass = isDigest ? digestPass : screenPass;
     poller = createPoller(
-      isDigest ? digestPass : screenPass,
+      async () => {
+        // Before the pass, not after it: a pass that throws — a session with no
+        // transcript, a daemon that went away — must still leave the header
+        // naming the session, and the digest pass throws precisely when the
+        // snapshot does not hold the session yet, which is the case the header
+        // has to recover from.
+        refreshName();
+        await pass();
+      },
       isDigest ? DIGEST_INTERVAL_MS : SCREEN_INTERVAL_MS,
       { timers, onError: (err) => showError(err.message) },
     );
@@ -373,6 +407,16 @@ export function renderSession(
       tabs.appendChild(button);
     }
 
+    // Beside the tabs, because the header is where a person looks to find out
+    // what they are looking at — and because the keys at the foot of the panel
+    // now say they are pressed in a live session, which is only half an answer
+    // until the panel says which one.
+    nameLine = el("div", "s-who", currentName());
+    // The name is the session list's own, and two sessions may carry the same
+    // one; the short id under the pointer tells them apart. A property, never
+    // interpolated into markup.
+    nameLine.title = short;
+
     const close = el("button", "s-close", "✕");
     close.type = "button";
     close.title = t("close_session");
@@ -385,6 +429,7 @@ export function renderSession(
     // else: the tabs, and the button that closes it. Both are undone by
     // reopening the panel.
     head.appendChild(tabs);
+    head.appendChild(nameLine);
     head.appendChild(close);
 
     // The keys are not among them, and this is the change the operator's first

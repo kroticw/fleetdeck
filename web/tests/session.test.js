@@ -593,3 +593,60 @@ test("the close button is not one of the keys, and the keys are not in the heade
   assert.equal(keys.querySelector(".s-close"), null, "the close button is inside the key group");
   assert.equal(head.contains(keys), false, "the key group is still nested in the header");
 });
+
+// --- which session this panel is pointing at -------------------------------
+//
+// The label under the keys says they are pressed in a live session. Which one
+// was answered nowhere on screen, and "whose session did I just press ↓ in" is
+// the same question the operator asked in the first place, one step further on.
+
+test("the header names the session the panel has open", async () => {
+  stubFetch(answer({ body: [] }));
+  const panel = await mount({ lookup: () => ({ short: SHORT, sessionId: FULL, name: "fleetdeck server" }) });
+
+  const who = panel.root.querySelector(".s-who");
+  assert.notEqual(who, null, "nothing in the header names the session");
+  assert.equal(who.textContent, "fleetdeck server");
+  // The short id is the identity the operator can match against the session
+  // list, and two sessions may carry the same name.
+  // Set as a property, the way every other title in this panel is: the fake DOM
+  // reflects neither direction, and a browser reflects both.
+  assert.equal(who.title, SHORT);
+
+  // Resolved on every pass, but written only when it changed: a header rewritten
+  // once a second drops a selection inside it and costs work for nothing.
+  const writes = who.textWrites;
+  await panel.timers.tick();
+  await panel.timers.tick();
+  assert.equal(who.textWrites, writes, "the header is rewritten on every poll");
+});
+
+test("a session with no name yet is named by its short id, never by nothing", async () => {
+  // A blank space says the panel does not know where it points. The short id is
+  // what the session list shows when a session has no name of its own.
+  stubFetch(answer({ body: [] }));
+  const panel = await mount({ lookup: () => ({ short: SHORT, sessionId: FULL }) });
+
+  assert.equal(panel.root.querySelector(".s-who").textContent, SHORT);
+});
+
+test("a panel opened before the first snapshot names the session once it appears", async () => {
+  // The same defect, and the same fix, as the full session id below it: captured
+  // when the panel opens, the name of a session that was not in the snapshot yet
+  // stays missing for as long as the panel stays open — and the panel is opened
+  // from a list that is itself drawn from that snapshot, so the race is ordinary.
+  let known;
+  stubFetch(answer({ body: [] }));
+  const panel = await mount({ lookup: () => known });
+
+  assert.equal(panel.root.querySelector(".s-who").textContent, SHORT, "before the snapshot: the short id");
+
+  known = { short: SHORT, sessionId: FULL, name: "fleetdeck server" };
+  await panel.timers.tick();
+
+  assert.equal(
+    panel.root.querySelector(".s-who").textContent,
+    "fleetdeck server",
+    "after the snapshot: named, without being reopened",
+  );
+});
