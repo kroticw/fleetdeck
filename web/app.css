@@ -471,6 +471,134 @@ main {
 
 .est {
   cursor: help;
+
+/* Card panel — Task 5.
+ *
+ * Every rule here is a class or an id. The panel must not use a style attribute:
+ * the server sends style-src 'self' on every static response, which blocks inline
+ * style attributes as well as inline <style>, and a blocked one fails silently.
+ */
+
+/* Appended rather than folded into the .col-center block above, so this task adds
+ * to the shell instead of rewriting a rule its sibling modules also render into.
+ * It exists so #card-panel, which is a child of that column, can cover the board.
+ */
+.col-center {
+  position: relative;
+}
+
+#card-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: auto;
+  padding: 12px;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.card-title {
+  margin: 0;
+}
+
+.card-close {
+  flex: none;
+  cursor: pointer;
+}
+
+.card-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  margin: var(--gap) 0;
+}
+
+.card-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.card-field-name {
+  opacity: 0.7;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.card-session {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* light-dark() rather than a single hex value: the shell declares
+ * `color-scheme: light dark`, so this panel is rendered on both a light and a
+ * dark ground and one fixed red is unreadable on one of them.
+ */
+.card-session-dead,
+.card-error,
+.card-parse-error {
+  color: light-dark(#b3261e, #f2b8b5);
+}
+
+/* The written-but-not-committed notice. Deliberately not styled as an error: the
+ * edit did take effect, and the wording and the colour both have to say so.
+ */
+.card-notice {
+  color: light-dark(#7a5900, #f0c674);
+}
+
+.card-empty {
+  opacity: 0.7;
+}
+
+.card-body {
+  overflow-wrap: anywhere;
+}
+
+.card-body pre {
+  overflow: auto;
+  padding: 8px;
+  background: rgb(127 127 127 / 12%);
+}
+
+.wikilink {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* A link to a card that does not exist. It carries no data-link attribute, so it
+ * is not clickable either — the styling only makes that visible.
+ */
+.wikilink-missing {
+  cursor: default;
+  text-decoration: underline dotted;
+  opacity: 0.6;
+}
+
+.card-backlinks {
+  margin-top: 16px;
+}
+
+.card-backlinks-title {
+  margin: 0 0 4px;
+}
+
+.card-backlink {
+  display: block;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 /* Kanban board (Task 4). #board is the .col-center child board.js renders
