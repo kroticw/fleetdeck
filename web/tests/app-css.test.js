@@ -138,3 +138,31 @@ test("the session panel's rules are top-level rules", () => {
     assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
   }
 });
+
+// The mark on the operator's own messages is the whole of the distinction
+// between his words and an agent's, in both panes and in both themes.
+test("the operator's own messages are marked in both panes, in colours that follow the theme", () => {
+  const { topLevel } = scan(css);
+  const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));
+
+  // Both panes, because a distinction that exists in one of them is a
+  // distinction a person cannot rely on.
+  for (const selector of [".step-typed", '.o-msg[data-typed="1"]', '.session-panel .s-step[data-typed="1"]']) {
+    assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
+  }
+
+  // A literal colour here is the failure this is guarding: the two themes do
+  // not share a palette, and a shade picked against the light surface can come
+  // out all but invisible against the dark one — which is how the tint it
+  // replaces failed. Every colour must be a token, so it changes with the theme
+  // rather than being chosen for one of them.
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const selector of [".step-typed", '\\.o-msg\\[data-typed="1"\\]', '\\.session-panel \\.s-step\\[data-typed="1"\\]']) {
+    const block = new RegExp(`${selector.replace(/^\.step-typed$/, "\\.step-typed")}\\s*\\{([^}]*)\\}`).exec(stripped);
+    assert.ok(block, `${selector} has no rule body to check`);
+    assert.ok(
+      !/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.test(block[1]),
+      `${selector} names a colour outright instead of a theme token: ${block[1].trim()}`,
+    );
+  }
+});

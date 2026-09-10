@@ -55,6 +55,8 @@ A browser pointed at that address gets the panel. The routes the page uses are c
 
 An image attached to a session is written to `~/.claude/fleetdeck/images/<session>/`, under a name the panel chooses, and the panel then sends the session that file's path. The directory is deliberately outside the repositories you work in, so nothing is left behind in a working tree — the trade is that a session's first read from there asks your permission. Answer it once per session (the prompt offers to allow the whole directory) and it does not come back; the question shows up in the panel's "waiting for you" counter and is answerable from there.
 
+The orchestrator column shows the whole conversation with the pinned session: its answers, and what you wrote to it. A message typed while the session was thinking takes its place in the thread at the moment you pressed Enter, not the moment the session got round to reading it. Your own lines are signed "operator" and marked with a bar down the side; a message that arrived from another session is signed with the sender's name and the time; everything else is the session speaking.
+
 To check that it is up:
 
 ```bash

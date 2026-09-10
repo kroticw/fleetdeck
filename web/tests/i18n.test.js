@@ -81,6 +81,12 @@ const KEYS = [
   // falls back to usage.Fetcher's cache (cmd/fleetdeck/collect.go) instead
   // of blanking the limits to "—" for one poll cycle.
   "last_known",
+
+  // The signature under the operator's own words in a thread (web/js/steps.js).
+  // It is the whole of the distinction between what he typed and what an agent
+  // sent him, so falling through to its own key would print "typed_here" where
+  // the point was to be readable at a glance.
+  "typed_here",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

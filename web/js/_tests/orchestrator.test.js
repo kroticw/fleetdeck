@@ -220,6 +220,7 @@ test("contextPercent is null without a usable window", () => {
 
 import { installDOM, fireEvent, settle } from "../../tests/fake-dom.js";
 import { atBottom, viewSignature } from "../orchestrator.js";
+import { t } from "../i18n.js";
 
 // --- the scroll rule, on its own ---
 
@@ -923,7 +924,9 @@ test("a note on a step that has no envelope is stripped too", async () => {
   const c = await column(structuredClone(PIN), [{ role: "user", text: `Please rebase.\n\n${note}` }]);
   const row = c.root.querySelector(".o-msg");
 
-  assert.equal(row.querySelector(".step-from"), null, "no envelope, so no attribution");
+  // No envelope, so no sender to name — which is exactly what marks it as
+  // something typed into this session's own box rather than forwarded into it.
+  assert.equal(row.querySelector(".step-typed")?.textContent, t("typed_here"), "attributed to the person at the keyboard");
   const body = row.querySelector(".step-body");
   assert.ok(body.innerHTML.includes("Please rebase."), "the message survives");
   assert.ok(!body.innerHTML.includes("permission laundering"), "the note does not");
