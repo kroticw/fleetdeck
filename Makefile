@@ -49,13 +49,22 @@ test:
 # files under web/ are ES modules, and web/tests/ sits outside web/embed.go's
 # go:embed patterns so nothing here reaches the binary.
 #
-# The test files are named one by one through the shell's glob rather than by
-# handing node the directory: `node --test web/tests/` is read as a module
-# specifier by some node versions and fails with MODULE_NOT_FOUND before a single
-# test runs, which is what CI hit on node 24 while node 26 walked the directory
-# happily.
+# The test files are named one by one rather than by handing node the directory:
+# `node --test web/tests/` is read as a module specifier by some node versions and
+# fails with MODULE_NOT_FOUND before a single test runs, which is what CI hit on
+# node 24 while node 26 walked the directory happily.
+#
+# They are found with `find` rather than spelled out as a fixed list of globs.
+# A fixed list named only web/tests/, and the 23 tests under web/js/_tests/ went
+# unrun for as long as they existed while this target — and the CI job that calls
+# it — reported success: the tests were written, reviewed and merged, and nothing
+# ever executed them. There are two test directories because they are excluded
+# from the binary in two different ways (web/tests/ sits outside the go:embed
+# patterns; web/js/_tests/ sits inside js/ but is skipped because the "all:"
+# prefix is deliberately absent and plain directory walking ignores a leading
+# "_"), and a third one would be added the same way. `find` cannot miss it.
 test-web:
-	node --test web/tests/*.test.js
+	node --test $$(find web -name '*.test.js' | sort)
 
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
