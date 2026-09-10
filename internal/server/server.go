@@ -75,5 +75,6 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/screen", d.handleScreen)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/status", d.handleStatus)
+	mux.HandleFunc("GET /ws", d.handleWS)
 	return mux
 }
