@@ -80,6 +80,10 @@ response header line:
 then: raw terminal bytes, streamed until the connection is closed.
 ```
 
+`cols` and `rows` are required, and they resize the session. An attach sent without them, or with zeros, is answered `{"ok": false, "error": "malformed request: Invalid input", "code": "EUNKNOWN"}` and yields no screen at all. The value that is sent reaches the session's real PTY, so it is not private to the attacher that asked for it — verified by reading the session's own tty device rather than the frames the daemon sends, since a frame is rendered per attacher and shows nothing about the PTY behind it. Measured against CLI 2.1.263: a freshly created background session runs at 200x50; one attach at 80x24 leaves the PTY at 80x24; a viewer that stays attached at 190x45 puts it at 190x45, and every other attacher's stream becomes 190 columns wide at that moment. When an attacher disconnects, the daemon restores the size from whoever is still attached; with nobody left, the last size stays. A client that opens a fresh attach on a cadence therefore reshapes the session on every tick — with a 190-column viewer attached, eight seconds of once-a-second polling produced nine 190→80→190 transitions, against zero over the same span with the polling stopped.
+
+The size a session is currently running at is reported nowhere: it is absent from a `list` record (see section 4) and from the attach header above. A client that wants to leave a session's geometry alone therefore has nothing to send — the only geometry it can name is its own.
+
 Two distinct uses are built on the same `attach` connection:
 
 - **Reading the screen**: after the header, read the streamed bytes for a while (until the stream goes idle, or a byte cap is reached, or the caller's deadline fires) and return what arrived. No key is required for this.
