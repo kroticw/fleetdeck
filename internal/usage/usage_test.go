@@ -85,3 +85,15 @@ func TestEmptyBodyIsNotSuccess(t *testing.T) {
 		t.Fatal("a response without windows must fail; nothing to read is not a healthy zero")
 	}
 }
+
+func TestMalformedResetsAtIsAnErrorNotZero(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"five_hour":{"utilization":17.4,"resets_at":"invalid"},"seven_day":{"utilization":48.2,"resets_at":"2026-09-13T00:00:00.000Z"}}`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	if _, err := f.Limits(context.Background()); err == nil {
+		t.Fatal("a response with malformed resets_at must fail; zero timestamps would look like no reset pending")
+	}
+}

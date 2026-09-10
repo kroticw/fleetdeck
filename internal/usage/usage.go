@@ -88,13 +88,17 @@ func (f *Fetcher) Limits(ctx context.Context) (Limits, error) {
 		return Limits{}, fmt.Errorf("usage reply carries no windows")
 	}
 
-	parse := func(s string) time.Time {
-		t, _ := time.Parse(time.RFC3339, s)
-		return t
+	fiveHourResets, err := time.Parse(time.RFC3339, payload.FiveHour.ResetsAt)
+	if err != nil {
+		return Limits{}, fmt.Errorf("parse five_hour resets_at: %w", err)
+	}
+	sevenDayResets, err := time.Parse(time.RFC3339, payload.SevenDay.ResetsAt)
+	if err != nil {
+		return Limits{}, fmt.Errorf("parse seven_day resets_at: %w", err)
 	}
 	out := Limits{
-		FiveHour:  Window{Utilization: payload.FiveHour.Utilization, ResetsAt: parse(payload.FiveHour.ResetsAt)},
-		SevenDay:  Window{Utilization: payload.SevenDay.Utilization, ResetsAt: parse(payload.SevenDay.ResetsAt)},
+		FiveHour:  Window{Utilization: payload.FiveHour.Utilization, ResetsAt: fiveHourResets},
+		SevenDay:  Window{Utilization: payload.SevenDay.Utilization, ResetsAt: sevenDayResets},
 		FetchedAt: time.Now(),
 	}
 	f.mu.Lock()
