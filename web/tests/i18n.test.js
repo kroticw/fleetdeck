@@ -76,6 +76,11 @@ const KEYS = [
   // web/js/header.js's stale-usage notice, added alongside the fresh
   // usage_down muting -- same reason as everything else on this list.
   "usage_down_stale",
+
+  // The gauges' own last-known-value label, shown when a failed refresh
+  // falls back to usage.Fetcher's cache (cmd/fleetdeck/collect.go) instead
+  // of blanking the limits to "—" for one poll cycle.
+  "last_known",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

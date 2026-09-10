@@ -200,16 +200,48 @@ function humanDuration(iso) {
   return `${minutes}m`;
 }
 
+// humanAge is humanDuration's mirror: a past timestamp's "how long ago",
+// rather than a future one's "how long until".
+function humanAge(iso) {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!isFinite(ms) || ms <= 0) return "0m";
+  const minutes = Math.floor(ms / 60000);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  return `${minutes}m`;
+}
+
 // gauge renders one usage window as a <meter>-based bar. No inline style is
 // used anywhere here: the page's CSP ships style-src 'self' with no
 // 'unsafe-inline', so a style="..." attribute or an el.style.* write would
 // silently fail to paint (no console error) rather than throw. The <meter>
 // element draws its fill natively from min/max/value attributes instead.
-function gauge(label, window_) {
+//
+// stale (with fetchedAt) is the case cmd/fleetdeck/collect.go's own comment
+// describes: the day's refresh failed, but usage.Fetcher had a last known
+// value cached and fell back to it rather than the panel discarding it --
+// snap.limits is real data, just aged, alongside snap.usageError. Coloring
+// an old percentage by severity (hot/warm/cool) would assert a freshness it
+// does not have, so it reads calm instead, the same voice the muted grey
+// already carries for a dead session or a stalled counter elsewhere on this
+// page -- this is ordinary network life, not a fresh failure demanding
+// attention.
+export function gauge(label, window_, stale, fetchedAt) {
   if (!window_) {
     return `<span class="gauge gauge-off">${label} <meter min="0" max="100" value="0" class="gauge-track" disabled></meter> —</span>`;
   }
   const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
+  if (stale) {
+    const age = humanAge(fetchedAt);
+    return `
+      <span class="gauge gauge-stale" title="${t("last_known")} ${age}">
+        ${label}
+        <meter class="gauge-track" min="0" max="100" value="${pct}"></meter>
+        ${pct}% · ${age}
+      </span>`;
+  }
   const level = pct >= 90 ? "hot" : pct >= 60 ? "warm" : "cool";
   return `
     <span class="gauge gauge-${level}" title="${t("resets_in")} ${humanDuration(window_.resetsAt)}">
@@ -331,13 +363,18 @@ export function renderHeader(root) {
     const stalledSessions = stalledTracker.update(sessions, nowMs);
     const stalledCount = stalledSessions.length;
     const usageSeverity = usageTracker.update(!!snap.usageError, nowMs);
+    // A value present alongside an error is usage.Fetcher's own cache
+    // fallback (cmd/fleetdeck/collect.go): real numbers, just not from this
+    // cycle's fetch. gauge() reads calm rather than hot/warm/cool for that
+    // case -- see its own comment.
+    const usageStale = Boolean(snap.limits) && Boolean(snap.usageError);
 
     root.innerHTML = `
       <div class="brand">fleetdeck</div>
       ${themeButtonHTML()}
       <div class="limits">
-        ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour) : gauge(t("limit_5h"), null)}
-        ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay) : gauge(t("limit_7d"), null)}
+        ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour, usageStale, snap.limits.fetchedAt) : gauge(t("limit_5h"), null)}
+        ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay, usageStale, snap.limits.fetchedAt) : gauge(t("limit_7d"), null)}
       </div>
       <div class="counters">
         ${alarmHTML(connected, snap)}

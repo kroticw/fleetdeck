@@ -30,6 +30,7 @@ import {
   USAGE_ERROR_STALE_MS,
   alarmHTML,
   usageProblemHTML,
+  gauge,
 } from "../header.js";
 import { t } from "../i18n.js";
 
@@ -355,4 +356,46 @@ test("usage_down never joins the red .problem span, at any severity", () => {
   assert.equal(usageProblemHTML("stale").includes("problem-notice"), true);
   assert.equal(usageProblemHTML("fresh").includes('class="problem"'), false);
   assert.equal(usageProblemHTML("stale").includes('class="problem"'), false);
+});
+
+// --- gauge: the flicker fix's visible half -------------------------------
+//
+// cmd/fleetdeck/collect.go's usage.Fetcher now falls back to its own cache
+// on a failed refresh, so snap.limits stays populated (aged) instead of
+// going nil for one poll cycle -- see internal/usage's own tests for that
+// half. gauge() is the other half: a last-known value must read calm
+// (.gauge-stale), never the hot/warm/cool severity coloring a fresh reading
+// gets, since a severity color on an aged number asserts a freshness it
+// does not have.
+
+test("no data at all is the existing gauge-off dash, unaffected by staleness", () => {
+  const html = gauge("5h", null, false, undefined);
+  assert.equal(html.includes("gauge-off"), true);
+  assert.equal(html.includes("—"), true);
+});
+
+test("a fresh reading is colored by severity, not marked stale", () => {
+  const html = gauge("5h", { utilization: 95, resetsAt: "2026-01-01T00:00:00Z" }, false, undefined);
+  assert.equal(html.includes("gauge-hot"), true);
+  assert.equal(html.includes("gauge-stale"), false);
+});
+
+// The control case: the same window value, stale vs fresh, must render
+// visibly differently -- otherwise the flag exists in code but changes
+// nothing a person can see.
+test("control case: the same window renders differently stale vs fresh", () => {
+  const window_ = { utilization: 95, resetsAt: "2026-01-01T00:00:00Z" };
+  const fresh = gauge("5h", window_, false, undefined);
+  const stale = gauge("5h", window_, true, new Date(Date.now() - 3 * 60000).toISOString());
+  assert.notEqual(fresh, stale, "a stale reading must render differently from a fresh one");
+  assert.equal(fresh.includes("gauge-hot"), true);
+  assert.equal(stale.includes("gauge-hot"), false, "a stale reading must not carry the fresh severity color");
+  assert.equal(stale.includes("gauge-stale"), true);
+});
+
+test("a stale reading carries its age, not the reset countdown", () => {
+  const threeMinutesAgo = new Date(Date.now() - 3 * 60000).toISOString();
+  const html = gauge("5h", { utilization: 40, resetsAt: "2026-01-01T00:00:00Z" }, true, threeMinutesAgo);
+  assert.equal(html.includes("3m"), true);
+  assert.equal(html.includes(t("last_known")), true);
 });

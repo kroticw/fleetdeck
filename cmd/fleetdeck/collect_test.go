@@ -647,3 +647,49 @@ func TestASlowUsageEndpointDoesNotStallTheCycle(t *testing.T) {
 		t.Fatal("Collect must not wait on the usage endpoint indefinitely")
 	}
 }
+
+// TestATransientUsageFailureKeepsTheLastKnownLimits covers the reported flicker: a
+// single failed refresh between two successful fetches a TTL apart used to blank
+// snap.Limits to nil, which the header rendered as "—" for one poll cycle before the
+// next successful fetch restored it. usage.Fetcher.Limits now falls back to its own
+// cache on a failed refresh; Collect must actually use that fallback rather than
+// discarding it whenever err != nil, or the fix in the fetcher does nothing here.
+func TestATransientUsageFailureKeepsTheLastKnownLimits(t *testing.T) {
+	fail := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fail {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"five_hour":{"utilization":17.4,"resets_at":"2026-09-09T12:00:00.000Z"},"seven_day":{"utilization":48.2,"resets_at":"2026-09-13T00:00:00.000Z"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	// A short TTL so the second Collect below is forced to attempt a real
+	// refresh instead of serving the first call's cache hit unconditionally.
+	uf := usage.NewFetcher(func() (string, error) { return "token", nil }, srv.URL, 10*time.Millisecond)
+	c := NewCollector(cfg, nil, uf, t.TempDir())
+
+	first := c.Collect(context.Background())
+	if first.UsageError != "" {
+		t.Fatalf("the first, successful fetch must not report an error: %q", first.UsageError)
+	}
+	if first.Limits == nil {
+		t.Fatal("the first, successful fetch must populate Limits")
+	}
+
+	time.Sleep(20 * time.Millisecond) // past the TTL
+	fail = true
+	second := c.Collect(context.Background())
+	if second.UsageError == "" {
+		t.Fatal("the failed refresh must still report its own error")
+	}
+	if second.Limits == nil {
+		t.Fatal("a failed refresh with a cached value must not blank Limits to nil")
+	}
+	if *second.Limits != *first.Limits {
+		t.Fatalf("a failed refresh must keep showing the last known value, got %+v want %+v", *second.Limits, *first.Limits)
+	}
+}
