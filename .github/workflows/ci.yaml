@@ -61,3 +61,44 @@ jobs:
       - run: make test
       - run: make build
       - run: make verify-ldflags
+
+  docs-parity:
+    # A documentation check has no reason to run on both operating systems the
+    # `check` job matrix covers, and needs no Go toolchain at all.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check Russian docs have the same heading counts as their English source
+        run: |
+          # Count only real markdown headings, skipping fenced code blocks (a line
+          # whose trimmed form starts with three backticks or three tildes, up to
+          # the matching closing fence). A naive `grep -c '^#'` also counts shell
+          # comments and example headings quoted inside a fence — that gap is what
+          # forced docs/en/board-convention.md to indent its example card's
+          # headings just to dodge the naive count, which made the documented card
+          # not shaped like a real one.
+          count_headings() {
+            awk '
+              /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+              fence { next }
+              /^#{1,6}[[:space:]]/ { n++ }
+              END { print n + 0 }
+            ' "$1"
+          }
+
+          check_pair() {
+            en_count=$(count_headings "$1")
+            ru_count=$(count_headings "$2")
+            if [ "$en_count" != "$ru_count" ]; then
+              echo "heading count mismatch: $1 has $en_count headings, $2 has $ru_count headings"
+              mismatch=1
+            fi
+          }
+
+          mismatch=0
+          check_pair README.md README.ru.md
+          check_pair docs/en/getting-started.md docs/ru/getting-started.md
+          check_pair docs/en/board-convention.md docs/ru/board-convention.md
+          check_pair docs/en/configuration.md docs/ru/configuration.md
+          exit "$mismatch"
