@@ -650,3 +650,25 @@ test("a panel opened before the first snapshot names the session once it appears
     "after the snapshot: named, without being reopened",
   );
 });
+
+// --- what the person typed -------------------------------------------------
+
+test("text typed and not sent survives a tab switch, in both directions", async () => {
+  // This panel already holds the rule that losing somebody's words is the one
+  // failure it must not have — text that fails to send comes back into the box.
+  // A tab switch is not even a failure, and switching to the screen to see what
+  // you are about to answer is exactly when a half-written answer exists.
+  installTerminal();
+  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  const panel = await mount();
+
+  const typed = "  half an answer\n  with two lines  ";
+  panel.input().value = typed;
+
+  await panel.openScreenTab();
+  assert.equal(panel.input().value, typed, "gone on the way to the screen tab");
+
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  assert.equal(panel.input().value, typed, "gone on the way back");
+});

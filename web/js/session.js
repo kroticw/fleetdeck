@@ -393,6 +393,18 @@ export function renderSession(
   function drawShell() {
     root.hidden = false;
 
+    // What is in the box outlives the redraw. drawShell builds a new textarea on
+    // every tab switch, and this panel already holds the rule that a person's
+    // unsent words are the one thing it must not lose — text that failed to send
+    // comes back into the box. A tab switch is not even a failure, which makes
+    // dropping the words worse rather than better: nothing went wrong and they
+    // are gone anyway. And switching to the screen tab to see what a session is
+    // actually asking is exactly when a half-written answer exists.
+    //
+    // The caret is not carried with it: the redraw does not preserve focus
+    // either, so there is nothing to put a caret back into.
+    const typed = input ? input.value : "";
+
     const head = el("div", "s-head");
 
     const tabs = el("div", "s-tabs");
@@ -481,6 +493,7 @@ export function renderSession(
     // Set as a property, never interpolated into markup: a translation holding
     // a quote would otherwise break out of the attribute it was written into.
     input.placeholder = t("write_to_session");
+    input.value = typed;
     input.addEventListener("keydown", (event) => {
       // Enter sends, Shift+Enter is a newline — the same bargain every chat
       // input makes.
