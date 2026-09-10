@@ -304,7 +304,21 @@ globalThis.navigator ??= { language: "en" };
 globalThis.WebSocket = TestSocket;
 globalThis.location = { protocol: "http:", host: "127.0.0.1:7777" };
 globalThis.setInterval = () => 0; // the digest poll is driven by hand below
-globalThis.fetch = async () => {
+// Every request this column makes, in order, so a case can ask what was sent
+// and to which session — the image upload especially, whose whole point is
+// that it addresses the session pinned at the moment of the paste.
+let requests = [];
+// Set by a case that needs an upload to fail; cleared by the next mount.
+let imageFails = null;
+
+globalThis.fetch = async (url, options = {}) => {
+  requests.push({ url: String(url), options });
+  if (String(url).endsWith("/image")) {
+    if (imageFails) {
+      return { ok: false, status: 415, statusText: "Unsupported Media Type", json: async () => ({ error: imageFails }) };
+    }
+    return { ok: true, status: 200, statusText: "OK", json: async () => ({ path: "/store/img/pasted.png" }) };
+  }
   digestCalls += 1;
   return { ok: true, json: async () => digestSteps };
 };
@@ -315,6 +329,8 @@ async function column(first, steps = [{ role: "assistant", text: "first" }]) {
   const store = await import("../store.js");
   const { renderOrchestrator } = await import("../orchestrator.js");
   digestSteps = steps;
+  requests = [];
+  imageFails = null;
   store.connect();
   const root = dom.element("section");
   renderOrchestrator(root);
@@ -930,6 +946,158 @@ test("a note on a step that has no envelope is stripped too", async () => {
   const body = row.querySelector(".step-body");
   assert.ok(body.innerHTML.includes("Please rebase."), "the message survives");
   assert.ok(!body.innerHTML.includes("permission laundering"), "the note does not");
+  c.dom.restore();
+});
+
+// --- pasting an image into this column's box ---
+//
+// The mechanics live in pasteimage.js and are pinned in
+// web/tests/paste-image.test.js. What is pinned here is the wiring: that this
+// column listens on its own textarea, that it uploads to the session pinned at
+// the moment of the paste, and that the two things a paste can have to say
+// reach the two rows this column keeps for saying them.
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+
+function fakeImage(bytes = PNG, type = "image/png") {
+  return {
+    name: "clipboard.png",
+    type,
+    size: bytes.length,
+    async arrayBuffer() {
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    },
+  };
+}
+
+function pasteOf({ file = null, text = null } = {}) {
+  const items = [];
+  if (text !== null) items.push({ kind: "string", type: "text/plain", getAsFile: () => null });
+  if (file) items.push({ kind: "file", type: file.type, getAsFile: () => file });
+  let prevented = false;
+  return {
+    type: "paste",
+    clipboardData: { items, files: file ? [file] : [] },
+    preventDefault() {
+      prevented = true;
+    },
+    get defaultPrevented() {
+      return prevented;
+    },
+  };
+}
+
+const uploads = () => requests.filter((r) => r.url.endsWith("/image"));
+
+test("an image pasted into the box is uploaded and its path lands in the box", async () => {
+  const c = await column(structuredClone(PIN));
+  const area = c.root.querySelector("textarea");
+
+  area.dispatchEvent(pasteOf({ file: fakeImage() }));
+  await settle();
+  await settle();
+
+  assert.equal(uploads().length, 1, `one paste produced ${uploads().length} uploads`);
+  assert.match(area.value, /\/store\/img\/pasted\.png/);
+  c.dom.restore();
+});
+
+// The control case, and the one that would hurt most if it broke: Cmd+V on
+// text is what a person does constantly in a box meant for writing.
+test("pasting text into the box is left alone entirely", async () => {
+  const c = await column(structuredClone(PIN));
+  const area = c.root.querySelector("textarea");
+
+  const event = pasteOf({ text: "обычный текст" });
+  area.dispatchEvent(event);
+  await settle();
+
+  assert.equal(event.defaultPrevented, false, "an ordinary text paste was cancelled");
+  assert.equal(uploads().length, 0);
+  assert.equal(area.value, "");
+  c.dom.restore();
+});
+
+// This is the column the resolve-at-paste-time rule exists for: one textarea,
+// re-pointed at a different session whenever the pin moves, with the node
+// staying exactly where it was.
+test("the image goes to the session pinned right now, not the one pinned when the column was built", async () => {
+  const c = await column(structuredClone(PIN));
+  const area = c.root.querySelector("textarea");
+
+  const moved = structuredClone(PIN);
+  moved.orchestratorSession = "zzz";
+  await c.push(moved);
+
+  area.dispatchEvent(pasteOf({ file: fakeImage() }));
+  await settle();
+  await settle();
+
+  assert.equal(uploads().length, 1);
+  assert.match(uploads()[0].url, /\/api\/sessions\/zzz\/image$/, "the image went to the session that used to be pinned");
+  c.dom.restore();
+});
+
+test("nothing is sent into the session by a paste — only the box changes", async () => {
+  const c = await column(structuredClone(PIN));
+  const area = c.root.querySelector("textarea");
+
+  area.dispatchEvent(pasteOf({ file: fakeImage() }));
+  await settle();
+  await settle();
+
+  assert.equal(requests.filter((r) => r.url.endsWith("/text")).length, 0);
+  c.dom.restore();
+});
+
+// A session stopping to ask permission looks exactly like a session that hung,
+// so the panel says the prompt is coming before it arrives.
+test("the permission notice appears in its own row, not among the errors", async () => {
+  const c = await column(structuredClone(PIN));
+  const area = c.root.querySelector("textarea");
+
+  area.dispatchEvent(pasteOf({ file: fakeImage() }));
+  await settle();
+  await settle();
+
+  const notice = c.root.querySelector(".o-notice");
+  assert.ok(notice, "nothing told the operator a prompt is coming");
+  assert.equal(notice.textContent, t("image_may_ask_permission"));
+  assert.equal(c.root.querySelector(".o-error-send"), null, "a working paste painted the error row");
+  c.dom.restore();
+});
+
+// It describes a path that has just left the box, so it must not outlive it.
+test("the notice goes away when the message is sent", async () => {
+  const c = await column(structuredClone(PIN));
+  const area = c.root.querySelector("textarea");
+
+  area.dispatchEvent(pasteOf({ file: fakeImage() }));
+  await settle();
+  await settle();
+  assert.ok(c.root.querySelector(".o-notice"), "precondition: the notice was shown");
+
+  fireEvent(area, "keydown", { key: "Enter" });
+  await settle();
+  await settle();
+
+  assert.equal(c.root.querySelector(".o-notice"), null, "the notice outlived the path it was about");
+  c.dom.restore();
+});
+
+test("a refused upload reports into the send-error row, where a failed send reports", async () => {
+  const c = await column(structuredClone(PIN));
+  imageFails = "only PNG, JPEG, GIF and WebP images are accepted";
+  const area = c.root.querySelector("textarea");
+
+  area.dispatchEvent(pasteOf({ file: fakeImage() }));
+  await settle();
+  await settle();
+
+  const error = c.root.querySelector(".o-error-send");
+  assert.ok(error, "a refused upload said nothing anywhere");
+  assert.match(error.textContent, /only PNG, JPEG, GIF and WebP/);
+  assert.equal(area.value, "", "a path was written for an image that was never stored");
   c.dom.restore();
 });
 

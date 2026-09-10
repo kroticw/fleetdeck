@@ -7,6 +7,7 @@ import { t } from "./i18n.js";
 export { parseAgentMessage, parseTaskNotification, unwrapEnvelope } from "./envelope.js";
 export { atBottom, stepKey, STICK_THRESHOLD_PX } from "./steps.js";
 import { syncSteps as syncStepRows } from "./steps.js";
+import { wireImagePaste } from "./pasteimage.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column and its own input.
@@ -118,6 +119,13 @@ export function renderOrchestrator(root) {
   // succeeding. Neither may clear the other.
   let sendError = "";
   let digestError = "";
+
+  // A pasted image is stored, and the path to it goes into the box — but the
+  // session's first read from that directory stops to ask permission, and a
+  // session stopping to ask looks exactly like a session that hung. This slot
+  // is where it says so. Not an error: nothing went wrong, and putting it in
+  // the red row would teach the operator to ignore the red row.
+  let pasteNotice = "";
 
   // The transcript UUID the digest was last fetched for. A change of pin, or
   // the pinned session reappearing after being absent, is detected by
@@ -245,6 +253,10 @@ export function renderOrchestrator(root) {
       const target = sendTo();
       if (!target) return;
       area.value = "";
+      // Whatever the last paste had to say, it said about a path that has now
+      // left the box. Keeping it would leave a sentence about a permission
+      // prompt standing over a conversation it no longer describes.
+      pasteNotice = "";
       try {
         await sendText(target, text);
         sendError = "";
@@ -253,6 +265,30 @@ export function renderOrchestrator(root) {
         area.value = text;
       }
       await refreshDigest();
+    });
+
+    // Cmd+V puts an image in here too, the same gesture the session panel
+    // takes and through the same module — a second copy of it would start
+    // diverging the day one of the two was fixed.
+    //
+    // `sendTo` is passed as the function it already is, so the session is
+    // resolved at the moment of the paste. This column is exactly the place
+    // that matters: the same textarea is re-pointed at a different session
+    // whenever the pin moves, and a session captured when this frame was built
+    // would keep sending images to whichever session used to be pinned —
+    // quietly, with a path in the box and every appearance of success.
+    //
+    // Nothing is disposed because nothing is rebuilt: this frame is built once
+    // (see `built`), and the textarea outlives every redraw.
+    wireImagePaste(area, sendTo, {
+      onError: (message) => {
+        sendError = message;
+        draw();
+      },
+      onNotice: (message) => {
+        pasteNotice = message;
+        draw();
+      },
     });
 
     return { head, thread: root.querySelector(".o-thread"), form, area };
@@ -411,6 +447,10 @@ export function renderOrchestrator(root) {
 
     showRow(root, "o-error o-error-digest", digestError, thread);
     showRow(root, "o-error o-error-send", sendError, root.querySelector(".o-form"));
+    // Below the errors and above the box, where the path it is about has just
+    // landed. Its own row rather than a third .o-error variant: it reports
+    // something working as intended, and the red family is for what is not.
+    showRow(root, "o-notice", pasteNotice, root.querySelector(".o-form"));
 
     // A session with no sessionId — nothing pinned, or the daemon no longer
     // lists the pinned one — has nothing to write a label against, and

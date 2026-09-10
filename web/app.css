@@ -1793,3 +1793,22 @@ main {
   padding-left: 5px;
 }
 
+/* What a pasted image has to say for itself, in the orchestrator column.
+ *
+ * Own block at the end, so a task rewriting this stylesheet moves one piece.
+ *
+ * It sits where .o-error sits and shares its geometry, but not its colours:
+ * the sentence it carries reports a session about to stop and ask permission,
+ * which is the panel working exactly as intended. Painting that red is how a
+ * person learns to stop reading red. So it borrows the quiet text colour the
+ * rest of the page uses for things that are merely worth knowing. */
+.o-notice {
+  flex: none;
+  margin: var(--gap) var(--gap) 0;
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
