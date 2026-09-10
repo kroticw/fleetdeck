@@ -1,5 +1,5 @@
 import { subscribe, get } from "./store.js";
-import { sendText, setOrchestratorSession } from "./api.js";
+import { sendText, setOrchestratorSession, setSessionLabel } from "./api.js";
 import { t } from "./i18n.js";
 // Re-exported rather than moved out of sight: these were this module's public
 // surface before the shared one existed, and the tests that pin their behaviour
@@ -56,12 +56,16 @@ export function pickableSessions(sessions) {
   return (sessions ?? []).filter((s) => s.short);
 }
 
-// pickerLabel is what a session's button reads. Session data comes from the
-// daemon, not from this codebase (spec 3.1: the fleet is open), so it is
-// untrusted — but it reaches the DOM through textContent and dataset now, not
-// through markup, so it cannot be markup no matter what it contains.
+// pickerLabel is what a session's button reads. label is the operator's own
+// name for the session (internal/config.SessionLabels, written through
+// PATCH /api/sessions/{id}/label) and wins when set; name is whatever the
+// daemon itself reports; short is what is left when neither exists — never
+// blank, never invented. Session data comes from the daemon, not from this
+// codebase (spec 3.1: the fleet is open), so it is untrusted — but it
+// reaches the DOM through textContent and dataset now, not through markup,
+// so it cannot be markup no matter what it contains.
 export function pickerLabel(session) {
-  return session.name || session.short;
+  return session.label || session.name || session.short;
 }
 
 // viewSignature is everything this column actually shows, and nothing else.
@@ -80,8 +84,10 @@ export function viewSignature(snap, connected, pickerRequested) {
     hasSnapshot: snap != null,
     // The picker lists sessions, so it depends on the list; the conversation
     // does not, and must not redraw when the list changes under it.
-    sessions: pinned ? null : pickableSessions(sessions).map((s) => [s.short, s.name ?? ""]),
-    session: session ? [session.short, session.name ?? "", session.sessionId, contextPercent(session.context)] : null,
+    sessions: pinned ? null : pickableSessions(sessions).map((s) => [s.short, s.name ?? "", s.label ?? ""]),
+    session: session
+      ? [session.short, session.name ?? "", session.label ?? "", session.sessionId, contextPercent(session.context)]
+      : null,
   });
 }
 
@@ -121,6 +127,13 @@ export function renderOrchestrator(root) {
   // still carrying the old pin, would drag the column straight back into the
   // conversation the operator just left.
   let pickerRequested = false;
+
+  // Set while the pinned session's own name is being edited in place. draw()
+  // must not touch .o-name while this is true — the same "do not disturb
+  // what is being typed into" rule the textarea already gets for free by
+  // never being replaced, applied here to a node that IS replaced (by the
+  // input) for the duration of the edit.
+  let editingLabel = false;
 
   // The mode currently built into the DOM, so the frame is rebuilt only when
   // the mode itself changes. null means nothing has been built yet.
@@ -173,6 +186,16 @@ export function renderOrchestrator(root) {
     back.addEventListener("click", onBack);
     head.append(back);
     head.append(el("span", "o-name", ""));
+    // Always visible, never only on hover: a control that only shows itself
+    // to a pointer already hovering it does not exist for a person who has
+    // not found it yet — the exact way the theme button's own plain text
+    // once went unnoticed.
+    const editBtn = el("button", "o-name-edit", "✎");
+    editBtn.setAttribute("type", "button");
+    editBtn.setAttribute("aria-label", t("edit_label"));
+    editBtn.setAttribute("title", t("edit_label"));
+    editBtn.addEventListener("click", startEditingLabel);
+    head.append(editBtn);
     root.appendChild(head);
 
     root.appendChild(el("div", "o-thread"));
@@ -215,6 +238,72 @@ export function renderOrchestrator(root) {
     return session ? session.short : short;
   };
 
+  // startEditingLabel swaps .o-name for a text input, pre-filled with the
+  // label alone — never with the name/short fallback text that is merely
+  // displayed when no label is set. Pre-filling with the fallback would mean
+  // pressing Enter without changing anything sets a label identical to what
+  // was already shown, which is not "no change", it is a new label that
+  // happens to read the same. The fallback is shown as the input's
+  // placeholder instead, so the operator still sees what is currently
+  // displayed while they decide what to type.
+  const startEditingLabel = () => {
+    const { session } = resolve();
+    if (!session) return; // nothing to label when the daemon does not list it
+    editingLabel = true;
+    draw();
+    const head = root.querySelector(".o-head");
+    const nameSpan = head.querySelector(".o-name");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "o-name-input";
+    input.value = session.label ?? "";
+    input.placeholder = session.name || session.short;
+    head.insertBefore(input, nameSpan);
+    nameSpan.remove();
+    input.focus();
+
+    // Enter and losing focus both save; Esc alone discards. Three outcomes,
+    // never a fourth: a person who clicks away after typing loses nothing
+    // silently invisible, which is worse than a save they can see and undo
+    // by editing again, and a third, different behaviour on top of these two
+    // would be one more thing to remember for no benefit.
+    let settled = false;
+    const finish = async (save) => {
+      if (settled) return; // Enter's own save must not also run as the blur it causes
+      settled = true;
+      editingLabel = false;
+      if (save) {
+        try {
+          const next = input.value.trim();
+          await setSessionLabel(session.sessionId, next);
+          // Reflected on the resolved session object itself, not only sent —
+          // the next real snapshot fully replaces this object graph anyway
+          // (store.js parses each push fresh), so this is a display-only
+          // nudge that self-corrects the moment a server snapshot disagrees,
+          // never a value this module invents and keeps believing.
+          session.label = next;
+          sendError = "";
+        } catch (err) {
+          sendError = `${t("label_save_failed")}: ${err.message}`;
+        }
+      }
+      head.insertBefore(el("span", "o-name", ""), input);
+      input.remove();
+      draw();
+    };
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finish(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+  };
+
   // How a step's row is classed here. The shared renderer owns everything
   // inside a step; a pane owns what its rows are called.
   const stepClass = (role) => `o-msg o-${role}`;
@@ -237,7 +326,7 @@ export function renderOrchestrator(root) {
     draw();
   };
 
-  const drawPicker = (sessions) => {
+  const drawPicker = (sessions, currentShort) => {
     // The picker holds no scroll position, no caret and no selection, so it is
     // rebuilt whole — there is nothing here for a rebuild to destroy. It is
     // built from nodes rather than markup all the same: session names and short
@@ -249,9 +338,22 @@ export function renderOrchestrator(root) {
 
     const list = el("div", "o-pick-list");
     for (const session of pickableSessions(sessions)) {
-      const item = el("button", "o-pick-item", pickerLabel(session));
+      // The picker is reached only after goBack has already cleared the pin
+      // (or nothing was ever pinned), so currentShort is ordinarily empty —
+      // except when that clearing PATCH itself failed, and the screen still
+      // shows the list while the old pin is, in fact, still the real one. A
+      // person reading the list in that moment must see which item that is,
+      // not mistake a browser focus ring on the first button for a mark that
+      // was never drawn — the exact confusion a naive read of this screen
+      // produced once already.
+      const current = currentShort !== "" && session.short === currentShort;
+      const item = el("button", current ? "o-pick-item o-pick-item-current" : "o-pick-item", pickerLabel(session));
       item.setAttribute("type", "button");
       item.dataset.short = session.short;
+      if (current) {
+        item.setAttribute("aria-current", "true");
+        item.setAttribute("title", t("current_orchestrator"));
+      }
       item.addEventListener("click", async () => {
         try {
           await setOrchestratorSession(session.short);
@@ -304,7 +406,7 @@ export function renderOrchestrator(root) {
 
     if (!pinned) {
       mode = "picker";
-      drawPicker(sessions);
+      drawPicker(sessions, short);
       return;
     }
 
@@ -317,7 +419,12 @@ export function renderOrchestrator(root) {
     const thread = root.querySelector(".o-thread");
 
     showRow(root, "o-stale", isConnected ? "" : t("offline"), head);
-    setText(head.querySelector(".o-name"), session ? session.name || session.short : short);
+    // Skipped while the name is being edited: .o-name has been replaced by
+    // an <input> for the duration, and querying for a span that is not
+    // there right now would be a silent no-op anyway — this says why.
+    if (!editingLabel) {
+      setText(head.querySelector(".o-name"), session ? session.label || session.name || session.short : short);
+    }
 
     const pct = session ? contextPercent(session.context) : null;
     const ctx = head.querySelector(".o-ctx");
@@ -331,6 +438,13 @@ export function renderOrchestrator(root) {
 
     showRow(root, "o-error o-error-digest", digestError, thread);
     showRow(root, "o-error o-error-send", sendError, root.querySelector(".o-form"));
+
+    // A session the daemon no longer lists has no sessionId to write a label
+    // against — disabled rather than hidden, so the control's place on
+    // screen stays stable and its state (not just its presence) says why a
+    // click would do nothing.
+    const editBtn = head.querySelector(".o-name-edit");
+    if (editBtn) editBtn.disabled = !session;
 
     if (!session) {
       // Pinned, but the daemon does not currently list that session: there is

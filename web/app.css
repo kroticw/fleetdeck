@@ -1650,3 +1650,123 @@ main {
   text-decoration: none;
 }
 
+/* Session labels (web/js/orchestrator.js, web/js/sessions.js) — the
+ * operator's own name for a session, edited in place. Kept as its own block
+ * at the end of the file, per this branch's own instruction, rather than
+ * folded into .o-name/.sname above: two sibling tasks (images, markdown
+ * tables) also append their own blocks here, and a rule scattered into an
+ * older section is a rule the next merge has to find by reading, not by
+ * looking at the bottom of the file.
+ *
+ * Every edit affordance below is deliberately visible without a hover and
+ * without focus — a plain-text control (the theme button, before this same
+ * reconnaissance found it) does not exist for a person who has not already
+ * found it by accident.
+ */
+
+.o-name-edit {
+  flex: none;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.o-name-edit:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.o-name-edit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.o-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+
+/* Without this, the placeholder (the name/short fallback, shown while the
+ * field holds no label of its own) rendered close enough to full text
+ * colour that an empty field and a field already holding that same text
+ * were hard to tell apart on screen — exactly the ambiguity pre-filling the
+ * field with the fallback was chosen to avoid in the first place. */
+.o-name-input::placeholder,
+.sname-input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* .o-pick-item-current marks the one session the picker's own list can, on
+ * rare occasions (an unpin that failed to save — see orchestrator.js's
+ * drawPicker), still show as genuinely pinned. A background-only mark reads
+ * exactly like a focus ring at a glance, which is the confusion this exists
+ * to remove — the checkmark is text, not decoration, so it survives being
+ * described rather than seen. */
+.o-pick-item-current {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: var(--accent);
+}
+
+.o-pick-item-current::before {
+  content: "✓ ";
+}
+
+.label-edit-btn {
+  flex: none;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.label-edit-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.sname-input {
+  font: inherit;
+  font-weight: 600;
+  font-size: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* A failed save, shown once at the top of the list. This column has no
+ * per-row error slot the way the orchestrator's own .o-error does — adding
+ * one for a single write path was not worth a second error convention, so
+ * this borrows .o-error's own colours instead of inventing a third. */
+.sname-edit-error {
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  color: var(--text);
+  font-size: var(--fs-2xs);
+}
+

@@ -186,7 +186,9 @@ test("pickableSessions on nothing at all is an empty list, not a crash", () => {
   assert.deepEqual(pickableSessions(undefined), []);
 });
 
-test("pickerLabel prefers the name and falls back to the short id", () => {
+test("pickerLabel prefers the operator's own label, then the name, then falls back to the short id", () => {
+  assert.equal(pickerLabel({ short: "abc", label: "my orchestrator", name: "orchestrator" }), "my orchestrator");
+  assert.equal(pickerLabel({ short: "abc", label: "", name: "orchestrator" }), "orchestrator");
   assert.equal(pickerLabel({ short: "abc", name: "orchestrator" }), "orchestrator");
   assert.equal(pickerLabel({ short: "abc", name: "" }), "abc");
   assert.equal(pickerLabel({ short: "abc" }), "abc");
@@ -673,6 +675,186 @@ test("a session named as markup reaches the picker as text, not as an element", 
   assert.equal(item.textContent, "<script>alert(1)</script>", "the name is the label, verbatim and inert");
   assert.equal(item.dataset.short, 'q"><img src=x onerror=alert(1)>', "and the short id is data, not markup");
   assert.equal(item.children.length, 0, "no element was created from either of them");
+  c.dom.restore();
+});
+
+test("a hostile label reaches .o-name and the picker only as text", async () => {
+  const hostile = 'q"><img src=x onerror=alert(1)>';
+  const withLabel = structuredClone(PIN);
+  withLabel.sessions[0].label = hostile;
+  const c = await column(withLabel);
+  const name = c.root.querySelector(".o-name");
+  assert.equal(name.textContent, hostile, "the label wins over the name, verbatim and inert");
+  assert.equal(name.children.length, 0, "no element was created from it");
+
+  fireEvent(c.root.querySelector(".o-back"), "click");
+  await settle();
+  const item = c.root.querySelector(`.o-pick-item[data-short="abc"]`);
+  assert.equal(item.textContent, hostile, "the picker prefers the same label");
+  assert.equal(item.children.length, 0);
+  c.dom.restore();
+});
+
+// --- editing the pinned session's own name in place ---
+
+test("the edit button is always present and never only a hover affordance", async () => {
+  const c = await column(structuredClone(PIN));
+  const editBtn = c.root.querySelector(".o-name-edit");
+  assert.ok(editBtn, "a control nobody can find by hovering does not exist for a first-time viewer");
+  assert.equal(editBtn.tagName, "BUTTON", "a real control, not a span styled to look like one");
+  c.dom.restore();
+});
+
+test("Enter saves the typed label", async () => {
+  const c = await column(structuredClone(PIN));
+  const realFetch = globalThis.fetch;
+  const patches = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/label")) {
+      patches.push({ url: String(url), body: JSON.parse(init.body) });
+      return { ok: true, status: 204, json: async () => ({}) };
+    }
+    return realFetch(url, init);
+  };
+
+  fireEvent(c.root.querySelector(".o-name-edit"), "click");
+  await settle();
+  const input = c.root.querySelector(".o-name-input");
+  assert.ok(input, "the name became an editable field");
+  assert.equal(input.value, "", "an unset label starts the field empty, never pre-filled with the fallback");
+  assert.equal(input.placeholder, "orchestrator", "the fallback is offered as a placeholder instead");
+
+  input.value = "my own name for it";
+  fireEvent(input, "keydown", { key: "Enter" });
+  await settle();
+  await settle();
+
+  assert.deepEqual(patches, [{ url: "/api/sessions/u-1/label", body: { label: "my own name for it" } }]);
+  assert.equal(c.root.querySelector(".o-name-input"), null, "the field is gone once saved");
+  assert.equal(c.root.querySelector(".o-name").textContent, "my own name for it");
+  globalThis.fetch = realFetch;
+  c.dom.restore();
+});
+
+test("losing focus saves too, the same as Enter", async () => {
+  const c = await column(structuredClone(PIN));
+  const realFetch = globalThis.fetch;
+  const patches = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/label")) {
+      patches.push(JSON.parse(init.body));
+      return { ok: true, status: 204, json: async () => ({}) };
+    }
+    return realFetch(url, init);
+  };
+
+  fireEvent(c.root.querySelector(".o-name-edit"), "click");
+  await settle();
+  const input = c.root.querySelector(".o-name-input");
+  input.value = "typed then clicked away";
+  fireEvent(input, "blur");
+  await settle();
+  await settle();
+
+  assert.deepEqual(patches, [{ label: "typed then clicked away" }], "a click away must not silently lose the edit");
+  assert.equal(c.root.querySelector(".o-name").textContent, "typed then clicked away");
+  globalThis.fetch = realFetch;
+  c.dom.restore();
+});
+
+test("Escape discards the edit and never calls the write route", async () => {
+  const c = await column(structuredClone(PIN));
+  const realFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/label")) {
+      called = true;
+      return { ok: true, status: 204, json: async () => ({}) };
+    }
+    return realFetch(url, init);
+  };
+
+  fireEvent(c.root.querySelector(".o-name-edit"), "click");
+  await settle();
+  const input = c.root.querySelector(".o-name-input");
+  input.value = "this must never be saved";
+  fireEvent(input, "keydown", { key: "Escape" });
+  await settle();
+
+  assert.equal(called, false, "Esc must discard, not save");
+  assert.equal(c.root.querySelector(".o-name-input"), null);
+  assert.equal(c.root.querySelector(".o-name").textContent, "orchestrator", "the previous display is restored, unchanged");
+  globalThis.fetch = realFetch;
+  c.dom.restore();
+});
+
+test("an empty label resets the display to name, then to short id", async () => {
+  const c = await column(structuredClone(PIN));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/label")) return { ok: true, status: 204, json: async () => ({}) };
+    return realFetch(url, init);
+  };
+
+  fireEvent(c.root.querySelector(".o-name-edit"), "click");
+  await settle();
+  fireEvent(c.root.querySelector(".o-name-input"), "keydown", { key: "Enter" });
+  await settle();
+  await settle();
+
+  // Nothing was typed, so this is the empty-string reset — and the session's
+  // own name is what the fallback chain shows next, not a blank space.
+  assert.equal(c.root.querySelector(".o-name").textContent, "orchestrator");
+  globalThis.fetch = realFetch;
+  c.dom.restore();
+});
+
+test("editing is disabled for a pinned session the daemon no longer lists", async () => {
+  const c = await column({ orchestratorSession: "abc", sessions: [] });
+  const editBtn = c.root.querySelector(".o-name-edit");
+  assert.ok(editBtn, "the button still exists");
+  assert.equal(editBtn.disabled, true, "there is no sessionId to write a label against");
+  c.dom.restore();
+});
+
+// --- marking the currently pinned session in the picker ---
+
+test("the picker marks the still-pinned session when going back failed to unpin it", async () => {
+  const c = await column(structuredClone(PIN));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/api/config")) {
+      return { ok: false, status: 503, statusText: "config is read-only", json: async () => ({ error: "config is read-only" }) };
+    }
+    return realFetch(url, init);
+  };
+
+  fireEvent(c.root.querySelector(".o-back"), "click");
+  await settle();
+  await settle();
+
+  const items = c.root.querySelectorAll(".o-pick-item");
+  const current = items.filter((item) => item.dataset.short === "abc");
+  assert.equal(current.length, 1);
+  assert.ok(
+    current[0].className.split(/\s+/).includes("o-pick-item-current"),
+    "the session that is, in fact, still pinned must be marked — a person must not mistake a focus ring for this",
+  );
+  assert.equal(current[0].getAttribute("aria-current"), "true");
+  const others = items.filter((item) => item.dataset.short !== "abc");
+  for (const other of others) {
+    assert.ok(!other.className.split(/\s+/).includes("o-pick-item-current"), "only the actually-pinned one is marked");
+  }
+
+  globalThis.fetch = realFetch;
+  c.dom.restore();
+});
+
+test("the picker marks nobody when nothing is actually pinned", async () => {
+  const c = await column({ orchestratorSession: "", sessions: [{ short: "abc", name: "a", sessionId: "u-1" }] });
+  const item = c.root.querySelector(".o-pick-item");
+  assert.ok(!item.className.split(/\s+/).includes("o-pick-item-current"));
+  assert.equal(item.getAttribute("aria-current"), null);
   c.dom.restore();
 });
 

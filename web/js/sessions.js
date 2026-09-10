@@ -22,6 +22,7 @@
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
+import { setSessionLabel } from "./api.js";
 
 // Closed vocabulary of "no person needed" needs strings, copied verbatim
 // (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
@@ -172,7 +173,11 @@ export function rowHtml(s) {
     ? `<div class="sreason" title="${escapeHtml(raw)}">${escapeHtml(reason)}</div>`
     : "";
 
-  const name = s.name || s.short || "";
+  // label is the operator's own name for the session (internal/config's
+  // session_labels, written through PATCH /api/sessions/{id}/label) and
+  // wins when set; name is whatever the daemon itself reports; short is
+  // what is left when neither exists — never blank, never invented.
+  const name = s.label || s.name || s.short || "";
   // A button, because it does something. It used to be a <div> with no handler:
   // a click on it bubbled to the row and opened the SESSION, while its tooltip
   // showed the path to a CARD. That is worse than unreachable — it promised one
@@ -192,10 +197,20 @@ export function rowHtml(s) {
       ? `<span class="scost">$${s.costUSD.toFixed(2)}</span>`
       : "";
 
+  // The pencil is a real, always-visible button — not a hover-only
+  // affordance and not the name text itself, so clicking a session's name to
+  // edit it can never be confused with clicking the row to open it. It
+  // carries the session's own transcript UUID: the write route is keyed on
+  // that, never on the short id short is (see api.js's setSessionLabel).
+  const editBtn = s.sessionId
+    ? `<button type="button" class="label-edit-btn" data-session-id="${escapeHtml(s.sessionId)}" aria-label="${escapeHtml(t("edit_label"))}" title="${escapeHtml(t("edit_label"))}">✎</button>`
+    : "";
+
   return `
     <article class="${classes.join(" ")}" data-short="${escapeHtml(s.short)}">
       <div class="srow-head">
         <span class="sname">${escapeHtml(name)}</span>
+        ${editBtn}
         ${badge}
       </div>
       <div class="smeta">
@@ -218,7 +233,25 @@ const HEAD = `<div class="slist-head">${escapeHtml(t("sessions_title"))}</div>`;
 // onOpenCard is optional: without it the card control is not offered at all,
 // because a control that cannot do what it says is the defect this replaced.
 export function renderSessions(root, onSelect, onOpenCard) {
-  subscribe((snap, connected) => {
+  // Set while one row's name is being edited in place. This column, unlike
+  // the orchestrator's, rebuilds its whole innerHTML on every snapshot — so
+  // the only way an <input> mid-edit survives a push arriving under the
+  // operator's fingers is to skip the rebuild entirely for as long as the
+  // edit lasts. The two most recent arguments are kept so the skipped
+  // render can be run once editing ends, instead of waiting out however
+  // long is left on the next poll.
+  let editingShort = null;
+  let lastSnap = null;
+  let lastConnected = false;
+
+  // Shown once, on the next render after a save fails — a silent
+  // console.error would never reach the operator, who does not have
+  // devtools open, and this column has no other error slot a per-row write
+  // failure could route through. Read and cleared by render() itself, so a
+  // later, successful edit does not leave a stale failure on screen.
+  let labelError = "";
+
+  const render = (snap, connected) => {
     // Before the first successful connection, or after a dropped/unparseable
     // frame, snapshot is null and connected is false — render a neutral
     // connecting state rather than dereferencing a snapshot that isn't there.
@@ -262,8 +295,11 @@ export function renderSessions(root, onSelect, onOpenCard) {
     for (const s of sessions) {
       (isWaiting(s) ? waitingRows : otherRows).push(s);
     }
+    const ordered = [...waitingRows, ...otherRows];
 
-    root.innerHTML = HEAD + [...waitingRows, ...otherRows].map(rowHtml).join("");
+    const errorHtml = labelError ? `<div class="sname-edit-error">${escapeHtml(labelError)}</div>` : "";
+    labelError = ""; // shown once; a later render must not keep repeating it
+    root.innerHTML = HEAD + errorHtml + ordered.map(rowHtml).join("");
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
@@ -278,5 +314,79 @@ export function renderSessions(root, onSelect, onOpenCard) {
         onOpenCard?.(el.dataset.card);
       });
     }
+
+    for (const btn of root.querySelectorAll(".label-edit-btn")) {
+      btn.addEventListener("click", (event) => {
+        // Editing a name must never also select the row it lives in — the
+        // two controls sit on top of each other and must not fire together.
+        event.stopPropagation();
+        const row = btn.closest(".srow");
+        const session = ordered.find((s) => s.short === row.dataset.short);
+        if (session) startEditing(row, session);
+      });
+    }
+  };
+
+  // startEditingLabel's own three rules, restated for a row built from a
+  // markup string rather than DOM nodes: the field is pre-filled with the
+  // label alone (never the name/short fallback that is merely displayed),
+  // the fallback becomes the placeholder, Enter and losing focus both save,
+  // Esc alone discards, and an empty save is the reset to name-then-short —
+  // it needs no special case here because the fallback chain in rowHtml
+  // already reads an absent label as absence, not as blank text.
+  const startEditing = (row, session) => {
+    editingShort = session.short;
+    const nameSpan = row.querySelector(".sname");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "sname-input";
+    input.value = session.label ?? "";
+    input.placeholder = session.name || session.short;
+    nameSpan.parentNode.insertBefore(input, nameSpan);
+    nameSpan.remove();
+    input.focus();
+
+    let settled = false;
+    const finish = async (save) => {
+      if (settled) return; // Enter's own save must not also run as the blur it causes
+      settled = true;
+      editingShort = null;
+      if (save) {
+        try {
+          const next = input.value.trim();
+          await setSessionLabel(session.sessionId, next);
+          // Reflected on the resolved session object itself, not only sent:
+          // the render this triggers reads from lastSnap, whose session
+          // objects are these same ones, so the row shows the new name at
+          // once rather than waiting out a poll — and the very next real
+          // snapshot replaces this object graph wholesale regardless (see
+          // store.js), so nothing here is a value this module goes on
+          // believing past that.
+          session.label = next;
+          labelError = "";
+        } catch (err) {
+          labelError = `${t("label_save_failed")}: ${err.message}`;
+        }
+      }
+      render(lastSnap, lastConnected);
+    };
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finish(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+  };
+
+  subscribe((snap, connected) => {
+    lastSnap = snap;
+    lastConnected = connected;
+    if (editingShort !== null) return;
+    render(snap, connected);
   });
 }
