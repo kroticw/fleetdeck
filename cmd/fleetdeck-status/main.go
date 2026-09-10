@@ -64,7 +64,9 @@ func report(endpoint string, in statusInput) error {
 	if err != nil {
 		return fmt.Errorf("post report: %w", err)
 	}
-	resp.Body.Close()
+	// The reporter never reads the response: the panel either took the report
+	// or it did not, and a status line is no place to complain about it.
+	_ = resp.Body.Close()
 	return nil
 }
 
