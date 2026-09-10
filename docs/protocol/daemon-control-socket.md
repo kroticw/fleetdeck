@@ -34,7 +34,7 @@ The operation key is `op`. `proto` must be an integer equal to the daemon's curr
 
 No auth, no `proto` field required.
 
-```
+```text
 request:  {"op": "ping"}
 response: {"ok": true, "op": "ping", "version": "<daemon version>", "proto": <integer>}
 ```
@@ -45,7 +45,7 @@ A reply that omits `proto`, or carries a non-numeric value for it, is a malforme
 
 No auth.
 
-```
+```text
 request:  {"proto": <n>, "op": "list"}
 response: {"ok": true, "op": "list", "jobs": [<job record>, ...]}
 ```
@@ -58,7 +58,7 @@ An error response (`"ok": false`) may or may not carry a `code` field. When it d
 
 **Requires auth.**
 
-```
+```text
 request:  {"proto": <n>, "op": "reply", "short": "<short id>", "text": "<text>", "auth": "<control key>"}
 response: {"ok": true, "op": "reply"}
 ```
@@ -71,7 +71,7 @@ Failure codes: `EAUTH` (missing or wrong key), `ENOJOB` (no such session), `ENOR
 
 Auth is **optional** for `attach`: the daemon allows an attach with no `auth` field at all, relying on the peer-uid check instead, but it rejects a *wrong* key outright. Send the key when the caller has one; omit the field entirely when it does not. This is why reading (see the screen-reading use below) keeps working even when no control key is available, while anything that writes into the session must not proceed without one.
 
-```
+```text
 request: {"proto": <n>, "op": "attach", "short": "<short id>", "cols": <int>, "rows": <int>}
 response header line:
   {"ok": true, "op": "attach", "imarkNonce": "...", "decModes": {...}, "via": "...",
@@ -93,7 +93,7 @@ Two distinct uses are built on the same `attach` connection:
 
 These are the keys a `list` reply can carry on a job record — eighteen in total. Not every record carries every optional key; a key that was never set for a given session is simply absent rather than present with an empty value.
 
-```
+```text
 agent, attempt, backend, cliVersion, createdAt, cwd, detail, intent, name, needs, nonce,
 pid, sessionId, short, source, startedAt, state, tempo
 ```
@@ -122,7 +122,7 @@ The rule:
 
 Illustrative examples (not verbatim from any real session):
 
-```
+```text
 tempo=blocked  state=working  needs="answer: Which colour should the probe use? (Red · Green · Blue)"   -> waiting  (rule 1)
 tempo=active   state=blocked  needs=""                                                                   -> stalled  (rule 2)
 tempo=blocked  state=blocked  needs="choose: (1) ... (2) ... (3) ..."                                    -> waiting  (rule 1: words outrank both flags)
@@ -130,7 +130,7 @@ tempo=blocked  state=blocked  needs="choose: (1) ... (2) ... (3) ..."           
 
 The closed "no person needed" vocabulary — matched by prefix, case-sensitively, against the daemon's own wording, extracted from the installed CLI 2.1.263 binary:
 
-```
+```text
 usage limit reached   (limit)
 login required        (login)
 API error              \

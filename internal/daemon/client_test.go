@@ -67,8 +67,10 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -100,7 +102,12 @@ func serveOnce(t *testing.T, listener net.Listener, fn func(t *testing.T, req []
 
 	trimmed := strings.TrimSuffix(line, "\n")
 	resp := fn(t, []byte(trimmed))
-	conn.Write(resp)
+	if resp == nil {
+		return
+	}
+	if _, err := conn.Write(resp); err != nil {
+		t.Errorf("Write: %v", err)
+	}
 }
 
 // loadFixtureLine reads the pretty-printed fixture and compacts it to the single-line
@@ -581,6 +588,15 @@ func TestMissingSocketErrDaemonUnavailable(t *testing.T) {
 	}
 }
 
+// TestTruncatedJSONIsError covers a truncated `list` reply. Without client.proto set,
+// this used to consume the single serveOnce response as the answer to ensureProto's
+// own ping (serveOnce only ever answers one request), so ListSessions failed with a
+// JSON error from Ping — never reaching listSessionsOnce's own line-reading and
+// struct-unmarshalling at all, despite the payload being shaped like a list reply and
+// the test's own name. Setting client.proto = 1 makes the served response actually
+// answer the "list" request this test is about, and asserting the error's text
+// pins down that it is a JSON syntax error (from the truncated payload itself),
+// not some other unrelated failure that also happens to be non-nil.
 func TestTruncatedJSONIsError(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -588,20 +604,42 @@ func TestTruncatedJSONIsError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	var capturedReq map[string]interface{}
 	go func() {
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
-			// Return truncated JSON (missing closing brace)
-			return []byte(`{"ok":true,"op":"list","jobs":[`)
+			if err := json.Unmarshal(req, &capturedReq); err != nil {
+				t.Errorf("unmarshalling captured request: %v", err)
+			}
+			// Truncated JSON (missing closing brackets/brace), but still terminated
+			// with the framing newline readBoundedLine requires: this needs to reach
+			// json.Unmarshal and fail there, on the malformed content, rather than
+			// failing earlier on missing framing (a bare io.EOF, which is what an
+			// unterminated line like this would produce, and would defeat the point
+			// of a test named for truncated *JSON*).
+			return []byte(`{"ok":true,"op":"list","jobs":[` + "\n")
 		})
 	}()
 
 	client := New(listener.Addr().String(), func() (string, error) {
 		return "key", nil
 	})
+	client.proto = 1 // skip the ping, so the one served response answers "list"
 
 	_, err = client.ListSessions(context.Background())
 	if err == nil {
-		t.Error("expected error for truncated JSON, got nil")
+		t.Fatal("expected error for truncated JSON, got nil")
+	}
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) {
+		t.Errorf("expected a JSON syntax error from the truncated payload, got %T: %v", err, err)
+	}
+
+	// Pin down that the exercised op was actually "list", not "ping": a malformed
+	// reply to the ping ensureProto sends first would produce the exact same
+	// *json.SyntaxError, which would make the assertion above pass for the wrong
+	// reason (as it silently did before client.proto was set here).
+	if op, _ := capturedReq["op"].(string); op != "list" {
+		t.Fatalf("request op was %q, not \"list\"; this test no longer exercises ListSessions' own error path", op)
 	}
 }
 
@@ -715,8 +753,15 @@ func TestRequestEndsWithNewline(t *testing.T) {
 
 	var mu sync.Mutex
 	requestLines := make([]string, 0)
+	errChan := make(chan error, 1)
 	done := make(chan struct{})
 	go func() {
+		// done is closed via defer, on every return path (including a read error),
+		// rather than only on the success path: closing it only after n>=2 left a read
+		// failure with no signal at all, and the test below would burn its full 2s
+		// timeout on a generic "did not capture both requests" message instead of the
+		// actual, more specific read error captured in errChan.
+		defer close(done)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -726,6 +771,7 @@ func TestRequestEndsWithNewline(t *testing.T) {
 			line, err := reader.ReadString('\n')
 			if err != nil {
 				conn.Close()
+				errChan <- err
 				return
 			}
 			mu.Lock()
@@ -743,7 +789,6 @@ func TestRequestEndsWithNewline(t *testing.T) {
 			conn.Close()
 
 			if n >= 2 {
-				close(done)
 				return
 			}
 		}
@@ -761,6 +806,11 @@ func TestRequestEndsWithNewline(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("server did not capture both requests")
+	}
+	select {
+	case err := <-errChan:
+		t.Fatalf("error in server: %v", err)
+	default:
 	}
 
 	mu.Lock()
@@ -1074,8 +1124,54 @@ func TestResolveSocketCandidateReportsOwnershipRefusal(t *testing.T) {
 	if !errors.Is(err, ErrDaemonUnavailable) {
 		t.Errorf("expected the error to still satisfy errors.Is(err, ErrDaemonUnavailable), got %v", err)
 	}
-	if !strings.Contains(err.Error(), "writable by group or other") {
-		t.Errorf("expected the ownership refusal to be visible in the error, got: %v", err)
+	// Asserted via the typed sentinel (errors.Is), not the prose: the exact wording
+	// stays free to change without breaking this test.
+	if !errors.Is(err, errSocketWritableByOthers) {
+		t.Errorf("expected the ownership refusal to satisfy errors.Is(err, errSocketWritableByOthers), got %v", err)
+	}
+}
+
+// TestResolveSocketCandidateSkipsDeadSocketAndUsesLiveOne covers the function's whole
+// point, per its own doc comment: lexicographic order (what the candidates list is
+// naturally sorted into by filepath.Glob) is not freshness. Given a dead socket ahead
+// of a live one, the dead one must be skipped — not returned, and not treated as a
+// fatal refusal — and the live one further down the list must be the one actually
+// used. Every other resolveSocketCandidate test in this file exercises a refusal; none
+// before this one exercised the success path at all.
+func TestResolveSocketCandidateSkipsDeadSocketAndUsesLiveOne(t *testing.T) {
+	base := shortTempDir(t)
+
+	deadDir := filepath.Join(base, "a-dead") // sorts before "b-live" lexicographically
+	if err := os.Mkdir(deadDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A correctly owned and moded regular file, not an actual socket: it passes
+	// checkSocketOwnership (so this exercises resolveSocketCandidate's *dial*-failure
+	// skip specifically, not the earlier ownership-refusal skip an already-removed
+	// socket file would hit instead) but fails to dial, reproducing a crashed
+	// daemon's stale socket left behind on disk.
+	deadSocket := filepath.Join(deadDir, "control.sock")
+	if err := os.WriteFile(deadSocket, []byte("not a socket"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	liveDir := filepath.Join(base, "b-live")
+	if err := os.Mkdir(liveDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	liveSocket := filepath.Join(liveDir, "control.sock")
+	liveListener, err := net.Listen("unix", liveSocket)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer liveListener.Close()
+
+	got, err := resolveSocketCandidate([]string{deadSocket, liveSocket})
+	if err != nil {
+		t.Fatalf("expected success by skipping the dead candidate, got error: %v", err)
+	}
+	if got != liveSocket {
+		t.Errorf("expected the live socket %q to be chosen, got %q", liveSocket, got)
 	}
 }
 
@@ -1193,6 +1289,14 @@ func TestErrorCodeEAUTH(t *testing.T) {
 	}
 }
 
+// TestErrorCodeEPEERUID covers EPEERUID surfacing from ListSessions' own "list" op.
+// Without client.proto set, this used to exercise ensureProto's own ping instead:
+// serveOnce only answers one request, and it answered that ping with EPEERUID before
+// ListSessions' own "list" request was ever sent — the assertion below still passed
+// (the same error type propagates either way), but for the wrong reason, exactly like
+// TestErrorCodeEAUTH's own fix above. client.proto is pre-set here so ensureProto
+// skips the ping and the one served response answers "list" itself; capturing the
+// request and asserting its op is what actually pins that down.
 func TestErrorCodeEPEERUID(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -1200,8 +1304,12 @@ func TestErrorCodeEPEERUID(t *testing.T) {
 	}
 	defer listener.Close()
 
+	var capturedReq map[string]interface{}
 	go func() {
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			if err := json.Unmarshal(req, &capturedReq); err != nil {
+				t.Errorf("unmarshalling captured request: %v", err)
+			}
 			return []byte(`{"ok":false,"code":"EPEERUID","error":"peer uid mismatch"}` + "\n")
 		})
 	}()
@@ -1209,11 +1317,19 @@ func TestErrorCodeEPEERUID(t *testing.T) {
 	client := New(listener.Addr().String(), func() (string, error) {
 		return "key", nil
 	})
+	client.proto = 1 // skip the ping, so the one served response answers "list"
 
 	_, err = client.ListSessions(context.Background())
 	var epErr *ErrPeeruid
 	if !errors.As(err, &epErr) {
 		t.Errorf("expected *ErrPeeruid, got %T: %v", err, err)
+	}
+
+	// Sanity check that this test actually exercises the "list" op, not ping: without
+	// this, a change back to consuming the ping's response would make the assertion
+	// above pass for the wrong reason again.
+	if op, _ := capturedReq["op"].(string); op != "list" {
+		t.Fatalf("request op was %q, not \"list\"; this test no longer exercises ListSessions' own error path", op)
 	}
 }
 
@@ -1292,8 +1408,8 @@ func TestControlKeyRefusesWrongOwner(t *testing.T) {
 		t.Fatalf("write key file: %v", err)
 	}
 
-	if err := checkKeyFileSecurity(keyPath, os.Getuid()+1); err == nil {
-		t.Error("expected a refusal for a key file not owned by the expected uid")
+	if err := checkKeyFileSecurity(keyPath, os.Getuid()+1); !errors.Is(err, errKeyFileWrongOwner) {
+		t.Errorf("expected errKeyFileWrongOwner for a key file not owned by the expected uid, got %v", err)
 	}
 	// The real owner must still be accepted.
 	if err := checkKeyFileSecurity(keyPath, os.Getuid()); err != nil {
@@ -1834,6 +1950,7 @@ func TestSendKeysWritesBytesToAttach(t *testing.T) {
 	var (
 		mu           sync.Mutex
 		capturedKeys []byte
+		capturedReq  map[string]interface{}
 	)
 	errChan := make(chan error, 1)
 	captured := make(chan struct{})
@@ -1848,7 +1965,12 @@ func TestSendKeysWritesBytesToAttach(t *testing.T) {
 		defer conn.Close()
 
 		reader := bufio.NewReader(conn)
-		if _, err := reader.ReadString('\n'); err != nil { // read the attach request
+		line, err := reader.ReadString('\n') // read the attach request
+		if err != nil {
+			errChan <- err
+			return
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &capturedReq); err != nil {
 			errChan <- err
 			return
 		}
@@ -1885,19 +2007,34 @@ func TestSendKeysWritesBytesToAttach(t *testing.T) {
 		t.Fatalf("SendKeys failed: %v", err)
 	}
 
+	// errChan is raced directly against captured (and the timeout) here, rather than
+	// checked separately afterward with a non-blocking default: a goroutine that hits
+	// an error returns immediately without ever closing captured, so a separate,
+	// sequential check reached only after this select would never run — the select
+	// would already have burned the full 2s on the generic "never captured key bytes"
+	// timeout message, hiding the actual, more specific cause.
 	select {
 	case <-captured:
-	case <-time.After(2 * time.Second):
-		t.Fatal("server never captured key bytes")
-	}
-	select {
 	case err := <-errChan:
 		t.Fatalf("error in server: %v", err)
-	default:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never captured key bytes")
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
+
+	// The attach request must carry auth, and the geometry it claims to send.
+	if auth, _ := capturedReq["auth"].(string); auth != "key" {
+		t.Errorf("expected attach to carry auth=%q, got %v", "key", capturedReq["auth"])
+	}
+	if cols, _ := capturedReq["cols"].(float64); cols != 80 {
+		t.Errorf("expected attach to carry cols=80, got %v", capturedReq["cols"])
+	}
+	if rows, _ := capturedReq["rows"].(float64); rows != 24 {
+		t.Errorf("expected attach to carry rows=24, got %v", capturedReq["rows"])
+	}
+
 	expected := []byte("hello keys")
 	if !bytes.Equal(capturedKeys, expected) {
 		t.Errorf("expected keys %v, got %v", expected, capturedKeys)
@@ -2052,15 +2189,28 @@ func TestReadScreenEPROTORetryGetsFreshDeadline(t *testing.T) {
 				// answering EPROTO — long enough to receive the response inside that
 				// budget, but leaving only a sliver of it unspent by the time this
 				// attempt returns and the retry begins.
-				time.Sleep(250 * time.Millisecond)
+				//
+				// The margins below (screenDeadline 1200ms, this stall 1000ms, leaving
+				// a 200ms sliver, versus the retry's own 500ms stall) are 4x wider than
+				// an earlier version of this test (300ms/250ms/50ms/150ms). That
+				// version passed forty race runs locally but left only ~50ms of
+				// headroom for dial+write+read+scheduler overhead on the first
+				// attempt, and only a ~100ms margin between "long enough to exceed a
+				// wrongly-reused deadline's leftover budget" and "short enough to fit
+				// inside a correctly-fresh one" — tight enough that a loaded CI runner
+				// could flake on scheduling jitter alone, independent of any real
+				// regression. Widening every absolute value by the same factor keeps
+				// the same proportions (so the same bug is still caught) while making
+				// each margin large relative to realistic scheduling jitter.
+				time.Sleep(1000 * time.Millisecond)
 				conn.Write([]byte(`{"ok":false,"code":"EPROTO"}` + "\n"))
 				conn.Close()
 			default:
 				// Retry's attach: stall longer than the sliver left over from a
-				// reused deadline (50ms), but well inside a fresh, full
-				// screenDeadline (300ms), before answering with a short,
+				// reused deadline (200ms), but well inside a fresh, full
+				// screenDeadline (1200ms), before answering with a short,
 				// distinctive screen.
-				time.Sleep(150 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 				conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
 				conn.Write([]byte("retry succeeded"))
 				conn.Close()
@@ -2072,7 +2222,7 @@ func TestReadScreenEPROTORetryGetsFreshDeadline(t *testing.T) {
 		return "key", nil
 	})
 	client.proto = 1
-	client.screenDeadline = 300 * time.Millisecond
+	client.screenDeadline = 1200 * time.Millisecond
 	client.readIdleTimeout = 30 * time.Millisecond
 
 	out, err := client.ReadScreen(context.Background(), "session123", 0)
@@ -2622,7 +2772,11 @@ func TestListSessionsRetriesOnceOnEPROTO(t *testing.T) {
 
 // TestDiscoverableClientRetriesOnceOnDeadSocket covers a discoverable client whose
 // cached socket path has gone dead (the daemon restarted under a new directory): the
-// call must re-resolve exactly once and succeed against the new path.
+// call must re-resolve exactly once and succeed against the new path, and must cache
+// the resolved path (via setSocketPath) rather than re-resolving on every subsequent
+// call. A previous version of this test only asserted err == nil with no call counter
+// on resolve at all, which a client that re-resolved on every single call — never
+// caching anything — would also have passed.
 func TestDiscoverableClientRetriesOnceOnDeadSocket(t *testing.T) {
 	deadListener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -2637,23 +2791,32 @@ func TestDiscoverableClientRetriesOnceOnDeadSocket(t *testing.T) {
 	}
 	defer liveListener.Close()
 
+	livePath := liveListener.Addr().String()
 	go func() {
-		conn, err := liveListener.Accept()
-		if err != nil {
-			return
+		for {
+			conn, err := liveListener.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				reader := bufio.NewReader(conn)
+				if _, err := reader.ReadString('\n'); err != nil {
+					return
+				}
+				conn.Write([]byte(`{"ok":true,"op":"list","jobs":[]}` + "\n"))
+			}(conn)
 		}
-		defer conn.Close()
-		reader := bufio.NewReader(conn)
-		if _, err := reader.ReadString('\n'); err != nil {
-			return
-		}
-		conn.Write([]byte(`{"ok":true,"op":"list","jobs":[]}` + "\n"))
 	}()
 
+	var resolveCalls int32
 	client := New(deadPath, func() (string, error) { return "key", nil })
 	client.proto = 1
 	client.discoverable = true
-	client.resolve = func() (string, error) { return liveListener.Addr().String(), nil }
+	client.resolve = func() (string, error) {
+		atomic.AddInt32(&resolveCalls, 1)
+		return livePath, nil
+	}
 
 	sessions, err := client.ListSessions(context.Background())
 	if err != nil {
@@ -2661,6 +2824,25 @@ func TestDiscoverableClientRetriesOnceOnDeadSocket(t *testing.T) {
 	}
 	if sessions == nil {
 		t.Error("expected a non-nil sessions slice")
+	}
+	if got := atomic.LoadInt32(&resolveCalls); got != 1 {
+		t.Fatalf("expected resolve to be called exactly once, got %d", got)
+	}
+	if got := client.currentSocketPath(); got != livePath {
+		t.Fatalf("expected the resolved path to be cached via setSocketPath, got %q, want %q", got, livePath)
+	}
+
+	// A second call must reuse the cached path (setSocketPath's whole point) rather
+	// than re-resolving: resolveCalls must stay at 1.
+	sessions, err = client.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("second ListSessions failed: %v", err)
+	}
+	if sessions == nil {
+		t.Error("expected a non-nil sessions slice on the second call")
+	}
+	if got := atomic.LoadInt32(&resolveCalls); got != 1 {
+		t.Fatalf("expected resolve still called exactly once after the cached path was reused, got %d", got)
 	}
 }
 
@@ -2803,8 +2985,10 @@ func TestClientRefusesInsecureSocketDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ListSessions to refuse an insecurely-owned socket directory")
 	}
-	if !strings.Contains(err.Error(), "writable by group or other") {
-		t.Errorf("expected an ownership refusal, got: %v", err)
+	// Asserted via the typed sentinel (errors.Is), not the prose: the exact wording
+	// stays free to change without breaking this test.
+	if !errors.Is(err, errSocketWritableByOthers) {
+		t.Errorf("expected an ownership refusal satisfying errors.Is(err, errSocketWritableByOthers), got: %v", err)
 	}
 }
 
@@ -2869,7 +3053,9 @@ func TestSendKeysWriteFailureReturnsErrKeysNotDelivered(t *testing.T) {
 	}
 	defer listener.Close()
 
+	serverDone := make(chan struct{})
 	go func() {
+		defer close(serverDone)
 		conn, err := listener.Accept()
 		if err != nil {
 			return
@@ -2888,14 +3074,27 @@ func TestSendKeysWriteFailureReturnsErrKeysNotDelivered(t *testing.T) {
 	})
 	client.proto = 1
 
-	// Give the fake server's close a moment to actually land before we write, so the
-	// write reliably fails rather than racing a still-open connection.
-	time.Sleep(50 * time.Millisecond)
-
+	// No artificial delay is needed (or useful) here: a previous version of this test
+	// slept 50ms right here, before calling SendKeys below — which happens before the
+	// dial even starts, let alone before the server has accepted a connection, so it
+	// could not have let the close "land" first as intended. The ordering this test
+	// actually relies on comes from the protocol shape, not from timing: SendKeys can
+	// only reach its write of the key bytes after successfully reading and parsing the
+	// header above, which itself requires the server to have already written that
+	// header — and the server's very next statement, with no I/O in between, is
+	// Close(). That two-instruction gap on the server side is reliably shorter than the
+	// client's read-then-parse-then-write round trip, which is why the write below
+	// reliably fails without needing a sleep anywhere.
 	err = client.SendKeys(context.Background(), "session123", "x")
 	var notDelivered *ErrKeysNotDelivered
 	if !errors.As(err, &notDelivered) {
 		t.Errorf("expected *ErrKeysNotDelivered, got %T: %v", err, err)
+	}
+
+	select {
+	case <-serverDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine never finished")
 	}
 }
 
@@ -3375,7 +3574,7 @@ func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) 
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("ReadScreen did not return within 10s against a chattly redrawing session")
+		t.Fatal("ReadScreen did not return within 10s against a chatty redrawing session")
 	}
 	elapsed := time.Since(start)
 
@@ -3918,7 +4117,27 @@ func (wrappedTimeoutNetErr) Temporary() bool { return true }
 // through behaviour is the only reason a plain `err.(net.Error)` type assertion has
 // worked so far in collectUntilIdleOrClosed; this fake proves the code is correct even
 // when a reader wraps its errors instead.
+//
+// The embedded net.Conn is a real net.Pipe() endpoint (see newAlwaysWrappedTimeoutConn),
+// not a bare, nil interface value: a nil-embedded net.Conn only happens to work here
+// because this test's one call path (Read and SetReadDeadline, both overridden below)
+// never reaches the embedded value's own methods — but the type is otherwise a
+// perfectly ordinary net.Conn, and calling any of its other methods (Close, Write,
+// LocalAddr, ...) on a nil embedded value would panic instead of failing cleanly. A
+// real pipe endpoint behaves correctly for all of them.
 type alwaysWrappedTimeoutConn struct{ net.Conn }
+
+// newAlwaysWrappedTimeoutConn wires alwaysWrappedTimeoutConn to a real net.Pipe()
+// endpoint and arranges for both ends to be closed at test cleanup.
+func newAlwaysWrappedTimeoutConn(t *testing.T) alwaysWrappedTimeoutConn {
+	t.Helper()
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+	return alwaysWrappedTimeoutConn{Conn: client}
+}
 
 func (alwaysWrappedTimeoutConn) Read([]byte) (int, error) {
 	time.Sleep(2 * time.Millisecond)
@@ -3935,7 +4154,7 @@ func (alwaysWrappedTimeoutConn) SetReadDeadline(time.Time) error { return nil }
 // would turn an ordinary timeout into a false kick, since detectKick treats
 // "connection closed" as one of its three required conditions.
 func TestCollectUntilIdleOrClosedUnwrapsWrappedTimeoutError(t *testing.T) {
-	conn := alwaysWrappedTimeoutConn{}
+	conn := newAlwaysWrappedTimeoutConn(t)
 	reader := bufio.NewReader(conn)
 
 	data, closed := collectUntilIdleOrClosed(context.Background(), conn, reader, 20*time.Millisecond, 0, true, time.Time{})
@@ -3999,5 +4218,367 @@ func TestReadScreenMarkerAtEndWithoutObservedCloseIsNotAKick(t *testing.T) {
 	}
 	if out != "EKICKED: another connection attached" {
 		t.Errorf("expected the marker's bytes as ordinary screen content, got %q", out)
+	}
+}
+
+// --- Item 1: the EPROTO retry safety claim on SendKeys and SendText ---
+
+// TestSendKeysEPROTORetryDoesNotDoubleDeliverKeys is the test that actually verifies
+// SendKeys's comment on isProtoErr: "EPROTO always surfaces at (or before) the attach
+// header, strictly before any key bytes are written, so retrying here never
+// double-delivers keys." Nothing exercised this claim before — SendKeys was at 60%
+// coverage and only ListSessions and ReadScreen had retry tests at all.
+//
+// The fake daemon's first attach answers EPROTO and then actively checks whether any
+// key bytes arrive anyway (reading with a short deadline before closing) — if
+// sendKeysOnce's ordering were wrong and it wrote the key bytes before checking the
+// header's ok field, this would catch that stray write directly, not just the visible
+// symptom of the wrong count below. The second attach (after the forced re-ping)
+// accepts and captures the keys. Exactly one delivery must be recorded.
+func TestSendKeysEPROTORetryDoesNotDoubleDeliverKeys(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	var (
+		mu          sync.Mutex
+		deliveries  [][]byte
+		strayWrites [][]byte
+	)
+	errChan := make(chan error, 8)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 3; i++ {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer conn.Close()
+				reader := bufio.NewReader(conn)
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					errChan <- err
+					return
+				}
+				switch {
+				case strings.Contains(line, `"op":"ping"`):
+					conn.Write([]byte(`{"ok":true,"op":"ping","version":"test","proto":9}` + "\n"))
+				case i == 0:
+					// First attempt: refuse before ever confirming any key bytes.
+					conn.Write([]byte(`{"ok":false,"code":"EPROTO"}` + "\n"))
+					// Prove the claim directly: check whether the client wrote
+					// anything to this connection despite the refusal. This must
+					// read through the same bufio.Reader used above, not
+					// conn.Read directly: bufio.Reader.ReadString('\n') can pull
+					// more than just the line into its own internal buffer in a
+					// single underlying Read — a stray write sent close behind
+					// the request line would already be sitting in that buffer,
+					// invisible to a fresh conn.Read call that bypasses it.
+					_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+					buf := make([]byte, 64)
+					if n, _ := reader.Read(buf); n > 0 {
+						mu.Lock()
+						strayWrites = append(strayWrites, append([]byte{}, buf[:n]...))
+						mu.Unlock()
+					}
+				default:
+					// Retry's attach: succeed, then capture the key bytes.
+					conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+					buf := make([]byte, 64)
+					n, rerr := reader.Read(buf)
+					if rerr != nil && rerr != io.EOF {
+						errChan <- rerr
+						return
+					}
+					mu.Lock()
+					deliveries = append(deliveries, append([]byte{}, buf[:n]...))
+					mu.Unlock()
+				}
+			}()
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 5 // stale cached proto, so the first attach is sent immediately
+
+	err = client.SendKeys(context.Background(), "session123", "hello")
+	if err != nil {
+		t.Fatalf("SendKeys failed: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not process all three connections")
+	}
+	select {
+	case err := <-errChan:
+		t.Fatalf("error in server: %v", err)
+	default:
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(strayWrites) != 0 {
+		t.Fatalf("FALSE CLAIM: key bytes were written to the connection refused with EPROTO, before the retry: %v — the comment on SendKeys's EPROTO retry is wrong", strayWrites)
+	}
+	if len(deliveries) != 1 {
+		t.Fatalf("expected exactly one delivery of the key bytes, got %d: %v", len(deliveries), deliveries)
+	}
+	if string(deliveries[0]) != "hello" {
+		t.Errorf("expected delivered keys %q, got %q", "hello", deliveries[0])
+	}
+}
+
+// TestSendTextEPROTORetryDoesNotDoubleDeliverText is SendKeys's sibling test for
+// SendText's "reply" op: the whole request (including the text) is sent as one write,
+// so the property worth proving is that a request refused with EPROTO is never counted
+// as an applied delivery by the daemon — only the retried request, sent with the
+// correct proto, is. SendText was at 71.4% coverage with no retry test of its own.
+func TestSendTextEPROTORetryDoesNotDoubleDeliverText(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	var (
+		mu         sync.Mutex
+		deliveries []string
+	)
+	errChan := make(chan error, 8)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 3; i++ {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer conn.Close()
+				reader := bufio.NewReader(conn)
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					errChan <- err
+					return
+				}
+				var m map[string]interface{}
+				if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &m); err != nil {
+					errChan <- err
+					return
+				}
+				switch {
+				case m["op"] == "ping":
+					conn.Write([]byte(`{"ok":true,"op":"ping","version":"test","proto":9}` + "\n"))
+				case i == 0:
+					// First attempt carries the stale proto: refused, never applied.
+					conn.Write([]byte(`{"ok":false,"code":"EPROTO"}` + "\n"))
+				default:
+					// Retry carries the freshly negotiated proto: applied exactly once.
+					mu.Lock()
+					text, _ := m["text"].(string)
+					deliveries = append(deliveries, text)
+					mu.Unlock()
+					conn.Write([]byte(`{"ok":true,"op":"reply"}` + "\n"))
+				}
+			}()
+		}
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 5 // stale cached proto, so the first reply is sent immediately
+
+	err = client.SendText(context.Background(), "session123", "hello world", true)
+	if err != nil {
+		t.Fatalf("SendText failed: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not process all three connections")
+	}
+	select {
+	case err := <-errChan:
+		t.Fatalf("error in server: %v", err)
+	default:
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(deliveries) != 1 {
+		t.Fatalf("expected exactly one applied delivery of the text, got %d: %v", len(deliveries), deliveries)
+	}
+	if deliveries[0] != "hello world" {
+		t.Errorf("expected delivered text %q, got %q", "hello world", deliveries[0])
+	}
+}
+
+// --- Item 2: the daemonError code table, and every typed error's Error() string ---
+
+// TestDaemonErrorCodeMapping is the table test covering both daemonError's mapping and
+// each mapped type's Error() string in one place. Before this test, ETOOLARGE,
+// ENOREPLY, ERESPAWNING, ESTARTING and the default/&ErrUnknown{} branch had no test at
+// all, and every Error() method in types.go was at 0% coverage: existing tests only
+// ever referenced an error's %v inside a t.Errorf/t.Fatalf that runs only on failure,
+// so a passing test run never actually called Error().
+func TestDaemonErrorCodeMapping(t *testing.T) {
+	cases := []struct {
+		code    string
+		want    error
+		wantMsg string
+	}{
+		{"EPROTO", &ErrProto{}, "proto mismatch"},
+		{"EAUTH", &ErrAuth{}, "authentication failed"},
+		{"EPEERUID", &ErrPeeruid{}, "peer uid mismatch"},
+		{"ETOOLARGE", &ErrToolarge{}, "request exceeds 1MB"},
+		{"ENOJOB", &ErrNojob{}, "no such session"},
+		{"ENOREPLY", &ErrNoreply{}, "session is not accepting replies"},
+		{"ERESPAWNING", &ErrRespawning{}, "session is respawning"},
+		{"ESTARTING", &ErrStarting{}, "daemon is starting"},
+		{"EWEIRDUNKNOWNCODE", &ErrUnknown{Code: "EWEIRDUNKNOWNCODE"}, "unknown error: EWEIRDUNKNOWNCODE"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.code, func(t *testing.T) {
+			err := daemonError(map[string]interface{}{"code": tc.code})
+			if reflect.TypeOf(err) != reflect.TypeOf(tc.want) {
+				t.Fatalf("daemonError(%q): expected type %T, got %T", tc.code, tc.want, err)
+			}
+			if got := err.Error(); got != tc.wantMsg {
+				t.Errorf("daemonError(%q).Error() = %q, want %q", tc.code, got, tc.wantMsg)
+			}
+		})
+	}
+}
+
+// TestErrSubmitNotSupportedMessage covers ErrSubmitNotSupported.Error(), never called
+// directly by any existing test (only errors.As).
+func TestErrSubmitNotSupportedMessage(t *testing.T) {
+	err := &ErrSubmitNotSupported{}
+	want := "the control socket always submits a reply; holding text unsent is not supported"
+	if got := err.Error(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestErrKickedMessages covers both of ErrKicked.Error()'s branches directly: with a
+// detail, and with none. Every existing kick test only ever references %v inside a
+// conditional t.Fatalf that does not run on a passing test, so Error() itself was
+// never actually called.
+func TestErrKickedMessages(t *testing.T) {
+	withDetail := &ErrKicked{Detail: "another connection attached"}
+	if got, want := withDetail.Error(), "attach was kicked: another connection attached"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	noDetail := &ErrKicked{}
+	if got, want := noDetail.Error(), "attach was kicked by another connection"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestErrKeysNotDeliveredWithCauseMessage covers ErrKeysNotDelivered.Error()'s
+// with-cause branch directly. TestErrKeysNotDeliveredNilErrDoesNotPanic already covers
+// the nil-cause branch.
+func TestErrKeysNotDeliveredWithCauseMessage(t *testing.T) {
+	err := &ErrKeysNotDelivered{Err: errors.New("broken pipe")}
+	want := "keys not confirmed delivered: broken pipe"
+	if got := err.Error(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// --- Item 3: Discover's wiring ---
+
+// TestDiscoverWiresResolveToSocketPathAndSetsInitialPath covers Discover directly —
+// the package's only production constructor, called by no test before this one.
+// Every existing test builds a Client by hand with New and then pokes discoverable
+// and resolve directly, which never exercised Discover's own wiring: that resolve is
+// set to SocketPath specifically (not merely "some function with the right
+// signature"), that discoverable is set to true, and that the client's initial
+// socketPath is whatever SocketPath() actually returned.
+//
+// This overrides socketGlobBase to a temporary directory rather than depending on a
+// live daemon on this machine (see TestSocketPathFindsLiveDaemonSocket, which
+// necessarily skips when there is none), so it runs deterministically everywhere,
+// including CI.
+func TestDiscoverWiresResolveToSocketPathAndSetsInitialPath(t *testing.T) {
+	base := shortTempDir(t)
+	orig := socketGlobBase
+	socketGlobBase = base
+	t.Cleanup(func() { socketGlobBase = orig })
+
+	currentUser, err := user.Current()
+	if err != nil {
+		t.Fatalf("user.Current: %v", err)
+	}
+	dir := filepath.Join(base, fmt.Sprintf("cc-daemon-%s", currentUser.Uid), "session1")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	sockPath := filepath.Join(dir, "control.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	client, err := Discover(func() (string, error) { return "key", nil })
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if !client.discoverable {
+		t.Error("expected a Discover-created client to be discoverable")
+	}
+	if client.resolve == nil {
+		t.Fatal("expected resolve to be wired")
+	}
+	if reflect.ValueOf(client.resolve).Pointer() != reflect.ValueOf(SocketPath).Pointer() {
+		t.Error("expected resolve to be wired to SocketPath specifically")
+	}
+	if got := client.currentSocketPath(); got != sockPath {
+		t.Errorf("expected the initial socket path %q, got %q", sockPath, got)
+	}
+}
+
+// --- Item 4: trimToRuneBoundary's actual loop body ---
+
+// TestTrimToRuneBoundaryDropsPartialMultiByteRunePrefix cuts through the middle of a
+// multi-byte UTF-8 rune and asserts the broken tail bytes are dropped while the valid
+// content after them survives intact. Every existing tail-trimming test used pure
+// ASCII, so trimToRuneBoundary's loop body — its only reason to exist — never actually
+// executed.
+func TestTrimToRuneBoundaryDropsPartialMultiByteRunePrefix(t *testing.T) {
+	full := []byte("日hello") // 0xE6 0x97 0xA5 'h' 'e' 'l' 'l' 'o'
+	cut := full[1:]          // drop the rune's first byte, landing mid-rune
+	got := trimToRuneBoundary(cut)
+	if string(got) != "hello" {
+		t.Errorf("expected the broken rune's tail bytes dropped and %q preserved, got %q", "hello", got)
+	}
+}
+
+// --- Item 6: readBoundedLine's 1MB cap ---
+
+// TestReadBoundedLineRefusesOversizedLine covers the cap directly: a line with no
+// newline that exceeds maxLineBytes must be refused rather than buffered without
+// bound.
+func TestReadBoundedLineRefusesOversizedLine(t *testing.T) {
+	data := bytes.Repeat([]byte("a"), maxLineBytes+10) // no newline anywhere
+	reader := bufio.NewReader(bytes.NewReader(data))
+
+	_, err := readBoundedLine(reader)
+	if err == nil {
+		t.Fatal("expected an error for a line exceeding maxLineBytes")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("expected the cap violation to be visible in the error, got: %v", err)
 	}
 }

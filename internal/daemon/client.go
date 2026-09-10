@@ -32,6 +32,15 @@ import (
 // side can be made to buffer an unbounded line.
 const maxLineBytes = 1024 * 1024
 
+// socketGlobBase is the directory SocketPath globs candidates under. It is a
+// package-level var, not a literal inlined at the call site, purely so a test can
+// point it at a temporary directory and exercise SocketPath's own glob-then-resolve
+// logic deterministically — without a live daemon, and without skipping in CI, unlike
+// a test driven against the real, uid-specific /tmp path (see
+// TestSocketPathFindsLiveDaemonSocket, which necessarily skips when this machine has
+// no live daemon).
+var socketGlobBase = "/tmp"
+
 // SocketPath returns the path to the daemon control socket for the current user.
 // filepath.Glob returns candidates in lexicographic order, which is not the same as
 // "most recently started daemon" — a dead socket left behind by a crashed daemon can
@@ -43,7 +52,7 @@ func SocketPath() (string, error) {
 		return "", err
 	}
 
-	pattern := filepath.Join("/tmp", fmt.Sprintf("cc-daemon-%s", currentUser.Uid), "*", "control.sock")
+	pattern := filepath.Join(socketGlobBase, fmt.Sprintf("cc-daemon-%s", currentUser.Uid), "*", "control.sock")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return "", err
@@ -96,6 +105,19 @@ func resolveSocketCandidate(matches []string) (string, error) {
 	return "", ErrDaemonUnavailable
 }
 
+// Sentinel causes for a socket-ownership refusal. Wrapping these with %w into the
+// human-readable messages built below lets a caller (or a test) assert on the specific
+// reason via errors.Is, without binding to the exact wording, which stays free to
+// change — see checkKeyFileSecurity's own sentinels for the symmetric client-side
+// check on the key file.
+var (
+	errSocketSymlink          = errors.New("refusing a symlinked socket path")
+	errSocketWrongOwner       = errors.New("socket path is owned by a different user")
+	errSocketWritableByOthers = errors.New("socket path is writable by group or other")
+	errSocketMissingStickyBit = errors.New("root-owned ancestor is writable by group or other and missing the sticky bit")
+	errSocketTooManyAncestors = errors.New("too many parent directories to check")
+)
+
 // checkSocketOwnership verifies that the socket file, and every enclosing directory up
 // to (but not including) the first one owned by root, is owned by the current user and
 // is not writable by group or other.
@@ -132,13 +154,13 @@ func checkSocketOwnership(socketPath string) error {
 		return fmt.Errorf("checking socket path %s: %w", socketPath, err)
 	}
 	if sockStat.symlink {
-		return fmt.Errorf("refusing socket %s: %s is a symlink, refusing to follow it", socketPath, socketPath)
+		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketSymlink)
 	}
 	if sockStat.uid != uid {
-		return fmt.Errorf("refusing socket %s: %s is owned by a different user", socketPath, socketPath)
+		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketWrongOwner)
 	}
 	if sockStat.mode&0o022 != 0 {
-		return fmt.Errorf("refusing socket %s: %s is writable by group or other", socketPath, socketPath)
+		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketWritableByOthers)
 	}
 
 	return checkSocketOwnershipWalk(socketPath, filepath.Dir(socketPath), uid, realLstat)
@@ -212,7 +234,7 @@ func checkSocketOwnershipWalk(socketPath, start string, uid int, lstat lstatFunc
 
 		if info.symlink {
 			if info.uid != 0 {
-				return fmt.Errorf("refusing socket %s: %s is a symlink owned by a non-root user, refusing to follow it", socketPath, path)
+				return fmt.Errorf("refusing socket %s: %s is a symlink owned by a non-root user: %w", socketPath, path, errSocketSymlink)
 			}
 			target := info.target
 			if !filepath.IsAbs(target) {
@@ -224,7 +246,7 @@ func checkSocketOwnershipWalk(socketPath, start string, uid int, lstat lstatFunc
 
 		if info.uid == 0 {
 			if !stickyBitSatisfiesRootBoundary(info.mode) {
-				return fmt.Errorf("refusing socket %s: %s is root-owned, writable by group or other, and missing the sticky bit", socketPath, path)
+				return fmt.Errorf("refusing socket %s: %s: %w", socketPath, path, errSocketMissingStickyBit)
 			}
 			// A root-owned enclosing directory (e.g. /private/tmp, the real target of
 			// macOS's /tmp symlink) that is either not writable by group/other, or is
@@ -234,10 +256,10 @@ func checkSocketOwnershipWalk(socketPath, start string, uid int, lstat lstatFunc
 		}
 
 		if info.uid != uid {
-			return fmt.Errorf("refusing socket %s: %s is owned by a different user", socketPath, path)
+			return fmt.Errorf("refusing socket %s: %s: %w", socketPath, path, errSocketWrongOwner)
 		}
 		if info.mode&0o022 != 0 {
-			return fmt.Errorf("refusing socket %s: %s is writable by group or other", socketPath, path)
+			return fmt.Errorf("refusing socket %s: %s: %w", socketPath, path, errSocketWritableByOthers)
 		}
 
 		parent := filepath.Dir(path)
@@ -247,7 +269,7 @@ func checkSocketOwnershipWalk(socketPath, start string, uid int, lstat lstatFunc
 		path = parent
 	}
 
-	return fmt.Errorf("refusing socket %s: too many parent directories to check", socketPath)
+	return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketTooManyAncestors)
 }
 
 // stickyBitSatisfiesRootBoundary reports whether a root-owned enclosing directory is
@@ -342,6 +364,16 @@ func wrapNoControlKey(cause error) error {
 	return &errNoControlKeyWithCause{cause: cause}
 }
 
+// Sentinel causes for a control-key-file refusal, wrapped by ControlKey into
+// ErrNoControlKey (see wrapNoControlKey) but still reachable via errors.Is/As for
+// diagnosis, symmetric with checkSocketOwnership's own sentinels above.
+var (
+	errKeyFileSymlink      = errors.New("control key file is a symlink, refusing to use it")
+	errKeyFileUnknownOwner = errors.New("cannot determine the owner of the control key file")
+	errKeyFileWrongOwner   = errors.New("control key file is owned by a different user")
+	errKeyFileInsecureMode = errors.New("control key file is readable or writable by group or other")
+)
+
 // checkKeyFileSecurity refuses a control key file that is not owned by wantUID, or is
 // readable or writable by group or other. wantUID is a parameter, rather than
 // checkKeyFileSecurity reading os.Getuid() itself, purely so a test can exercise the
@@ -362,19 +394,19 @@ func checkKeyFileSecurity(path string, wantUID int) error {
 		// key file's real location, and its own security properties, be something
 		// other than what this check just verified), but the internal cause should say
 		// so plainly rather than blaming a permission bit that isn't the real reason.
-		return errors.New("control key file is a symlink, refusing to use it")
+		return errKeyFileSymlink
 	}
 
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return errors.New("cannot determine the owner of the control key file")
+		return errKeyFileUnknownOwner
 	}
 
 	if int(stat.Uid) != wantUID {
-		return errors.New("control key file is owned by a different user")
+		return errKeyFileWrongOwner
 	}
 	if !keyFileModeIsSecure(info.Mode()) {
-		return errors.New("control key file is readable or writable by group or other")
+		return errKeyFileInsecureMode
 	}
 	return nil
 }
@@ -499,6 +531,16 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 		return nil, err
 	}
 
+	// c.resolve (SocketPath, for a Discover-created client) takes no context: it dials
+	// each glob candidate with its own fixed 500ms timeout (see resolveSocketCandidate)
+	// and cannot be cancelled early by ctx. This is deliberate, not an oversight:
+	// SocketPath's own signature is `func() (string, error)`, shared by every test that
+	// stubs c.resolve directly (`client.resolve = func() (string, error) { ... }`), and
+	// threading a context through would mean changing that signature and every one of
+	// those call sites for a bound that already exists in a different, coarser form —
+	// at most a small, fixed number of candidates (in practice one or two) at 500ms
+	// each, never unbounded. A caller with a very short ctx deadline can still see this
+	// call outlast it by up to that fixed amount; that is the accepted trade-off.
 	newPath, resolveErr := c.resolve()
 	if resolveErr != nil {
 		return nil, err
@@ -1173,6 +1215,17 @@ func trimToRuneBoundary(b []byte) []byte {
 // cap regardless of tail. This limit applies identically whether or not the stream ends
 // in a kick (see ErrKicked): a caller that asked for the last few bytes gets the last
 // few bytes of the accumulated prefix either way, not the whole thing.
+//
+// A longer deadline on ctx is not honoured past c.screenDeadline (2s by default): when
+// ctx carries no deadline of its own, readScreenWithDeadline derives one bounded by
+// c.screenDeadline regardless of how long the caller might otherwise be willing to
+// wait, and even when ctx does carry its own (longer) deadline, the idle-detection loop
+// still races it against that same c.screenDeadline ceiling (see
+// collectUntilIdleOrClosed's until parameter). A caller passing a 30-second context to
+// read a continuously-printing session still gets back whatever accumulated in about
+// 2 seconds, not 30 — this is intentional (see readScreenWithDeadline's own comment for
+// why), but it means ctx's deadline is a ceiling this method can shorten, never one it
+// lets a caller stretch.
 //
 // cols/rows are fixed at 80x24 for this attach. This is not an open risk: the daemon's
 // own attach handler stores the requested geometry per-attacher
