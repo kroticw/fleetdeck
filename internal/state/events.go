@@ -17,8 +17,13 @@ type Event struct {
 // its condition becomes true and stays quiet for as long as it remains true,
 // per spec section 6 ("повторные баннеры по одному и тому же событию не
 // шлются: событием считается смена состояния, а не его наличие"). The very
-// first snapshot — prev has neither a session nor a card to compare against —
-// fires nothing: every standing state in next would otherwise look brand new.
+// very first snapshot — prev was never assembled, so its At is zero — fires
+// nothing: every standing state in next would otherwise look brand new.
+//
+// That guard keys on prev.At and nothing else. An observed empty fleet is a fact
+// ("last tick there was nothing running"), the absence of an observation is not, and
+// only the second may be quiet: a fleet that starts empty and gains a session already
+// waiting is precisely the case spec section 1 exists for.
 //
 // The four rules implemented here are exactly the four the design spec lists
 // in section 6, matched to the four toggles in internal/config's
@@ -47,7 +52,7 @@ type Event struct {
 // waiting on you", which is exactly the conflation section 5 of
 // docs/protocol/daemon-control-socket.md warns against.
 func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleared []string) {
-	if len(prev.Sessions) == 0 && len(prev.Cards) == 0 {
+	if prev.At.IsZero() {
 		return nil, nil
 	}
 

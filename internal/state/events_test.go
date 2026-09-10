@@ -9,6 +9,12 @@ import (
 	"github.com/kroticw/fleetdeck/internal/daemon"
 )
 
+// observedAt stamps a prev snapshot as a real prior observation. Diff tells "no
+// snapshot yet" from "an empty fleet" by prev.At alone (see its doc comment), so a
+// prev built in a test without At set is the first-tick case, not the case these
+// tests mean to exercise.
+var observedAt = time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+
 func waitingView(short string) SessionView {
 	return SessionView{Session: daemon.Session{Short: short, Name: "session " + short, Needs: "answer: pick one (A · B)"}}
 }
@@ -22,7 +28,7 @@ func stalledView(short string) SessionView {
 }
 
 func TestSessionBecomingWaitingFiresOnce(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{idleView("a")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("a")}}
 	next := Snapshot{Sessions: []SessionView{waitingView("a")}}
 	fire, cleared := Diff(prev, next, time.Hour)
 	if len(fire) != 1 || fire[0].Key != "session:a:waiting" {
@@ -34,7 +40,7 @@ func TestSessionBecomingWaitingFiresOnce(t *testing.T) {
 }
 
 func TestStillWaitingDoesNotFireAgain(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{waitingView("a")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{waitingView("a")}}
 	next := Snapshot{Sessions: []SessionView{waitingView("a")}}
 	fire, _ := Diff(prev, next, time.Hour)
 	if len(fire) != 0 {
@@ -43,7 +49,7 @@ func TestStillWaitingDoesNotFireAgain(t *testing.T) {
 }
 
 func TestSessionThatStoppedWaitingIsCleared(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{waitingView("a")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{waitingView("a")}}
 	next := Snapshot{Sessions: []SessionView{idleView("a")}}
 	fire, cleared := Diff(prev, next, time.Hour)
 	if len(fire) != 0 {
@@ -59,7 +65,7 @@ func TestSessionThatStoppedWaitingIsCleared(t *testing.T) {
 // comment on Diff). A session moving straight from idle into Stalled
 // (state=blocked, no words in Needs) must produce no banner at all.
 func TestSessionBecomingStalledDoesNotFire(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{idleView("a")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("a")}}
 	next := Snapshot{Sessions: []SessionView{stalledView("a")}}
 	fire, cleared := Diff(prev, next, time.Hour)
 	if len(fire) != 0 {
@@ -75,7 +81,7 @@ func TestSessionBecomingStalledDoesNotFire(t *testing.T) {
 // (so it can fire again later), but arriving at Stalled fires nothing, since
 // Stalled has no banner of its own.
 func TestWaitingSessionThatBecomesStalledClearsWaitingButFiresNothingNew(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{waitingView("a")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{waitingView("a")}}
 	next := Snapshot{Sessions: []SessionView{stalledView("a")}}
 	fire, cleared := Diff(prev, next, time.Hour)
 	if len(fire) != 0 {
@@ -87,7 +93,7 @@ func TestWaitingSessionThatBecomesStalledClearsWaitingButFiresNothingNew(t *test
 }
 
 func TestSessionEndingInFailureFires(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{idleView("a")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("a")}}
 	failed := idleView("a")
 	failed.State = "failed"
 	next := Snapshot{Sessions: []SessionView{failed}}
@@ -100,7 +106,7 @@ func TestSessionEndingInFailureFires(t *testing.T) {
 func TestStillFailedDoesNotFireAgain(t *testing.T) {
 	failed := idleView("a")
 	failed.State = "failed"
-	prev := Snapshot{Sessions: []SessionView{failed}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{failed}}
 	next := Snapshot{Sessions: []SessionView{failed}}
 	fire, _ := Diff(prev, next, time.Hour)
 	if len(fire) != 0 {
@@ -111,7 +117,7 @@ func TestStillFailedDoesNotFireAgain(t *testing.T) {
 func TestFailedSessionThatRecoversIsCleared(t *testing.T) {
 	failed := idleView("a")
 	failed.State = "failed"
-	prev := Snapshot{Sessions: []SessionView{failed}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{failed}}
 	next := Snapshot{Sessions: []SessionView{idleView("a")}}
 	_, cleared := Diff(prev, next, time.Hour)
 	if len(cleared) != 1 || cleared[0] != "session:a:failed" {
@@ -124,7 +130,7 @@ func TestSilenceFiresOnceOnCrossingTheThreshold(t *testing.T) {
 	before.SilentFor = 10 * time.Minute
 	after := idleView("a")
 	after.SilentFor = 31 * time.Minute
-	prev := Snapshot{Sessions: []SessionView{before}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{before}}
 	next := Snapshot{Sessions: []SessionView{after}}
 	fire, _ := Diff(prev, next, 30*time.Minute)
 	if len(fire) != 1 || fire[0].Key != "session:a:silent" {
@@ -135,7 +141,7 @@ func TestSilenceFiresOnceOnCrossingTheThreshold(t *testing.T) {
 func TestSilenceDoesNotFireAgainWhileStillOverThreshold(t *testing.T) {
 	still := idleView("a")
 	still.SilentFor = 45 * time.Minute
-	prev := Snapshot{Sessions: []SessionView{still}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{still}}
 	next := Snapshot{Sessions: []SessionView{still}}
 	fire, _ := Diff(prev, next, 30*time.Minute)
 	if len(fire) != 0 {
@@ -148,7 +154,7 @@ func TestSilenceClearsWhenActivityResumes(t *testing.T) {
 	before.SilentFor = 45 * time.Minute
 	after := idleView("a")
 	after.SilentFor = 0
-	prev := Snapshot{Sessions: []SessionView{before}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{before}}
 	next := Snapshot{Sessions: []SessionView{after}}
 	_, cleared := Diff(prev, next, 30*time.Minute)
 	if len(cleared) != 1 || cleared[0] != "session:a:silent" {
@@ -157,7 +163,7 @@ func TestSilenceClearsWhenActivityResumes(t *testing.T) {
 }
 
 func TestCardEnteringBlockedFires(t *testing.T) {
-	prev := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "active"}}}
+	prev := Snapshot{At: observedAt, Cards: []board.Card{{Path: "/board/c.md", Stage: "active"}}}
 	next := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "blocked"}}}
 	fire, _ := Diff(prev, next, time.Hour)
 	if len(fire) != 1 || fire[0].Key != "card:/board/c.md:blocked" {
@@ -166,7 +172,7 @@ func TestCardEnteringBlockedFires(t *testing.T) {
 }
 
 func TestCardEnteringReviewFires(t *testing.T) {
-	prev := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "active"}}}
+	prev := Snapshot{At: observedAt, Cards: []board.Card{{Path: "/board/c.md", Stage: "active"}}}
 	next := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "review"}}}
 	fire, _ := Diff(prev, next, time.Hour)
 	if len(fire) != 1 || fire[0].Key != "card:/board/c.md:review" {
@@ -175,7 +181,7 @@ func TestCardEnteringReviewFires(t *testing.T) {
 }
 
 func TestCardMovingBetweenNonNotifiableStagesFiresNothing(t *testing.T) {
-	prev := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "new"}}}
+	prev := Snapshot{At: observedAt, Cards: []board.Card{{Path: "/board/c.md", Stage: "new"}}}
 	next := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "active"}}}
 	fire, cleared := Diff(prev, next, time.Hour)
 	if len(fire) != 0 || len(cleared) != 0 {
@@ -184,7 +190,7 @@ func TestCardMovingBetweenNonNotifiableStagesFiresNothing(t *testing.T) {
 }
 
 func TestCardLeavingBlockedIsCleared(t *testing.T) {
-	prev := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "blocked"}}}
+	prev := Snapshot{At: observedAt, Cards: []board.Card{{Path: "/board/c.md", Stage: "blocked"}}}
 	next := Snapshot{Cards: []board.Card{{Path: "/board/c.md", Stage: "active"}}}
 	_, cleared := Diff(prev, next, time.Hour)
 	if len(cleared) != 1 || cleared[0] != "card:/board/c.md:blocked" {
@@ -198,7 +204,7 @@ func TestCardLeavingBlockedIsCleared(t *testing.T) {
 // "just moved to blocked" apart from "created directly in blocked" for a
 // card, so a first sighting stays quiet rather than guess.
 func TestCardBrandNewInBlockedDoesNotFire(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{idleView("z")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("z")}}
 	next := Snapshot{
 		Sessions: []SessionView{idleView("z")},
 		Cards:    []board.Card{{Path: "/board/new.md", Stage: "blocked"}},
@@ -214,7 +220,7 @@ func TestCardBrandNewInBlockedDoesNotFire(t *testing.T) {
 // not been told about yet, so it fires even though this particular session
 // has no prior entry to compare against.
 func TestSessionBrandNewAlreadyWaitingDoesFire(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{idleView("z")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("z")}}
 	next := Snapshot{Sessions: []SessionView{idleView("z"), waitingView("a")}}
 	fire, _ := Diff(prev, next, time.Hour)
 	if len(fire) != 1 || fire[0].Key != "session:a:waiting" {
@@ -222,16 +228,35 @@ func TestSessionBrandNewAlreadyWaitingDoesFire(t *testing.T) {
 	}
 }
 
-func TestEmptyPreviousSnapshotFiresNothing(t *testing.T) {
-	next := Snapshot{Sessions: []SessionView{waitingView("a"), waitingView("b")}}
+// TestZeroValuedPreviousSnapshotFiresNothing: the very first tick has no prior
+// observation to compare against, so every standing state in next would look brand
+// new. A zero-valued prev — never assembled, At unset — is that case, and it is the
+// only case that stays quiet.
+func TestZeroValuedPreviousSnapshotFiresNothing(t *testing.T) {
+	next := Snapshot{At: observedAt, Sessions: []SessionView{waitingView("a"), waitingView("b")}}
 	fire, cleared := Diff(Snapshot{}, next, time.Hour)
 	if len(fire) != 0 || len(cleared) != 0 {
 		t.Fatalf("the first snapshot has nothing to compare against and must stay quiet, got fire=%+v cleared=%v", fire, cleared)
 	}
 }
 
+// TestPreviousSnapshotOfAnEmptyFleetStillDiffs: an empty fleet is a real
+// observation, not the absence of one. A tick that saw no sessions and no cards, and
+// a tick that never happened, are different facts, and only the second may be quiet:
+// spec section 1 exists for exactly the session that appears already waiting and is
+// not noticed (three sessions stood for two hours). Keying the guard on "prev has no
+// sessions and no cards" swallowed that first appearance.
+func TestPreviousSnapshotOfAnEmptyFleetStillDiffs(t *testing.T) {
+	prev := Snapshot{At: observedAt}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{waitingView("a")}}
+	fire, _ := Diff(prev, next, time.Hour)
+	if len(fire) != 1 || fire[0].Key != "session:a:waiting" {
+		t.Fatalf("a session appearing already waiting after an observed empty fleet must fire: %+v", fire)
+	}
+}
+
 func TestEventTextIsEnglish(t *testing.T) {
-	prev := Snapshot{Sessions: []SessionView{idleView("a")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("a")}}
 	next := Snapshot{Sessions: []SessionView{waitingView("a")}}
 	fire, _ := Diff(prev, next, time.Hour)
 	if len(fire) != 1 || fire[0].Text != "is waiting for an answer" {
@@ -245,8 +270,8 @@ func TestEventTextIsEnglish(t *testing.T) {
 // silence is an event" — every live session crosses zero on first sight and the
 // whole fleet gets a banner. Zero means the rule is off.
 func TestZeroSilenceThresholdDisablesTheSilenceRule(t *testing.T) {
-	prev := Snapshot{At: time.Now(), Sessions: []SessionView{idleView("z")}}
-	next := Snapshot{At: time.Now(), Sessions: []SessionView{idleView("z"), idleView("a"), idleView("b")}}
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("z")}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{idleView("z"), idleView("a"), idleView("b")}}
 	fire, cleared := Diff(prev, next, 0)
 	if len(fire) != 0 {
 		t.Fatalf("a zero silence threshold turns the silence rule off, it must not fire: %+v", fire)
