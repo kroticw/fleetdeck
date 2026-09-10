@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 )
 
@@ -195,8 +196,10 @@ func chosenBoard(env initEnv) (string, error) {
 }
 
 // ensureBoard creates the board directory and, when that directory is absent or
-// empty, writes one example card into it. A directory that already holds files is
-// somebody's board and is not touched.
+// empty, creates its cards subdirectory (board.CardsDir) and writes one example
+// card into it — board.Scan reads cards from there, not from the board directory
+// itself. A directory that already holds files is somebody's board and is not
+// touched, cards subdirectory included: nothing is created inside it either.
 func ensureBoard(cfgPath string, cfg config.Config, cfgCreated bool, cfgErr error, env initEnv) initStep {
 	s := initStep{name: "board"}
 	if cfgErr != nil {
@@ -238,16 +241,21 @@ func ensureBoard(cfgPath string, cfg config.Config, cfgCreated bool, cfgErr erro
 		s.note = dir + " (kept, it already holds files)"
 		return s
 	}
-	card := filepath.Join(dir, exampleCardName)
+	cardsDir := board.CardsDir(dir)
+	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
+		s.err = fmt.Errorf("create board cards dir: %w", err)
+		return s
+	}
+	card := filepath.Join(cardsDir, exampleCardName)
 	if err := os.WriteFile(card, []byte(exampleCard(time.Now().Format(dateLayout))), 0o600); err != nil {
 		s.err = fmt.Errorf("write example card: %w", err)
 		return s
 	}
 	if existed {
-		s.note = fmt.Sprintf("%s (was empty, wrote %s)", dir, exampleCardName)
+		s.note = fmt.Sprintf("%s (was empty, wrote cards/%s)", dir, exampleCardName)
 		return s
 	}
-	s.note = fmt.Sprintf("%s (created, wrote %s)", dir, exampleCardName)
+	s.note = fmt.Sprintf("%s (created, wrote cards/%s)", dir, exampleCardName)
 	return s
 }
 

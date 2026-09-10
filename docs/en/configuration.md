@@ -20,6 +20,8 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 
 Switching one of the `notify.enabled.*` keys on turns a rule on, not a guarantee that its banner is seen — see the README's [Limitations](../../README.md#limitations) section for why.
 
+`board.path` names the board's root directory, not the directory cards live in directly: the panel reads cards from a `cards` subdirectory underneath it (`<board.path>/cards/*.md`), matching the layout `plugin/templates/board/` lays out (`cards/`, `archive/`, `scripts/`, `README.md`). A `board.path` that exists but has no `cards` subdirectory is reported as a distinct, more specific error than an empty board.
+
 ## Example file
 
 ```yaml

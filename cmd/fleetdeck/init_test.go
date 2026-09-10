@@ -382,7 +382,8 @@ func TestInitWritesAnExampleCardThatParses(t *testing.T) {
 	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(home, "fleetdeck", "board", exampleCardName)
+	boardDir := filepath.Join(home, "fleetdeck", "board")
+	path := filepath.Join(boardDir, "cards", exampleCardName)
 
 	card, err := board.ParseCard(path)
 	if err != nil {
@@ -395,7 +396,7 @@ func TestInitWritesAnExampleCardThatParses(t *testing.T) {
 		t.Fatalf("the example card is missing fields the board expects: %+v", card)
 	}
 
-	cards, err := board.Scan(filepath.Dir(path))
+	cards, err := board.Scan(boardDir)
 	if err != nil {
 		t.Fatalf("a board holding only the example card must scan: %v", err)
 	}
@@ -443,7 +444,7 @@ func TestInitRefusesOnlyTheStatuslineStepWhenTheReporterIsMissing(t *testing.T) 
 		t.Fatal("Claude Code's settings must not be pointed at a command that is not there")
 	}
 	// Every other step still ran.
-	if _, statErr := os.Stat(filepath.Join(home, "fleetdeck", "board", exampleCardName)); statErr != nil {
+	if _, statErr := os.Stat(filepath.Join(home, "fleetdeck", "board", "cards", exampleCardName)); statErr != nil {
 		t.Fatalf("the board step was skipped along with the statusline: %v", statErr)
 	}
 	if _, statErr := os.Stat(filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)); statErr != nil {

@@ -65,23 +65,70 @@ func TestParseCardWithoutFrontmatterIsBroken(t *testing.T) {
 	}
 }
 
-func TestScanEmptyDirectoryIsTypedError(t *testing.T) {
-	_, err := Scan(t.TempDir())
+func TestScanBoardWithNoCardsSubdirIsTypedError(t *testing.T) {
+	// A board directory with no cards/ subdirectory at all — the exact shape
+	// of the production bug this test pins: board.path named a directory
+	// laid out like plugin/templates/board/ (cards/, archive/, scripts/,
+	// README.md), and Scan used to read the board root directly instead of
+	// its cards/ subdirectory, so real cards were never found.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# board\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Scan(dir)
+	if !errors.Is(err, ErrNoCardsDir) {
+		t.Fatalf("a board directory with no cards/ subdirectory must be its own distinct error, not ErrNoCards: %v", err)
+	}
+}
+
+func TestScanEmptyCardsSubdirIsTypedError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "cards"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Scan(dir)
 	if !errors.Is(err, ErrNoCards) {
-		t.Fatalf("an empty board must be reported, not pass as success with zero cards: %v", err)
+		t.Fatalf("a cards/ subdirectory with zero cards must be reported, not pass as success with zero cards: %v", err)
 	}
 }
 
 func TestScanKeepsGoingPastOneBrokenCard(t *testing.T) {
 	dir := t.TempDir()
-	writeCard(t, dir, "good.md", sample)
-	writeCard(t, dir, "bad.md", "---\nzone: [\n---\n")
+	cardsDir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeCard(t, cardsDir, "good.md", sample)
+	writeCard(t, cardsDir, "bad.md", "---\nzone: [\n---\n")
 	cards, err := Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cards) != 2 {
 		t.Fatalf("both cards must be returned, the broken one included: %d", len(cards))
+	}
+}
+
+// TestScanReadsCardsSubdirNotBoardRoot pins the fix itself: a .md file
+// sitting directly in the board root (not in cards/) must never be picked
+// up by Scan — that would be the flat-fallback shape the design explicitly
+// rejects (two silently-working conventions are worse than one explicit
+// one), and it would mask the exact bug TestScanBoardWithNoCardsSubdirIsTypedError
+// guards against.
+func TestScanReadsCardsSubdirNotBoardRoot(t *testing.T) {
+	dir := t.TempDir()
+	writeCard(t, dir, "root-level.md", sample)
+	cardsDir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeCard(t, cardsDir, "in-cards.md", sample)
+	cards, err := Scan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cards) != 1 || filepath.Base(cards[0].Path) != "in-cards.md" {
+		t.Fatalf("Scan must read only cards/, never the board root: got %+v", cards)
 	}
 }
 
@@ -146,7 +193,7 @@ func TestParseCardLinkTrimsHeadingAndAlias(t *testing.T) {
 func TestScanRealBoardDirectory(t *testing.T) {
 	dir := os.Getenv("FLEETDECK_SMOKE_BOARD_DIR")
 	if dir == "" {
-		t.Skip("set FLEETDECK_SMOKE_BOARD_DIR to a real board cards directory to run this")
+		t.Skip("set FLEETDECK_SMOKE_BOARD_DIR to a real board directory (the one holding cards/, not cards/ itself) to run this")
 	}
 	cards, err := Scan(dir)
 	if err != nil {
