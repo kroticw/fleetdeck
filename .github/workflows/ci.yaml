@@ -62,6 +62,20 @@ jobs:
       - run: make build
       - run: make verify-ldflags
 
+  web-tests:
+    # The frontend has no build step and no dependencies, so this needs node and
+    # nothing else — not the Go toolchain, and not both operating systems the
+    # `check` matrix covers: these tests exercise pure ES modules against a stubbed
+    # fetch and a stub document, and nothing in them can be platform-specific.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - run: make test-web
+
   docs-parity:
     # A documentation check has no reason to run on both operating systems the
     # `check` job matrix covers, and needs no Go toolchain at all.

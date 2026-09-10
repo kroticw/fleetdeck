@@ -49,10 +49,13 @@ Then run `fleetdeck init`. It writes `~/.config/fleetdeck/config.yaml` if there 
 Requires Go 1.27 (see `go.mod`) and, for linting, `golangci-lint` v2.13.2 on `PATH`.
 
 ```sh
-make build   # every binary under cmd/* into bin/
-make test    # go test ./... -race -count=1
-make lint    # go vet, gofmt -l, golangci-lint run
+make build    # every binary under cmd/* into bin/
+make test     # go test ./... -race -count=1
+make test-web # node --test web/tests/ (the frontend; needs node, no npm)
+make lint     # go vet, gofmt -l, golangci-lint run
 ```
+
+`make test-web` runs the frontend's tests under node's own test runner. It is not part of `make test`, which stays Go-only so that a checkout without node still gets a complete Go check; CI runs both. There is no npm install and no dependency to fetch.
 
 `make verify-ldflags` builds and runs the one test that checks the release build's version-injection symbol path (`internal/version`) actually still resolves; it is not part of `make test` because it requires its own `-ldflags`, and CI runs it as a separate step.
 

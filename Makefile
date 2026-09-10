@@ -30,7 +30,7 @@ DISTDIR  ?= dist
 # project (spec section 1), so this is the whole list, not a default subset.
 DIST_ARCHES ?= arm64 amd64
 
-.PHONY: build test lint run verify-ldflags dist verify-dist
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist
 
 # Build every command under ./cmd into $(BINDIR).
 build:
@@ -40,6 +40,16 @@ build:
 
 test:
 	go test ./... -race -count=1
+
+# The frontend's own tests. Kept out of `make test` deliberately: that target is
+# Go-only and node is not a build requirement of this project, so a contributor
+# without node still gets a complete Go check. CI runs both.
+#
+# No npm and no dependencies: web/package.json exists only to tell node that the
+# files under web/ are ES modules, and web/tests/ sits outside web/embed.go's
+# go:embed patterns so nothing here reaches the binary.
+test-web:
+	node --test web/tests/
 
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
