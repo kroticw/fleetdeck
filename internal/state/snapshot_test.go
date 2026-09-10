@@ -2,6 +2,8 @@
 package state
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,5 +174,37 @@ func TestSnapshotAssembledFromEveryInconvenientForm(t *testing.T) {
 	}
 	if broken != 1 {
 		t.Fatalf("the broken card must survive in Cards with its ParseError intact, got %d broken cards", broken)
+	}
+}
+
+// TestSnapshotCarriesOrphanCards pins task-9-fix-round-1 item 7. Spec section 7
+// requires a card whose session is dead to be surfaced, and OrphanCards computes
+// exactly that list — but the result had nowhere to sit on the snapshot the panel is
+// served from, so the caller assembling one could not pass it on.
+func TestSnapshotCarriesOrphanCards(t *testing.T) {
+	sessions := []daemon.Session{{Short: "live1234"}}
+	cards := []board.Card{{Path: "/board/orphan.md", Session: "gone1234"}}
+	snap := Snapshot{
+		Sessions:    Link(sessions, cards),
+		Cards:       cards,
+		OrphanCards: OrphanCards(sessions, cards),
+		At:          time.Now(),
+	}
+	if len(snap.OrphanCards) != 1 || snap.OrphanCards[0] != "/board/orphan.md" {
+		t.Fatalf("a card naming a dead session must reach the snapshot: %v", snap.OrphanCards)
+	}
+	body, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	if !strings.Contains(string(body), `"orphanCards":["/board/orphan.md"]`) {
+		t.Fatalf("orphan cards must reach the browser under the agreed key: %s", body)
+	}
+	quiet, err := json.Marshal(Snapshot{At: time.Now()})
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	if strings.Contains(string(quiet), "orphanCards") {
+		t.Fatalf("no orphans is the absence of a key, not an empty list: %s", quiet)
 	}
 }

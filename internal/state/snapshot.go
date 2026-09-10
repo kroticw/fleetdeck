@@ -30,13 +30,19 @@ type SessionView struct {
 // becomes code: a Snapshot with DaemonError set can still carry a full Cards
 // list, and one with BoardError set can still carry a full Sessions list.
 type Snapshot struct {
-	Sessions    []SessionView `json:"sessions"`
-	Cards       []board.Card  `json:"cards"`
-	Limits      *usage.Limits `json:"limits,omitempty"`
-	DaemonError string        `json:"daemonError,omitempty"`
-	BoardError  string        `json:"boardError,omitempty"`
-	UsageError  string        `json:"usageError,omitempty"`
-	At          time.Time     `json:"at"`
+	Sessions []SessionView `json:"sessions"`
+	Cards    []board.Card  `json:"cards"`
+	Limits   *usage.Limits `json:"limits,omitempty"`
+	// OrphanCards holds the path of every card whose Session field names a
+	// session the daemon no longer lists — spec section 7's "карточка ссылается
+	// на мёртвую сессию", which the panel must surface rather than quietly leave
+	// pointing at nothing. The list is the caller's to fill from OrphanCards();
+	// this package computes it but never assembles a Snapshot itself.
+	OrphanCards []string  `json:"orphanCards,omitempty"`
+	DaemonError string    `json:"daemonError,omitempty"`
+	BoardError  string    `json:"boardError,omitempty"`
+	UsageError  string    `json:"usageError,omitempty"`
+	At          time.Time `json:"at"`
 }
 
 // Link attaches each session to the card that names it. A card names a
