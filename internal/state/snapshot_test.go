@@ -208,3 +208,38 @@ func TestSnapshotCarriesOrphanCards(t *testing.T) {
 		t.Fatalf("no orphans is the absence of a key, not an empty list: %s", quiet)
 	}
 }
+
+// TestLinkPrefersTheLowestPathWhenTwoCardsNameOneSession pins item 9. Two cards
+// naming the same short id is a mistake on the board, but the panel still has to pick
+// one, and which one it picked used to depend on the order board.Scan happened to
+// return — a neighbour package's sort, which nothing here pins. The cards are given in
+// the opposite order to the sorted one, so a "last one wins" implementation picks the
+// other card and fails.
+func TestLinkPrefersTheLowestPathWhenTwoCardsNameOneSession(t *testing.T) {
+	sessions := []daemon.Session{{Short: "abc12345"}}
+	first := board.Card{Path: "/board/a-first.md", Session: "abc12345"}
+	later := board.Card{Path: "/board/z-later.md", Session: "abc12345"}
+	// Both input orders, because the point is that the input order does not decide.
+	for _, cards := range [][]board.Card{{first, later}, {later, first}} {
+		views := Link(sessions, cards)
+		if views[0].CardPath != "/board/a-first.md" {
+			t.Fatalf("the lowest path must win, whatever order the cards arrive in (%s then %s): %+v",
+				cards[0].Path, cards[1].Path, views[0])
+		}
+	}
+}
+
+// TestLinkGivesNoCardToASessionWithNoShortID: an empty short id is not an identity.
+// A card cannot name it (a card's session field holds a short id), so nothing may be
+// linked to such a session even if a card carried an empty session field of its own.
+func TestLinkGivesNoCardToASessionWithNoShortID(t *testing.T) {
+	sessions := []daemon.Session{{Short: ""}}
+	cards := []board.Card{{Path: "/board/one.md", Session: ""}}
+	views := Link(sessions, cards)
+	if len(views) != 1 {
+		t.Fatalf("Link must still produce a view per session, so the panel can show it: %+v", views)
+	}
+	if views[0].CardPath != "" {
+		t.Fatalf("a session with no short id must be linked to nothing: %+v", views[0])
+	}
+}

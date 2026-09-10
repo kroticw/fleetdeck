@@ -49,17 +49,47 @@ type Snapshot struct {
 // session through its Session field, which holds the session's short id
 // (daemon.Session.Short) — never the transcript UUID (SessionID), and never
 // something guessed from a title or a path. A session with no card naming it
-// gets an empty CardPath; it must never borrow another session's card.
+// gets an empty CardPath; it must never borrow another session's card. A session
+// whose own Short is empty is linked to nothing: an empty short id is not an
+// identity, so nothing can legitimately name it. It still gets a view — a session
+// the panel cannot link is still a session the panel must show.
+//
+// Two cards naming the same session is a mistake on the board, but one this
+// function still has to resolve, and the answer must not depend on the order
+// board.Scan happens to return: the lexicographically smallest Path wins. That is
+// an arbitrary rule chosen for being stable — the same board produces the same
+// link on every tick, and a neighbour package changing its sort cannot silently
+// move a card from one session to another.
+//
+// Link fills Session and CardPath and nothing else. Context and SilentFor are the
+// caller's to fill: both require I/O (reading the session's transcript from disk),
+// and this package performs none — Task 11's Collect does that and hands the
+// finished views back. So a zero SilentFor out of Link means "not measured", never
+// "not silent", and the two cannot be told apart from the field alone. Silence is
+// measured from the transcript, as the age of the last write to the session's
+// file, and a session may well have no transcript at all: one that has just
+// started and whose file does not exist yet, one transcript.Locate cannot find,
+// one from another backend. Anything reading SilentFor must therefore treat zero
+// as "no measurement" — the silence rule in Diff does, which is why a session in
+// its first second of life does not get told it has been silent for half an hour.
 func Link(sessions []daemon.Session, cards []board.Card) []SessionView {
 	cardByShort := map[string]string{}
 	for _, c := range cards {
-		if c.Session != "" {
-			cardByShort[c.Session] = c.Path
+		if c.Session == "" {
+			continue
 		}
+		if won, taken := cardByShort[c.Session]; taken && won <= c.Path {
+			continue
+		}
+		cardByShort[c.Session] = c.Path
 	}
 	views := make([]SessionView, 0, len(sessions))
 	for _, s := range sessions {
-		views = append(views, SessionView{Session: s, CardPath: cardByShort[s.Short]})
+		path := ""
+		if s.Short != "" {
+			path = cardByShort[s.Short]
+		}
+		views = append(views, SessionView{Session: s, CardPath: path})
 	}
 	return views
 }

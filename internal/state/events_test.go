@@ -503,3 +503,21 @@ func TestEventKindMapsOntoTheConfigToggles(t *testing.T) {
 		}
 	}
 }
+
+// TestUnmeasuredSilenceNeverFires: a zero SilentFor means "not measured", never "not
+// silent" (see Link's doc comment). Silence is the age of the last write to the
+// session's transcript, and a session that just started, one transcript.Locate cannot
+// find, or one from another backend has no transcript to measure — Collect leaves the
+// field zero. Read as a measurement of zero it is simply below any real threshold, so
+// the rule stays quiet; read the other way round, every session in its first second of
+// life would be told it had been silent for half an hour.
+func TestUnmeasuredSilenceNeverFires(t *testing.T) {
+	fresh := idleView("a")
+	fresh.SilentFor = 0
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("z")}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{idleView("z"), fresh}}
+	fire, _ := Diff(prev, next, 30*time.Minute)
+	if len(fire) != 0 {
+		t.Fatalf("a session whose silence was never measured must not fire the silence rule: %+v", fire)
+	}
+}
