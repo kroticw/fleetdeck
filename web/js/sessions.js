@@ -200,10 +200,22 @@ export function renderSessions(root, onSelect) {
 
     // Go's zero slice serializes as JSON null, so sessions may be absent
     // even on a real, connected snapshot.
-    const sessions = snap.sessions ?? [];
+    const all = snap.sessions ?? [];
+
+    // This column is the fleet's task list, and the orchestrator is not one of
+    // the tasks: it has a column of its own, where its conversation lives. So
+    // it is left out here rather than shown twice — the same session in two
+    // columns was the operator's own complaint. While nothing is pinned there
+    // is no orchestrator to leave out, and this is simply every session.
+    const pinned = snap.orchestratorSession ?? "";
+    const sessions = pinned ? all.filter((s) => s.short !== pinned) : all;
 
     if (sessions.length === 0) {
-      root.innerHTML = `${HEAD}<div class="sempty">${escapeHtml(t("no_sessions"))}</div>`;
+      // "Every session there is, is the orchestrator" and "there are no
+      // sessions" are different facts, and a person reading an empty column
+      // needs to know which one they are looking at.
+      const message = all.length === 0 ? t("no_sessions") : t("only_orchestrator");
+      root.innerHTML = `${HEAD}<div class="sempty">${escapeHtml(message)}</div>`;
       return;
     }
 
