@@ -137,6 +137,11 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Flex items default to min-width: auto, which resolves to min-content —
+     with nowrap that's the full unwrapped text width, so without this the
+     item never shrinks and the ellipsis never triggers. */
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .sbadge {
