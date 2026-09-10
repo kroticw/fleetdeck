@@ -2,7 +2,10 @@ package notify
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestEscapeAppleScriptString(t *testing.T) {
@@ -78,5 +81,34 @@ func TestSendFailureIsReportedAndNotRemembered(t *testing.T) {
 	}
 	if sendCount != 2 {
 		t.Fatalf("second Fire must call send again (retry), got %d total sends", sendCount)
+	}
+}
+
+func TestFireConcurrentSameSendsOnce(t *testing.T) {
+	sendCount := int64(0)
+	n := New(func(title, text string) error {
+		atomic.AddInt64(&sendCount, 1)
+		// Simulate osascript latency to expose race condition without proper locking
+		time.Sleep(5 * time.Millisecond)
+		return nil
+	})
+
+	const numGoroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			if err := n.Fire("same-key", "title", "text"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if atomic.LoadInt64(&sendCount) != 1 {
+		t.Fatalf("concurrent Fire calls with same key must result in exactly one send, got %d", sendCount)
 	}
 }

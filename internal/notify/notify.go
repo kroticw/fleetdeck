@@ -25,17 +25,14 @@ func New(send func(title, text string) error) *Notifier {
 // state: while a session stands waiting, one banner is enough.
 func (n *Notifier) Fire(key, title, text string) error {
 	n.mu.Lock()
-	already := n.seen[key]
-	n.mu.Unlock()
-	if already {
+	defer n.mu.Unlock()
+	if n.seen[key] {
 		return nil
 	}
 	if err := n.send(title, text); err != nil {
 		return fmt.Errorf("send banner %s: %w", key, err)
 	}
-	n.mu.Lock()
 	n.seen[key] = true
-	n.mu.Unlock()
 	return nil
 }
 
