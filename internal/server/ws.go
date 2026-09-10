@@ -33,17 +33,27 @@ const defaultPushInterval = time.Second
 // stops nothing: a page on any site the operator visits can open a socket to their
 // own loopback, and without this check it could read the entire fleet's state —
 // prompts, card contents, session names — straight out of their browser.
+//
+// That check is originAllowed, the same function every HTTP route goes through.
+// It runs here as well as in guard so the socket stays closed to foreign pages
+// even if this handler is ever mounted without the middleware, and the library's
+// own origin verification is turned off so there is exactly one rule in the
+// package and no second one to drift away from it.
 func (d Deps) handleWS(w http.ResponseWriter, r *http.Request) {
 	if d.Snapshot == nil {
 		unavailable(w, "a snapshot source")
 		return
 	}
+	if !originAllowed(r) {
+		refuseForeignOrigin(w)
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"127.0.0.1:*", "localhost:*"},
+		InsecureSkipVerify: true,
 	})
 	if err != nil {
-		// Accept has already answered the request (403 for a refused origin,
-		// 400 for a malformed handshake); there is nothing left to write.
+		// Accept has already answered the request (400 for a malformed
+		// handshake); there is nothing left to write.
 		return
 	}
 	defer func() { _ = conn.CloseNow() }()

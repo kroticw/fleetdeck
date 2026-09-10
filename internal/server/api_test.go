@@ -46,13 +46,22 @@ func testDeps() (Deps, *[]string) {
 	}, &calls
 }
 
+// do sends a request the way the panel's own page does: a JSON content type on
+// anything carrying a body, and no Origin, which is what a non-browser client
+// sends. Tests that care about either header build the request themselves with
+// send below.
 func do(d Deps, method, target, body string) *httptest.ResponseRecorder {
 	var r *http.Request
 	if body == "" {
 		r = httptest.NewRequest(method, target, nil)
 	} else {
 		r = httptest.NewRequest(method, target, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
 	}
+	return send(d, r)
+}
+
+func send(d Deps, r *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	New(d).ServeHTTP(rec, r)
 	return rec

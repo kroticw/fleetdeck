@@ -88,6 +88,10 @@ type Deps struct {
 // New builds the router. Routing uses net/http's own pattern matching (Go 1.22+),
 // which also supplies the 405 for a known path reached with the wrong method — no
 // third-party mux is involved.
+//
+// Every route, read and write alike, is wrapped in guard: the origin and content
+// type checks that keep a page on another site from driving this panel through
+// the operator's own browser.
 func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
@@ -97,5 +101,5 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/status", d.handleStatus)
 	mux.HandleFunc("GET /ws", d.handleWS)
-	return mux
+	return guard(mux)
 }
