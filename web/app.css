@@ -270,6 +270,23 @@ body {
   font-size: var(--fs-xs);
 }
 
+/* usage_down, freshly failing: calm, same voice as the gauges' own dashes --
+   the absent number already says the endpoint is unreachable, this adds
+   nothing but unwarranted urgency if it shouts. */
+#header .problem-quiet {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* usage_down, failing long enough that "it'll come back" stopped being a
+   safe assumption: worded and visible, but not --danger -- there is still
+   nothing on fire, only a sign-in that has to happen. */
+#header .problem-notice {
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+}
+
 #header .counter {
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
