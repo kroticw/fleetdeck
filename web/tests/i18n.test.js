@@ -53,6 +53,15 @@ const KEYS = [
   // which is the state the operator already could not read.
   "keys_to_session",
 
+  // Attaching an image (web/js/session.js). The permission line especially: it
+  // is the one that keeps a session stopping to ask from being read as a hang,
+  // and falling through to its own key would say "image_may_ask_permission" at
+  // exactly the moment a person needs a sentence.
+  "attach_image",
+  "image_too_large",
+  "image_wrong_type",
+  "image_may_ask_permission",
+
   // web/js/sessions.js's own column header and the theme override's button
   // (web/js/header.js renders it, web/js/theme.js decides its state) — both
   // added by the same task that added this comment. On this list for the
