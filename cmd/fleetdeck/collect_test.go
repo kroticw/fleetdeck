@@ -202,7 +202,7 @@ func TestSilentForIsTheAgeOfTheTranscript(t *testing.T) {
 
 	c := NewCollector(config.Default(), nil, nil, projects)
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	got := views[0].SilentFor
 	if got < 55*time.Minute || got > 65*time.Minute {
@@ -220,13 +220,45 @@ func TestSilentForIsTheAgeOfTheTranscript(t *testing.T) {
 func TestSilentForIsZeroWithoutATranscript(t *testing.T) {
 	c := NewCollector(config.Default(), nil, nil, t.TempDir())
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	if views[0].SilentFor != 0 {
 		t.Fatalf("a session with no transcript must read as not measured (zero), got %s", views[0].SilentFor)
 	}
 	if views[0].Context != nil {
 		t.Fatal("a session with no transcript has no context estimate either")
+	}
+}
+
+// TestEnrichCopiesTheOperatorsLabelBySessionID pins the lookup key: a label
+// is matched by the session's transcript UUID (SessionID), never its short
+// id, the same distinction every other UUID-keyed lookup in this package
+// makes.
+func TestEnrichCopiesTheOperatorsLabelBySessionID(t *testing.T) {
+	c := NewCollector(config.Default(), nil, nil, t.TempDir())
+	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
+	labels := map[string]string{sampleUUID: "orchestrator"}
+
+	c.enrich(views, labels)
+
+	if views[0].Label != "orchestrator" {
+		t.Fatalf("Label = %q, want orchestrator", views[0].Label)
+	}
+}
+
+// TestEnrichLeavesLabelEmptyWithoutInventingAnything is this package's own
+// instance of the project's core rule: no label recorded for a session
+// means the view shows no label, never a fabricated one and never another
+// session's label borrowed by mistake.
+func TestEnrichLeavesLabelEmptyWithoutInventingAnything(t *testing.T) {
+	c := NewCollector(config.Default(), nil, nil, t.TempDir())
+	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
+	labels := map[string]string{"22222222-2222-2222-2222-222222222222": "someone else's label"}
+
+	c.enrich(views, labels)
+
+	if views[0].Label != "" {
+		t.Fatalf("a session with no recorded label must show none, got %q", views[0].Label)
 	}
 }
 
@@ -259,7 +291,7 @@ func TestReportedContextBeatsTheTranscriptEstimate(t *testing.T) {
 	c.PutStatus(sampleUUID, "Opus", 42, 1.25)
 
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	got := views[0].Context
 	if got == nil {
@@ -285,7 +317,7 @@ func TestReportedModelAndCostReachTheView(t *testing.T) {
 	c.PutStatus(sampleUUID, "Opus", 42, 1.25)
 
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	if views[0].Model != "Opus" {
 		t.Fatalf("the reported model name must reach the view, got %q", views[0].Model)
@@ -305,7 +337,7 @@ func TestAZeroCostIsStillAReport(t *testing.T) {
 	c.PutStatus(sampleUUID, "Opus", 0, 0)
 
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	if views[0].CostUSD == nil {
 		t.Fatal("a reported cost of zero must be a cost, not an absence")
@@ -324,7 +356,7 @@ func TestAnUnreportedSessionCarriesNoModelOrCost(t *testing.T) {
 
 	c := NewCollector(config.Default(), nil, nil, projects)
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	if views[0].Model != "" || views[0].CostUSD != nil {
 		t.Fatalf("an unreported session must carry neither field, got model=%q cost=%v", views[0].Model, views[0].CostUSD)
@@ -347,7 +379,7 @@ func TestAReportReachesTheSnapshotJSON(t *testing.T) {
 		At:       time.Now(),
 		Sessions: []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}},
 	}
-	c.enrich(snap.Sessions)
+	c.enrich(snap.Sessions, nil)
 
 	raw, err := json.Marshal(snap)
 	if err != nil {
@@ -368,7 +400,7 @@ func TestReportIsKeyedByTranscriptUUIDNotShortID(t *testing.T) {
 	c.PutStatus("abc12345", "Opus", 42, 1.25)
 
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	if views[0].Context != nil {
 		t.Fatal("a report filed under a short id must not be attached to the session whose transcript UUID it isn't")
@@ -388,7 +420,7 @@ func TestStaleReportFallsBackToTheEstimate(t *testing.T) {
 	c.ageReport(sampleUUID, reportTTL+time.Minute)
 
 	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
-	c.enrich(views)
+	c.enrich(views, nil)
 
 	got := views[0].Context
 	if got == nil {
@@ -412,7 +444,7 @@ func TestExpiredReportsAreForgotten(t *testing.T) {
 	c.PutStatus(sampleUUID, "Opus", 42, 1.25)
 	c.ageReport(sampleUUID, reportTTL+time.Minute)
 
-	c.enrich([]state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}})
+	c.enrich([]state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}, nil)
 
 	if n := c.reportCount(); n != 0 {
 		t.Fatalf("an expired report must be dropped from the store, %d left", n)

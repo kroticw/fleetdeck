@@ -43,6 +43,21 @@ type SessionView struct {
 	// zero SilentFor carries below, made explicit in the type instead of by
 	// convention, because there is no rule here that reads a zero as absence.
 	CostUSD *float64 `json:"costUSD,omitempty"`
+
+	// Label is the operator's own name for this session, keyed by its
+	// transcript UUID (Session.SessionID, never Short — see
+	// internal/config.Config.SessionLabels' own comment for why) and copied
+	// in by the caller (cmd/fleetdeck's Collector) from configuration. Empty
+	// means the operator never named this session; the caller must not
+	// invent one — falling back to Short, or to whatever daemon-supplied
+	// name exists, is the frontend's job, not this package's.
+	//
+	// No frontend reads this field yet. It is stored and served starting
+	// with this change; the panel starts rendering it in a following
+	// change, once internal/server's session-label write route also has a
+	// browser-side caller to pair with the neighbouring frontend restructure
+	// this change deliberately does not touch.
+	Label string `json:"label,omitempty"`
 }
 
 // Snapshot is everything the panel shows at one moment, assembled from

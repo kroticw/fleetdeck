@@ -402,3 +402,38 @@ func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleSetSessionLabel writes the operator's own name for one session, id
+// is the session's transcript UUID (handleDigest's own convention — never
+// the daemon's short id). No frontend calls this route yet; see
+// Deps.SetSessionLabel's own comment for why.
+//
+// The field is a pointer for the same reason handlePatchConfig's is: an
+// absent key (400) and an explicit empty string are different requests. But
+// unlike orchestratorSession, an explicit empty label here is not an error
+// answered with 204 by coincidence — it is the one input this route treats
+// as a deletion: internal/config.SetSessionLabel removes the session's
+// entry entirely rather than persisting an empty string, so a config that
+// only ever gained hand-written names never accumulates ones for sessions
+// nobody remembers.
+func (d Deps) handleSetSessionLabel(w http.ResponseWriter, r *http.Request) {
+	if d.SetSessionLabel == nil {
+		unavailable(w, "a configuration store")
+		return
+	}
+	var body struct {
+		Label *string `json:"label"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Label == nil {
+		fail(w, http.StatusBadRequest, "label is required")
+		return
+	}
+	if err := d.SetSessionLabel(r.PathValue("id"), *body.Label); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
