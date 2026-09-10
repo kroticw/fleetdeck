@@ -109,3 +109,17 @@ test("hidden actually hides, whatever display a section's own rule sets", () => 
     );
   }
 });
+
+test("the session panel's rules are top-level rules", () => {
+  const { topLevel } = scan(css);
+  const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));
+
+  // #session-panel is the second overlay over the same column: nested, it stops
+  // covering the board and the terminal is drawn behind a kanban.
+  assert.ok(selectors.has("#session-panel"), "#session-panel is not a top-level rule in web/app.css");
+
+  // .s-error is the only place the panel says a write did not happen — that the
+  // text in the box was not sent, that the screen could not be read. Unstyled it
+  // is a line of body text among the terminal's own output.
+  assert.ok(selectors.has(".session-panel .s-error"), ".session-panel .s-error is not a top-level rule in web/app.css");
+});

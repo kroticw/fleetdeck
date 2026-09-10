@@ -38,6 +38,16 @@ const KEYS = [
   "docs_empty",
   "docs_list_failed",
   "doc_open_failed",
+  // The keys web/js/session.js asks for. In the same list because the property
+  // being checked is the same one, and because a key that only exists in the
+  // language this machine happens to run in is exactly as invisible here as it
+  // is there.
+  "tab_digest",
+  "tab_screen",
+  "write_to_session",
+  "close_session",
+  "no_steps",
+  "terminal_missing",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup
@@ -79,7 +89,7 @@ test("a missing key renders as the key, never as nothing", async () => {
   }
 });
 
-test("every key the card panel asks for is in both dictionaries", () => {
+test("every key the panels ask for is in both dictionaries", () => {
   const en = dictionary("en");
   const ru = dictionary("ru");
   for (const key of KEYS) {

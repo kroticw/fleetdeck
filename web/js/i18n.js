@@ -53,6 +53,15 @@ const en = {
   docs_empty: "no documents in the configured directories",
   docs_list_failed: "the documentation could not be listed",
   doc_open_failed: "this document could not be opened",
+  // Session panel (web/js/session.js). close_session is its own key rather than
+  // card_close above: the two buttons close different things, and a single key
+  // shared between them would tie one panel's wording to the other's.
+  tab_digest: "digest",
+  tab_screen: "screen",
+  write_to_session: "write to this session…",
+  close_session: "close",
+  no_steps: "no readable steps yet",
+  terminal_missing: "the terminal library did not load",
 };
 
 const ru = {
@@ -93,6 +102,12 @@ const ru = {
   docs_empty: "в настроенных каталогах нет документов",
   docs_list_failed: "не удалось построить список документации",
   doc_open_failed: "не удалось открыть документ",
+  tab_digest: "выжимка",
+  tab_screen: "экран",
+  write_to_session: "написать в сессию…",
+  close_session: "закрыть",
+  no_steps: "читаемых шагов пока нет",
+  terminal_missing: "библиотека терминала не загрузилась",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;

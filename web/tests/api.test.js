@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, sendText, sendKeys } from "../js/api.js";
+import { setCardField, sendText, sendKeys, fetchDigest, fetchScreen } from "../js/api.js";
 
 let calls = [];
 let realFetch;
@@ -124,4 +124,56 @@ test("a session id is escaped into the path", async () => {
 test("a refused session write throws", async () => {
   stubFetch(answer({ status: 502, body: { error: "daemon: EAUTH" } }));
   await assert.rejects(() => sendText("a1b2c3", "hello"), { message: "daemon: EAUTH" });
+});
+
+// The two reads. They are here rather than in the snapshot because a transcript
+// digest and a terminal screen are too large to push to every tab once a second
+// and are wanted only while somebody has a session open.
+
+test("a digest asks for the limit it was given and comes back as steps", async () => {
+  const steps = [{ role: "user", text: "go" }, { role: "assistant", text: "done" }];
+  stubFetch(answer({ status: 200, body: steps }));
+
+  assert.deepEqual(await fetchDigest("abc123", 30), steps);
+  assert.equal(calls[0].url, "/api/sessions/abc123/digest?limit=30");
+});
+
+test("a transcript that cannot be read throws the server's own words", async () => {
+  // The route answers 404 for a session that has left no transcript, and that
+  // has to reach the operator: an empty pane reads as a quiet session.
+  stubFetch(answer({ status: 404, statusText: "Not Found", body: { error: "transcript not found: abc123" } }));
+
+  await assert.rejects(() => fetchDigest("abc123", 30), /transcript not found: abc123/);
+});
+
+test("a refusal whose body is not JSON still produces words, not undefined", async () => {
+  // What a route the server does not register answers: the request falls through
+  // to the static file server, whose 404 body is plain text.
+  stubFetch(answer({ status: 404, statusText: "Not Found" }));
+
+  await assert.rejects(() => fetchDigest("abc123", 30), (err) => {
+    assert.equal(err.message, "Not Found");
+    return true;
+  });
+});
+
+test("a screen read sends no tail: the byte count belongs to the server", async () => {
+  // tail is a byte count, not a line count. A number picked here would be a
+  // second copy of one the server already holds, free to drift — and one chosen
+  // as though it counted lines would truncate the screen to a fragment.
+  stubFetch(answer({ status: 200, body: { screen: "$ " } }));
+
+  assert.deepEqual(await fetchScreen("abc123"), { screen: "$ ", error: "" });
+  assert.equal(calls[0].url, "/api/sessions/abc123/screen");
+});
+
+test("a screen read that failed keeps the bytes that did arrive", async () => {
+  // handleScreen sends both fields on a failure on purpose: the output read
+  // before the attach broke is often the very output being looked at. Throwing
+  // it away would be the panel discarding what the server took care to send.
+  stubFetch(
+    answer({ status: 502, statusText: "Bad Gateway", body: { error: "attach evicted", screen: "half a line" } }),
+  );
+
+  assert.deepEqual(await fetchScreen("abc123"), { screen: "half a line", error: "attach evicted" });
 });
