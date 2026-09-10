@@ -27,6 +27,18 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
+# node missing is a refusal to check, not a broken environment to route around.
+# Without this, the first call below exits with "node: command not found", which
+# reads as somebody else's problem — and the thing a person does next with a
+# problem that reads that way is work around it, not fix it. The `lint` target
+# says the same thing about golangci-lint, in the same shape, for the same
+# reason.
+if ! command -v node >/dev/null 2>&1; then
+	echo "run-web-tests.sh: node is not on PATH, so the frontend tests cannot run" >&2
+	echo "run-web-tests.sh: this is an unchecked frontend, not a passing one -- install node: https://nodejs.org/en/download" >&2
+	exit 1
+fi
+
 root=${1:-web}
 
 # Built as positional parameters, not a bare variable substituted unquoted
