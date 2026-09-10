@@ -618,6 +618,59 @@ func TestConfigReturnsAnIndependentCopyOfSessionLabels(t *testing.T) {
 // the machine. Every other source is local and bounded by its own package; a usage
 // request that never answers would otherwise freeze the whole collect cycle, and the
 // panel would stop showing sessions because a rate-limit gauge is slow.
+// TestUsageErrorKindReachesTheSnapshot is the fix this card exists for: a
+// snapshot carried only the raw error string, which the frontend could not
+// safely tell apart from a rate limit without brittle text matching. The
+// kind classifyUsageError assigns must survive Collect() into the snapshot
+// unchanged, for each of the three buckets the panel's wording depends on.
+func TestUsageErrorKindReachesTheSnapshot(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		code int
+		want string
+	}{
+		{"rate limited", `{"error":{"type":"rate_limit_error"}}`, http.StatusTooManyRequests, "rate_limit"},
+		{"token rejected", `{"error":{"type":"authentication_error"}}`, http.StatusOK, "auth"},
+		{"unrecognized type", `{"error":{"type":"overloaded_error"}}`, http.StatusOK, "other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.code)
+				w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			cfg := config.Default()
+			cfg.BoardPath = ""
+			uf := usage.NewFetcher(func() (string, error) { return "token", nil }, srv.URL, time.Minute)
+			snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
+
+			if snap.UsageError == "" {
+				t.Fatal("an error reply must light UsageError")
+			}
+			if snap.UsageErrorKind != tc.want {
+				t.Fatalf("UsageErrorKind = %q, want %q (UsageError was %q)", snap.UsageErrorKind, tc.want, snap.UsageError)
+			}
+		})
+	}
+}
+
+// TestUsageErrorKindIsAuthForAMissingToken covers the ErrNoToken half of
+// "auth" -- classifyUsageError never sees an HTTP response for this case,
+// so it must not need one.
+func TestUsageErrorKindIsAuthForAMissingToken(t *testing.T) {
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	uf := usage.NewFetcher(func() (string, error) { return "", usage.ErrNoToken }, "http://127.0.0.1:1", time.Minute)
+	snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
+
+	if snap.UsageErrorKind != "auth" {
+		t.Fatalf("UsageErrorKind = %q, want \"auth\" for a missing token", snap.UsageErrorKind)
+	}
+}
+
 func TestASlowUsageEndpointDoesNotStallTheCycle(t *testing.T) {
 	original := usageTimeout
 	usageTimeout = 50 * time.Millisecond

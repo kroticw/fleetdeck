@@ -75,11 +75,19 @@ type Snapshot struct {
 	// на мёртвую сессию", which the panel must surface rather than quietly leave
 	// pointing at nothing. The list is the caller's to fill from OrphanCards();
 	// this package computes it but never assembles a Snapshot itself.
-	OrphanCards []string  `json:"orphanCards,omitempty"`
-	DaemonError string    `json:"daemonError,omitempty"`
-	BoardError  string    `json:"boardError,omitempty"`
-	UsageError  string    `json:"usageError,omitempty"`
-	At          time.Time `json:"at"`
+	OrphanCards []string `json:"orphanCards,omitempty"`
+	DaemonError string   `json:"daemonError,omitempty"`
+	BoardError  string   `json:"boardError,omitempty"`
+	UsageError  string   `json:"usageError,omitempty"`
+	// UsageErrorKind classifies UsageError for the frontend's wording choice:
+	// "auth" when sign-in would actually fix it (usage.ErrNoToken or
+	// usage.ErrUnauthorized), "rate_limit" when it is the account's own
+	// request budget (usage.ErrRateLimited), "other" for anything not
+	// classified, "" when UsageError is empty. See cmd/fleetdeck/collect.go's
+	// classifyUsageError -- the point of this field existing at all is that
+	// "sign-in needed" must never be shown for a cause sign-in cannot fix.
+	UsageErrorKind string    `json:"usageErrorKind,omitempty"`
+	At             time.Time `json:"at"`
 
 	// OrchestratorSession is the short session id pinned to the orchestrator
 	// column, copied from configuration by the caller (cmd/fleetdeck's
