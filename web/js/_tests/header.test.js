@@ -369,9 +369,13 @@ test("stale wording depends on the error kind, never defaults to sign-in", () =>
   assert.equal(usageProblemHTML("stale", "rate_limit").includes(t("usage_down_rate_limited")), true);
   assert.equal(usageProblemHTML("stale", "rate_limit").includes(t("usage_down_auth")), false);
   // "other", and an old snapshot with no kind at all, must not claim sign-in
-  // fixes it -- that claim is only ever true for kind "auth".
-  assert.equal(usageProblemHTML("stale", "other").includes(t("usage_down_auth")), false);
-  assert.equal(usageProblemHTML("stale", undefined).includes(t("usage_down_auth")), false);
+  // fixes it -- that claim is only ever true for kind "auth". Pinned as a
+  // positive fact (equals the generic notice), not only as an absence of
+  // the auth text: a version that rendered "" or dropped the notice
+  // entirely would still pass a not-equal-to-auth-text check, so that
+  // alone does not prove this branch renders anything at all.
+  assert.equal(usageProblemHTML("stale", "other"), `<span class="problem-notice">${t("usage_down")}</span>`);
+  assert.equal(usageProblemHTML("stale", undefined), `<span class="problem-notice">${t("usage_down")}</span>`);
 });
 
 // --- gauge: the flicker fix's visible half -------------------------------
