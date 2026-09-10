@@ -27,6 +27,103 @@ body {
 
 #header {
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--gap) * 2);
+  padding: var(--gap) calc(var(--gap) * 2);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+#header .brand {
+  font-weight: 600;
+}
+
+#header .limits {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--gap) * 2);
+}
+
+#header .counters {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+#header .gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+#header .gauge-track {
+  width: 60px;
+  height: 8px;
+}
+
+/* Firefox */
+#header .gauge-track::-moz-meter-bar {
+  background: currentColor;
+}
+#header .gauge-track::-moz-meter-optimum-value {
+  background: currentColor;
+}
+
+/* WebKit/Blink */
+#header .gauge-track::-webkit-meter-bar {
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  border: none;
+}
+#header .gauge-track::-webkit-meter-optimum-value,
+#header .gauge-track::-webkit-meter-suboptimum-value,
+#header .gauge-track::-webkit-meter-even-less-good-value {
+  background: currentColor;
+}
+
+#header .gauge-cool {
+  color: #2f9e44;
+}
+
+#header .gauge-warm {
+  color: #e8590c;
+}
+
+#header .gauge-hot {
+  color: #e03131;
+}
+
+#header .gauge-off {
+  color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+#header .problem {
+  color: #e03131;
+  font-weight: 600;
+}
+
+#header .counter {
+  font-variant-numeric: tabular-nums;
+}
+
+#header .counter-waiting.counter-on {
+  font-weight: 700;
+  color: #e8590c;
+}
+
+#header .counter-stalled {
+  opacity: 0.75;
+}
+
+#header .counter-stalled.counter-on {
+  opacity: 1;
+}
+
+#header .stall-reasons {
+  font-size: 0.85em;
+  opacity: 0.8;
 }
 
 main {
