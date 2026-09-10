@@ -21,6 +21,7 @@
 // that on the last hop.
 
 import { renderMarkdown } from "./markdown.js";
+import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
 
 // The documentation section has no cards to resolve wiki links against, so every
@@ -86,6 +87,10 @@ export function renderDocs(root) {
   const paintBody = (content) => {
     if (content?.html !== undefined) {
       article.innerHTML = content.html;
+      // Documentation is where the wide tables actually are. Marked here rather
+      // than at the call site so no future painter can forget it.
+      markScrollablesWithin(article, ".md-table, pre");
+      watchScrollables(article, ".md-table, pre");
       return;
     }
     article.replaceChildren(el("p", "docs-empty", content?.text ?? t("pick_doc")));

@@ -1,5 +1,6 @@
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
+import { markScrollable, watchSelf } from "./scrollable.js";
 
 const STAGES = ["new", "active", "review", "blocked", "done"];
 
@@ -114,27 +115,9 @@ function render(root, snap) {
   markScrollable(root);
 }
 
-// The board's own scrollbar is the platform's, and on macOS that is an
-// overlay that stays invisible until the pointer is over it -- exactly the
-// discoverability gap #38 fixed once for columns that had nowhere left to
-// shrink to. Six columns wide enough to carry a readable title no longer
-// always fit without scrolling (see app.css's own note on #board), so that
-// gap is back unless something renders regardless of hover state. This adds
-// .board-scrollable, a plain class app.css turns into a right-edge shadow,
-// whenever there is genuinely more board to the right of what is currently
-// visible -- not "the board happens to be wider than its box" (true for the
-// whole session, however far scrolled) but "scrolling right now would show
-// something new". Real measurements, re-taken after every render, on
-// resize, and on scroll itself: the same content can cross the
-// fits/doesn't boundary on a resize with no new snapshot, and scrolling to
-// the far column must turn the shadow off rather than fade content that has
-// nothing left past it to promise.
-const SCROLL_END_SLACK_PX = 1; // sub-pixel layout rounding, not a real gap
-function markScrollable(root) {
-  const moreToTheRight = root.scrollLeft + root.clientWidth < root.scrollWidth - SCROLL_END_SLACK_PX;
-  root.classList.toggle("board-scrollable", moreToTheRight);
-}
-
+// The board scrolls itself rather than holding boxes that scroll, so it marks
+// itself. The mechanism and the reasoning behind it live in scrollable.js,
+// which is also where the panel's other scrolling boxes get it from.
 export function renderBoard(root, onOpenCard) {
   // One delegated listener rather than one per card: root.innerHTML is
   // replaced whole on every snapshot, so per-card listeners would need to be
@@ -146,16 +129,10 @@ export function renderBoard(root, onOpenCard) {
     onOpenCard(card.dataset.path);
   });
 
-  // A resize alone can cross the fits/doesn't boundary with no new snapshot
-  // to trigger a re-render -- the columns already on screen are unchanged,
-  // only how much of them the window can show. Re-measuring is enough here;
-  // the markup itself does not need rebuilding for that.
-  window.addEventListener("resize", () => markScrollable(root));
-
-  // And scrolling the board itself is exactly what turns the shadow off --
-  // reaching the last column is the one thing markScrollable exists to
-  // notice, so it has to run on the event that actually gets there.
-  root.addEventListener("scroll", () => markScrollable(root));
+  // Resize and scroll both change the answer with no new snapshot behind them:
+  // a narrower window can hide a column that fitted, and reaching the last
+  // column is the one thing the mark exists to stop claiming.
+  watchSelf(root);
 
   subscribe((snap) => render(root, snap));
 }

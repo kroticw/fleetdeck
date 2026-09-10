@@ -21,6 +21,7 @@
 import { subscribe as storeSubscribe } from "./store.js";
 import { setCardField } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
+import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
@@ -220,6 +221,10 @@ export function renderCard(root, path, onClose, options = {}) {
 
     const body = el("div", "card-body");
     body.innerHTML = renderMarkdown(card.body, new Set(known));
+        // Tables and code blocks scroll sideways inside their own box, and on macOS
+    // nothing says so until the pointer is already there. Marked after every
+    // render, because both are rebuilt with the body.
+    markScrollablesWithin(body, ".md-table, pre");
     nodes.push(body);
 
     if (backlinks.length > 0) {
@@ -313,6 +318,12 @@ export function renderCard(root, path, onClose, options = {}) {
   };
 
   root.addEventListener("click", onLinkClick);
+
+  // Watched on the panel, which outlives every card drawn into it, rather than
+  // on the body, which is replaced whole on each render: a resize listener per
+  // render would accumulate one per card ever opened, each holding a body that
+  // left the document long ago.
+  watchScrollables(root, ".md-table, pre");
   document.addEventListener("keydown", onKey);
   document.addEventListener("mousedown", onOutside);
   // Wrapped, not passed straight in: subscribe calls its listener with

@@ -76,6 +76,12 @@ class FakeNode {
     this.scrollTop = 0;
     this.scrollHeight = 0;
     this.clientHeight = 0;
+    // The same three across, for the scroll indicator: whether there is more
+    // content to the right is a measurement, and a test states the situation by
+    // setting these rather than by laying anything out.
+    this.scrollLeft = 0;
+    this.scrollWidth = 0;
+    this.clientWidth = 0;
     this.selectionStart = 0;
     this.selectionEnd = 0;
 
@@ -89,6 +95,33 @@ class FakeNode {
     this.textWrites = 0;
     this.htmlWrites = 0;
     this.queries = 0;
+  }
+
+  // classList over className, so a module can toggle one class without
+  // knowing what else the node carries -- which is the whole point of using it
+  // in the first place.
+  get classList() {
+    const node = this;
+    const names = () => String(node.className).split(/\s+/).filter(Boolean);
+    const write = (list) => {
+      node.className = list.join(" ");
+    };
+    return {
+      contains: (name) => names().includes(name),
+      add: (name) => {
+        if (!names().includes(name)) write([...names(), name]);
+      },
+      remove: (name) => write(names().filter((n) => n !== name)),
+      toggle: (name, on) => {
+        if (on === undefined) on = !names().includes(name);
+        if (on) {
+          if (!names().includes(name)) write([...names(), name]);
+        } else {
+          write(names().filter((n) => n !== name));
+        }
+        return on;
+      },
+    };
   }
 
   setSelectionRange(start, end) {
@@ -271,16 +304,25 @@ class FakeDocument {
 // its document into the next one.
 export function installDOM() {
   const previous = Object.hasOwn(globalThis, "document") ? globalThis.document : undefined;
+  const previousWindow = Object.hasOwn(globalThis, "window") ? globalThis.window : undefined;
   const document = new FakeDocument();
   globalThis.document = document;
+  // A window with nothing on it but events. Resize is a real input to the
+  // panel -- the same content crosses the fits/doesn't-fit boundary with no
+  // new snapshot behind it -- and without a window here that path is untestable.
+  const window = new FakeNode("window");
+  globalThis.window = window;
   return {
     document,
+    window,
     element(tag) {
       return document.createElement(tag);
     },
     restore() {
       if (previous === undefined) delete globalThis.document;
       else globalThis.document = previous;
+      if (previousWindow === undefined) delete globalThis.window;
+      else globalThis.window = previousWindow;
     },
   };
 }

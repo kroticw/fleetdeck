@@ -17,6 +17,7 @@
 // half a change belongs to.
 
 import { renderMarkdown } from "./markdown.js";
+import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { stripToolNote, unwrapEnvelope } from "./envelope.js";
 
 
@@ -89,7 +90,14 @@ export function fillStep(row, step, classFor) {
   // A wrapper whose whole content was the envelope leaves nothing to render;
   // the attribution line is then the entire step, which is honest — that is all
   // the notification actually said.
-  if (text) body.innerHTML = renderMarkdown(text, NO_CARDS);
+  if (text) {
+    body.innerHTML = renderMarkdown(text, NO_CARDS);
+    // Same fade as everywhere else: a wide table or a long command line in a
+    // step runs past the column's edge with nothing at rest to say so. The
+    // scroll listener is not here but on the thread container, once — steps are
+    // diffed rather than rebuilt, so attaching per step would pile up.
+    markScrollablesWithin(body, ".md-table, pre");
+  }
   row.appendChild(body);
   return row;
 }
@@ -105,6 +113,10 @@ export function fillStep(row, step, classFor) {
 // appending changes the answer. Someone who scrolled up is reading, and taking
 // the screen back makes a conversation longer than one screen unreadable.
 export function syncSteps(container, steps, classFor) {
+  // The container outlives the steps inside it — steps are diffed, not rebuilt
+  // — so the listeners go here, once. watchScrollables is idempotent per
+  // (container, selector), which is what makes calling it on every sync safe.
+  watchScrollables(container, ".md-table, pre");
   const stick = atBottom(container);
   const rows = container.children;
 
