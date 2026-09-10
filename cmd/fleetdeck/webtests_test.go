@@ -99,6 +99,31 @@ test("c", () => {});
 		}
 	})
 
+	// The declared-name extractor only understands a flat test() call at
+	// column 0, which is every file's actual shape today. describe() would
+	// nest a test one indent level deeper, silently dropping it out of the
+	// "declared" set rather than out of "ran" -- the one direction this
+	// script's name comparison cannot turn into a loud failure on its own.
+	// Refusing describe() outright is the guard against that blind spot.
+	t.Run("describe() is refused outright rather than silently under-counted", func(t *testing.T) {
+		root := t.TempDir()
+		writeFixture(t, root, "nested.test.js", `
+import test from "node:test";
+import assert from "node:assert/strict";
+import { describe } from "node:test";
+describe("a group", () => {
+  test("a", () => { assert.equal(1, 1); });
+});
+`)
+		out, err := run(t, root)
+		if err == nil {
+			t.Fatalf("describe() must be refused, not silently under-counted:\n%s", out)
+		}
+		if !strings.Contains(out, "describe(") {
+			t.Fatalf("want the describe() guard's own message, got:\n%s", out)
+		}
+	})
+
 	t.Run("an empty tree refuses to pass vacuously", func(t *testing.T) {
 		root := t.TempDir()
 		out, err := run(t, root)
