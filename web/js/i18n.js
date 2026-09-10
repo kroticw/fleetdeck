@@ -82,7 +82,7 @@ const en = {
   // was wrong, because the person is about to pick another file and that is the
   // useful half. The permission line is not a warning: it names an expected step
   // so a session that stops to ask is not read as one that hung.
-  attach_image: "attach an image",
+  image_no_session: "there is no session to attach an image to",
   image_too_large: "that image is too large to attach",
   image_wrong_type: "that file is not an image the panel can attach",
   image_may_ask_permission: "the session will ask your permission the first time it reads from here — answer it in this panel",
@@ -149,7 +149,7 @@ const ru = {
   no_steps: "читаемых шагов пока нет",
   terminal_missing: "библиотека терминала не загрузилась",
 
-  attach_image: "прикрепить картинку",
+  image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
   image_too_large: "эта картинка слишком велика, чтобы её прикрепить",
   image_wrong_type: "этот файл — не та картинка, которую пульт умеет прикреплять",
   image_may_ask_permission: "при первом чтении отсюда сессия спросит вашего разрешения — ответьте ей в этом же пульте",
