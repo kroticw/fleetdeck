@@ -24,6 +24,16 @@ func TestIndexIsServedAtRoot(t *testing.T) {
 	}
 }
 
+func TestIndexHasContentSecurityPolicy(t *testing.T) {
+	d, _ := testDeps()
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	want := "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self'; style-src 'self'"
+	if got := rec.Header().Get("Content-Security-Policy"); got != want {
+		t.Fatalf("want Content-Security-Policy %q, got %q", want, got)
+	}
+}
+
 func TestStaticAssetIsServed(t *testing.T) {
 	d, _ := testDeps()
 	rec := httptest.NewRecorder()
@@ -75,26 +85,72 @@ func TestEmbeddedFSIsNotEmpty(t *testing.T) {
 	}
 }
 
-// TestEmbeddedFSContainsExpectedFiles asserts, by name, that the specific
-// files this task creates are actually reachable through web.FS. Dropping one
-// of them from the go:embed line still leaves the FS non-empty (the test
-// above would pass), so that check alone would not have caught it.
+// TestEmbeddedFSContainsExpectedFiles asserts that web.FS contains exactly
+// this set of files — no fewer, no more. "No fewer" catches a dropped file
+// (dropping one from the go:embed line still leaves the FS non-empty, so
+// TestEmbeddedFSIsNotEmpty would not catch it); "no more" catches an
+// unexpected extra entry, such as a .DS_Store or editor scratch file swept in
+// by an "all:" embed prefix that should not be there.
+//
+// This set is exact on purpose. web/vendor/ (xterm.js) is added to it by the
+// task that vendors that dependency — update this list there, don't loosen
+// the assertion to "contains" instead of "equals".
 func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
-	for _, name := range []string{"index.html", "app.css", "js/store.js", "js/main.js"} {
-		if _, err := fs.Stat(web.FS, name); err != nil {
-			t.Errorf("expected file %q missing from embedded FS: %v", name, err)
+	want := map[string]bool{
+		"index.html":  true,
+		"app.css":     true,
+		"js/store.js": true,
+		"js/main.js":  true,
+	}
+	got := map[string]bool{}
+	if err := fs.WalkDir(web.FS, ".", func(file string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			got[file] = true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk embedded FS: %v", err)
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("expected file %q missing from embedded FS", name)
+		}
+	}
+	for name := range got {
+		if !want[name] {
+			t.Errorf("unexpected file %q present in embedded FS", name)
 		}
 	}
 }
 
-// rootRefPattern finds every src="..." or href="..." attribute in an HTML
-// document.
-var rootRefPattern = regexp.MustCompile(`(?:src|href)="([^"]+)"`)
+// rootRefPattern finds every reference a plain HTML or CSS file can hold to
+// another file: an HTML src="..." or href="...", a CSS @import "...", or a
+// CSS url(...). All three break the same way — a rename leaves the file
+// referencing something that no longer exists — so all three get the same
+// check. Exactly one capture group is non-empty per match; refOf picks it out.
+var rootRefPattern = regexp.MustCompile(`(?:src|href)="([^"]+)"|@import\s+["']([^"']+)["']|url\(\s*["']?([^"')]+)["']?\s*\)`)
 
-// jsImportPattern finds the specifier of every static import in a JS module,
-// with or without a binding list in front of it (`import x from "..."` and
-// `import "..."` both match).
-var jsImportPattern = regexp.MustCompile(`import\s+(?:.*?\s+from\s+)?["'](\.[^"']+)["']`)
+// refOf returns the single non-empty capture group of a rootRefPattern match.
+func refOf(m []string) string {
+	for _, g := range m[1:] {
+		if g != "" {
+			return g
+		}
+	}
+	return ""
+}
+
+// jsImportPattern finds the specifier of every static import in a JS module:
+// a plain `import x from "..."` or `import "..."`, a dynamic `import("...")`
+// (the form an on-demand panel module would use to pull in xterm.js), and a
+// re-export `export { x } from "..."`. It accepts both relative ("./foo.js")
+// and root-relative ("/js/foo.js") specifiers — index.html already writes
+// root-relative references, so a module following that same style is expected,
+// not exotic.
+var jsImportPattern = regexp.MustCompile(`(?:import\s*\(|import\s+(?:.*?\s+from\s+)?|export\s+.*?\s+from\s+)\s*["'](\.[^"']+|/[^"']+)["']`)
 
 // TestStaticReferencesResolveWithinEmbeddedFS is the guard against the failure
 // mode a frontend with no build step is defenceless against: nothing here
@@ -104,20 +160,30 @@ var jsImportPattern = regexp.MustCompile(`import\s+(?:.*?\s+from\s+)?["'](\.[^"'
 // specifier, and asserts each one resolves to a file that actually exists in
 // the embedded FS.
 func TestStaticReferencesResolveWithinEmbeddedFS(t *testing.T) {
+	checkRootRefs := func(name, content string) {
+		for _, m := range rootRefPattern.FindAllStringSubmatch(content, -1) {
+			ref := refOf(m)
+			if !strings.HasPrefix(ref, "/") {
+				continue // not root-relative: e.g. a scheme'd URL, out of scope here
+			}
+			target := strings.TrimPrefix(ref, "/")
+			if _, err := fs.Stat(web.FS, target); err != nil {
+				t.Errorf("%s references %q, which does not exist in the embedded FS", name, ref)
+			}
+		}
+	}
+
 	index, err := fs.ReadFile(web.FS, "index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
 	}
-	for _, m := range rootRefPattern.FindAllStringSubmatch(string(index), -1) {
-		ref := m[1]
-		if !strings.HasPrefix(ref, "/") {
-			continue // not root-relative: e.g. a scheme'd URL, out of scope here
-		}
-		target := strings.TrimPrefix(ref, "/")
-		if _, err := fs.Stat(web.FS, target); err != nil {
-			t.Errorf("index.html references %q, which does not exist in the embedded FS", ref)
-		}
+	checkRootRefs("index.html", string(index))
+
+	css, err := fs.ReadFile(web.FS, "app.css")
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
 	}
+	checkRootRefs("app.css", string(css))
 
 	if err := fs.WalkDir(web.FS, "js", func(file string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(file, ".js") {
@@ -129,7 +195,12 @@ func TestStaticReferencesResolveWithinEmbeddedFS(t *testing.T) {
 		}
 		for _, m := range jsImportPattern.FindAllStringSubmatch(string(src), -1) {
 			spec := m[1]
-			target := path.Join(path.Dir(file), spec)
+			var target string
+			if strings.HasPrefix(spec, "/") {
+				target = strings.TrimPrefix(spec, "/")
+			} else {
+				target = path.Join(path.Dir(file), spec)
+			}
 			if _, err := fs.Stat(web.FS, target); err != nil {
 				t.Errorf("%s imports %q, which resolves to %q and does not exist in the embedded FS", file, spec, target)
 			}

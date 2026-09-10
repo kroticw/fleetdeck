@@ -17,10 +17,17 @@ import "embed"
 // directory — so internal/server can serve FS directly with no further
 // stripping of a leading "web/" prefix.
 //
+// Plain patterns, deliberately without the "all:" prefix: "all:" exists only
+// to make go:embed walk a directory INCLUDING files that start with "." or
+// "_" — .DS_Store, editor swap files, scratch files — which is precisely what
+// must never end up in the binary or be reachable over HTTP. Without "all:",
+// directory walking (js/) already skips those, and on plain file patterns
+// (index.html, app.css) the prefix would have been a no-op anyway.
+//
 // Only what exists today is listed. web/vendor/ (xterm.js) is added to this
 // line by the task that vendors it; embedding a pattern that matches nothing
 // is a compile-time error, so listing it early would break this package's
 // build before that directory exists.
 //
-//go:embed all:index.html all:app.css all:js
+//go:embed index.html app.css js
 var FS embed.FS
