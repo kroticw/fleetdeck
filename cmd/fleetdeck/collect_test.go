@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -691,5 +693,158 @@ func TestATransientUsageFailureKeepsTheLastKnownLimits(t *testing.T) {
 	}
 	if *second.Limits != *first.Limits {
 		t.Fatalf("a failed refresh must keep showing the last known value, got %+v want %+v", *second.Limits, *first.Limits)
+	}
+}
+
+// --- the wire between SetSessionLabel and a live snapshot ---
+//
+// Every test above this point checks one half of the label path in
+// isolation: enrich() copies a label into a view it is handed directly
+// (TestEnrichCopiesTheOperatorsLabelBySessionID), and SetSessionLabel updates
+// what Config() reports next (TestConfigReturnsAnIndependentCopyOfSessionLabels).
+// Neither exercises Collect() itself with a session that actually came back
+// from a daemon, which is the one path that would have caught a live
+// operator's report: PATCH the label, and the running panel's own
+// /api/snapshot kept answering with an empty label until the process was
+// restarted. A test that only checks the config file after the write, or
+// enrich() against a hand-built view, cannot see that kind of gap — the file
+// was correct and the view-copying logic was correct; what needed proving is
+// that the two are actually wired together on a live collector, the same
+// collector instance an HTTP handler's SetSessionLabel call and the poll
+// loop's Collect() call both act on in cmd/fleetdeck's own deps() wiring.
+
+// fakeDaemon serves "ping" and "list" over a fresh unix socket well enough
+// for the real Client.ListSessions to succeed against it, so a test can
+// drive Collector.Collect through an actual daemon round trip instead of a
+// hand-built session slice. jobs is the literal comma-separated job records
+// to answer every "list" with, in the wire shape docs/protocol/daemon-
+// control-socket.md section 4 describes.
+func fakeDaemon(t *testing.T, jobs string) *daemon.Client {
+	t.Helper()
+	// A short, hand-rolled temp dir rather than t.TempDir(): that embeds the
+	// full test name, which a few directories below overflows macOS's ~104
+	// byte sun_path limit on a unix socket ("bind: invalid argument") — the
+	// same workaround internal/daemon's own client_test.go uses.
+	dir, err := os.MkdirTemp("", "fd")
+	if err != nil {
+		t.Fatalf("creating temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	listener, err := net.Listen("unix", filepath.Join(dir, "s.sock"))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				// The listener was closed at test teardown; nothing left to serve.
+				return
+			}
+			go func() {
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadString('\n')
+				if err != nil {
+					return
+				}
+				var req map[string]any
+				if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &req); err != nil {
+					return
+				}
+				var resp string
+				switch req["op"] {
+				case "ping":
+					resp = `{"ok":true,"op":"ping","version":"test","proto":1}` + "\n"
+				case "list":
+					resp = fmt.Sprintf(`{"ok":true,"op":"list","jobs":[%s]}`, jobs) + "\n"
+				default:
+					return
+				}
+				_, _ = conn.Write([]byte(resp))
+			}()
+		}
+	}()
+
+	return daemon.New(listener.Addr().String(), func() (string, error) { return "key", nil })
+}
+
+// newConfigFile writes cfg to a fresh config file and returns its path, so a
+// test can call setSessionLabel exactly the way server.Deps.SetSessionLabel
+// does in cmd/fleetdeck's own deps() wiring — through the file, not only
+// through the in-memory collector.
+func newConfigFile(t *testing.T, cfg config.Config) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("writing fixture config: %v", err)
+	}
+	return path
+}
+
+// TestSetSessionLabelChangesTheNextCollect is the round-trip the operator's
+// own live report was missing: PATCH-ing a label must change what the very
+// next Collect() — against the same collector, the same daemon connection —
+// reports for that session, with no restart in between. It calls
+// setSessionLabel, not Collector.SetSessionLabel directly, because that is
+// the actual function server.Deps.SetSessionLabel wires the HTTP route to
+// (see deps() in main.go) — the operator's report came from that route, and
+// a test that skipped past it to the collector method underneath would not
+// be exercising the path that was actually reported broken. The control
+// case (checked first) is required, not decorative: without it a test that
+// somehow always saw an empty label would still pass.
+func TestSetSessionLabelChangesTheNextCollect(t *testing.T) {
+	job := fmt.Sprintf(`{"short":"aa11","sessionId":"%s","name":"a task"}`, sampleUUID)
+	cfg := config.Default()
+	configPath := newConfigFile(t, cfg)
+	c := NewCollector(cfg, fakeDaemon(t, job), nil, t.TempDir())
+
+	before := c.Collect(context.Background())
+	if len(before.Sessions) != 1 {
+		t.Fatalf("want one session from the fake daemon, got %d", len(before.Sessions))
+	}
+	if before.Sessions[0].Label != "" {
+		t.Fatalf("control case: want no label before setSessionLabel, got %q", before.Sessions[0].Label)
+	}
+
+	if err := setSessionLabel(configPath, c, sampleUUID, "orchestrator"); err != nil {
+		t.Fatalf("setSessionLabel: %v", err)
+	}
+
+	after := c.Collect(context.Background())
+	if len(after.Sessions) != 1 {
+		t.Fatalf("want one session from the fake daemon, got %d", len(after.Sessions))
+	}
+	if after.Sessions[0].Label != "orchestrator" {
+		t.Fatalf("want the label set moments ago on the very next Collect, got %q", after.Sessions[0].Label)
+	}
+}
+
+// TestSetSessionLabelToEmptyRemovesItFromTheNextCollect is the deletion half
+// of the same wire: an empty label must stop showing on the live snapshot
+// too, not only leave the file's session_labels entry gone.
+func TestSetSessionLabelToEmptyRemovesItFromTheNextCollect(t *testing.T) {
+	job := fmt.Sprintf(`{"short":"aa11","sessionId":"%s","name":"a task"}`, sampleUUID)
+	cfg := config.Default()
+	configPath := newConfigFile(t, cfg)
+	c := NewCollector(cfg, fakeDaemon(t, job), nil, t.TempDir())
+	if err := setSessionLabel(configPath, c, sampleUUID, "orchestrator"); err != nil {
+		t.Fatalf("setSessionLabel: %v", err)
+	}
+
+	labelled := c.Collect(context.Background())
+	if labelled.Sessions[0].Label != "orchestrator" {
+		t.Fatalf("control case: want the label present before it is cleared, got %q", labelled.Sessions[0].Label)
+	}
+
+	if err := setSessionLabel(configPath, c, sampleUUID, ""); err != nil {
+		t.Fatalf("setSessionLabel (clear): %v", err)
+	}
+
+	cleared := c.Collect(context.Background())
+	if cleared.Sessions[0].Label != "" {
+		t.Fatalf("want no label on the very next Collect after clearing it, got %q", cleared.Sessions[0].Label)
 	}
 }

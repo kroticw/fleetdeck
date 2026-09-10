@@ -111,6 +111,53 @@ func TestSetSessionLabelAddsASecondEntryUsingTheFirstEntrysIndent(t *testing.T) 
 	}
 }
 
+// TestSetSessionLabelAddsASecondEntryWithNoBlankLineOrLostNewline is a real
+// bug caught live, not in review, against a config where session_labels is
+// the file's last key — an ordinary shape: an operator's config predates the
+// feature (see SetSessionLabel's own comment on why that is the ordinary
+// case, not a hand-edited oddity) and this key was appended after it, last.
+//
+// strings.Split on content ending in "\n" produces a trailing "" element —
+// not a blank line in the file, simply what comes after the last real
+// line's own newline — and the child-scanning loop this function's own
+// comment describes cannot tell that apart from a genuine blank line inside
+// the section, since both trim to "". With nothing following the section to
+// stop the scan at, that phantom element got selected as if it were the
+// section's boundary, and the new line was spliced in between the two
+// elements the earlier code had failed to tell apart: a blank line ended up
+// between the two entries, and the file's own closing newline moved from
+// the true end to just before the new entry instead of after it.
+//
+// TestSetSessionLabelAddsASecondEntryBesideTheFirst above cannot see this:
+// its fixture (Save(Default())) happens to write session_labels ahead of
+// notify, so the scan's boundary is that next section's own line, never the
+// phantom one, and yaml.v3 parses a spurious blank line inside a block
+// mapping without complaint besides. A test asserting only the parsed map
+// stays green whichever fixture it uses; this one needs the exact shape
+// that triggers the bug, and reads the bytes.
+func TestSetSessionLabelAddsASecondEntryWithNoBlankLineOrLostNewline(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "server:\n    port: 7777\nsession_labels:\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSessionLabel(p, uuidA, "first"); err != nil {
+		t.Fatalf("first SetSessionLabel: %v", err)
+	}
+	if err := SetSessionLabel(p, uuidB, "second"); err != nil {
+		t.Fatalf("second SetSessionLabel: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := content + "    " + uuidA + ": first\n    " + uuidB + ": second\n"
+	if string(raw) != want {
+		t.Fatalf("want the two entries adjacent with one trailing newline and nothing else after them\nwant: %q\ngot:  %q", want, raw)
+	}
+}
+
 // TestSetSessionLabelPreservesACommentOnABareHeaderWhenInsertingTheFirstEntry
 // guards against a real bug caught in review: the first version of the
 // insert path rewrote the "session_labels:" header line unconditionally
