@@ -29,9 +29,10 @@ const en = {
   // Card panel (web/js/card.js). Field names are deliberately absent: stage,
   // progress and session are frontmatter keys, they appear in the card file
   // exactly as written, and translating them would show the operator a word
-  // they cannot type into a card. 
+  // they cannot type into a card. A dead session reuses session_dead above
+  // rather than restating the same sentence under a second name.
+  //
   card_close: "close",
-  card_session_dead: "session is dead",
   card_waiting: "waiting for the first snapshot",
   card_gone: "card is gone",
   card_parse_error: "this card does not parse, so its fields cannot be edited here",
@@ -64,7 +65,6 @@ const ru = {
   session_not_listed: "сессия сейчас не в списке демона",
 
   card_close: "закрыть",
-  card_session_dead: "сессия мертва",
   card_waiting: "ждём первый снимок",
   card_gone: "карточка исчезла",
   card_parse_error: "карточка не разбирается, править её поля отсюда нельзя",

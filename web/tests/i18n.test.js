@@ -21,7 +21,9 @@ const KEYS = [
   "card_waiting",
   "card_gone",
   "card_parse_error",
-  "card_session_dead",
+  // Master's own key, reused by the panel rather than restated under a second
+  // name: same fact, same sentence.
+  "session_dead",
   "card_not_committed",
   "card_write_refused",
   "backlinks",

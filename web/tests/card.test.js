@@ -48,14 +48,14 @@ function fakeStore(initial) {
 let dom;
 let realFetch;
 let renderCard;
-let wireCardPanel;
+let createCardPanel;
 
 beforeEach(async () => {
   dom = installDOM();
   realFetch = globalThis.fetch;
   // Imported after the document exists. The module reads it only when called,
   // but importing here keeps that independent of module caching order.
-  ({ renderCard, wireCardPanel } = await import("../js/card.js"));
+  ({ renderCard, createCardPanel } = await import("../js/card.js"));
 });
 
 afterEach(() => {
@@ -147,7 +147,7 @@ test("a card pointing at a dead session says so and offers nothing to click", ()
   const { root } = open(snapshot(), CARD_KEEPING);
   const dead = root.querySelector(".card-session-dead");
   assert.ok(dead);
-  assert.equal(dead.textContent, t("card_session_dead"));
+  assert.equal(dead.textContent, t("session_dead"));
   // Writing `session` is not something this panel does, so there is no control
   // here to offer it with.
   assert.equal(root.querySelector(".card-meta").querySelectorAll("button").length, 0);
@@ -472,52 +472,29 @@ test("a value the board does not allow is shown as it is, not replaced", () => {
   assert.equal(stage.children[0].disabled, true);
 });
 
-// wireCardPanel — what makes the panel a panel, and what main.js is reduced to.
+// createCardPanel — what makes the panel a panel, and what main.js is reduced to.
+//
+// The click delegation is deliberately not tested here: board.js owns it and
+// calls this module's `open`, which is the whole contract between the two.
 
-function board() {
-  const node = dom.element("div");
-  const card = dom.element("div");
-  card.dataset.path = FLEET_UI;
-  node.append(card);
-  return { node, card };
-}
-
-test("a click on a board card opens the panel", () => {
-  const { node, card } = board();
+test("opening draws the card and unhides the panel", () => {
   const panel = dom.element("div");
   panel.hidden = true;
   const store = fakeStore(snapshot());
 
-  wireCardPanel(node, panel, { subscribe: store.subscribe });
-  fireEvent(card, "click");
+  createCardPanel(panel, { subscribe: store.subscribe }).open(FLEET_UI);
 
   assert.equal(panel.hidden, false);
   assert.equal(panel.querySelector("h3").textContent, 'Fleet UI <panel> "v2"');
 });
 
-test("a click on nothing in particular opens nothing", () => {
-  const { node } = board();
-  const panel = dom.element("div");
-  panel.hidden = true;
-  const store = fakeStore(snapshot());
-
-  wireCardPanel(node, panel, { subscribe: store.subscribe });
-  fireEvent(node, "click");
-
-  assert.equal(panel.hidden, true);
-});
-
 test("opening a second card disposes the first", () => {
-  const { node, card } = board();
-  const second = dom.element("div");
-  second.dataset.path = CARD_KEEPING;
-  node.append(second);
   const panel = dom.element("div");
   const store = fakeStore(snapshot());
+  const cardPanel = createCardPanel(panel, { subscribe: store.subscribe });
 
-  wireCardPanel(node, panel, { subscribe: store.subscribe });
-  fireEvent(card, "click");
-  fireEvent(second, "click");
+  cardPanel.open(FLEET_UI);
+  cardPanel.open(CARD_KEEPING);
 
   assert.equal(panel.querySelector("h3").textContent, "Card keeping");
 
@@ -540,38 +517,32 @@ test("opening a second card disposes the first", () => {
 });
 
 test("closing empties the panel and hides it again", () => {
-  const { node, card } = board();
   const panel = dom.element("div");
   const store = fakeStore(snapshot());
+  const cardPanel = createCardPanel(panel, { subscribe: store.subscribe });
 
-  wireCardPanel(node, panel, { subscribe: store.subscribe });
-  fireEvent(card, "click");
+  cardPanel.open(FLEET_UI);
   fireEvent(panel.querySelector(".card-close"), "click");
 
   assert.equal(panel.hidden, true);
   assert.equal(panel.children.length, 0);
+  assert.equal(store.live, false);
 });
 
-test("unwiring stops the board opening anything", () => {
-  const { node, card } = board();
+test("closing a panel that is not open is not an error", () => {
   const panel = dom.element("div");
-  panel.hidden = true;
-  const store = fakeStore(snapshot());
-
-  const unwire = wireCardPanel(node, panel, { subscribe: store.subscribe });
-  unwire();
-  fireEvent(card, "click");
-
+  createCardPanel(panel).close();
   assert.equal(panel.hidden, true);
 });
 
-test("a page without the elements says so instead of doing nothing quietly", () => {
+test("a page without the panel element says so instead of doing nothing quietly", () => {
   const errors = [];
   const realError = console.error;
   console.error = (...args) => errors.push(args.join(" "));
   try {
-    const unwire = wireCardPanel(null, dom.element("div"));
-    unwire();
+    const cardPanel = createCardPanel(null);
+    cardPanel.open(FLEET_UI);
+    cardPanel.close();
   } finally {
     console.error = realError;
   }

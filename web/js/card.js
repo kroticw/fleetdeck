@@ -202,7 +202,7 @@ export function renderCard(root, path, onClose, options = {}) {
     if (orphan) {
       // Shown, and nothing more: the panel writes stage and progress and no
       // other field, so it has no honest "unlink" to offer.
-      meta.append(el("span", "card-session-dead", t("card_session_dead")));
+      meta.append(el("span", "card-session-dead", t("session_dead")));
     }
     if (meta.children.length > 0) nodes.push(meta);
 
@@ -328,26 +328,27 @@ export function renderCard(root, path, onClose, options = {}) {
 }
 
 /**
- * wireCardPanel makes the board open the panel, and returns a function that
- * undoes the wiring.
+ * createCardPanel owns the one panel the page has: which card it is showing, and
+ * that only one is ever alive.
  *
- * It delegates on `[data-path]` rather than importing the board module: the
- * attribute is what a board card carries, so this works before that module
- * exists and keeps working once it lands, with no dependency between the two.
+ * `open` is exactly what renderBoard's onOpenCard parameter takes, so the board
+ * keeps its own click delegation and this module never learns how a card is
+ * drawn. A second delegation of our own on the same element would fire on the
+ * same click as the board's, which is two open paths for one gesture.
  *
- * It lives here rather than in main.js because main.js cannot be tested — it
- * connects a socket the moment it is imported — and this is the part that makes
- * the panel a panel: the delegation, the unhiding, and disposing the previous
- * panel before opening the next one so its listeners do not accumulate on the
- * document.
+ * `open` disposes the panel already showing before drawing the next one. Without
+ * that, every card the operator opens leaves another store subscription and
+ * another pair of document listeners behind — invisibly, because the new panel
+ * draws over the old one.
+ *
+ * It lives here rather than in main.js because main.js cannot be tested: it
+ * connects a socket the moment it is imported.
  */
-export function wireCardPanel(board, panel, options = {}) {
-  if (!board || !panel) {
-    // Silence here would look exactly like a board with no cards on it.
-    console.error(
-      "fleetdeck: the card panel is not wired — the page has no #board or no #card-panel",
-    );
-    return () => {};
+export function createCardPanel(panel, options = {}) {
+  if (!panel) {
+    // Silence here would look exactly like a board whose cards do nothing.
+    console.error("fleetdeck: the card panel is not wired — the page has no #card-panel");
+    return { open() {}, close() {} };
   }
 
   let dispose = null;
@@ -361,16 +362,11 @@ export function wireCardPanel(board, panel, options = {}) {
     panel.hidden = true;
   };
 
-  const onClick = (event) => {
-    const opener = event.target?.closest?.("[data-path]");
-    if (!opener || !board.contains(opener)) return;
-    close();
-    dispose = renderCard(panel, opener.dataset.path, close, options);
-  };
-
-  board.addEventListener("click", onClick);
-  return () => {
-    board.removeEventListener("click", onClick);
-    close();
+  return {
+    open(path) {
+      close();
+      dispose = renderCard(panel, path, close, options);
+    },
+    close,
   };
 }
