@@ -65,7 +65,11 @@ func writeTranscript(t *testing.T, projectsDir string) string {
 
 func TestCollectReportsDaemonFailureAndKeepsBoard(t *testing.T) {
 	dir := t.TempDir()
-	writeSampleCard(t, dir)
+	cardsDir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSampleCard(t, cardsDir)
 
 	cfg := config.Default()
 	cfg.BoardPath = dir

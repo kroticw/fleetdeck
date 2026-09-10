@@ -184,6 +184,10 @@ func TestPollKeepsTicking(t *testing.T) {
 // happens, not up to a poll interval later.
 func TestBoardEditsReachThePanel(t *testing.T) {
 	dir := t.TempDir()
+	cardsDir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	changed := make(chan struct{}, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -202,7 +206,7 @@ func TestBoardEditsReachThePanel(t *testing.T) {
 
 	// Give the watcher a moment to register before touching the directory.
 	time.Sleep(100 * time.Millisecond)
-	writeSampleCard(t, dir)
+	writeSampleCard(t, cardsDir)
 
 	select {
 	case <-changed:

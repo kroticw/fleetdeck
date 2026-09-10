@@ -136,18 +136,21 @@ func poll(ctx context.Context, interval time.Duration, refresh func(context.Cont
 	}
 }
 
-// watchBoard runs board.Watch so an edit made by an agent or in the operator's own
-// editor reaches the panel when it happens rather than up to a poll interval later
-// (spec section 5: the board is ordinary markdown that anything may edit).
+// watchBoard runs board.Watch on boardDir's cards subdirectory (board.CardsDir)
+// so an edit made by an agent or in the operator's own editor reaches the panel
+// when it happens rather than up to a poll interval later (spec section 5: the
+// board is ordinary markdown that anything may edit). This must watch the same
+// directory Collect's board.Scan call actually reads, or a card edit would wake
+// the panel to re-scan a directory with nothing new in it.
 //
 // A board that cannot be watched — unconfigured, missing, removed while running —
 // does not take the panel down. It is reported once and the panel goes on polling,
 // the same way an unreachable daemon does not stop the board from being served.
-func watchBoard(ctx context.Context, dir string, onChange func()) {
-	if dir == "" {
+func watchBoard(ctx context.Context, boardDir string, onChange func()) {
+	if boardDir == "" {
 		return
 	}
-	if err := board.Watch(ctx, dir, onChange); err != nil {
+	if err := board.Watch(ctx, board.CardsDir(boardDir), onChange); err != nil {
 		log.Printf("board watch: %v (the panel keeps running; board edits will be picked up by the next poll)", err)
 	}
 }
