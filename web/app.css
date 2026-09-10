@@ -1455,3 +1455,50 @@ main {
   overflow-x: auto;
 }
 
+/* Markdown tables.
+ *
+ * The scroll lives on the wrapper, never on the page. These columns are narrow
+ * and a four-column table lands in one immediately; a table allowed to set its
+ * own width pushes the whole layout sideways and takes every other column with
+ * it. min-width: 0 on the wrapper is what lets a flex or grid parent shrink it
+ * below its content — without it the overflow never engages and the page widens
+ * anyway.
+ */
+
+.md-table {
+  min-width: 0;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.md-table table {
+  border-collapse: collapse;
+  /* Cells size to their content and the box scrolls; wrapping every cell into a
+     column one word wide is what the operator already called unreadable
+     elsewhere. */
+  white-space: nowrap;
+}
+
+.md-table th,
+.md-table td {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  text-align: left;
+}
+
+.md-table th {
+  font-weight: 600;
+}
+
+.md-left {
+  text-align: left;
+}
+
+.md-center {
+  text-align: center;
+}
+
+.md-right {
+  text-align: right;
+}
+
