@@ -1,6 +1,7 @@
 import { subscribe, get } from "./store.js";
 import { sendText, setOrchestratorSession } from "./api.js";
 import { t } from "./i18n.js";
+import { renderMarkdown } from "./markdown.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column and its own input.
@@ -56,6 +57,43 @@ export function pickableSessions(sessions) {
 // through markup, so it cannot be markup no matter what it contains.
 export function pickerLabel(session) {
   return session.name || session.short;
+}
+
+// Fleet messages arrive in a transcript wrapped in an <agent-message> tag that
+// carries who wrote it and when. Shown raw it is half a line of attributes
+// before every message and a closing tag after it — the operator reads more
+// wrapper than message.
+//
+// The match is deliberately strict and the failure is deliberately soft: the
+// tag must open the step and its attributes must include a sender, or the step
+// is left exactly as it arrived. Something that merely looks like a tag is
+// text, and swallowing text is worse than showing a tag — a digest is read to
+// find out what happened, and what it does not show did not happen as far as
+// the reader can tell.
+//
+// A missing closing tag is accepted because a digest is a tail of a transcript
+// and can cut anywhere, including mid-message.
+const AGENT_MESSAGE = /^<agent-message\s+([^>]*)>([\s\S]*?)(?:<\/agent-message>)?$/;
+const ATTRIBUTE = /([a-z-]+)="([^"]*)"/g;
+
+export function parseAgentMessage(text) {
+  const match = AGENT_MESSAGE.exec(String(text ?? "").trim());
+  if (!match) return null;
+  const attributes = {};
+  for (const [, name, value] of match[1].matchAll(ATTRIBUTE)) attributes[name] = value;
+  // Without a sender the wrapper says nothing the body does not, so there is
+  // nothing to gain by removing it and a line of text to lose by getting it
+  // wrong.
+  if (!attributes.from) return null;
+  return { from: attributes.from, at: attributes.at ?? "", body: match[2].trim() };
+}
+
+// stepKey is what tells an unchanged step from a changed one. It is the step's
+// own role and text, not the markup they render into: the rendered form is
+// derived, and comparing derived output would make the diff depend on the
+// renderer as well as on the data.
+export function stepKey(step) {
+  return `${step.role}\u0000${step.text}`;
 }
 
 // How close to the end counts as "reading the newest message". A person who
@@ -226,6 +264,42 @@ export function renderOrchestrator(root) {
     return session ? session.short : short;
   };
 
+  // buildStep renders one step of the conversation.
+  //
+  // The body goes through markdown.js — the same renderer the cards and the
+  // documentation use, rather than a second one — so ** reads as bold and a
+  // fenced block reads as code. That renderer escapes its whole input before it
+  // assembles anything, which is what makes it safe to hand its output to
+  // innerHTML: a step's text comes from the daemon, and the fleet is open (spec
+  // 3.1), so it is untrusted like a card body is untrusted. Nothing else here
+  // touches innerHTML; the sender and the time are set as text.
+  //
+  // An empty Set of known cards, deliberately: a conversation has no card names
+  // to resolve links against, so a [[link]] renders as a link that does not
+  // work rather than one that goes somewhere wrong.
+  const NO_CARDS = new Set();
+
+  const buildStep = (step) => fillStep(el("div", ""), step);
+
+  // fillStep writes one step into a row, whether the row is new or is being
+  // updated. A row that is being updated keeps its node: only a step whose own
+  // data changed gets here at all, and reusing the node keeps the thread's
+  // children stable for everything around it.
+  const fillStep = (row, step) => {
+    row.className = `o-msg o-${step.role}`;
+    row.dataset.stepKey = stepKey(step);
+    row.replaceChildren();
+
+    const wrapper = parseAgentMessage(step.text);
+    if (wrapper) {
+      row.appendChild(el("div", "o-msg-from", wrapper.at ? `${wrapper.from} · ${wrapper.at}` : wrapper.from));
+    }
+    const body = el("div", "o-msg-body");
+    body.innerHTML = renderMarkdown(wrapper ? wrapper.body : step.text, NO_CARDS);
+    row.appendChild(body);
+    return row;
+  };
+
   // syncSteps updates the thread in place: a step whose role and text are
   // unchanged is left exactly as it is, node and all. That is what lets a
   // selection survive a poll that returned the same twenty steps it returned
@@ -236,14 +310,17 @@ export function renderOrchestrator(root) {
 
     for (let i = 0; i < steps.length; i += 1) {
       const step = steps[i];
-      const className = `o-msg o-${step.role}`;
       const existing = rows[i];
       if (!existing) {
-        thread.appendChild(el("div", className, step.text));
+        thread.appendChild(buildStep(step));
         continue;
       }
-      if (existing.className !== className) existing.className = className;
-      setText(existing, step.text);
+      // The comparison is on the step's own data, kept on the node, not on the
+      // markup it produced: a rendered form is derived, and diffing derived
+      // output would make an unchanged step depend on the renderer holding
+      // still as well as on the data.
+      if (existing.dataset.stepKey === stepKey(step)) continue;
+      fillStep(existing, step);
     }
     while (thread.children.length > steps.length) {
       thread.children[thread.children.length - 1].remove();

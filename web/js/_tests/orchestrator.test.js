@@ -11,7 +11,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel } from "../orchestrator.js";
+import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel, parseAgentMessage } from "../orchestrator.js";
 
 test("no snapshot yet resolves to nothing pinned and no sessions", () => {
   const r = resolveOrchestrator(null);
@@ -59,6 +59,51 @@ test("contextPercent computes tokens/window as a rounded percentage", () => {
   // A value that does not divide evenly, so dropping the rounding is visible:
   // 123456/200000 is 61.728%, and a bar labelled "61.728%" is not a label.
   assert.equal(contextPercent({ tokens: 123456, window: 200000 }), 62);
+});
+
+test("an agent-message wrapper is read as sender, time and body", () => {
+  const m = parseAgentMessage('<agent-message id="m-1" from="06a1f607" to="worker [80b7dc38]" at="2026-09-10T14:43:51+05:00">Two new things.</agent-message>');
+  assert.equal(m.from, "06a1f607");
+  assert.equal(m.at, "2026-09-10T14:43:51+05:00");
+  assert.equal(m.body, "Two new things.");
+});
+
+test("an unterminated wrapper still yields its body — a digest is a tail and can cut", () => {
+  const m = parseAgentMessage('<agent-message id="m-1" from="abc" at="2026-09-10T14:00:00+05:00">cut off mid-sen');
+  assert.equal(m.from, "abc");
+  assert.equal(m.body, "cut off mid-sen");
+});
+
+test("a step that is not a wrapper is left alone, tags and all", () => {
+  // Tolerant on purpose: swallowing something that merely looks like a tag
+  // would hide the very text the operator is trying to read.
+  assert.equal(parseAgentMessage("plain text"), null);
+  assert.equal(parseAgentMessage("<agent-message-ish from=\"x\">no</agent-message-ish>"), null);
+  assert.equal(parseAgentMessage("<div>not ours</div>"), null);
+  assert.equal(parseAgentMessage("prefix <agent-message from=\"x\">body</agent-message>"), null);
+});
+
+test("a wrapper's body keeps its own text, trimmed of the tag's own padding only", () => {
+  const m = parseAgentMessage('<agent-message from="x" at="t">  **bold** stays  </agent-message>');
+  assert.equal(m.body, "**bold** stays", "the markdown reaches the renderer intact");
+});
+
+test("a wrapper with no time still names its sender", () => {
+  const m = parseAgentMessage('<agent-message from="x">body</agent-message>');
+  assert.equal(m.from, "x");
+  assert.equal(m.at, "", "an absent time is absent, not invented");
+});
+
+test("a wrapper with no sender is not a wrapper worth unwrapping", () => {
+  // Without `from` there is no attribution to show, so the tag carries nothing
+  // the body does not, and hiding it would only lose text.
+  assert.equal(parseAgentMessage('<agent-message id="m-1">body</agent-message>'), null);
+});
+
+test("a wrapper's attributes are data, never markup", () => {
+  const m = parseAgentMessage('<agent-message from="&lt;img src=x onerror=alert(1)&gt;" at="now">hi</agent-message>');
+  assert.equal(m.from, "&lt;img src=x onerror=alert(1)&gt;");
+  assert.equal(m.body, "hi");
 });
 
 test("pickableSessions offers every session that has a short id", () => {
@@ -297,7 +342,8 @@ test("a step that has not changed is not written to at all, so a selection in it
   // Each push changes something this column shows, so the gate lets it through
   // and the thread really is synced — otherwise the gate would be doing this
   // test's work and a broken diff would sail past it.
-  const writesBefore = firstRow.textWrites;
+  const bodyBefore = firstRow.querySelector(".o-msg-body");
+  const writesBefore = bodyBefore.htmlWrites;
   for (const tokens of [30, 40]) {
     const moved = structuredClone(PIN);
     moved.sessions[0].context.tokens = tokens;
@@ -305,7 +351,8 @@ test("a step that has not changed is not written to at all, so a selection in it
   }
 
   assert.equal(thread.children[0], firstRow, "the same node, not an identical replacement");
-  assert.equal(firstRow.textWrites, writesBefore, "an unchanged step must not be written to");
+  assert.equal(firstRow.querySelector(".o-msg-body"), bodyBefore, "and its body is the same node too");
+  assert.equal(bodyBefore.htmlWrites, writesBefore, "an unchanged step must not be re-rendered");
   c.dom.restore();
 });
 
@@ -316,17 +363,18 @@ test("a step whose text did change is written, and only that one", async () => {
   ]);
   const thread = c.root.querySelector(".o-thread");
   const [row0, row1] = thread.children;
-  const writes0 = row0.textWrites;
-  const writes1 = row1.textWrites;
+  const writes0 = row0.querySelector(".o-msg-body").htmlWrites;
+  const key0 = row0.dataset.stepKey;
 
   c.setSteps([{ role: "assistant", text: "first" }, { role: "user", text: "second, edited" }]);
   const moved = structuredClone(PIN);
   moved.sessions[0].sessionId = "u-1e";
   await c.push(moved);
 
-  assert.equal(row0.textWrites, writes0, "the step that did not change is left alone");
-  assert.equal(row1.textWrites, writes1 + 1, "the step that changed is updated in place");
-  assert.equal(thread.children[1], row1, "in place, not replaced");
+  assert.equal(row0.querySelector(".o-msg-body").htmlWrites, writes0, "the step that did not change is left alone");
+  assert.equal(row0.dataset.stepKey, key0, "and still carries its own key");
+  assert.equal(thread.children[1], row1, "the changed step is updated in place, not replaced");
+  assert.ok(row1.dataset.stepKey.includes("second, edited"), "and its key now names the new text");
   c.dom.restore();
 });
 
@@ -429,6 +477,63 @@ test("when clearing the pin fails, the screen still goes back and says a reload 
   c.dom.restore();
 });
 
+test("two steps with the same words but different roles are different steps", async () => {
+  // The key has to carry the role: an assistant echoing a user's words is not
+  // the same step, and a diff that thought so would leave the wrong side of the
+  // conversation on screen.
+  const c = await column(structuredClone(PIN), [
+    { role: "user", text: "same words" },
+    { role: "assistant", text: "same words" },
+  ]);
+  const thread = c.root.querySelector(".o-thread");
+  assert.equal(thread.children.length, 2);
+  assert.notEqual(thread.children[0].dataset.stepKey, thread.children[1].dataset.stepKey);
+
+  c.setSteps([{ role: "assistant", text: "same words" }, { role: "assistant", text: "same words" }]);
+  const moved = structuredClone(PIN);
+  moved.sessions[0].sessionId = "u-role";
+  await c.push(moved);
+
+  assert.ok(thread.children[0].className.includes("o-assistant"), "the role change reached the row");
+  c.dom.restore();
+});
+
+test("a step's text is rendered as markdown, and cannot bring its own markup", async () => {
+  const hostile = "**bold** and <img src=x onerror=alert(1)> and <script>alert(1)</script>";
+  const c = await column(structuredClone(PIN), [{ role: "assistant", text: hostile }]);
+  const body = c.root.querySelector(".o-msg-body");
+  const html = body.innerHTML;
+
+  assert.ok(html.includes("<strong>bold</strong>"), "markdown is rendered, which is the point of the change");
+  assert.ok(!html.includes("<img"), "and the step's own markup is not");
+  assert.ok(!html.includes("<script"), "nor its script tag");
+  assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"), "the tag is shown as the text it is");
+  c.dom.restore();
+});
+
+test("an agent-message step shows its sender as text, not as the tag it arrived in", async () => {
+  const wrapped = '<agent-message id="m-1" from="06a1f607" at="2026-09-10T14:43:51+05:00">**two** new things</agent-message>';
+  const c = await column(structuredClone(PIN), [{ role: "user", text: wrapped }]);
+  const row = c.root.querySelector(".o-msg");
+  const from = row.querySelector(".o-msg-from");
+
+  assert.ok(from, "who wrote it is worth keeping");
+  assert.equal(from.textContent, "06a1f607 · 2026-09-10T14:43:51+05:00");
+  assert.equal(from.children.length, 0, "and it is text, not markup");
+  assert.ok(row.querySelector(".o-msg-body").innerHTML.includes("<strong>two</strong>"), "the body is the message itself");
+  assert.ok(!row.querySelector(".o-msg-body").innerHTML.includes("agent-message"), "the wrapper is gone from the body");
+  c.dom.restore();
+});
+
+test("a sender spelled as markup reaches the DOM as text", async () => {
+  const nasty = '<agent-message from="&lt;img src=x onerror=alert(1)&gt;" at="now">body</agent-message>';
+  const c = await column(structuredClone(PIN), [{ role: "user", text: nasty }]);
+  const from = c.root.querySelector(".o-msg-from");
+  assert.equal(from.children.length, 0, "no element was created from the sender");
+  assert.ok(from.textContent.includes("img src=x"), "it is a label that reads like a tag, and nothing more");
+  c.dom.restore();
+});
+
 test("picking a session from the list opens its conversation", async () => {
   const c = await column(structuredClone(PIN));
   const realFetch = globalThis.fetch;
@@ -492,7 +597,7 @@ test("a digest that came back shorter drops the rows that are gone", async () =>
   await c.push(moved);
 
   assert.equal(thread.children.length, 1, "rows with nothing behind them must go");
-  assert.equal(thread.children[0].textContent, "first");
+  assert.ok(thread.children[0].dataset.stepKey.endsWith("first"));
   c.dom.restore();
 });
 
