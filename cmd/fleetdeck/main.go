@@ -348,6 +348,12 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		// that has one.
 		BoardDir: cfg.BoardPath,
 
+		// The other end of the docs.paths configuration key: the directories the
+		// operator listed are what the documentation section reads, and the only
+		// directories a document request may resolve into. Left unwired, the key
+		// would be parsed, validated and read by nobody.
+		DocsRoots: cfg.DocsPaths,
+
 		// This is the other end of cmd/fleetdeck-status: the reporter posts to
 		// /api/status, the server hands it here, and Collect prefers it over the
 		// transcript estimate.
