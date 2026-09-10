@@ -68,3 +68,36 @@ test("the card panel's rules are top-level rules", () => {
     assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
   }
 });
+
+test("the documentation section's rules are top-level rules", () => {
+  const { topLevel } = scan(css);
+  const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));
+
+  // .docs is the section's own two-pane layout: nested, the list and the body
+  // stop being side by side and the document falls below the list.
+  assert.ok(selectors.has(".docs"), ".docs is not a top-level rule in web/app.css");
+
+  // These carry meaning rather than decoration. Without them the current tab and
+  // the open document are indistinguishable from the rest, and a section that is
+  // empty looks exactly like one that failed.
+  for (const selector of ["#tabs .tab.on", ".docs-entry.on", ".docs-empty", ".docs-error"]) {
+    assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
+  }
+});
+
+// The switcher hides a section with the hidden attribute. A `display` on #docs
+// would override that — hidden is display:none from the user-agent stylesheet
+// and loses to any author rule — leaving the documentation section stacked under
+// the board instead of put away.
+test("no rule gives #docs a display of its own", () => {
+  const { topLevel } = scan(css);
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(topLevel.includes("#docs"), "#docs is not a top-level rule in web/app.css");
+  const block = /#docs\s*\{([^}]*)\}/.exec(stripped);
+  assert.ok(block, "web/app.css no longer declares a #docs rule");
+  assert.doesNotMatch(
+    block[1],
+    /(^|;)\s*display\s*:/,
+    "#docs sets display, which defeats the hidden attribute the section switcher uses",
+  );
+});

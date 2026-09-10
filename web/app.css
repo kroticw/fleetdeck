@@ -801,3 +801,102 @@ main {
   width: 0;
   background: #2b6fd8;
 }
+
+/* Centre-column sections (web/js/sections.js) and the documentation section
+ * (web/js/docs.js).
+ *
+ * #docs is a sibling of #board inside the centre column and is shown one at a
+ * time by the switcher, which toggles the `hidden` attribute — so nothing here
+ * may set `display` on #docs itself, or the hidden section would keep its box
+ * and sit under the visible one.
+ */
+
+#tabs {
+  flex: none;
+  display: flex;
+  gap: var(--gap);
+  padding: var(--gap) calc(var(--gap) * 2) 0;
+}
+
+#tabs .tab {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 4px 8px;
+  border-bottom: 2px solid transparent;
+  opacity: 0.7;
+}
+
+#tabs .tab.on {
+  opacity: 1;
+  font-weight: 600;
+  border-bottom-color: currentColor;
+}
+
+#docs {
+  flex: 1;
+  min-height: 0;
+}
+
+.docs {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  gap: calc(var(--gap) * 2);
+  padding: var(--gap) calc(var(--gap) * 2);
+}
+
+.docs-list {
+  flex: 0 0 30%;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.docs-entry {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 4px 6px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.docs-entry.on {
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.docs-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+}
+
+.docs-body pre {
+  overflow-x: auto;
+  padding: var(--gap);
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* A section with nothing to show and a section that failed are different
+ * statements, and they must not look alike: one is an ordinary state, the other
+ * is something an operator has to act on. */
+
+.docs-empty {
+  opacity: 0.7;
+}
+
+.docs-error {
+  color: #b3261e;
+  overflow-wrap: anywhere;
+}
