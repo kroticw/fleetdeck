@@ -104,6 +104,39 @@ export function sendKeys(sessionId, keys) {
   return post(`/api/sessions/${encodeURIComponent(sessionId)}/keys`, { keys });
 }
 
+// uploadSessionImage writes an image into the panel's own store and returns the
+// path it was written to. It sends nothing into the session: the path goes into
+// the operator's message, and the operator presses send.
+//
+// base64 in an ordinary JSON body rather than multipart, deliberately. The two
+// checks that stand between a page in another tab and a live session are the
+// mandatory application/json and the Origin rule (internal/server/guard.go), and
+// multipart is one of the three content types a browser sends cross-origin with
+// no preflight — accepting it here would carve an exception through the guard
+// for the one route that writes a file.
+//
+// The name of the file is not sent. The server chooses it; a name from the
+// request is a path, and a path from a request goes wherever it says.
+export async function uploadSessionImage(sessionId, base64) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/image`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ data: base64 }),
+  });
+  if (!response.ok) {
+    throw await refusal(response);
+  }
+  const body = await readJSON(response);
+  const path = typeof body?.path === "string" ? body.path : "";
+  if (path === "") {
+    // A 200 with no path is a success we cannot use: there is nothing to put in
+    // the box, and pretending otherwise would leave the operator sending a
+    // message about an image that is not named in it.
+    throw new Error("the panel stored the image but the server did not say where");
+  }
+  return path;
+}
+
 // setOrchestratorSession pins, or unpins, the session the left column shows.
 //
 // An empty id is a legal value and means "no session pinned": the route takes a

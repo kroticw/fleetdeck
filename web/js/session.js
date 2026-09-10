@@ -22,10 +22,11 @@
 // constructor are read from the global object, which is where the browser puts
 // them and where a test can put its own.
 
-import { fetchDigest, fetchScreen, sendKeys, sendText } from "./api.js";
+import { fetchDigest, fetchScreen, sendKeys, sendText, uploadSessionImage } from "./api.js";
 import { get } from "./store.js";
 import { t } from "./i18n.js";
 import { syncSteps } from "./steps.js";
+import { IMAGE_TYPES, MAX_IMAGE_BYTES, detectImageType, toBase64 } from "./imagefile.js";
 
 // How many transcript steps the digest asks for, and how often each tab
 // refreshes. The screen is polled faster because it is what a person watches
@@ -213,6 +214,7 @@ export function renderSession(
   let terminal = null;
   let body = null;
   let errorLine = null;
+  let noticeLine = null;
   let input = null;
   let nameLine = null;
 
@@ -256,6 +258,20 @@ export function renderSession(
     errorLine.textContent = message ?? "";
     errorLine.hidden = !message;
   };
+
+  // showNotice is the same idea for something that is not a failure. It has a
+  // line of its own rather than sharing the error line: "the session may ask you
+  // for permission" is an expected step, and showing it where failures appear
+  // would teach the operator to read the error line as noise.
+  const showNotice = (message) => {
+    if (!noticeLine) return;
+    noticeLine.textContent = message ?? "";
+    noticeLine.hidden = !message;
+  };
+
+  // formatBytes is only ever given this module's own ceiling, so it needs no
+  // more than whole mebibytes and no rounding rules worth arguing about.
+  const formatBytes = (bytes) => `${Math.round(bytes / (1024 * 1024))} MiB`;
 
   const disposeTerminal = () => {
     // xterm holds a renderer, listeners and a resize observer. Dropping the
@@ -399,6 +415,88 @@ export function renderSession(
     }
   };
 
+  // attachImage takes the file the operator picked, checks what the server would
+  // check, uploads it, and puts the path where they are typing.
+  //
+  // It never sends. The route does not send either: which text accompanies an
+  // image, and whether it is sent at all, is the operator's — two images and one
+  // question is an ordinary thing to want, and neither half of this may decide
+  // otherwise on their behalf.
+  const attachImage = async (file) => {
+    if (!file) return;
+
+    // Size first, from the file's own metadata, so an oversized file is refused
+    // without reading it into memory at all.
+    if (file.size > MAX_IMAGE_BYTES) {
+      showError(`${t("image_too_large")} (${formatBytes(MAX_IMAGE_BYTES)})`);
+      return;
+    }
+
+    let bytes;
+    try {
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } catch (err) {
+      showError(err.message);
+      return;
+    }
+
+    // The bytes, not the name and not the type the browser guessed: both are
+    // claims, and the server decides by the signature. This check is a courtesy
+    // — it saves an upload that would be refused — and never a substitute for
+    // the server's own, which is the one that defends anything.
+    if (detectImageType(bytes) === "") {
+      showError(`${t("image_wrong_type")} (${IMAGE_TYPES.join(", ")})`);
+      return;
+    }
+
+    try {
+      const path = await uploadSessionImage(short, toBase64(bytes));
+      // Appended to what is already there, on its own line, because the operator
+      // is mid-sentence as often as not and an attachment is not a reason to
+      // lose it.
+      const typed = input.value;
+      input.value = typed === "" ? path : `${typed.replace(/\s*$/, "")}\n${path}`;
+      showError("");
+      showNotice(t("image_may_ask_permission"));
+    } catch (err) {
+      // Nothing was stored, so nothing goes into the box. What was typed stays
+      // exactly as it was: this panel's standing rule is that a person's unsent
+      // words are the one thing it must not lose.
+      showError(err.message);
+    }
+  };
+
+  // attachRow is the control itself: a button the operator sees and a file input
+  // it stands in for. The input is hidden rather than styled because a file
+  // input cannot be given a label of our own wording any other way, and the
+  // button carries the accessible name.
+  const attachRow = () => {
+    const row = el("div", "s-attach-row");
+
+    const picker = el("input", "s-attach-input");
+    picker.setAttribute("type", "file");
+    // A hint to the file dialog, never a check: the accept attribute filters
+    // what is easy to pick and stops nothing, which is why the bytes are read
+    // above regardless of what comes back.
+    picker.setAttribute("accept", IMAGE_TYPES.join(","));
+    picker.hidden = true;
+    picker.addEventListener("change", () => {
+      const file = picker.files?.[0];
+      // Cleared before the upload rather than after: picking the same file twice
+      // in a row fires no change event when the value is still set, and the
+      // second attach would silently do nothing.
+      picker.value = "";
+      attachImage(file);
+    });
+
+    const button = el("button", "s-attach", t("attach_image"));
+    button.setAttribute("type", "button");
+    button.addEventListener("click", () => picker.click?.());
+
+    row.append(picker, button);
+    return row;
+  };
+
   function drawShell() {
     root.hidden = false;
 
@@ -493,6 +591,9 @@ export function renderSession(
     errorLine = el("div", "s-error");
     errorLine.hidden = true;
 
+    noticeLine = el("div", "s-notice");
+    noticeLine.hidden = true;
+
     const form = el("form", "s-form");
     // A form left to its default behaviour navigates the page away on Enter,
     // taking the whole panel with it.
@@ -511,11 +612,12 @@ export function renderSession(
       return submitTyped();
     });
     form.appendChild(input);
+    form.appendChild(attachRow());
 
     // keys is absent on the digest tab, and filtered out rather than replaced by
     // an empty node: an empty container still takes the row's gap and leaves the
     // writing area sitting at a different height on each tab.
-    root.replaceChildren(...[head, body, errorLine, keys, form].filter(Boolean));
+    root.replaceChildren(...[head, body, errorLine, noticeLine, keys, form].filter(Boolean));
   }
 
   drawShell();
