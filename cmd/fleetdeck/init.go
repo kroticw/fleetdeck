@@ -82,7 +82,11 @@ type initEnv struct {
 type initStep struct {
 	name string
 	note string
-	err  error
+	// detail is a second line about the same step, indented under it. It carries
+	// what the operator would otherwise have to discover by reading the file
+	// afterwards.
+	detail string
+	err    error
 }
 
 // runInit performs every step of `fleetdeck init` and prints what each one did.
@@ -112,6 +116,9 @@ func runInit(env initEnv) error {
 			continue
 		}
 		fmt.Fprintf(&report, "%-14s %s\n", s.name+":", s.note)
+		if s.detail != "" {
+			fmt.Fprintf(&report, "%-14s %s\n", "", s.detail)
+		}
 	}
 
 	// Loading the agent is a change to a machine's login behaviour, and it is the
@@ -303,31 +310,58 @@ func ensureStatusline(env initEnv) initStep {
 	}
 
 	settingsPath := filepath.Join(env.home, ".claude", "settings.json")
-	what, err := wireStatusline(settingsPath, statusBinary, env.force)
+	result, err := wireStatusline(settingsPath, statusBinary, env.force)
 	if err != nil {
 		s.err = err
 		return s
 	}
-	s.note = fmt.Sprintf("%s -> %s (%s)", settingsPath, statusBinary, what)
+	s.note = fmt.Sprintf("%s -> %s (%s)", settingsPath, statusBinary, result.what)
+	if result.reformatted {
+		// Said out loud rather than left to be discovered: this command's promise is
+		// that it does not disturb what it did not come for, and re-encoding the
+		// whole document is a disturbance even when nothing is lost by it.
+		s.detail = "that file was reformatted: two-space indent, keys in alphabetical order — JSON carries no comments to lose, but a hand-ordered file does not come back in its own order"
+	}
 	return s
 }
 
+// statuslineResult is what wireStatusline did.
+type statuslineResult struct {
+	// what is written, updated, kept or replaced.
+	what string
+	// reformatted reports that an existing file came back re-encoded — same
+	// settings, different layout and key order.
+	reformatted bool
+}
+
 // wireStatusline sets the statusLine command and leaves every other setting
-// untouched. It returns what it did: written, updated, kept or replaced.
+// untouched.
 //
 // A malformed file stops the step: overwriting someone's settings to make our own
 // feature work is not a trade we get to make. Neither is replacing a statusline
 // the operator configured themselves — that needs force, and says so.
-func wireStatusline(settingsPath, binary string, force bool) (string, error) {
+func wireStatusline(settingsPath, binary string, force bool) (statuslineResult, error) {
 	settings := map[string]any{}
+	existed := false
 	raw, err := os.ReadFile(settingsPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
-		return "", fmt.Errorf("read settings: %w", err)
+		return statuslineResult{}, fmt.Errorf("read settings: %w", err)
 	default:
 		if err := json.Unmarshal(raw, &settings); err != nil {
-			return "", fmt.Errorf("%s is malformed, refusing to overwrite it: %w", settingsPath, err)
+			return statuslineResult{}, fmt.Errorf("%s is malformed, refusing to overwrite it: %w", settingsPath, err)
+		}
+		existed = true
+	}
+
+	// Measured before the map is touched: re-encoding the settings exactly as they
+	// are and comparing that to the file on disk is what separates "this write will
+	// reindent and reorder your file" from "your file is already in that shape".
+	reformatted := false
+	if existed {
+		if canonical, cErr := json.MarshalIndent(settings, "", "  "); cErr == nil {
+			reformatted = string(raw) != string(append(canonical, '\n'))
 		}
 	}
 
@@ -338,9 +372,10 @@ func wireStatusline(settingsPath, binary string, force bool) (string, error) {
 	case isOurStatusline(existing):
 		current, _ := existing.(map[string]any)
 		if statuslineCommandOf(existing) == binary {
-			// Byte-for-byte identical to what a write would produce, so there is
-			// nothing to write: this is what makes a second run change no file.
-			return "kept", nil
+			// The setting already says what this step would say, so the file is not
+			// opened for writing at all — layout included, whatever it is. This is
+			// what makes a second run change no file.
+			return statuslineResult{what: "kept"}, nil
 		}
 		// Ours to move, and the operator may have set other keys on it.
 		if current != nil {
@@ -354,21 +389,21 @@ func wireStatusline(settingsPath, binary string, force bool) (string, error) {
 	case force:
 		what = "replaced"
 	default:
-		return "", fmt.Errorf("%s already runs %q as its statusline; re-run with --force to replace it with %s", settingsPath, statuslineCommandOf(existing), binary)
+		return statuslineResult{}, fmt.Errorf("%s already runs %q as its statusline; re-run with --force to replace it with %s", settingsPath, statuslineCommandOf(existing), binary)
 	}
 
 	settings["statusLine"] = line
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("encode settings: %w", err)
+		return statuslineResult{}, fmt.Errorf("encode settings: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
-		return "", fmt.Errorf("create settings dir: %w", err)
+		return statuslineResult{}, fmt.Errorf("create settings dir: %w", err)
 	}
 	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o600); err != nil {
-		return "", fmt.Errorf("write settings: %w", err)
+		return statuslineResult{}, fmt.Errorf("write settings: %w", err)
 	}
-	return what, nil
+	return statuslineResult{what: what, reformatted: reformatted}, nil
 }
 
 // statuslineCommandOf digs the command out of a statusLine setting, which Claude

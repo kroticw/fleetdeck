@@ -524,3 +524,67 @@ func TestInitPrintsTheCurrentLaunchctlSpelling(t *testing.T) {
 		t.Fatalf("init still prints the legacy spelling:\n%s", out.String())
 	}
 }
+
+func TestInitSaysWhenItReformatsTheSettingsFile(t *testing.T) {
+	home := t.TempDir()
+	settings := settingsPathOf(home)
+	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Compact, and not in the key order Go's encoder produces.
+	if err := os.WriteFile(settings, []byte(`{"model":"opus","alwaysThinkingEnabled":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: &out}); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "reformatted") {
+		t.Fatalf("a write that reindents and reorders the operator's file must say so:\n%s", out.String())
+	}
+}
+
+func TestInitSaysNothingAboutReformattingWhenItReformatsNothing(t *testing.T) {
+	home := t.TempDir()
+	binary := fakeInstall(t, true)
+
+	// A settings file that did not exist is created, not reformatted.
+	var created bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: binary, out: &created}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(created.String(), "reformatted") {
+		t.Fatalf("nothing was reformatted on a fresh home:\n%s", created.String())
+	}
+
+	// And the second run does not open the file at all.
+	var again bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: binary, out: &again}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(again.String(), "reformatted") {
+		t.Fatalf("a kept file was reported as reformatted:\n%s", again.String())
+	}
+}
+
+func TestWireStatuslineLeavesAnAlreadyWiredFileUntouchedWhateverItsLayout(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	// Ours already, in a layout this command would never produce.
+	original := "{\n\t\"statusLine\": {\"command\": \"/bin/fleetdeck-status\", \"type\": \"command\"},\n\t\"model\": \"opus\"\n}"
+	if err := os.WriteFile(p, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := wireStatusline(p, "/bin/fleetdeck-status", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.what != "kept" {
+		t.Fatalf("nothing needed changing, got %q", result.what)
+	}
+	raw, _ := os.ReadFile(p)
+	if string(raw) != original {
+		t.Fatalf("the file was rewritten to satisfy nothing:\n%s", raw)
+	}
+}
