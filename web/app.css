@@ -485,10 +485,39 @@ main {
   white-space: pre-wrap;
   word-break: break-word;
   font-size: var(--fs-sm);
+  /* A row is stretched to the thread by align-items, and this says so a second
+   * time on purpose. A flex item that stops being stretched falls back to
+   * sizing by its own content, and a <pre> that does not wrap has a min-content
+   * width of its longest line — which is how a message full of numbers came to
+   * be 553px wide inside a 390px thread. Measured; see the block below. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .o-msg.o-user {
-  align-self: flex-end;
+  /* No align-self here, deliberately.
+   *
+   * It used to say `flex-end`, and that one declaration was the whole of a
+   * defect the operator reported as "the message is cut on BOTH sides". In a
+   * column flex container align-self replaces "stretch to the container" with
+   * "size to your content", so a message carrying a table of numbers grew to
+   * its longest line: 553px inside a 390px thread, 163px wider than its parent
+   * and the only box in the chain that was.
+   *
+   * The right-hand cut followed from the width. The left-hand one was not
+   * scrolling at all, which is why nothing could be scrolled back: flex-end
+   * pins the oversized row's RIGHT edge to the container and pushes the excess
+   * out of the START side, so the row began at -161px, outside the window,
+   * with no scroll container extending that way.
+   *
+   * It also cost nothing to remove. Measured before this was written, a user
+   * row and an answer were both 374px wide whenever the text wrapped at all —
+   * flex-end does nothing visible to anything longer than one line. What tells
+   * a person's own words from an agent's is the signature and the bar down the
+   * side, not which edge the bubble touches.
+   *
+   * With the row stretched again the <pre> inside is the one that overflows,
+   * which is what its own `overflow-x: auto` and the scroll indicator are for. */
   background: color-mix(in srgb, var(--accent) 20%, var(--surface-hover));
 }
 
