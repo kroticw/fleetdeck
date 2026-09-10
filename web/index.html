@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>fleetdeck</title>
   <link rel="stylesheet" href="/app.css">
-  <!-- vendor/xterm.css is added here by the task that vendors xterm.js -->
+  <link rel="stylesheet" href="/vendor/xterm.css">
 </head>
 <body>
   <header id="header"></header>
@@ -16,9 +16,16 @@
       <div id="board"></div>
       <div id="docs" hidden></div>
       <div id="card-panel" hidden></div>
+      <div id="session-panel" class="session-panel" hidden></div>
     </section>
     <aside id="sessions" class="col col-sessions"></aside>
   </main>
+  <!-- xterm.js is a UMD bundle, not an ES module: it assigns its single export,
+       Terminal, onto window. A classic script tag runs before the deferred
+       module below, so window.Terminal is already there when the panel opens a
+       session. Loaded from the binary's own embedded files, never a CDN — the
+       page's Content-Security-Policy is script-src 'self'. -->
+  <script src="/vendor/xterm.js"></script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

@@ -13,8 +13,8 @@ package web
 
 import "embed"
 
-// FS holds index.html, app.css and every file under js/, rooted at this
-// directory — so internal/server can serve FS directly with no further
+// FS holds index.html, app.css and every file under js/ and vendor/, rooted at
+// this directory — so internal/server can serve FS directly with no further
 // stripping of a leading "web/" prefix.
 //
 // Plain patterns, deliberately without the "all:" prefix: "all:" exists only
@@ -24,10 +24,12 @@ import "embed"
 // directory walking (js/) already skips those, and on plain file patterns
 // (index.html, app.css) the prefix would have been a no-op anyway.
 //
-// Only what exists today is listed. web/vendor/ (xterm.js) is added to this
-// line by the task that vendors it; embedding a pattern that matches nothing
-// is a compile-time error, so listing it early would break this package's
-// build before that directory exists.
+// Only what exists today is listed. vendor/ joined the list when xterm.js was
+// vendored into it; embedding a pattern that matches nothing is a compile-time
+// error, so a directory is listed here only once it holds files. That also
+// makes this line a check of its own: delete web/vendor/ and this package stops
+// compiling, rather than the panel quietly serving a 404 for a <script> tag no
+// browser reports back to us.
 //
-//go:embed index.html app.css js
+//go:embed index.html app.css js vendor
 var FS embed.FS

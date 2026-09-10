@@ -910,3 +910,145 @@ main {
   color: #b3261e;
   overflow-wrap: anywhere;
 }
+
+/* Session panel (web/js/session.js)
+ *
+ * Two tabs over one session, the key buttons that reach it, and the box that
+ * types into it.
+ *
+ * An overlay over the centre column, exactly like #card-panel above and for the
+ * same reason: the board and the panel both want that column and both want its
+ * scroll, and a terminal that has to be hunted for underneath a kanban is not a
+ * terminal anyone watches. Covering the column rather than hiding the board also
+ * means there is no state to put back when the panel closes.
+ *
+ * Like the card panel, this uses no style attribute anywhere: style-src 'self'
+ * blocks inline styles, and blocks them silently.
+ *
+ * No colour here is a single-theme literal: like the session list above,
+ * everything is mixed from currentColor so both a light and a dark system theme
+ * read correctly.
+ */
+#session-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+}
+
+.session-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+}
+
+.session-panel .s-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.session-panel .s-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.session-panel .s-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.session-panel button {
+  font: inherit;
+  color: inherit;
+  background: var(--srow-bg);
+  border: 1px solid var(--srow-border);
+  border-radius: 4px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.session-panel button:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.session-panel .s-tab-on {
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.session-panel .s-key {
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+
+/* The body is the one part that scrolls: the tabs, the error line and the
+ * input must stay put while a session talks. */
+.session-panel .s-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--srow-border);
+  border-radius: 6px;
+  padding: var(--gap);
+}
+
+.session-panel .s-step {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--srow-border);
+}
+
+.session-panel .s-step:last-child {
+  border-bottom: none;
+}
+
+.session-panel .s-step-user {
+  font-weight: 600;
+}
+
+.session-panel .s-step-assistant,
+.session-panel .s-step-other {
+  opacity: 0.9;
+}
+
+.session-panel .s-empty {
+  color: var(--muted);
+}
+
+.session-panel .s-term {
+  height: 100%;
+}
+
+/* Errors sit between what the tab is showing and the box being typed into,
+ * where a person is already looking — never on top of the content, which
+ * would cost them the very output they were reading. */
+.session-panel .s-error {
+  flex: none;
+  color: #e03131;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.session-panel .s-form {
+  flex: none;
+  display: flex;
+}
+
+.session-panel .s-input {
+  flex: 1;
+  font: inherit;
+  color: inherit;
+  background: var(--srow-bg);
+  border: 1px solid var(--srow-border);
+  border-radius: 6px;
+  padding: 6px;
+  resize: vertical;
+}
