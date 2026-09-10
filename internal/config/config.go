@@ -84,6 +84,12 @@ type Config struct {
 	DaemonPollInterval time.Duration
 	UsageEnabled       bool
 	ServerPort         int
+	// StatuslineWrap is the statusline command cmd/fleetdeck-status passes
+	// stdin through to and prints the output of unchanged -- the operator's
+	// own tool (spec: their own liked, pre-existing statusline), read from
+	// here only when the same-named command-line flag was not given. Empty
+	// means no wrapping: fleetdeck-status prints its own plain render.
+	StatuslineWrap string
 }
 
 // configDuration is time.Duration decoded from YAML with its own validation-shaped
@@ -170,6 +176,9 @@ type file struct {
 	Server struct {
 		Port int `yaml:"port"`
 	} `yaml:"server"`
+	Statusline struct {
+		Wrap string `yaml:"wrap"`
+	} `yaml:"statusline"`
 }
 
 // Default returns the configuration used when no file exists.
@@ -183,6 +192,18 @@ func Default() Config {
 		UsageEnabled:       true,
 		ServerPort:         7777,
 	}
+}
+
+// DefaultPath is where spec section 11 puts the configuration file, exported
+// so any command reading it -- cmd/fleetdeck (which has carried this same
+// logic locally since before this function existed) and cmd/fleetdeck-status
+// -- agree on the one location without each restating it.
+func DefaultPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "config.yaml"
+	}
+	return filepath.Join(home, ".config", "fleetdeck", "config.yaml")
 }
 
 // configToFile converts a Config to file format for marshalling.
@@ -200,6 +221,7 @@ func configToFile(c Config) file {
 	f.Daemon.PollInterval = configDuration(c.DaemonPollInterval)
 	f.Usage.Enabled = c.UsageEnabled
 	f.Server.Port = c.ServerPort
+	f.Statusline.Wrap = c.StatuslineWrap
 	return f
 }
 
@@ -220,6 +242,7 @@ func fileToConfig(f file) Config {
 		DaemonPollInterval: time.Duration(f.Daemon.PollInterval),
 		UsageEnabled:       f.Usage.Enabled,
 		ServerPort:         f.Server.Port,
+		StatuslineWrap:     f.Statusline.Wrap,
 	}
 }
 
