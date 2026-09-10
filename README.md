@@ -16,23 +16,25 @@ fleetdeck's answer is a panel that watches the sessions and the board together, 
 
 ## Status
 
-This repository is under active development and does not yet do most of what is described below. As of this writing:
+This repository is under active development. As of this writing:
 
-- There is no `fleetdeck` server binary. The only binary that exists is `fleetdeck-status`, a small statusline reporter (see "Packages" below).
-- `internal/server` provides an HTTP and WebSocket surface for the panel, but wiring it to a real daemon, board, and config is still someone else's task, and there is no `fleetdeck` binary to start it — so nothing in this repository listens on a network port yet, and there is still no web UI.
-- There is no `fleetdeck init` command, because there is no `fleetdeck` binary for such a command to belong to.
-- There is no launchd agent and no `.plist` file anywhere in the repository.
-- There is no release process and nothing published to install from.
+- Two binaries build from source: `fleetdeck`, the panel, and `fleetdeck-status`, the statusline reporter (see "Packages" below).
+- The panel runs and serves on `127.0.0.1:7777`: the fleet snapshot, a WebSocket stream of it, and the routes that type into a session and move a card. There is no web UI yet — a browser pointed at that address gets a 404, so the API is all there is to talk to.
+- `fleetdeck init` exists. It writes the configuration file when there is none, creates the board directory with one example card when it is empty, points Claude Code's `statusLine` at `fleetdeck-status`, and installs the launchd agent. A step that would overwrite something you configured yourself refuses and says how to proceed instead.
+- The launchd agent is written to `~/Library/LaunchAgents/dev.fleetdeck.panel.plist`, with its log in `~/Library/Logs/fleetdeck.log`. `init` does not load it: it prints the `launchctl bootstrap` command and leaves that decision to you.
+- There is still no release process and nothing published to install from. Building from source is the only way in.
 
-What does exist and work today: the Go packages that will eventually sit behind that panel — reading and writing board cards, loading configuration, talking to the Claude Code daemon's control socket, reading session transcripts, reading account usage limits, and sending macOS notifications — plus the `fleetdeck-status` statusline reporter and the Claude Code plugin under `plugin/`. Each is described under "Packages" below.
+What exists and works today: the Go packages behind the panel — reading and writing board cards, loading configuration, talking to the Claude Code daemon's control socket, reading session transcripts, reading account usage limits, and sending macOS notifications — the `fleetdeck` panel binary that assembles them, the `fleetdeck-status` statusline reporter, and the Claude Code plugin under `plugin/`. Each is described under "Packages" below.
 
-There is no interface yet, so no screenshot appears in this document.
+There is no web interface yet, so no screenshot appears in this document.
 
 ## Installation
 
-> **Not implemented yet.** This section describes the intended behaviour, not what the current build does. Nothing named here exists in the repository at the time of writing.
+> **Not implemented yet.** There is no release process and nothing published to download. Building from source, described below, is the only way to install fleetdeck today.
 
-The plan is to install a prebuilt binary from GitHub Releases, or build it with `go install`, then run `fleetdeck init` to write a configuration file, install a launchd agent so the panel starts on login, and wire the `fleetdeck-status` statusline reporter into Claude Code's settings. None of that exists yet: there is no release, no `fleetdeck` binary, and no `init` subcommand. For now, only `fleetdeck-status` can be built, from source, with `make build`.
+`make build` produces both binaries in `bin/`: `fleetdeck`, the panel, and `fleetdeck-status`, the statusline reporter. Keep the two together — `init` looks for the reporter beside the panel binary and records that path in Claude Code's settings.
+
+Then run `fleetdeck init`. It writes `~/.config/fleetdeck/config.yaml` if there is none, creates the board directory (`~/fleetdeck/board` by default, or `--board <path>`) with an example card if it is empty, wires `fleetdeck-status` into `~/.claude/settings.json`, and installs the launchd agent. It prints one line per step, including the steps it refused and why: a statusline you configured yourself, or a launch agent this command did not write, are left alone unless you pass `--force`, and one refused step does not stop the others. Loading the agent is a separate, printed command. See [`docs/en/getting-started.md`](docs/en/getting-started.md) for the whole flow.
 
 ## Limitations
 
@@ -47,7 +49,7 @@ The plan is to install a prebuilt binary from GitHub Releases, or build it with 
 Requires Go 1.27 (see `go.mod`) and, for linting, `golangci-lint` v2.13.2 on `PATH`.
 
 ```sh
-make build   # go build ./... (or every binary under cmd/*, once one exists)
+make build   # every binary under cmd/* into bin/
 make test    # go test ./... -race -count=1
 make lint    # go vet, gofmt -l, golangci-lint run
 ```
@@ -62,7 +64,7 @@ For configuration, see [`docs/en/configuration.md`](docs/en/configuration.md).
 - `internal/config` — loads and saves the YAML configuration file described in [`docs/en/configuration.md`](docs/en/configuration.md). A missing file is a set of defaults, not a failure; a malformed file is a failure.
 - `internal/daemon` — a client for the daemon's Unix control socket: discovery, ownership/security checks on the socket and the control key file, and the `ping`, `list`, `reply`, and `attach` (screen read / key send) operations. The full wire protocol it implements is documented in [`docs/protocol/daemon-control-socket.md`](docs/protocol/daemon-control-socket.md) — read that first before changing anything in this package.
 - `internal/notify` — shows macOS banners through `osascript`. The decision to notify belongs to the panel, not the browser: the panel knows the state, and a banner must not depend on whether a browser tab happens to be open.
-- `internal/server` — exposes the panel's snapshot over HTTP and WebSocket and accepts the four writes the panel performs: text into a session, keys into a session, one field of one card, and a statusline reporter's report. It performs no I/O of its own beyond the connection it is answering — every source it needs arrives as a function in a `Deps` struct — which is what makes wiring it to the real daemon, board, and config still someone else's job. Depends on `github.com/coder/websocket`, in addition to the standard library and `internal/board`, `internal/daemon`, and `internal/state`.
+- `internal/server` — exposes the panel's snapshot over HTTP and WebSocket and accepts the four writes the panel performs: text into a session, keys into a session, one field of one card, and a statusline reporter's report. It performs no I/O of its own beyond the connection it is answering: every source it needs arrives as a function in a `Deps` struct, and `cmd/fleetdeck` is what fills that struct in. Depends on `github.com/coder/websocket`, in addition to the standard library and `internal/board`, `internal/daemon`, and `internal/state`.
 - `internal/state` — holds the snapshot type the panel would render from and the rules for deciding which state transitions are worth a banner. It performs no I/O of its own: every source reaches it as a plain value, so the rules are testable without a daemon, a board directory, or a network.
 - `internal/transcript` — reads Claude Code session transcripts from the tail: locating a session's `.jsonl` file, a digest of its most recent conversational steps, and an estimate of context-window occupancy for when the statusline reporter is not installed. It is the source for what a session did; it never reports what a session is doing right now.
 - `internal/usage` — reads account rate-limit windows from the Anthropic OAuth usage endpoint. The OAuth token is read from the macOS Keychain, sent only to that endpoint, never logged, and never stored.
