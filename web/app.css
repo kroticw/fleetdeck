@@ -646,9 +646,18 @@ main {
   padding: var(--gap);
 }
 
+/* flex-shrink 1 with a floor well below the fixed-basis 200px this used to
+ * carry: six columns (five known stages plus "other") at 200px each need
+ * about 1250px, more than .col-center's share of a real laptop window ever
+ * gets (measured ~840px at 1680px total) — with a fixed basis that only
+ * ever grows, the last two columns silently push past the visible edge into
+ * #board's overflow-x, and macOS's overlay scrollbars give no idle-state
+ * hint that anything is there to scroll to. Letting columns shrink together
+ * instead means the whole board fits without scrolling on realistic widths;
+ * min-width stays a readability floor, not a promise every column gets it. */
 .kcol {
-  flex: 1 0 200px;
-  min-width: 200px;
+  flex: 1 1 140px;
+  min-width: 120px;
   display: flex;
   flex-direction: column;
   gap: 6px;
