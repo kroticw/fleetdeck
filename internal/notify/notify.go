@@ -51,6 +51,14 @@ func escapeAppleScriptString(s string) string {
 }
 
 // OSAScriptSend shows a macOS notification banner.
+//
+// Its only signal is osascript's exit code, and a zero exit means the command
+// ran — not that a banner appeared. macOS drops notifications silently when
+// permission is denied or Do Not Disturb or a Focus mode is on, and osascript
+// still exits zero. Nothing here verifies on-screen delivery: doing so would
+// mean reading an undocumented private database. Treat a nil error as "the
+// command did not fail", never as "the person saw it" — the panel's own
+// counters, which do not depend on any of this, are the reliable channel.
 func OSAScriptSend(title, text string) error {
 	script := fmt.Sprintf(`display notification "%s" with title "%s"`, escapeAppleScriptString(text), escapeAppleScriptString(title))
 	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
