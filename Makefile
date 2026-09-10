@@ -1,4 +1,8 @@
 VERSION  ?= dev
+# Where `make build` puts the binaries. Overridable so the release-binary version test
+# (cmd/fleetdeck/version_test.go) can build into a scratch directory instead of
+# clobbering whatever the operator has in ./bin.
+BINDIR   ?= bin
 # Recursively expanded (=, not :=) so a target-specific VERSION override (see
 # verify-ldflags below) is still picked up when LDFLAGS is actually used in a recipe,
 # rather than being frozen to the default at parse time.
@@ -16,7 +20,7 @@ build:
 	else \
 		for dir in $$dirs; do \
 			b=$$(basename $$dir); \
-			go build -ldflags "$(LDFLAGS)" -o bin/$$b ./cmd/$$b || exit 1; \
+			go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$$b ./cmd/$$b || exit 1; \
 		done; \
 	fi
 
@@ -42,8 +46,8 @@ verify-ldflags:
 	go test -tags ldflagscheck -ldflags "$(LDFLAGS)" -count=1 -run TestLdflagsSymbolPathActuallyLands -v ./internal/version/...
 
 run: build
-	@if [ ! -x ./bin/fleetdeck ]; then \
-		echo "run: ./bin/fleetdeck was not built — no cmd/ directory exists yet in this branch" >&2; \
+	@if [ ! -x $(BINDIR)/fleetdeck ]; then \
+		echo "run: $(BINDIR)/fleetdeck was not built" >&2; \
 		exit 1; \
 	fi
-	./bin/fleetdeck
+	$(BINDIR)/fleetdeck

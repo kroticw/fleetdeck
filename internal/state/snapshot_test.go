@@ -243,3 +243,33 @@ func TestLinkGivesNoCardToASessionWithNoShortID(t *testing.T) {
 		t.Fatalf("a session with no short id must be linked to nothing: %+v", views[0])
 	}
 }
+
+// TestReportedModelAndCostSerialise pins the two fields that reach the panel from the
+// statusline reporter and from nowhere else. Both are omitted from the JSON when no
+// report has been applied, so the browser can tell "nothing reported" from a reported
+// value — which for cost is what a plain float could not express, zero being a real
+// cost a session can have.
+func TestReportedModelAndCostSerialise(t *testing.T) {
+	cost := 0.0
+	reported := SessionView{Session: daemon.Session{Short: "abc12345"}, Model: "Opus", CostUSD: &cost}
+	unreported := SessionView{Session: daemon.Session{Short: "deadbeef"}}
+
+	withReport, err := json.Marshal(reported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(withReport), `"model":"Opus"`) {
+		t.Fatalf("a reported model must reach the panel: %s", withReport)
+	}
+	if !strings.Contains(string(withReport), `"costUSD":0`) {
+		t.Fatalf("a session that has cost nothing yet still has a reported cost: %s", withReport)
+	}
+
+	without, err := json.Marshal(unreported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(without), "model") || strings.Contains(string(without), "costUSD") {
+		t.Fatalf("a session with no report must carry neither field: %s", without)
+	}
+}

@@ -753,27 +753,6 @@ func TestLoadInvalidDurationStringDoesNotDuplicateTheValue(t *testing.T) {
 	}
 }
 
-// TestSilenceDisabledTrueForZero and TestSilenceDisabledFalseForPositive pin the
-// meaning of notify.silence_after: 0. Spec line 248 defines the setting as the
-// threshold a session's silence must exceed before it counts as an event, and no
-// session is silent for less than no time, so a zero threshold cannot mean "report
-// every silence" — that would banner the whole fleet on first sight. Zero turns the
-// rule off. SilenceDisabled is the one place that decision is made, so a consumer
-// cannot re-decide it differently by comparing SilenceAfter to zero itself.
-func TestSilenceDisabledTrueForZero(t *testing.T) {
-	n := NotifyConfig{SilenceAfter: 0}
-	if !n.SilenceDisabled() {
-		t.Fatal("a zero silence_after must turn the silence rule off")
-	}
-}
-
-func TestSilenceDisabledFalseForPositive(t *testing.T) {
-	n := NotifyConfig{SilenceAfter: 30 * time.Minute}
-	if n.SilenceDisabled() {
-		t.Fatal("a positive silence_after is a real threshold, the rule must stay on")
-	}
-}
-
 // TestSaveSweepsStaleTempFiles covers branch-review-13's recommendation 8: if the
 // process died between os.CreateTemp and os.Rename in an earlier Save (a hard kill, not
 // a Go-level error return — the defer already covers every error-return path), a

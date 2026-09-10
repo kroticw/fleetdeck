@@ -19,32 +19,30 @@ import (
 
 // NotifyConfig is never serialised directly either — see Config below.
 type NotifyConfig struct {
-	Waiting      bool
-	Failed       bool
-	Silent       bool
-	CardBlocked  bool
-	SilenceAfter time.Duration
-}
+	Waiting     bool
+	Failed      bool
+	Silent      bool
+	CardBlocked bool
 
-// SilenceDisabled reports whether the silence rule is switched off.
-//
-// SilenceAfter is not a repeat-suppression window: spec line 248 defines
-// notify.silence_after as "сколько сессия должна молчать, чтобы это считалось
-// событием" — the threshold a session's silence must exceed before it is an event at
-// all. No session can be silent for less than no time, so a zero threshold read
-// literally would make every session an event the moment it is first seen, and the
-// whole fleet would arrive as banners. The only reading that leaves the setting a way
-// to say "do not call me about silence" is that 0 turns the rule off; validate rejects
-// a negative value outright, but this method treats one as off too rather than let an
-// unvalidated struct built in code fire on everything.
-//
-// This method is where that decision is made once for the whole codebase: a consumer of
-// SilenceAfter must call it rather than compare SilenceAfter to zero itself, so the
-// meaning cannot be re-decided differently somewhere else. See
-// docs/en/configuration.md's "What `silence_after: 0` means, and what a
-// negative value does" section for the user-facing statement of the same rule.
-func (n NotifyConfig) SilenceDisabled() bool {
-	return n.SilenceAfter <= 0
+	// SilenceAfter is how long a session must be silent before that silence counts
+	// as an event at all, and zero turns the silence rule off entirely.
+	//
+	// It is not a repeat-suppression window: spec line 248 defines
+	// notify.silence_after as "сколько сессия должна молчать, чтобы это считалось
+	// событием" — a threshold, not a cooldown. No session can be silent for less
+	// than no time, so a zero threshold read literally would make every session an
+	// event the moment it is first seen and the whole fleet would arrive as banners.
+	// Off is the only reading that leaves the setting a way to say "do not call me
+	// about silence". validate rejects a negative value outright.
+	//
+	// The comparison that acts on this lives in state.Diff, as `silenceAfter > 0`,
+	// and has to: state applies the rule and must not import this package to ask
+	// permission. So this comment is the explanation, not the implementation — there
+	// is deliberately no helper here claiming to be the one place the decision is
+	// made, because it would be the second one. See docs/en/configuration.md's
+	// "What `silence_after: 0` means, and what a negative value does" section for the
+	// user-facing statement of the same rule.
+	SilenceAfter time.Duration
 }
 
 // Config is never serialised directly — Save/Load marshal the nested unexported
@@ -328,7 +326,7 @@ func describeYAMLError(err error) error {
 // socket, or a negative silence window that means either "always silent" or "never
 // silent" depending on how it is later compared — neither of which is what a negative
 // duration was meant to express. Zero is not rejected here: unlike a negative value, it
-// has one defined meaning (see NotifyConfig.SilenceDisabled) rather than two competing
+// has one defined meaning (see NotifyConfig.SilenceAfter) rather than two competing
 // ones, so there is nothing for validate to refuse.
 func validate(c Config) error {
 	if c.ServerPort < 1 || c.ServerPort > 65535 {

@@ -27,6 +27,22 @@ type SessionView struct {
 	Context   *transcript.Usage `json:"context,omitempty"`
 	CardPath  string            `json:"cardPath,omitempty"`
 	SilentFor time.Duration     `json:"silentFor"`
+
+	// Model and CostUSD come from the statusline reporter and from nowhere else.
+	// Claude Code hands the model display name and the session's running cost to
+	// its statusline command and to nothing outside the session (spec section
+	// 3.2), which is the whole reason cmd/fleetdeck-status exists. Unlike Context,
+	// neither has a transcript fallback: a session whose reporter is not installed
+	// simply has no model name and no cost, and the panel must show that rather
+	// than a number derived from something else.
+	Model string `json:"model,omitempty"`
+
+	// CostUSD is a pointer because "no report" and "a session that has so far cost
+	// nothing" are different facts, and a plain float cannot tell them apart —
+	// zero is a real cost a session genuinely can have. The same distinction the
+	// zero SilentFor carries below, made explicit in the type instead of by
+	// convention, because there is no rule here that reads a zero as absence.
+	CostUSD *float64 `json:"costUSD,omitempty"`
 }
 
 // Snapshot is everything the panel shows at one moment, assembled from
@@ -67,9 +83,10 @@ type Snapshot struct {
 // link on every tick, and a neighbour package changing its sort cannot silently
 // move a card from one session to another.
 //
-// Link fills Session and CardPath and nothing else. Context and SilentFor are the
-// caller's to fill: both require I/O (reading the session's transcript from disk),
-// and this package performs none — Task 11's Collect does that and hands the
+// Link fills Session and CardPath and nothing else. Context, SilentFor, Model and
+// CostUSD are the caller's to fill: the first two require I/O (reading the session's
+// transcript from disk) and the last two arrive from the statusline reporter,
+// and this package does neither — Task 11's Collect does both and hands the
 // finished views back. So a zero SilentFor out of Link means "not measured", never
 // "not silent", and the two cannot be told apart from the field alone. Silence is
 // measured from the transcript, as the age of the last write to the session's
