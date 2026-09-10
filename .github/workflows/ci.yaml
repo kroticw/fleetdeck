@@ -61,3 +61,82 @@ jobs:
       - run: make test
       - run: make build
       - run: make verify-ldflags
+
+  docs-parity:
+    # A documentation check has no reason to run on both operating systems the
+    # `check` job matrix covers, and needs no Go toolchain at all.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check every English doc has a Russian counterpart with the same heading sequence
+        run: |
+          # The pairing is derived, not hardcoded: every docs/en/*.md must have a
+          # docs/ru/<same name>.md counterpart, plus the explicit README.md /
+          # README.ru.md pair (README lives outside docs/, so it cannot be
+          # discovered by the same glob). A new English page with no Russian
+          # translation must fail here, by name, instead of passing silently.
+          #
+          # Pairs are compared by the *sequence* of heading levels (#, ##, ###,
+          # ...), not by how many headings each page has: two pages can hold an
+          # equal count while their structure has drifted apart, and comparing
+          # the sequence catches that as well as a dropped section. Fenced code
+          # blocks (a line whose trimmed form starts with three backticks or
+          # three tildes, up to the matching closing fence) are skipped, since a
+          # naive `grep -c '^#'` would also count shell comments and example
+          # headings quoted inside a fence — the gap that once forced
+          # docs/en/board-convention.md to indent its example card's headings
+          # just to dodge the count, which made the documented card not shaped
+          # like a real one.
+          heading_sequence() {
+            awk '
+              /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+              fence { next }
+              match($0, /^#{1,6}[[:space:]]/) { print RLENGTH - 1 }
+            ' "$1"
+          }
+
+          check_pair() {
+            en="$1"
+            ru="$2"
+            if [ ! -f "$ru" ]; then
+              echo "missing translation: $ru has no counterpart for $en"
+              mismatch=1
+              return 0
+            fi
+            en_seq=()
+            while IFS= read -r lvl; do en_seq+=("$lvl"); done < <(heading_sequence "$en")
+            ru_seq=()
+            while IFS= read -r lvl; do ru_seq+=("$lvl"); done < <(heading_sequence "$ru")
+            max=${#en_seq[@]}
+            if [ "${#ru_seq[@]}" -gt "$max" ]; then
+              max=${#ru_seq[@]}
+            fi
+            i=0
+            while [ "$i" -lt "$max" ]; do
+              a="${en_seq[$i]:-<missing heading>}"
+              b="${ru_seq[$i]:-<missing heading>}"
+              if [ "$a" != "$b" ]; then
+                echo "heading sequence mismatch: $en vs $ru diverge at heading #$((i + 1)) (English level $a, Russian level $b)"
+                mismatch=1
+                return 0
+              fi
+              i=$((i + 1))
+            done
+            return 0
+          }
+
+          mismatch=0
+          check_pair README.md README.ru.md
+
+          shopt -s nullglob
+          en_docs=(docs/en/*.md)
+          if [ "${#en_docs[@]}" -eq 0 ]; then
+            echo "docs/en contains no markdown files: this check would pass vacuously"
+            exit 1
+          fi
+          for en in "${en_docs[@]}"; do
+            check_pair "$en" "docs/ru/$(basename "$en")"
+          done
+
+          exit "$mismatch"
