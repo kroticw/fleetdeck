@@ -4,13 +4,18 @@
  * (the session list mixed currentColor through color-mix(), the kanban board
  * used flat hex) — this is that consolidation.
  *
- * Dark is the base palette (bare :root): it is what the panel has shipped
- * with, and every token below states a real value for it, not a mix left to
- * fall out of currentColor. Light is a full second palette, not a derived
- * one, overridden in two ways that must not fight each other: the system's
- * own prefers-color-scheme, and an explicit choice recorded in data-theme on
- * <html> (web/js/theme.js) that outranks the system. A person is never left
- * looking at "dark, and whatever the browser felt like doing with it."
+ * Light is the base palette (bare :root): every token below states a real
+ * value for it, not a mix left to fall out of currentColor. Dark is a full
+ * second palette, not a derived one, applied in two ways that must not fight
+ * each other: the system's own prefers-color-scheme, and an explicit choice
+ * recorded in data-theme on <html> (web/js/theme.js) that outranks the
+ * system. auto is the default — no data-theme attribute at all — so a person
+ * who has never touched the toggle gets whatever their OS is already set to,
+ * light or dark, not a fixed choice the page made for them. No color has its
+ * only definition inside the @media block: the same dark values are restated
+ * under :root[data-theme="dark"] so an explicit dark choice wins even when
+ * the system itself is set to light, exactly as :not([data-theme="light"])
+ * lets an explicit light choice win when the system is set to dark.
  *
  * Semantic tokens carry meaning, not decoration, and the meaning is narrow on
  * purpose: --danger is a failure or something that will not resolve itself —
@@ -28,29 +33,29 @@
   color-scheme: light dark;
 
   /* Surfaces, back to front. */
-  --bg: #14161a;
-  --surface: #1b1e24;
-  --surface-raised: #21252c;
-  --surface-hover: #292e36;
-  --border: #2c313a;
-  --border-strong: #3c4149;
-  --shadow: rgb(0 0 0 / 45%);
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-hover: #edeff2;
+  --border: #dde1e7;
+  --border-strong: #c2c8d1;
+  --shadow: rgb(20 22 26 / 16%);
 
   /* Text, most to least prominent. */
-  --text: #e7e9ec;
-  --text-muted: #9aa1ac;
-  --text-faint: #6b7280;
+  --text: #1a1d22;
+  --text-muted: #5b6470;
+  --text-faint: #8791a0;
 
   /* The app's own accent — used for focus, links, the active tab, and the
      "planned" zone. Teal rather than the blue every dashboard reaches for,
      and kept out of the danger/attn family so it never reads as an alert. */
-  --accent: #34a99a;
-  --accent-strong: #4fc4b5;
+  --accent: #1f7a72;
+  --accent-strong: #15645d;
 
   /* Severity, exactly three steps. */
-  --danger: #e5484d;
-  --attn: #d88a15;
-  --ok: #3fb950;
+  --danger: #c92a2a;
+  --attn: #a15c00;
+  --ok: #2f9e44;
 
   /* Kanban zone accents. Urgent and unplanned deliberately reuse --danger
      and --attn — a zone is a planning-priority signal, not a session-state
@@ -94,58 +99,61 @@ html {
   font-size: 87.5%; /* 14px at a 16px browser default */
 }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #f5f6f8;
-    --surface: #ffffff;
-    --surface-raised: #ffffff;
-    --surface-hover: #edeff2;
-    --border: #dde1e7;
-    --border-strong: #c2c8d1;
-    --shadow: rgb(20 22 26 / 16%);
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
 
-    --text: #1a1d22;
-    --text-muted: #5b6470;
-    --text-faint: #8791a0;
+    --bg: #14161a;
+    --surface: #1b1e24;
+    --surface-raised: #21252c;
+    --surface-hover: #292e36;
+    --border: #2c313a;
+    --border-strong: #3c4149;
+    --shadow: rgb(0 0 0 / 45%);
 
-    --accent: #1f7a72;
-    --accent-strong: #15645d;
+    --text: #e7e9ec;
+    --text-muted: #9aa1ac;
+    --text-faint: #6b7280;
 
-    --danger: #c92a2a;
-    --attn: #a15c00;
-    --ok: #2f9e44;
+    --accent: #34a99a;
+    --accent-strong: #4fc4b5;
+
+    --danger: #e5484d;
+    --attn: #d88a15;
+    --ok: #3fb950;
   }
 }
 
-:root[data-theme="light"] {
-  color-scheme: light;
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --surface-raised: #ffffff;
-  --surface-hover: #edeff2;
-  --border: #dde1e7;
-  --border-strong: #c2c8d1;
-  --shadow: rgb(20 22 26 / 16%);
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-  --text: #1a1d22;
-  --text-muted: #5b6470;
-  --text-faint: #8791a0;
+  --bg: #14161a;
+  --surface: #1b1e24;
+  --surface-raised: #21252c;
+  --surface-hover: #292e36;
+  --border: #2c313a;
+  --border-strong: #3c4149;
+  --shadow: rgb(0 0 0 / 45%);
 
-  --accent: #1f7a72;
-  --accent-strong: #15645d;
+  --text: #e7e9ec;
+  --text-muted: #9aa1ac;
+  --text-faint: #6b7280;
 
-  --danger: #c92a2a;
-  --attn: #a15c00;
-  --ok: #2f9e44;
+  --accent: #34a99a;
+  --accent-strong: #4fc4b5;
+
+  --danger: #e5484d;
+  --attn: #d88a15;
+  --ok: #3fb950;
 }
 
-:root[data-theme="dark"] {
-  /* The system may still be light here — this only re-affirms color-scheme
-     so native form controls (the usage <meter>s, <select>s) render with dark
-     chrome even when the OS itself is set to light. Every custom property
-     above already equals the bare :root value in that case, so nothing else
-     needs restating. */
-  color-scheme: dark;
+:root[data-theme="light"] {
+  /* The system may still be dark here — this only re-affirms color-scheme
+     so native form controls (the usage <meter>s, <select>s) render with
+     light chrome even when the OS itself is set to dark. Every custom
+     property above already equals the bare :root value in that case, so
+     nothing else needs restating. */
+  color-scheme: light;
 }
 
 * {
