@@ -206,14 +206,36 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "path is required: a card write must name the card it writes")
 		return
 	}
-	if err := d.SetCardField(body.Path, body.Field, body.Value); err != nil {
+	switch err := d.SetCardField(body.Path, body.Field, body.Value); {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, board.ErrNothingToCommit):
+		// The card already held this value, so the write changed no bytes and
+		// there was no history to record. Nothing happened and nothing is
+		// missing: an ordinary success, checked before the case below because an
+		// error can carry both sentinels and this is the more specific one.
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrFieldWrittenNotCommitted):
+		// A success status for a partial outcome, deliberately. The status code
+		// answers one question — did the operator's edit take effect? — and here
+		// it did: the field is in the card file. What failed is the commit, and
+		// the panel cannot ask for that to be retried by redoing the edit, which
+		// on a progress field would apply it twice. So the outcome goes out as a
+		// success carrying the part that did not happen and why, for the panel to
+		// show as it likes.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"written":   true,
+			"committed": false,
+			"reason":    err.Error(),
+		})
+	default:
 		fail(w, cardWriteStatus(err), err.Error())
-		return
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
-// cardWriteStatus maps what internal/board can actually return onto a status.
+// cardWriteStatus maps what internal/board can actually return onto a status. It
+// sees only the failures where nothing was written: the two outcomes where the
+// field did reach the card are answered by the caller above.
 //
 // board.SetField distinguishes exactly one failure with a sentinel
 // (ErrUnknownField, for a field the panel does not own) and reaches the disk only

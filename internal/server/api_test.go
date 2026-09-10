@@ -375,3 +375,52 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 		})
 	}
 }
+
+// A card write is two steps — the file, then the commit — and only the first one
+// decides whether the operator's edit took effect. An error that reaches the
+// handler after the file was written must not be shown as a failed write: the
+// operator would redo an edit that already happened, and doing that twice to a
+// progress field moves it somewhere nobody asked for.
+func TestPatchCardReportsAnUncommittedWriteAsSuccess(t *testing.T) {
+	d, _ := testDeps()
+	d.SetCardField = func(string, string, string) error {
+		return fmt.Errorf("%w: git commit timed out after 30s, likely a signing passphrase prompt", ErrFieldWrittenNotCommitted)
+	}
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"progress","value":"40"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a written but uncommitted field must be 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "signing passphrase prompt") {
+		t.Fatalf("the reason must reach the operator verbatim: %s", body)
+	}
+	if !strings.Contains(body, `"committed":false`) {
+		t.Fatalf("an uncommitted write must be distinguishable from an ordinary success: %s", body)
+	}
+}
+
+// Nothing to commit means the field already held this value, so no history is
+// missing and there is nothing to tell the operator about.
+func TestPatchCardReportsNothingToCommitAsAnOrdinarySuccess(t *testing.T) {
+	d, _ := testDeps()
+	d.SetCardField = func(string, string, string) error {
+		return fmt.Errorf("nothing to commit for c.md: %w", board.ErrNothingToCommit)
+	}
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"progress","value":"40"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("nothing to commit must be an ordinary success, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The same sentinel wrapped both ways round: a commit that found nothing to do is
+// not a write missing from git history, whichever way the caller wrapped it.
+func TestPatchCardTreatsNothingToCommitAsSuccessEvenWhenWrappedAsUncommitted(t *testing.T) {
+	d, _ := testDeps()
+	d.SetCardField = func(string, string, string) error {
+		return fmt.Errorf("%w: %w", ErrFieldWrittenNotCommitted, board.ErrNothingToCommit)
+	}
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"progress","value":"40"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

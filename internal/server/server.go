@@ -10,12 +10,26 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/state"
 )
+
+// ErrFieldWrittenNotCommitted is what SetCardField wraps when the field reached
+// the card file but the commit did not happen. The edit is applied; only the git
+// history is missing it.
+//
+// It exists because a card write is two steps and only the first one decides
+// whether the operator's edit took effect. Once the file is written, any later
+// failure — a signing passphrase prompt with nobody to answer it, a repository in
+// a state git will not commit from — leaves the panel holding an error for
+// something that already happened. Reported as a plain failure, the operator
+// redoes an edit that took effect, and a progress field applied twice moves
+// somewhere nobody asked for.
+var ErrFieldWrittenNotCommitted = errors.New("field written but not committed")
 
 // Deps holds everything the HTTP surface needs from the rest of the program.
 //
@@ -43,9 +57,16 @@ type Deps struct {
 	// silently discard the bytes it did collect.
 	ReadScreen func(session string, tail int) daemon.ScreenResult
 
-	// SetCardField writes one field of one card. The server does not decide which
+	// SetCardField writes one field of one card, and records it in the board's git
+	// history if the caller wired it to do so. The server does not decide which
 	// fields the panel owns or which values are legal — internal/board does, and
 	// this server only maps its refusals onto status codes.
+	//
+	// Two of those returns carry a meaning the status codes depend on. An error
+	// wrapping ErrFieldWrittenNotCommitted means the field reached the card and
+	// only the commit did not happen, and is answered as a success. An error
+	// wrapping board.ErrNothingToCommit means the card already held the value, and
+	// is answered as an ordinary success. Everything else is a failed write.
 	//
 	// path arrives from the browser, so whatever this function is wired to is
 	// responsible for confining writes to the board directory. The server cannot
