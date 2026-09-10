@@ -532,12 +532,19 @@ func TestSetSessionLabelCreatesAConfigWhenNoneExists(t *testing.T) {
 	}
 }
 
-// TestSetSessionLabelNeverFallsBackToSaveForAnExistingFile mirrors
-// TestSetOrchestratorSessionNeverFallsBackToSaveForAnExistingFile: a config
-// file that exists but is missing session_labels entirely (hand-edited down
-// to something unusual) must be an error, never a silent full rewrite that
-// would destroy the comments this write path exists to protect.
-func TestSetSessionLabelNeverFallsBackToSaveForAnExistingFile(t *testing.T) {
+// TestSetSessionLabelCreatesTheSectionForAnExistingFileMissingIt is unlike
+// its TestSetOrchestratorSessionNeverFallsBackToSaveForAnExistingFile
+// sibling on purpose: session_labels is the first top-level key ever added
+// to the config schema after its first release (see
+// internal/config.SetSessionLabel's own comment), so a config file that
+// exists but predates this feature is the ordinary case for this specific
+// key, not a hand-edited oddity — and refusing it broke the feature outright
+// for every operator who had already run `fleetdeck init` before today, a
+// real failure caught against a real running config. config.SetSessionLabel
+// now appends the missing section surgically rather than erroring, and this
+// still must never fall back to a full config.Save: the hand-written
+// comment on the untouched sibling key must survive.
+func TestSetSessionLabelCreatesTheSectionForAnExistingFileMissingIt(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	content := "server:\n  port: 7777  # hand-tuned, do not overwrite\n"
 	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
@@ -545,20 +552,23 @@ func TestSetSessionLabelNeverFallsBackToSaveForAnExistingFile(t *testing.T) {
 	}
 	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
 
-	err := setSessionLabel(p, collector, testSessionUUID, "label")
-	if err == nil {
-		t.Fatal("a config missing session_labels must be an error, not a silent full rewrite")
+	if err := setSessionLabel(p, collector, testSessionUUID, "label"); err != nil {
+		t.Fatalf("setSessionLabel: %v", err)
 	}
 
 	raw, readErr := os.ReadFile(p)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
-	if string(raw) != content {
-		t.Fatalf("a refused write must leave the file byte for byte as it was, got:\n%s", string(raw))
+	got := string(raw)
+	if !strings.Contains(got, "# hand-tuned, do not overwrite") {
+		t.Fatalf("the existing comment must survive, got:\n%s", got)
 	}
-	if _, ok := collector.Config().SessionLabels[testSessionUUID]; ok {
-		t.Fatal("the collector must not report a label that was never actually persisted")
+	if !strings.Contains(got, testSessionUUID+": label") {
+		t.Fatalf("the new entry must actually be written, got:\n%s", got)
+	}
+	if collector.Config().SessionLabels[testSessionUUID] != "label" {
+		t.Fatalf("the collector must report the new label, got %+v", collector.Config().SessionLabels)
 	}
 }
 
