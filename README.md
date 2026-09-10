@@ -42,7 +42,7 @@ server:
   port: 7777                     # default: 7777
 ```
 
-Durations (`poll_interval`, `silence_after`) must be a duration string such as `"30s"` or `"2s"` — a bare number is rejected with a message that says so, rather than a raw Go/YAML type-mismatch error. `silence_after: 0` means notifications are never silenced — every occurrence is reported, with no cooldown window at all — while a negative value is rejected outright as ambiguous. See `internal/config` for the full implementation and its tests.
+Durations (`poll_interval`, `silence_after`) must be a duration string such as `"30s"` or `"2s"` — a bare number is rejected with a message that says so, rather than a raw Go/YAML type-mismatch error. `silence_after` is the threshold a session must be silent for before the silence counts as an event, so `silence_after: 0` turns that rule off entirely — no session is silent for less than no time, and a zero threshold read literally would banner the whole fleet on first sight. A negative value is rejected outright as ambiguous. See `internal/config` for the full implementation and its tests.
 
 ## Packages
 

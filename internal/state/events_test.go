@@ -238,3 +238,20 @@ func TestEventTextIsEnglish(t *testing.T) {
 		t.Fatalf("interface text must be English per spec section 10.1: %+v", fire)
 	}
 }
+
+// TestZeroSilenceThresholdDisablesTheSilenceRule pins task-9-fix-round-1 item 1:
+// spec line 248 defines notify.silence_after as the threshold a session must be
+// silent for before it counts as an event, so a zero threshold cannot mean "every
+// silence is an event" — every live session crosses zero on first sight and the
+// whole fleet gets a banner. Zero means the rule is off.
+func TestZeroSilenceThresholdDisablesTheSilenceRule(t *testing.T) {
+	prev := Snapshot{At: time.Now(), Sessions: []SessionView{idleView("z")}}
+	next := Snapshot{At: time.Now(), Sessions: []SessionView{idleView("z"), idleView("a"), idleView("b")}}
+	fire, cleared := Diff(prev, next, 0)
+	if len(fire) != 0 {
+		t.Fatalf("a zero silence threshold turns the silence rule off, it must not fire: %+v", fire)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("a disabled silence rule must not clear anything either: %v", cleared)
+	}
+}

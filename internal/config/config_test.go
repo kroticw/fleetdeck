@@ -753,23 +753,24 @@ func TestLoadInvalidDurationStringDoesNotDuplicateTheValue(t *testing.T) {
 	}
 }
 
-// TestNeverSilencesTrueForZero and TestNeverSilencesFalseForPositive pin
-// branch-review-13's recommendation 7: notify.silence_after: 0 previously had no defined
-// meaning (validate rejected only negatives) even though it is exactly as ambiguous as a
-// negative value — "silence immediately" or "never silence" are both readings of a zero
-// window. NeverSilences is the one place that decision is made, so a future consumer
+// TestSilenceDisabledTrueForZero and TestSilenceDisabledFalseForPositive pin the
+// meaning of notify.silence_after: 0. Spec line 248 defines the setting as the
+// threshold a session's silence must exceed before it counts as an event, and no
+// session is silent for less than no time, so a zero threshold cannot mean "report
+// every silence" — that would banner the whole fleet on first sight. Zero turns the
+// rule off. SilenceDisabled is the one place that decision is made, so a consumer
 // cannot re-decide it differently by comparing SilenceAfter to zero itself.
-func TestNeverSilencesTrueForZero(t *testing.T) {
+func TestSilenceDisabledTrueForZero(t *testing.T) {
 	n := NotifyConfig{SilenceAfter: 0}
-	if !n.NeverSilences() {
-		t.Fatal("a zero silence_after must mean notifications are never silenced")
+	if !n.SilenceDisabled() {
+		t.Fatal("a zero silence_after must turn the silence rule off")
 	}
 }
 
-func TestNeverSilencesFalseForPositive(t *testing.T) {
+func TestSilenceDisabledFalseForPositive(t *testing.T) {
 	n := NotifyConfig{SilenceAfter: 30 * time.Minute}
-	if n.NeverSilences() {
-		t.Fatal("a positive silence_after must not report NeverSilences")
+	if n.SilenceDisabled() {
+		t.Fatal("a positive silence_after is a real threshold, the rule must stay on")
 	}
 }
 

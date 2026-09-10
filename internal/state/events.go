@@ -26,7 +26,13 @@ type Event struct {
 //
 //  1. a session started Waiting() — a person must answer it now;
 //  2. a session's State became "failed";
-//  3. a session's SilentFor crossed silenceAfter;
+//  3. a session's SilentFor crossed silenceAfter — unless silenceAfter is zero
+//     or negative, which turns this rule off entirely. Spec line 248 defines
+//     notify.silence_after as the threshold a session must be silent for before
+//     the silence counts as an event, and no session can be silent for less than
+//     no time at all: a zero threshold read as "report every silence" would put a
+//     banner on the whole fleet the moment it is first seen. Off is the only
+//     reading that leaves the setting a way to say "do not call me about this";
 //  4. a card's Stage became "blocked" or "review".
 //
 // Deliberately absent: a session becoming Stalled() fires nothing on its own.
@@ -74,7 +80,8 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 			cleared = append(cleared, fmt.Sprintf("session:%s:failed", s.Short))
 		}
 
-		crossed := s.SilentFor >= silenceAfter && (!existed || was.SilentFor < silenceAfter)
+		silenceEnabled := silenceAfter > 0
+		crossed := silenceEnabled && s.SilentFor >= silenceAfter && (!existed || was.SilentFor < silenceAfter)
 		if crossed {
 			fire = append(fire, Event{
 				Key:   fmt.Sprintf("session:%s:silent", s.Short),
@@ -82,7 +89,7 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 				Text:  fmt.Sprintf("has been silent for over %s", silenceAfter),
 			})
 		}
-		if s.SilentFor < silenceAfter && existed && was.SilentFor >= silenceAfter {
+		if silenceEnabled && s.SilentFor < silenceAfter && existed && was.SilentFor >= silenceAfter {
 			cleared = append(cleared, fmt.Sprintf("session:%s:silent", s.Short))
 		}
 	}
