@@ -36,6 +36,43 @@ type Config struct {
 	ServerPort          int
 }
 
+// configDuration is time.Duration decoded from YAML with its own validation-shaped
+// error for a value that is not a duration string at all, rather than yaml.v3's
+// default type-mismatch text for a bare number (e.g. "cannot unmarshal !!int 0 into
+// time.Duration" for `poll_interval: 0`, as opposed to the intended `poll_interval: 0s`
+// reaching validate's own "must be positive" message). yaml.v3 special-cases the plain
+// time.Duration type to marshal and unmarshal it as a duration string already; using a
+// distinct named type here means that built-in support no longer applies, so both
+// directions are implemented explicitly below rather than relying on it silently
+// continuing to work for a type it was never written for.
+type configDuration time.Duration
+
+// MarshalYAML writes d as the same duration-string form (e.g. "30s") the plain
+// time.Duration type would have produced, so Save's output format does not change.
+func (d configDuration) MarshalYAML() (interface{}, error) {
+	return time.Duration(d).String(), nil
+}
+
+// UnmarshalYAML accepts only a duration string (e.g. "30s"), parsed with
+// time.ParseDuration. Anything else — most commonly a bare number, the config file's
+// most likely typo for a duration field — is refused here with a message that says so,
+// rather than surfacing yaml.v3's default "cannot unmarshal !!int ... into
+// time.Duration", which names the Go type involved rather than the fix.
+func (d *configDuration) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode && value.Tag == "!!str" {
+		parsed, err := time.ParseDuration(value.Value)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q: %w", value.Value, err)
+		}
+		*d = configDuration(parsed)
+		return nil
+	}
+	if value.Kind == yaml.ScalarNode && (value.Tag == "!!int" || value.Tag == "!!float") {
+		return fmt.Errorf("must be a duration string like \"30s\", not a bare number (%s)", value.Value)
+	}
+	return errors.New("must be a duration string like \"30s\"")
+}
+
 // notifyFile represents the nested notify section in the config file.
 type notifyFile struct {
 	Enabled struct {
@@ -44,7 +81,7 @@ type notifyFile struct {
 		Silent      bool `yaml:"silent"`
 		CardBlocked bool `yaml:"card_blocked"`
 	} `yaml:"enabled"`
-	SilenceAfter time.Duration `yaml:"silence_after"`
+	SilenceAfter configDuration `yaml:"silence_after"`
 }
 
 // file represents the nested structure of the config file.
@@ -60,7 +97,7 @@ type file struct {
 	} `yaml:"orchestrator"`
 	Notify notifyFile `yaml:"notify"`
 	Daemon struct {
-		PollInterval time.Duration `yaml:"poll_interval"`
+		PollInterval configDuration `yaml:"poll_interval"`
 	} `yaml:"daemon"`
 	Usage struct {
 		Enabled bool `yaml:"enabled"`
@@ -93,8 +130,8 @@ func configToFile(c Config) file {
 	f.Notify.Enabled.Failed = c.Notify.Failed
 	f.Notify.Enabled.Silent = c.Notify.Silent
 	f.Notify.Enabled.CardBlocked = c.Notify.CardBlocked
-	f.Notify.SilenceAfter = c.Notify.SilenceAfter
-	f.Daemon.PollInterval = c.DaemonPollInterval
+	f.Notify.SilenceAfter = configDuration(c.Notify.SilenceAfter)
+	f.Daemon.PollInterval = configDuration(c.DaemonPollInterval)
 	f.Usage.Enabled = c.UsageEnabled
 	f.Server.Port = c.ServerPort
 	return f
@@ -111,9 +148,9 @@ func fileToConfig(f file) Config {
 			Failed:       f.Notify.Enabled.Failed,
 			Silent:       f.Notify.Enabled.Silent,
 			CardBlocked:  f.Notify.Enabled.CardBlocked,
-			SilenceAfter: f.Notify.SilenceAfter,
+			SilenceAfter: time.Duration(f.Notify.SilenceAfter),
 		},
-		DaemonPollInterval: f.Daemon.PollInterval,
+		DaemonPollInterval: time.Duration(f.Daemon.PollInterval),
 		UsageEnabled:       f.Usage.Enabled,
 		ServerPort:         f.Server.Port,
 	}
@@ -180,12 +217,20 @@ func validate(c Config) error {
 // missingAncestorDirs returns, ordered from the outermost missing ancestor down to dir
 // itself, every directory in dir's chain that does not exist yet — exactly the set
 // os.MkdirAll(dir, ...) is about to create. It stops at the first ancestor that already
-// exists: that one, and everything above it, existed before this call and is not
-// something the caller created, so it must never be included.
+// exists, or whose existence cannot be determined at all: either way, that ancestor,
+// and everything above it, is not something this call is about to create, so it must
+// never be included. "Does not exist" means exactly errors.Is(err, fs.ErrNotExist) —
+// any other Stat failure (EACCES from a restrictive parent, ELOOP from a symlink
+// cycle, ENOTDIR from a non-directory earlier in the path, ...) leaves existence
+// merely unknown, not confirmed absent, and must not be treated as the latter: an
+// ancestor that already exists but happens to be unstat'able must never join this list
+// and later get os.Chmod(d, 0o700) from Save (see Save's own comment on why that would
+// be wrong).
 func missingAncestorDirs(dir string) []string {
 	var missing []string
 	for p := dir; ; {
-		if _, err := os.Stat(p); err == nil {
+		_, err := os.Stat(p)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) {
 			break
 		}
 		missing = append(missing, p)

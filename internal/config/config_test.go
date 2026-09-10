@@ -237,13 +237,24 @@ func TestSavePreservesNestedFormat(t *testing.T) {
 	}
 }
 
+// TestLoadPortOutOfRangeIsAnError, and its neighbours below through
+// TestLoadNegativeSilenceAfterIsAnError, each pin the specific validate() message their
+// fixture is meant to trigger, not just err != nil: asserting only that some error
+// came back lets the test go green for the wrong reason — e.g. a fixture that is
+// simply malformed YAML would satisfy "err == nil is a failure" without ever reaching
+// validate() at all, and a bug that swapped two of validate's checks would still turn
+// every one of these fixtures into *some* error.
 func TestLoadPortOutOfRangeIsAnError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
 	if err := os.WriteFile(p, []byte("server:\n  port: 99999\n"), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	if _, err := Load(p); err == nil {
+	_, err := Load(p)
+	if err == nil {
 		t.Fatal("a port above 65535 must be rejected")
+	}
+	if !strings.Contains(err.Error(), "server.port must be between 1 and 65535") {
+		t.Fatalf("expected the port-range validation message, got: %v", err)
 	}
 }
 
@@ -252,8 +263,12 @@ func TestLoadPortZeroIsAnError(t *testing.T) {
 	if err := os.WriteFile(p, []byte("server:\n  port: 0\n"), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	if _, err := Load(p); err == nil {
+	_, err := Load(p)
+	if err == nil {
 		t.Fatal("a port of 0 must be rejected")
+	}
+	if !strings.Contains(err.Error(), "server.port must be between 1 and 65535") {
+		t.Fatalf("expected the port-range validation message, got: %v", err)
 	}
 }
 
@@ -262,8 +277,12 @@ func TestLoadPortNegativeIsAnError(t *testing.T) {
 	if err := os.WriteFile(p, []byte("server:\n  port: -1\n"), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	if _, err := Load(p); err == nil {
+	_, err := Load(p)
+	if err == nil {
 		t.Fatal("a negative port must be rejected")
+	}
+	if !strings.Contains(err.Error(), "server.port must be between 1 and 65535") {
+		t.Fatalf("expected the port-range validation message, got: %v", err)
 	}
 }
 
@@ -272,8 +291,12 @@ func TestLoadZeroPollIntervalIsAnError(t *testing.T) {
 	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: 0s\n"), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	if _, err := Load(p); err == nil {
+	_, err := Load(p)
+	if err == nil {
 		t.Fatal("a zero poll interval must be rejected: it would hot-loop against the daemon socket")
+	}
+	if !strings.Contains(err.Error(), "daemon.poll_interval must be positive") {
+		t.Fatalf("expected the poll-interval validation message, got: %v", err)
 	}
 }
 
@@ -282,8 +305,12 @@ func TestLoadNegativePollIntervalIsAnError(t *testing.T) {
 	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: -5s\n"), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	if _, err := Load(p); err == nil {
+	_, err := Load(p)
+	if err == nil {
 		t.Fatal("a negative poll interval must be rejected")
+	}
+	if !strings.Contains(err.Error(), "daemon.poll_interval must be positive") {
+		t.Fatalf("expected the poll-interval validation message, got: %v", err)
 	}
 }
 
@@ -297,8 +324,56 @@ func TestLoadNegativeSilenceAfterIsAnError(t *testing.T) {
 	if err := os.WriteFile(p, []byte("notify:\n  silence_after: -5m\n"), 0o600); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	if _, err := Load(p); err == nil {
+	_, err := Load(p)
+	if err == nil {
 		t.Fatal("a negative silence_after must be rejected")
+	}
+	if !strings.Contains(err.Error(), "notify.silence_after must not be negative") {
+		t.Fatalf("expected the silence_after validation message, got: %v", err)
+	}
+}
+
+// TestLoadBarePollIntervalNumberIsAnError covers the recommendation that a bare number
+// for a duration field failed with yaml.v3's raw type-mismatch text ("cannot unmarshal
+// !!int 0 into time.Duration") instead of a message a user can act on. `poll_interval:
+// 0` (no unit suffix) is the single most likely typo for the intended `poll_interval:
+// 0s`, and previously the two produced unrelated-looking errors — this one from the
+// YAML decoder, that one from validate() — for what is, from the user's chair, the same
+// mistake.
+func TestLoadBarePollIntervalNumberIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: 5\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("a bare number for poll_interval must be rejected")
+	}
+	if strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("expected a comprehensible duration-string error, got yaml.v3's raw type-mismatch text: %v", err)
+	}
+	if !strings.Contains(err.Error(), "duration string") || !strings.Contains(err.Error(), "bare number") {
+		t.Fatalf("expected an error naming both the expected duration-string form and the bare-number mistake, got: %v", err)
+	}
+}
+
+// TestLoadBareSilenceAfterNumberIsAnError is
+// TestLoadBarePollIntervalNumberIsAnError's counterpart for notify.silence_after, the
+// config file's other duration field.
+func TestLoadBareSilenceAfterNumberIsAnError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("notify:\n  silence_after: 30\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("a bare number for silence_after must be rejected")
+	}
+	if strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Fatalf("expected a comprehensible duration-string error, got yaml.v3's raw type-mismatch text: %v", err)
+	}
+	if !strings.Contains(err.Error(), "duration string") || !strings.Contains(err.Error(), "bare number") {
+		t.Fatalf("expected an error naming both the expected duration-string form and the bare-number mistake, got: %v", err)
 	}
 }
 
@@ -402,6 +477,50 @@ func TestMissingAncestorDirsStopsAtAnExistingAncestor(t *testing.T) {
 	for i, w := range want {
 		if got[i] != w {
 			t.Errorf("missing dir %d: expected %q, got %q", i, w, got[i])
+		}
+	}
+}
+
+// TestMissingAncestorDirsDoesNotTreatEACCESAsMissing covers the recommendation that
+// missingAncestorDirs treated any os.Stat error as "does not exist", not just
+// fs.ErrNotExist. Here "mid" exists but cannot be stat'ed because its own parent
+// ("outer") denies search permission — the same EACCES an existing ancestor with a
+// broken symlink parent, or an ENOTDIR from a non-directory earlier in the path, would
+// also produce. Absence must mean errors.Is(err, fs.ErrNotExist) alone: on any other
+// stat error against an existing ancestor, that ancestor must not join the list and
+// must not later get os.Chmod(d, 0o700) from Save — exactly the "silently tighten a
+// directory Save has no business touching" the function's own comment promises to
+// prevent.
+func TestMissingAncestorDirsDoesNotTreatEACCESAsMissing(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory permission checks; this test requires a non-root uid")
+	}
+
+	base := t.TempDir()
+	outer := filepath.Join(base, "outer")
+	mid := filepath.Join(outer, "mid")
+	dir := filepath.Join(mid, "created1", "created2")
+
+	if err := os.MkdirAll(mid, 0o700); err != nil {
+		t.Fatalf("seeding mid: %v", err)
+	}
+	if err := os.Chmod(outer, 0o000); err != nil {
+		t.Fatalf("chmod outer: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(outer, 0o700) }) // let t.TempDir() clean up afterward
+
+	if _, err := os.Stat(mid); err == nil {
+		t.Fatal("test setup did not actually reproduce a stat failure on mid; cannot exercise the bug")
+	}
+
+	got := missingAncestorDirs(dir)
+
+	for _, d := range got {
+		if d == mid {
+			t.Fatalf("missingAncestorDirs reported existing (but unstat'able) %q as missing: %v", mid, got)
+		}
+		if d == outer {
+			t.Fatalf("missingAncestorDirs reported existing %q as missing: %v", outer, got)
 		}
 	}
 }

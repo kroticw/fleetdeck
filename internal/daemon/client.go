@@ -124,6 +124,7 @@ func resolveSocketCandidate(matches []string) (string, error) {
 // check on the key file.
 var (
 	errSocketSymlink          = errors.New("refusing a symlinked socket path")
+	errSocketNotASocket       = errors.New("socket path does not refer to a Unix domain socket")
 	errSocketWrongOwner       = errors.New("socket path is owned by a different user")
 	errSocketWritableByOthers = errors.New("socket path is writable by group or other")
 	errSocketMissingStickyBit = errors.New("root-owned ancestor is writable by group or other and missing the sticky bit")
@@ -167,6 +168,14 @@ func checkSocketOwnership(socketPath string) error {
 	}
 	if sockStat.symlink {
 		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketSymlink)
+	}
+	// Defence in depth, not a hole this closes: net.Dial("unix", ...) against a
+	// non-socket path fails on its own regardless. But realLstat already has
+	// info.Mode() in hand, and every other property this function checks is checked
+	// explicitly rather than assumed — the path actually being a socket should be no
+	// different.
+	if sockStat.mode&os.ModeSocket == 0 {
+		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketNotASocket)
 	}
 	if sockStat.uid != uid {
 		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketWrongOwner)
@@ -537,15 +546,19 @@ func New(socketPath string, key func() (string, error)) *Client {
 // It resolves eagerly when a socket already exists, purely so a caller gets an
 // immediately-usable path in the common case, but a failure to do so here is not
 // reported — it is left for dial's own re-resolution to pick up on first use,
-// identically to how a later restart is handled.
-func Discover(key func() (string, error)) (*Client, error) {
+// identically to how a later restart is handled. There is consequently no path through
+// this function that can fail, which is why it returns *Client alone rather than
+// (*Client, error): a signature that always returns a nil error just moves the "did
+// this fail" question to every call site instead of answering it here, in the one
+// place that actually knows the answer.
+func Discover(key func() (string, error)) *Client {
 	c := New("", key)
 	c.discoverable = true
 	c.resolve = SocketPath
 	if path, err := SocketPath(); err == nil {
 		c.socketPath = path
 	}
-	return c, nil
+	return c
 }
 
 // dialTimeout bounds the connect(2) call itself, independently of whatever deadline
@@ -1291,16 +1304,15 @@ func trimToRuneBoundary(b []byte) []byte {
 // in a kick (see ErrKicked): a caller that asked for the last few bytes gets the last
 // few bytes of the accumulated prefix either way, not the whole thing.
 //
-// A longer deadline on ctx is not honoured past c.screenDeadline (2s by default): when
-// ctx carries no deadline of its own, readScreenWithDeadline derives one bounded by
-// c.screenDeadline regardless of how long the caller might otherwise be willing to
-// wait, and even when ctx does carry its own (longer) deadline, the idle-detection loop
-// still races it against that same c.screenDeadline ceiling (see
-// collectUntilIdleOrClosed's until parameter). A caller passing a 30-second context to
-// read a continuously-printing session still gets back whatever accumulated in about
-// 2 seconds, not 30 — this is intentional (see readScreenWithDeadline's own comment for
-// why), but it means ctx's deadline is a ceiling this method can shorten, never one it
-// lets a caller stretch.
+// A longer deadline on ctx is not honoured past c.screenDeadline (2s by default):
+// readScreenWithDeadline always shortens ctx's deadline to at most c.screenDeadline
+// from now, whether ctx carried no deadline of its own or a longer one, and that same
+// shortened deadline governs both the attach header read and the streaming
+// idle-detection loop that follows it (see readScreenWithDeadline's own comment). A
+// caller passing a 30-second context to read a continuously-printing session, or to a
+// daemon that never answers at all, still gets back in about 2 seconds, not 30 — this
+// is intentional, but it means ctx's deadline is a ceiling this method can shorten,
+// never one it lets a caller stretch.
 //
 // cols/rows are fixed at 80x24 for this attach. This is not an open risk: the daemon's
 // own attach handler stores the requested geometry per-attacher
@@ -1317,29 +1329,52 @@ func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (stri
 	return out, err
 }
 
-// readScreenWithDeadline derives a fresh, full c.screenDeadline-based context for
-// exactly one call to readScreenOnce, when ctx (the caller's own, as passed to
-// ReadScreen, never mutated in place) carries no deadline of its own. It is factored
-// out of ReadScreen precisely so an EPROTO retry gets a full budget of its own: the
-// previous shape derived the deadline once, before the first attempt, and reused that
-// same context for the retry — leaving it with whatever time happened to remain after
-// the first attempt's own dial-and-response, sometimes almost none.
+// readScreenWithDeadline derives a fresh context for exactly one call to readScreenOnce,
+// whose deadline is at most c.screenDeadline from now — shortening ctx's own deadline
+// when it has one and is further out, and supplying one outright when it has none. It
+// is factored out of ReadScreen precisely so an EPROTO retry gets a full budget of its
+// own: the previous shape derived the deadline once, before the first attempt, and
+// reused that same context for the retry — leaving it with whatever time happened to
+// remain after the first attempt's own dial-and-response, sometimes almost none.
+//
+// This one ceiling is the shared boundary between the two phases readScreenOnce runs in
+// sequence — reading the attach header (readAttachHeader, via c.setDeadline) and then
+// reading the streamed bytes that follow (collectUntilIdleOrClosed, whose own until
+// parameter readScreenOnce derives from this same ctx.Deadline()) — precisely so a
+// change that bounds one phase cannot silently leave the other riding whatever ctx the
+// caller happened to pass in. Before this, only the streaming phase was bounded by
+// c.screenDeadline when ctx carried its own (longer) deadline; the header phase used
+// ctx's deadline unshortened, so a caller's five-minute context let a daemon that
+// accepts the connection and never writes the header hold ReadScreen open for five
+// minutes (see TestReadScreenHeaderHangHonorsScreenDeadline).
 //
 // The read loop below (inside readScreenOnce, via collectUntilIdleOrClosed) races this
 // absolute deadline against the idle timeout. context.Background() is the documented
 // call path for a session poller, so ctx.Deadline() is typically absent and this
-// derivation runs on every attempt. This uses c.screenDeadline, not c.defaultDeadline:
-// a chatty session (a redrawing spinner, say) never goes idle, so the idle timeout
-// never fires and this derived deadline is what actually ends the read.
-// defaultDeadline's 30s is sized for request/response operations, not for bounding a
-// stream read on every poll tick.
+// derivation shortens nothing in that case, only supplies the ceiling. This uses
+// c.screenDeadline, not c.defaultDeadline: a chatty session (a redrawing spinner, say)
+// never goes idle, so the idle timeout never fires and this derived deadline is what
+// actually ends the read. defaultDeadline's 30s is sized for request/response
+// operations, not for bounding a stream read on every poll tick.
 func (c *Client) readScreenWithDeadline(ctx context.Context, session string, tail int) (string, error) {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.screenDeadline)
-		defer cancel()
-	}
+	ctx, cancel := c.withScreenDeadline(ctx)
+	defer cancel()
 	return c.readScreenOnce(ctx, session, tail)
+}
+
+// withScreenDeadline returns a context whose deadline is at most c.screenDeadline from
+// now, shortening ctx's own deadline when it has one that is further out, and supplying
+// c.screenDeadline outright when it has none. This is the one ceiling ReadScreen and
+// SendKeys each derive once and then share between their attach-header phase and their
+// streaming phase — see readScreenWithDeadline's own comment for why a single, shared
+// ceiling matters: a bound computed separately for each phase is a bound a future
+// change can add to one and forget on the other.
+func (c *Client) withScreenDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	ceiling := time.Now().Add(c.screenDeadline)
+	if d, ok := ctx.Deadline(); ok && d.Before(ceiling) {
+		ceiling = d
+	}
+	return context.WithDeadline(ctx, ceiling)
 }
 
 func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (string, error) {
@@ -1389,11 +1424,20 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 	// goes idle, so the explicit ceiling below is what ends the read in that case, and
 	// what has been accumulated by then is a real, valid partial screen.
 	//
-	// The ceiling is passed explicitly, as an absolute time.Time independent of ctx's
-	// own deadline, rather than relying solely on whatever deadline ctx happens to
-	// carry by this point: collectUntilIdleOrClosed's own hard ceiling must not depend
-	// on a caller upstream having derived one on ctx (see its own doc comment).
-	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false, time.Now().Add(c.screenDeadline))
+	// The ceiling passed here is ctx's own deadline, not a fresh time.Now().Add(c.screen
+	// Deadline()) computed at this point: readScreenWithDeadline already set ctx's
+	// deadline to exactly that ceiling before the header phase above ran, so reading it
+	// back is the same instant the header read was already bounded by, not a second,
+	// independently-computed one that could drift from it. See withScreenDeadline's
+	// comment for why the two phases must share one ceiling rather than each deriving
+	// its own.
+	until, ok := ctx.Deadline()
+	if !ok {
+		// Unreachable via ReadScreen (readScreenWithDeadline always sets one), kept as
+		// a safe fallback for any other caller of this unexported function.
+		until = time.Now().Add(c.screenDeadline)
+	}
+	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false, until)
 
 	// The kick marker means this attach connection was evicted (see detectKick's
 	// comment for the two-condition rule, and
@@ -1427,6 +1471,11 @@ func applyTail(data []byte, tail int) []byte {
 // ErrNoControlKey before dialling when none is available, rather than silently
 // degrading to some read-only behaviour.
 //
+// Like ReadScreen, the attach-header phase and the streaming phase that follows it
+// share one ceiling of at most c.screenDeadline from now, derived once inside
+// sendKeysOnce (see withScreenDeadline) rather than each phase computing, or
+// inheriting, its own — ctx's own deadline, when it has one, is shortened the same way.
+//
 // SendKeys must never be retried blindly by a caller. The attach protocol offers no
 // per-delivery acknowledgement (see sendKeysOnce), so even the errors it returns do not
 // always mean "nothing happened": a write failure ([ErrKeysNotDelivered]) can still have
@@ -1436,7 +1485,10 @@ func (c *Client) SendKeys(ctx context.Context, session, keys string) error {
 	err := c.sendKeysOnce(ctx, session, keys)
 	if isProtoErr(err) {
 		// EPROTO always surfaces at (or before) the attach header, strictly before
-		// any key bytes are written, so retrying here never double-delivers keys.
+		// any key bytes are written, so retrying here never double-delivers keys. Each
+		// call to sendKeysOnce derives its own screenDeadline-based ceiling from ctx
+		// (see withScreenDeadline), so this retry gets a full budget of its own rather
+		// than whatever remained of the first attempt's.
 		c.invalidateProto()
 		err = c.sendKeysOnce(ctx, session, keys)
 	}
@@ -1465,6 +1517,17 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	}
 	defer func() { _ = conn.Close() }()
 
+	// From here on, everything runs under a ctx shortened to at most c.screenDeadline
+	// from now — see withScreenDeadline's comment. Before this, setDeadline(ctx, conn)
+	// used ctx's own deadline when it had one, or fell back to c.defaultDeadline (30s
+	// in production) on SendKeys' documented context.Background() call path, so the
+	// header read below (readAttachHeader) could hold the connection open for up to 30s
+	// before the much shorter window governing the streaming phase after it even began
+	// (see TestSendKeysHeaderHangHonorsScreenDeadline). Deriving this once and reusing
+	// it for both the header phase and collectUntilIdleOrClosed's until parameter below
+	// keeps the two from drifting apart the way they did here.
+	ctx, cancel := c.withScreenDeadline(ctx)
+	defer cancel()
 	c.setDeadline(ctx, conn)
 
 	req := map[string]interface{}{
@@ -1506,15 +1569,21 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	// kick marker split across two reads, or arriving after a chunk of ordinary PTY
 	// bytes, is never missed the way a single fixed-size read would miss it.
 	//
-	// The window has its own explicit ceiling, independent of ctx (SendKeys never
-	// derives a context deadline the way ReadScreen does — context.Background() is its
-	// documented call path). Without this, a session that keeps printing more often
+	// The window's ceiling is ctx's own deadline — the same c.screenDeadline-based one
+	// withScreenDeadline set above and that already governed the header read — not a
+	// second, independently computed time.Now().Add(c.screenDeadline) that could drift
+	// from it. Without a ceiling at all here, a session that keeps printing more often
 	// than c.readIdleTimeout resets collectUntilIdleOrClosed's sliding idle deadline on
-	// every byte, and with no ctx deadline in play either, the call never returns: it
-	// blocks for the whole of the session's current turn, or forever. c.screenDeadline
-	// is reused here rather than a separate field, so this window and ReadScreen's own
-	// cannot silently drift apart from each other.
-	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true, time.Now().Add(c.screenDeadline))
+	// every byte, and this would never return: it would block for the whole of the
+	// session's current turn, or forever. c.screenDeadline is the same field ReadScreen
+	// derives its own ceiling from, so this window and ReadScreen's own cannot silently
+	// drift apart from each other.
+	until, ok := ctx.Deadline()
+	if !ok {
+		// Unreachable: withScreenDeadline above always returns a ctx with a deadline.
+		until = time.Now().Add(c.screenDeadline)
+	}
+	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true, until)
 
 	if _, detail, kicked := detectKick(data, closed); kicked {
 		// The keys were written to the connection, but a kick observed right after

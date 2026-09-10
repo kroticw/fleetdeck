@@ -15,12 +15,36 @@ linters:
 
   settings:
     revive:
+      # golangci-lint v2 treats an explicit `rules` list as the entire rule set,
+      # not an addition to revive's defaults - listing only "exported: disabled"
+      # here previously left revive checking nothing at all. List revive's default
+      # rules explicitly, omitting "exported": exported-name-stuttering (e.g.
+      # daemon.ErrProto) is idiomatic Go in this package's own error-type family
+      # (ErrProto, ErrAuth, ErrKicked, ...) and renaming them would fight the
+      # standard library's own errors.As convention.
       rules:
-        # exported-name-stuttering (e.g. daemon.ErrProto) is idiomatic Go in this
-        # package's own error-type family (ErrProto, ErrAuth, ErrKicked, ...) and
-        # renaming them would fight the standard library's own errors.As convention.
-        - name: exported
-          disabled: true
+        - name: var-declaration
+        - name: package-comments
+        - name: dot-imports
+        - name: blank-imports
+        - name: var-naming
+        - name: indent-error-flow
+        - name: range
+        - name: errorf
+        - name: error-naming
+        - name: error-strings
+        - name: receiver-naming
+        - name: increment-decrement
+        - name: error-return
+        - name: unexported-return
+        - name: time-naming
+        - name: context-keys-type
+        - name: context-as-argument
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
 
   exclusions:
     rules:
@@ -37,3 +61,12 @@ formatters:
   enable:
     - gofmt
     - goimports
+
+# golangci-lint's own defaults cap repeated findings (max-issues-per-linter: 50,
+# max-same-issues: 3) - a repetitive mistake (the same unused test-closure parameter
+# copy-pasted many times, say) would then report only a handful of instances and look
+# clean once those are fixed, while the rest sit unreported. Uncapped, so "0 issues"
+# means zero, not "zero of the ones we bothered to show you".
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -3,7 +3,15 @@ package daemon
 // testdata/list_sessions.json is an anonymised capture of a real `list` reply from a
 // live daemon (cwd, name, sessionId, nonce, pid and timestamps replaced; needs/intent/
 // detail rewritten to neutral text of the same shape). Three of its records are
-// derived from that capture. The fourth (short "e4fa5037": tempo=active, state=blocked,
+// derived from that capture — the first three in the file (short "a1c92f04",
+// "b2d83e15", "c3e94f26") — and are left exactly as captured, key-for-key, rather than
+// tidied to match the protocol document: two of them ("b2d83e15", "c3e94f26") carry
+// "needs": "" and "intent": "" explicitly, where docs/protocol/daemon-control-socket.md
+// section 4 describes an unset key as simply absent. Go's encoding/json makes no
+// distinction between an absent key and one present with the zero value, so this
+// changes nothing about how the fixture parses or what it exercises; it is left as the
+// daemon actually sent it, a faithful capture being worth more here than one that
+// silently disagrees with what was observed. The fourth (short "e4fa5037": tempo=active, state=blocked,
 // needs="") is added by hand, because the live capture used for this fixture did not
 // happen to contain that form. It is nonetheless attested: this form was observed live
 // on this machine, a session parked for roughly an hour with
@@ -140,7 +148,7 @@ func TestFixtureParsesViaListSessions(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
 	}()
@@ -175,7 +183,7 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
 	}()
@@ -287,7 +295,7 @@ func TestFixtureDyingFieldParsesViaListSessions(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
 	}()
@@ -348,7 +356,7 @@ func TestFixtureFirstRecordAllFieldsLiteral(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
 	}()
@@ -849,7 +857,7 @@ func TestProtoNegotiation(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 2; i++ {
-			serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+			serveOnce(t, listener, func(_ *testing.T, req []byte) []byte {
 				var m map[string]interface{}
 				if err := json.Unmarshal(req, &m); err != nil {
 					errChan <- err
@@ -861,9 +869,9 @@ func TestProtoNegotiation(t *testing.T) {
 
 				if i == 0 { // ping response
 					return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":7}` + "\n")
-				} else { // list response
-					return []byte(`{"ok":true,"op":"list","jobs":[]}` + "\n")
 				}
+				// list response
+				return []byte(`{"ok":true,"op":"list","jobs":[]}` + "\n")
 			})
 		}
 	}()
@@ -954,7 +962,7 @@ func TestPingMissingProtoIsError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263"}` + "\n")
 		})
 	}()
@@ -981,7 +989,7 @@ func TestPingNonNumberProtoIsError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":"1"}` + "\n")
 		})
 	}()
@@ -1013,7 +1021,7 @@ func TestPingProtoZeroIsError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":0}` + "\n")
 		})
 	}()
@@ -1045,7 +1053,7 @@ func TestPingFractionalProtoIsError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":1.9}` + "\n")
 		})
 	}()
@@ -1074,7 +1082,7 @@ func TestListSessionsErrorWithoutCodeIsCleanError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false}` + "\n")
 		})
 	}()
@@ -1145,14 +1153,21 @@ func TestResolveSocketCandidateSkipsDeadSocketAndUsesLiveOne(t *testing.T) {
 	if err := os.Mkdir(deadDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	// A correctly owned and moded regular file, not an actual socket: it passes
+	// A correctly owned and moded socket file with nothing listening on it: it passes
 	// checkSocketOwnership (so this exercises resolveSocketCandidate's *dial*-failure
-	// skip specifically, not the earlier ownership-refusal skip an already-removed
-	// socket file would hit instead) but fails to dial, reproducing a crashed
-	// daemon's stale socket left behind on disk.
+	// skip specifically, not the earlier ownership-refusal skip a non-socket file
+	// would hit instead — see checkSocketOwnership's own os.ModeSocket check) but
+	// fails to dial, reproducing a crashed daemon's stale socket left behind on disk.
+	// SetUnlinkOnClose(false) is what leaves the socket file in place after Close,
+	// exactly as a crashed process (rather than a clean shutdown) would.
 	deadSocket := filepath.Join(deadDir, "control.sock")
-	if err := os.WriteFile(deadSocket, []byte("not a socket"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
+	deadListener, err := net.Listen("unix", deadSocket)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadListener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := deadListener.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 
 	liveDir := filepath.Join(base, "b-live")
@@ -1189,21 +1204,29 @@ func TestResolveSocketCandidateNoMatchesIsPlainUnavailable(t *testing.T) {
 // ownership check but fails to dial: skipping it with a bare `continue` and no
 // collected cause would leave the caller with a plain ErrDaemonUnavailable and no
 // cause at all — throwing away the one piece of evidence resolveSocketCandidate exists
-// to preserve. The candidate here is a plain regular file, not a socket: it passes
-// checkSocketOwnership (correctly owned, tightly moded) but a dial against it fails,
-// since nothing is listening there.
+// to preserve. The candidate here is a real socket file with nothing listening on it
+// (see SetUnlinkOnClose(false) below), not a plain regular file: checkSocketOwnership
+// refuses the latter outright now (see its own os.ModeSocket check), which would
+// exercise the ownership-refusal path this test does not intend to cover. This one
+// passes checkSocketOwnership (correctly owned, tightly moded, and an actual socket)
+// but fails to dial, since nothing is listening there.
 func TestResolveSocketCandidateReportsDialFailure(t *testing.T) {
 	base := shortTempDir(t)
 	secureDir := filepath.Join(base, "secure")
 	if err := os.Mkdir(secureDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	notASocket := filepath.Join(secureDir, "control.sock")
-	if err := os.WriteFile(notASocket, []byte("not a socket"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
+	deadSocket := filepath.Join(secureDir, "control.sock")
+	deadListener, err := net.Listen("unix", deadSocket)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadListener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := deadListener.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 
-	_, err := resolveSocketCandidate([]string{notASocket})
+	_, err = resolveSocketCandidate([]string{deadSocket})
 	if err == nil {
 		t.Fatal("expected an error when the only candidate fails to dial")
 	}
@@ -1223,7 +1246,7 @@ func TestErrorCodeEPROTO(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EPROTO","error":"proto mismatch"}` + "\n")
 		})
 	}()
@@ -1575,7 +1598,7 @@ func TestSendTextRequest(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, req []byte) []byte {
 			if err := json.Unmarshal(req, &capturedReq); err != nil {
 				errChan <- err
 				return nil
@@ -1753,7 +1776,7 @@ func TestSendTextErrorENOJOB(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
 		})
 	}()
@@ -2077,7 +2100,7 @@ func TestSendKeysAttachRefusedENOJOB(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
 		})
 	}()
@@ -2102,7 +2125,7 @@ func TestSendKeysAttachRefusedEAUTH(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
 		})
 	}()
@@ -2127,7 +2150,7 @@ func TestReadScreenAttachRefusedENOJOB(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
 		})
 	}()
@@ -2155,7 +2178,7 @@ func TestReadScreenAttachRefusedEAUTH(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
 		})
 	}()
@@ -2389,7 +2412,7 @@ func TestErrorMessageNoControlKey(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EAUTH","error":"auth failed"}` + "\n")
 		})
 	}()
@@ -2418,7 +2441,7 @@ func TestListSessionsMissingJobsKeyIsError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			// Reply with ok=true but no jobs field at all - malformed response
 			return []byte(`{"ok":true,"op":"list"}` + "\n")
 		})
@@ -2446,7 +2469,7 @@ func TestListSessionsEmptyJobsArrayIsNotError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			// Reply with ok=true and empty jobs array - valid response
 			return []byte(`{"ok":true,"op":"list","jobs":[]}` + "\n")
 		})
@@ -3019,6 +3042,33 @@ func TestCheckSocketOwnershipAcceptsSecureDir(t *testing.T) {
 	}
 }
 
+// TestCheckSocketOwnershipRefusesNonSocketFile covers the recommendation that
+// checkSocketOwnership never checked the path actually was a socket at all: a
+// correctly owned, tightly moded, ordinary regular file at the expected path used to
+// pass every check here and fail only later, at dial. This is defence in depth, not a
+// hole this closes on its own (net.Dial against a non-socket path fails regardless),
+// but every other property this function checks is checked explicitly rather than
+// assumed, and the path being a socket at all should be no different.
+func TestCheckSocketOwnershipRefusesNonSocketFile(t *testing.T) {
+	base := shortTempDir(t)
+	secureDir := filepath.Join(base, "secure")
+	if err := os.Mkdir(secureDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	notASocket := filepath.Join(secureDir, "control.sock")
+	if err := os.WriteFile(notASocket, []byte("not a socket"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	err := checkSocketOwnership(notASocket)
+	if err == nil {
+		t.Fatal("expected a correctly owned and moded but non-socket file to be refused")
+	}
+	if !errors.Is(err, errSocketNotASocket) {
+		t.Errorf("expected errors.Is(err, errSocketNotASocket), got: %v", err)
+	}
+}
+
 // TestClientRefusesInsecureSocketDirectory confirms the check is actually wired into
 // the connect path, not just callable in isolation.
 func TestClientRefusesInsecureSocketDirectory(t *testing.T) {
@@ -3378,6 +3428,114 @@ func TestReadScreenSlowFirstPaintReturnsData(t *testing.T) {
 	}
 	if out != "hello" {
 		t.Errorf("expected %q, got %q", "hello", out)
+	}
+}
+
+// TestReadScreenHeaderHangHonorsScreenDeadline covers the blocker that a caller's own,
+// longer-lived context deadline let a daemon that accepts the connection and then never
+// writes the attach header hold ReadScreen open for the full length of that context,
+// rather than client.screenDeadline: readAttachHeader blocks on the connection deadline
+// setDeadline derives from ctx, and readScreenWithDeadline used to shorten ctx only when
+// it carried no deadline of its own, leaving a 30-second caller context fully in effect
+// for the header phase. ReadScreen's own doc comment says ctx's deadline "is a ceiling
+// this method can shorten, never one it lets a caller stretch" — this asserts that
+// against the header phase specifically, not just the streaming phase
+// TestReadScreenProductionDefaultsChattySessionReturnsPromptly already covers.
+func TestReadScreenHeaderHangHonorsScreenDeadline(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		// Never write the header line; just hold the connection open, as a wedged
+		// daemon would.
+		<-stop
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.screenDeadline = 300 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err = client.ReadScreen(ctx, "session123", 0)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error against a daemon that never sends the attach header, got nil")
+	}
+	// Margin is proportional to screenDeadline, not a fixed duration, for the same
+	// reason TestReadScreenProductionDefaultsChattySessionReturnsPromptly's margin is.
+	margin := client.screenDeadline / 2
+	if elapsed >= client.screenDeadline+margin {
+		t.Errorf("ReadScreen took %v against a header that never arrives, expected it to return at its screenDeadline ceiling (%v, +%v margin), not ride the caller's 30s context", elapsed, client.screenDeadline, margin)
+	}
+}
+
+// TestSendKeysHeaderHangHonorsScreenDeadline is TestReadScreenHeaderHangHonorsScreenDeadline's
+// counterpart for SendKeys: sendKeysOnce reads the attach header under the deadline
+// setDeadline derives from ctx, which on SendKeys' documented context.Background() call
+// path falls back to client.defaultDeadline (30s in production) rather than the much
+// shorter screenDeadline the streaming phase after the header uses — so a daemon that
+// accepts and then never writes the header held SendKeys open for defaultDeadline before
+// the header phase even ended, let alone reached the streaming window's own 2s ceiling.
+func TestSendKeysHeaderHangHonorsScreenDeadline(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		// Never write the header line; just hold the connection open, as a wedged
+		// daemon would.
+		<-stop
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.screenDeadline = 300 * time.Millisecond
+
+	start := time.Now()
+	err = client.SendKeys(context.Background(), "session123", "x")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error against a daemon that never sends the attach header, got nil")
+	}
+	margin := client.screenDeadline / 2
+	if elapsed >= client.screenDeadline+margin {
+		t.Errorf("SendKeys took %v against a header that never arrives, expected it to return at its screenDeadline ceiling (%v, +%v margin), not client.defaultDeadline", elapsed, client.screenDeadline, margin)
 	}
 }
 
@@ -3842,12 +4000,12 @@ func TestControlKeyRefusesSymlinkWithClearInternalCause(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	real := filepath.Join(tmpDir, "real.key")
-	if err := os.WriteFile(real, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o600); err != nil {
+	realKey := filepath.Join(tmpDir, "real.key")
+	if err := os.WriteFile(realKey, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o600); err != nil {
 		t.Fatalf("write real key file: %v", err)
 	}
 	keyPath := filepath.Join(dir, "control.key")
-	if err := os.Symlink(real, keyPath); err != nil {
+	if err := os.Symlink(realKey, keyPath); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
 
@@ -4150,7 +4308,7 @@ func TestPingErrorWithoutCodeIsCleanError(t *testing.T) {
 	defer listener.Close()
 
 	go func() {
-		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false}` + "\n")
 		})
 	}()
@@ -4597,10 +4755,7 @@ func TestDiscoverWiresResolveToSocketPathAndSetsInitialPath(t *testing.T) {
 	}
 	defer listener.Close()
 
-	client, err := Discover(func() (string, error) { return "key", nil })
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
+	client := Discover(func() (string, error) { return "key", nil })
 	if !client.discoverable {
 		t.Error("expected a Discover-created client to be discoverable")
 	}
@@ -4632,10 +4787,7 @@ func TestDiscoverSucceedsWithNoDaemonPresentThenResolvesOnceOneAppears(t *testin
 	socketGlobBase = base
 	t.Cleanup(func() { socketGlobBase = orig })
 
-	client, err := Discover(func() (string, error) { return "key", nil })
-	if err != nil {
-		t.Fatalf("Discover with no daemon present must not fail, got: %v", err)
-	}
+	client := Discover(func() (string, error) { return "key", nil })
 	if !client.discoverable {
 		t.Error("expected a Discover-created client to be discoverable")
 	}
