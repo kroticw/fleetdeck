@@ -11,7 +11,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel, parseAgentMessage } from "../orchestrator.js";
+import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel, parseAgentMessage, unwrapStep } from "../orchestrator.js";
 
 test("no snapshot yet resolves to nothing pinned and no sessions", () => {
   const r = resolveOrchestrator(null);
@@ -104,6 +104,77 @@ test("a wrapper's attributes are data, never markup", () => {
   const m = parseAgentMessage('<agent-message from="&lt;img src=x onerror=alert(1)&gt;" at="now">hi</agent-message>');
   assert.equal(m.from, "&lt;img src=x onerror=alert(1)&gt;");
   assert.equal(m.body, "hi");
+});
+
+// --- background-task notifications ---
+//
+// The same complaint as the agent-message wrapper, one tag along: a notification
+// arrives as eight nested tags, of which two say what happened and the rest are
+// identifiers. Shown raw it is a screenful of machinery around one sentence.
+
+const NOTIFICATION = [
+  "<task-notification>",
+  "<task-id>addce847dd288ca47</task-id>",
+  "<tool-use-id>toolu_01FpzR6Pe9cDKLuwigxzmAHs</tool-use-id>",
+  "<output-file>/private/tmp/claude-501/x/tasks/addce847dd288ca47.output</output-file>",
+  "<status>completed</status>",
+  '<summary>Agent "Implement Task 6" finished</summary>',
+  "<result>**Status:** DONE. Three commits.</result>",
+  "</task-notification>",
+].join("\n");
+
+test("a notification is read as its outcome, its summary and its body", () => {
+  const step = unwrapStep(NOTIFICATION);
+  assert.ok(step, "a notification is a wrapper worth unwrapping");
+  assert.ok(step.label.includes("completed"), "the outcome is what a person looks for first");
+  assert.ok(step.label.includes('Agent "Implement Task 6" finished'), "and the summary says what it was");
+  assert.equal(step.body, "**Status:** DONE. Three commits.", "the result is the message itself");
+});
+
+test("a notification's identifiers are kept, not thrown away", () => {
+  // They are useless to read and the only way to chase a lead afterwards, so
+  // they move out of the way rather than out of existence.
+  const step = unwrapStep(NOTIFICATION);
+  assert.ok(step.detail.includes("addce847dd288ca47"), "the task id is still reachable");
+  assert.ok(step.detail.includes("tasks/addce847dd288ca47.output"), "and so is the output file");
+  assert.ok(!step.label.includes("toolu_01"), "but none of it is in the line a person reads");
+});
+
+test("a notification with no result still says what happened", () => {
+  const noResult = "<task-notification>\n<status>failed</status>\n<summary>Agent died</summary>\n</task-notification>";
+  const step = unwrapStep(noResult);
+  assert.ok(step.label.includes("failed"));
+  assert.ok(step.label.includes("Agent died"));
+  assert.equal(step.body, "", "an absent result is absent, not invented");
+});
+
+test("a sentence that mentions a notification tag is left alone", () => {
+  // This is not hypothetical: the fleet talks about these tags, so a step that
+  // merely names one has to survive. Swallowing it would hide the very message
+  // that explains the tag.
+  assert.equal(unwrapStep("Next to it lie raw <task-notification> and <task-id>, unhandled."), null);
+  assert.equal(unwrapStep("look: <task-notification>"), null, "the tag must open the step");
+  // A whole notification quoted inside a sentence is the sharp case: unwrapping
+  // it would keep the quote and throw away the sentence that framed it.
+  const quoted = "This is what arrives: <task-notification><status>completed</status><summary>x</summary></task-notification> — pure noise.";
+  assert.equal(unwrapStep(quoted), null, "the tag must OPEN the step, not merely appear in it");
+});
+
+test("a notification with nothing in it is not unwrapped", () => {
+  assert.equal(unwrapStep("<task-notification></task-notification>"), null, "there is nothing to show instead");
+  assert.equal(unwrapStep("<task-notification>\n<task-id>x</task-id>\n</task-notification>"), null,
+    "identifiers alone say nothing a person can read");
+});
+
+test("unwrapStep still handles the agent-message wrapper it started with", () => {
+  const step = unwrapStep('<agent-message id="m-1" from="06a1f607" at="t">body</agent-message>');
+  assert.equal(step.label, "06a1f607 · t");
+  assert.equal(step.body, "body");
+  assert.ok(step.detail.includes("m-1"), "the message id moves to the detail, not the label");
+});
+
+test("unwrapStep leaves a plain step alone", () => {
+  assert.equal(unwrapStep("just a message"), null);
 });
 
 test("pickableSessions offers every session that has a short id", () => {
@@ -531,6 +602,31 @@ test("a sender spelled as markup reaches the DOM as text", async () => {
   const from = c.root.querySelector(".o-msg-from");
   assert.equal(from.children.length, 0, "no element was created from the sender");
   assert.ok(from.textContent.includes("img src=x"), "it is a label that reads like a tag, and nothing more");
+  c.dom.restore();
+});
+
+test("a notification step shows its outcome as text and hides its ids in the title", async () => {
+  const c = await column(structuredClone(PIN), [{ role: "user", text: NOTIFICATION }]);
+  const row = c.root.querySelector(".o-msg");
+  const from = row.querySelector(".o-msg-from");
+
+  assert.ok(from.textContent.includes("completed"), "what happened is on the line a person reads");
+  assert.equal(from.children.length, 0, "and it is text, not markup");
+  assert.ok(from.getAttribute("title").includes("addce847dd288ca47"), "the ids are reachable");
+  assert.ok(!from.textContent.includes("toolu_01"), "but not in the way");
+  assert.ok(row.querySelector(".o-msg-body").innerHTML.includes("<strong>Status:</strong>"),
+    "and the result is rendered as the markdown it is");
+  assert.ok(!row.querySelector(".o-msg-body").innerHTML.includes("task-notification"), "the envelope is gone");
+  c.dom.restore();
+});
+
+test("a step that only talks about a notification tag is rendered whole", async () => {
+  const talking = "Next to it lie raw <task-notification> and <task-id>, unhandled.";
+  const c = await column(structuredClone(PIN), [{ role: "assistant", text: talking }]);
+  const row = c.root.querySelector(".o-msg");
+  assert.equal(row.querySelector(".o-msg-from"), null, "it is not an envelope, so there is nothing to attribute");
+  assert.ok(row.querySelector(".o-msg-body").innerHTML.includes("&lt;task-notification&gt;"),
+    "the sentence survives, tags shown as the text they are");
   c.dom.restore();
 });
 
