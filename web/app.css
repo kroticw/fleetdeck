@@ -264,6 +264,14 @@ body {
   color: var(--text-faint);
 }
 
+/* A last-known value falling back from a failed refresh (web/js/header.js's
+   gauge()) -- real numbers, just aged, not asserted fresh by a severity
+   color. Same muted voice as a stalled session or a dead one on a done
+   card: ordinary network life, not a fresh failure. */
+#header .gauge-stale {
+  color: var(--text-muted);
+}
+
 #header .problem {
   color: var(--danger);
   font-weight: 600;

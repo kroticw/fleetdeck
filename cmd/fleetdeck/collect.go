@@ -384,7 +384,17 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		cancel()
 		if err != nil {
 			snap.UsageError = err.Error()
-		} else {
+		}
+		// l carries the last successfully fetched value even when err != nil
+		// (usage.Fetcher.Limits falls back to its cache on a failed refresh) --
+		// its own FetchedAt is the only way to tell a real value from the zero
+		// Limits a fetcher with no successful call yet returns. Setting
+		// snap.Limits whenever there is a real value, independent of err,
+		// is what stops a single transient failure between two good fetches
+		// from blanking the gauges to "—" for one poll cycle: the panel keeps
+		// showing what it last knew, aged, rather than discarding it because
+		// the one attempt that happened to run this cycle failed.
+		if !l.FetchedAt.IsZero() {
 			snap.Limits = &l
 		}
 	}
