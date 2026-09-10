@@ -1,3 +1,4 @@
 bin/
 .superpowers/
 .DS_Store
+dist/
