@@ -29,6 +29,18 @@ import { t } from "./i18n.js";
 // How many transcript steps the digest asks for, and how often each tab
 // refreshes. The screen is polled faster because it is what a person watches
 // while a session works; the digest only changes when a session speaks.
+//
+// Polled, and not streamed over a socket — which looks like the simpler design
+// until you read what attach costs. A session's attach stream is exclusive: the
+// daemon evicts whoever held it when a new reader arrives, and writes
+// "EKICKED: ..." into the evicted stream in place of PTY bytes
+// (internal/daemon/client.go, ekickedPrefix). A panel holding that stream open
+// would sit in the single slot, so an operator running `claude agents attach`
+// against their own session would evict the panel and the panel's next read
+// would evict the operator, back and forth, over the operator's own terminal.
+// The same fact is why ReadScreen shortens any deadline it is given to two
+// seconds (screenDeadline). Polling is not a shortcut here; it is what leaves
+// the terminal to the person using it.
 const DIGEST_LIMIT = 30;
 const DIGEST_INTERVAL_MS = 3000;
 const SCREEN_INTERVAL_MS = 1000;
