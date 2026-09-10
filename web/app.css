@@ -961,6 +961,42 @@ main {
   gap: var(--gap);
   overflow-x: auto;
   padding: var(--gap);
+  /* Six columns wide enough to read titles in no longer fit every realistic
+     window without scrolling -- readable titles and six-columns-at-once are
+     a real tradeoff, not something CSS alone resolves. Scrolling here is
+     fine (the board owns it, the page never moves); staying invisible until
+     hovered is not: macOS's overlay scrollbar gives no idle-state hint that
+     there is anything past the edge, which is the exact discoverability gap
+     #38 fixed once already when columns had nowhere to shrink to. A always-
+     visible, styled scrollbar keeps that fix in force under the wider
+     columns this task adds. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+#board::-webkit-scrollbar {
+  height: 10px;
+}
+
+#board::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#board::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+/* .board-scrollable (web/js/board.js's markScrollable) is a real measurement
+ * -- scrollWidth > clientWidth, re-taken after every render and on resize --
+ * not a guess about typical window widths. The styled scrollbar above is
+ * still a hover/interaction affordance on most platforms; this is not: a
+ * fade on the last ~40px says "more columns past here" in the idle,
+ * unscrolled screenshot itself, before any pointer ever reaches the board.
+ * It only ever appears when there genuinely is more to reach. */
+.board-scrollable {
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent 100%);
 }
 
 .kerror {
@@ -976,10 +1012,18 @@ main {
  * #board's overflow-x, and macOS's overlay scrollbars give no idle-state
  * hint that anything is there to scroll to. Letting columns shrink together
  * instead means the whole board fits without scrolling on realistic widths;
- * min-width stays a readability floor, not a promise every column gets it. */
+ * min-width stays a readability floor, not a promise every column gets it.
+ *
+ * flex-grow raised from 1 to 3 in the same change that added .kcol-empty
+ * below: six columns sharing width equally regardless of content was the
+ * other half of the "несуразненько" complaint -- an empty "new" or "other"
+ * column held exactly as much width as a "done" column carrying thirty
+ * cards. .kcol-empty shrinks toward its floor instead of competing for
+ * space; a higher grow on the base rule lets the columns that actually have
+ * cards claim what the empty ones give up. */
 .kcol {
-  flex: 1 1 140px;
-  min-width: 120px;
+  flex: 3 1 160px;
+  min-width: 140px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -989,6 +1033,17 @@ main {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--gap-sm);
+}
+
+/* An empty column stays a real drop target -- never removed, never
+   unreachable -- but has no cards to read, so it has no claim on the same
+   width as a column that does. flex-grow 0 stops it competing for the
+   space .kcol above gives the non-empty columns; the floor is the header
+   row's own content (a short stage word plus a one-digit count), not an
+   arbitrary number. */
+.kcol-empty {
+  flex: 0 1 64px;
+  min-width: 64px;
 }
 
 .kcol h5 {
@@ -1041,7 +1096,15 @@ main {
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text);
-  overflow-wrap: anywhere;
+  /* break-word, not anywhere: anywhere also counts as a break opportunity
+     inside the flex-sizing algorithm itself, so a narrow .kcol shrinks
+     eagerly and wraps titles one or two words at a time, sometimes mid-word,
+     because the layout never has to prove a whole word won't fit before
+     breaking it. break-word only splits a word when the line would
+     otherwise overflow -- real titles, which are prose with plenty of
+     spaces, wrap at word boundaries the way a reader expects; only a single
+     token wider than the column would ever break mid-word. */
+  overflow-wrap: break-word;
 }
 
 .ksession {
