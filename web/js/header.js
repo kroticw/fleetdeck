@@ -1,6 +1,7 @@
 // web/js/header.js
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
+import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 
 // Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
 // Keep both lists and both functions in sync with that file if it ever
@@ -140,7 +141,30 @@ export function stalledList(stalledSessions) {
   return `<span class="stall-reasons">${shown.join("")}${tail}</span>`;
 }
 
+// currentTheme()/cycleTheme() return null for "no override" — not a missing
+// case here, the auto state genuinely has its own label and button state.
+function themeLabelKey(theme) {
+  return theme === "light" ? "theme_light" : theme === "dark" ? "theme_dark" : "theme_auto";
+}
+
+function themeButtonHTML() {
+  return `<button type="button" class="theme-toggle">${t(themeLabelKey(currentTheme()))}</button>`;
+}
+
 export function renderHeader(root) {
+  initTheme();
+
+  // Delegated and attached once, outside the render below: root.innerHTML is
+  // replaced whole on every snapshot (subscribe below fires roughly once a
+  // second), so a listener on the button itself would need re-attaching on
+  // every one of those — the same reasoning board.js's own delegated click
+  // handler documents.
+  root.addEventListener("click", (event) => {
+    const button = event.target.closest(".theme-toggle");
+    if (!button) return;
+    button.textContent = t(themeLabelKey(cycleTheme()));
+  });
+
   subscribe((rawSnap, connected) => {
     const snap = rawSnap ?? {};
     const sessions = snap.sessions ?? [];
@@ -155,6 +179,7 @@ export function renderHeader(root) {
 
     root.innerHTML = `
       <div class="brand">fleetdeck</div>
+      ${themeButtonHTML()}
       <div class="limits">
         ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour) : gauge(t("limit_5h"), null)}
         ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay) : gauge(t("limit_7d"), null)}

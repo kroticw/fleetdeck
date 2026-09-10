@@ -285,6 +285,24 @@ test("switching tabs stops the tab being left behind, and disposes its terminal"
   assert.match(calls[calls.length - 1].url, /\/digest\?/);
 });
 
+// Pins the fix for a real defect: xterm's own default theme is a fixed
+// light-grey-on-black regardless of the page's own theme, which read fine
+// for as long as the whole app was dark-only and became a solid black
+// rectangle in an otherwise light panel once a light theme actually shipped.
+// This cannot check the *colours* — fake-dom.js has no CSS engine, and
+// terminalTheme() itself degrades to undefined without one — but it does
+// pin that a terminal is never constructed with the option silently
+// dropped, which is the shape a future refactor could plausibly break.
+test("the terminal is always constructed with a theme option, even if undefined", async () => {
+  const terminals = installTerminal();
+  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  assert.equal(terminals.length, 1);
+  assert.ok("theme" in terminals[0].options, "Terminal was constructed with no theme option at all");
+});
+
 test("a poller started twice still arms only one timer", async () => {
   const timers = fakeTimers();
   const poller = createPoller(async () => {}, 1000, { timers });

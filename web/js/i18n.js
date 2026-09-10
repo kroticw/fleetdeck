@@ -64,6 +64,14 @@ const en = {
   close_session: "close",
   no_steps: "no readable steps yet",
   terminal_missing: "the terminal library did not load",
+
+  // The session list's own header (web/js/sessions.js) and the theme
+  // override (web/js/theme.js's button, rendered by header.js). "auto" is
+  // the no-override state — the panel follows the system theme.
+  sessions_title: "Sessions",
+  theme_auto: "theme: auto",
+  theme_light: "theme: light",
+  theme_dark: "theme: dark",
 };
 
 const ru = {
@@ -112,6 +120,11 @@ const ru = {
   close_session: "закрыть",
   no_steps: "читаемых шагов пока нет",
   terminal_missing: "библиотека терминала не загрузилась",
+
+  sessions_title: "Сессии",
+  theme_auto: "тема: авто",
+  theme_light: "тема: светлая",
+  theme_dark: "тема: тёмная",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;
