@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,16 +43,20 @@ func assistantLine(tokens int) string {
 	return fmt.Sprintf(`{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":0,"cache_read_input_tokens":%d}}}`, tokens)
 }
 
+// sampleTokens is the context estimate a fixture transcript carries, distinct enough
+// from any reported percentage that a test can tell which of the two it is looking at.
+const sampleTokens = 100
+
 // writeTranscript lays out a projects directory the way Claude Code does —
-// <projects>/<project>/<uuid>.jsonl — and returns the transcript's path.
-func writeTranscript(t *testing.T, projectsDir, uuid string, tokens int) string {
+// <projects>/<project>/<sampleUUID>.jsonl — and returns the transcript's path.
+func writeTranscript(t *testing.T, projectsDir string) string {
 	t.Helper()
 	project := filepath.Join(projectsDir, "some-project")
 	if err := os.MkdirAll(project, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(project, uuid+".jsonl")
-	if err := os.WriteFile(path, []byte(assistantLine(tokens)+"\n"), 0o600); err != nil {
+	path := filepath.Join(project, sampleUUID+".jsonl")
+	if err := os.WriteFile(path, []byte(assistantLine(sampleTokens)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -183,7 +189,7 @@ func TestContextEstimateIsRecomputedWhenFileGrows(t *testing.T) {
 // serves the context cache.
 func TestSilentForIsTheAgeOfTheTranscript(t *testing.T) {
 	projects := t.TempDir()
-	path := writeTranscript(t, projects, sampleUUID, 100)
+	path := writeTranscript(t, projects)
 	hourAgo := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(path, hourAgo, hourAgo); err != nil {
 		t.Fatal(err)
@@ -242,7 +248,7 @@ func TestSilenceIsUnmeasuredForATranscriptThatCannotBeStatted(t *testing.T) {
 // an estimate — otherwise the reporter posts into a route whose value nothing reads.
 func TestReportedContextBeatsTheTranscriptEstimate(t *testing.T) {
 	projects := t.TempDir()
-	writeTranscript(t, projects, sampleUUID, 100)
+	writeTranscript(t, projects)
 
 	c := NewCollector(config.Default(), nil, nil, projects)
 	c.PutStatus(sampleUUID, "Opus", 42, 1.25)
@@ -259,6 +265,93 @@ func TestReportedContextBeatsTheTranscriptEstimate(t *testing.T) {
 	}
 	if got.Window == 0 || float64(got.Tokens)/float64(got.Window)*100 != 42 {
 		t.Fatalf("the reported occupancy must be 42%%, got %d/%d", got.Tokens, got.Window)
+	}
+}
+
+// TestReportedModelAndCostReachTheView pins the two values that exist in the panel
+// only because the reporter sends them: Claude Code hands the model name and the
+// running cost to its statusline command and to nothing else (spec section 3.2). They
+// have no transcript fallback, so a report is the only way either can ever be shown.
+func TestReportedModelAndCostReachTheView(t *testing.T) {
+	projects := t.TempDir()
+	writeTranscript(t, projects)
+
+	c := NewCollector(config.Default(), nil, nil, projects)
+	c.PutStatus(sampleUUID, "Opus", 42, 1.25)
+
+	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
+	c.enrich(views)
+
+	if views[0].Model != "Opus" {
+		t.Fatalf("the reported model name must reach the view, got %q", views[0].Model)
+	}
+	if views[0].CostUSD == nil {
+		t.Fatal("a session with a report has a cost, even when that cost is nothing")
+	}
+	if *views[0].CostUSD != 1.25 {
+		t.Fatalf("want the reported cost of 1.25, got %v", *views[0].CostUSD)
+	}
+}
+
+// TestAZeroCostIsStillAReport is the reason CostUSD is a pointer: a session that has
+// so far cost nothing is not a session nobody reported on.
+func TestAZeroCostIsStillAReport(t *testing.T) {
+	c := NewCollector(config.Default(), nil, nil, t.TempDir())
+	c.PutStatus(sampleUUID, "Opus", 0, 0)
+
+	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
+	c.enrich(views)
+
+	if views[0].CostUSD == nil {
+		t.Fatal("a reported cost of zero must be a cost, not an absence")
+	}
+	if *views[0].CostUSD != 0 {
+		t.Fatalf("want 0, got %v", *views[0].CostUSD)
+	}
+}
+
+// TestAnUnreportedSessionCarriesNoModelOrCost: neither field has a fallback, so a
+// session whose reporter is not installed must show nothing rather than something
+// derived from elsewhere.
+func TestAnUnreportedSessionCarriesNoModelOrCost(t *testing.T) {
+	projects := t.TempDir()
+	writeTranscript(t, projects)
+
+	c := NewCollector(config.Default(), nil, nil, projects)
+	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
+	c.enrich(views)
+
+	if views[0].Model != "" || views[0].CostUSD != nil {
+		t.Fatalf("an unreported session must carry neither field, got model=%q cost=%v", views[0].Model, views[0].CostUSD)
+	}
+}
+
+// TestAReportReachesTheSnapshotJSON follows one report the whole way it travels
+// inside this process — PutStatus, the store, enrich, the snapshot, the wire — since
+// every field of it exists only to be read by a browser. The daemon's own contribution
+// (producing the session in the first place) is covered by the degrade-in-parts tests
+// above and by the live check in the task report.
+func TestAReportReachesTheSnapshotJSON(t *testing.T) {
+	projects := t.TempDir()
+	writeTranscript(t, projects)
+
+	c := NewCollector(config.Default(), nil, nil, projects)
+	c.PutStatus(sampleUUID, "Opus", 42, 1.25)
+
+	snap := state.Snapshot{
+		At:       time.Now(),
+		Sessions: []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}},
+	}
+	c.enrich(snap.Sessions)
+
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"model":"Opus"`, `"costUSD":1.25`, `"estimated":false`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("the snapshot on the wire must carry %s: %s", want, raw)
+		}
 	}
 }
 
@@ -283,7 +376,7 @@ func TestReportIsKeyedByTranscriptUUIDNotShortID(t *testing.T) {
 // honest estimate.
 func TestStaleReportFallsBackToTheEstimate(t *testing.T) {
 	projects := t.TempDir()
-	writeTranscript(t, projects, sampleUUID, 100)
+	writeTranscript(t, projects)
 
 	c := NewCollector(config.Default(), nil, nil, projects)
 	c.PutStatus(sampleUUID, "Opus", 42, 1.25)
@@ -301,6 +394,9 @@ func TestStaleReportFallsBackToTheEstimate(t *testing.T) {
 	}
 	if got.Tokens != 100 {
 		t.Fatalf("want the transcript estimate of 100 tokens, got %d", got.Tokens)
+	}
+	if views[0].Model != "" || views[0].CostUSD != nil {
+		t.Fatalf("an expired report takes its model and cost with it, got model=%q cost=%v", views[0].Model, views[0].CostUSD)
 	}
 }
 

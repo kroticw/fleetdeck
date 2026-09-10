@@ -217,6 +217,11 @@ func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.D
 // fallback for when the reporter is not installed (spec section 3.2). The estimate is
 // still computed, because it is what the session falls back to the moment the report
 // expires — and because the same stat is what measures silence either way.
+//
+// The report also carries the model name and the running cost, which have no fallback
+// at all: nothing outside a session can obtain either, which is why cmd/fleetdeck-status
+// exists. A session with no live report keeps an empty model and a nil cost, and the
+// panel shows neither rather than inventing one.
 func (c *Collector) enrich(views []state.SessionView) map[string]struct{} {
 	live := map[string]struct{}{}
 	for i := range views {
@@ -239,6 +244,15 @@ func (c *Collector) enrich(views []state.SessionView) map[string]struct{} {
 				Window:    reportedPercentWindow,
 				Estimated: false,
 			}
+			// The model name and the cost have no fallback the way the context
+			// does: Claude Code hands both to its statusline command and to
+			// nothing else, so they are set here or they are never set at all.
+			// The cost is taken by address rather than by value because zero is a
+			// cost a session genuinely can have, and the panel must be able to
+			// tell that from a session nobody reported on.
+			views[i].Model = r.model
+			cost := r.costUSD
+			views[i].CostUSD = &cost
 		}
 	}
 	return live
