@@ -65,43 +65,69 @@ export function renderCard(root, path, onClose, options = {}) {
   // The last snapshot seen, so a click handler can resolve a link without
   // reaching back into the store.
   let latest = null;
-  // The edit the operator has made that the snapshot has not caught up with
-  // yet. It keeps the control showing what the operator chose during the round
-  // trip and, on a written-but-not-committed answer, until the next snapshot
-  // confirms it. Cleared the moment a write is refused.
-  let pending = null;
-  // "The field was written and the commit did not happen" — a success with a
-  // caveat, never an error, and never a retry: repeating a progress edit would
-  // apply it twice.
-  let notice = null;
-  // "Nothing was written." The control goes back to what the file holds.
-  let failure = null;
+  // Everything a write leaves behind is keyed by field, and every write carries
+  // a token, because a panel that can be re-targeted mid-request has two ways to
+  // draw an answer onto the wrong thing: the operator follows a link while a
+  // request is in flight and the message about card A lands on card B, or two
+  // fields are edited in a row and the slower answer overwrites the faster one's
+  // message and reverts a control whose write in fact succeeded. A single
+  // notice slot and a single pending slot cannot tell any of those apart.
+
+  // field -> the value the operator chose, held until a snapshot shows the card
+  // holding it. It is what keeps the control on the operator's choice across the
+  // round trip instead of flickering back to the file's old value.
+  const pending = new Map();
+  // field -> {kind: "notice"|"error", reason}. "notice" is "the field was
+  // written and the commit did not happen" — a success with a caveat, never an
+  // error and never a retry, because repeating a progress edit applies it twice.
+  // "error" is "nothing was written", and the control goes back to the file.
+  const outcomes = new Map();
+  // field -> the token of the newest write started for that field. An answer
+  // whose token is no longer the newest belongs to an edit the operator has
+  // already replaced.
+  const writes = new Map();
+  let nextToken = 0;
   // Signature of what is currently on screen, so an unchanged snapshot redraws
   // nothing.
   let painted = null;
 
   const shownValue = (card, field) =>
-    pending?.field === field ? pending.value : String(card?.[field] ?? "");
+    pending.has(field) ? pending.get(field) : String(card?.[field] ?? "");
 
   const onFieldChange = async (select) => {
     const field = select.dataset.field;
     const value = select.value;
-    notice = null;
-    failure = null;
-    pending = { field, value };
+    // Both captured before the await: which card is being written, and which
+    // edit of this field this is.
+    const card = current;
+    const token = (nextToken += 1);
+
+    writes.set(field, token);
+    outcomes.delete(field);
+    pending.set(field, value);
     repaint(field);
+
+    let outcome = null;
+    let written = true;
     try {
-      const result = await setCardField(current, field, value);
-      if (!result.committed) {
-        notice = { field, reason: result.reason };
-      }
+      const result = await setCardField(card, field, value);
+      if (!result.committed) outcome = { kind: "notice", reason: result.reason };
     } catch (err) {
-      // Nothing reached the file, so the control must stop showing a value the
-      // card does not have: a control left on the operator's choice is a lie
-      // about the state of the board.
-      pending = null;
-      failure = err.message;
+      outcome = { kind: "error", reason: err.message };
+      written = false;
     }
+
+    // The panel may have moved to another card while this was in flight, and
+    // this field may have been edited again. Either way the answer is no longer
+    // about what is on screen, and drawing it there would attach a message about
+    // one file to another.
+    if (current !== card || writes.get(field) !== token) return;
+
+    // Nothing reached the file, so the control must stop showing a value the
+    // card does not have: a control left on the operator's choice is a lie about
+    // the state of the board.
+    if (!written) pending.delete(field);
+    if (outcome) outcomes.set(field, outcome);
     repaint(field);
   };
 
@@ -162,7 +188,11 @@ export function renderCard(root, path, onClose, options = {}) {
     const meta = el("div", "card-meta");
     if (card.session) {
       if (onOpenSession) {
-        const link = el("a", "card-session", card.session);
+        // A button, not an <a> with no href: an anchor without one is not
+        // focusable, is not in the tab order and is not announced as a link, so
+        // it would look like a link and work only for a mouse.
+        const link = el("button", "card-session card-session-link", card.session);
+        link.setAttribute("type", "button");
         link.addEventListener("click", () => onOpenSession(card.session));
         meta.append(link);
       } else {
@@ -176,14 +206,16 @@ export function renderCard(root, path, onClose, options = {}) {
     }
     if (meta.children.length > 0) nodes.push(meta);
 
-    if (failure) {
-      nodes.push(el("p", "card-error", `${t("card_write_refused")}: ${failure}`));
-    }
-    if (notice) {
-      const text = notice.reason
-        ? `${t("card_not_committed")}: ${notice.reason}`
-        : t("card_not_committed");
-      nodes.push(el("p", "card-notice", text));
+    // One line per field that has something to say, in the order the controls
+    // are in, and each names its field: with two writable fields there can be
+    // two answers on screen at once, and an unlabelled message would not say
+    // which edit it is about.
+    for (const field of ["stage", "progress"]) {
+      const outcome = outcomes.get(field);
+      if (!outcome) continue;
+      const what = outcome.kind === "error" ? t("card_write_refused") : t("card_not_committed");
+      const text = outcome.reason ? `${field}: ${what}: ${outcome.reason}` : `${field}: ${what}`;
+      nodes.push(el("p", outcome.kind === "error" ? "card-error" : "card-notice", text));
     }
 
     const body = el("div", "card-body");
@@ -194,7 +226,8 @@ export function renderCard(root, path, onClose, options = {}) {
       const box = el("div", "card-backlinks");
       box.append(el("h4", "card-backlinks-title", t("backlinks")));
       for (const back of backlinks) {
-        const link = el("a", "card-backlink", back.title || baseName(back.path));
+        const link = el("button", "card-backlink", back.title || baseName(back.path));
+        link.setAttribute("type", "button");
         link.dataset.link = baseName(back.path);
         box.append(link);
       }
@@ -208,10 +241,10 @@ export function renderCard(root, path, onClose, options = {}) {
     latest = snap ?? null;
     const cards = latest?.cards ?? [];
     const card = cards.find((c) => c.path === current) ?? null;
-    if (pending && card && String(card[pending.field] ?? "") === pending.value) {
-      // The snapshot has caught up with the edit; the card itself is the source
+    for (const [field, value] of pending) {
+      // The snapshot has caught up with this edit; the card itself is the source
       // of the value again.
-      pending = null;
+      if (card && String(card[field] ?? "") === value) pending.delete(field);
     }
     const known = cards.map((c) => baseName(c.path));
     const orphan = (latest?.orphanCards ?? []).includes(current);
@@ -226,9 +259,8 @@ export function renderCard(root, path, onClose, options = {}) {
       known,
       orphan,
       backlinks: backlinks.map((c) => [c.path, c.title]),
-      pending,
-      notice,
-      failure,
+      pending: [...pending],
+      outcomes: [...outcomes],
     });
     if (signature === painted) return;
     painted = signature;
@@ -253,9 +285,17 @@ export function renderCard(root, path, onClose, options = {}) {
     if (!target) return;
     event.preventDefault?.();
     current = target.path;
-    pending = null;
-    notice = null;
-    failure = null;
+    // None of this belongs to the card being opened. Answers still in flight
+    // find `current` changed and discard themselves.
+    //
+    // `writes` is deliberately NOT cleared: it holds edit identities, not
+    // display state, and its tokens are unique for the life of the panel.
+    // Clearing it here would make every in-flight answer stale for the token
+    // reason as well, which would leave the "is this still the same card?" half
+    // of the guard below covering nothing and untestable — true today and
+    // silently untrue the moment this line moved.
+    pending.clear();
+    outcomes.clear();
     painted = null;
     draw(latest);
   };
@@ -284,5 +324,53 @@ export function renderCard(root, path, onClose, options = {}) {
     root.removeEventListener("click", onLinkClick);
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("mousedown", onOutside);
+  };
+}
+
+/**
+ * wireCardPanel makes the board open the panel, and returns a function that
+ * undoes the wiring.
+ *
+ * It delegates on `[data-path]` rather than importing the board module: the
+ * attribute is what a board card carries, so this works before that module
+ * exists and keeps working once it lands, with no dependency between the two.
+ *
+ * It lives here rather than in main.js because main.js cannot be tested — it
+ * connects a socket the moment it is imported — and this is the part that makes
+ * the panel a panel: the delegation, the unhiding, and disposing the previous
+ * panel before opening the next one so its listeners do not accumulate on the
+ * document.
+ */
+export function wireCardPanel(board, panel, options = {}) {
+  if (!board || !panel) {
+    // Silence here would look exactly like a board with no cards on it.
+    console.error(
+      "fleetdeck: the card panel is not wired — the page has no #board or no #card-panel",
+    );
+    return () => {};
+  }
+
+  let dispose = null;
+
+  const close = () => {
+    if (dispose) {
+      dispose();
+      dispose = null;
+    }
+    panel.replaceChildren();
+    panel.hidden = true;
+  };
+
+  const onClick = (event) => {
+    const opener = event.target?.closest?.("[data-path]");
+    if (!opener || !board.contains(opener)) return;
+    close();
+    dispose = renderCard(panel, opener.dataset.path, close, options);
+  };
+
+  board.addEventListener("click", onClick);
+  return () => {
+    board.removeEventListener("click", onClick);
+    close();
   };
 }

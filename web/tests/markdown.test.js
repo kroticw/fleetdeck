@@ -60,15 +60,18 @@ test("a wiki link name cannot break out of the attribute it lands in", () => {
   // The literal quote must not appear anywhere: one unescaped quote here ends
   // the attribute and everything after it becomes markup.
   assert.ok(!html.includes('"weird"name"'), html);
-  // Four quotes and no more: the two that delimit class and the two that
-  // delimit data-link. A fifth is a quote that came out of the card.
-  assert.equal((html.match(/"/g) ?? []).length, 4, html);
+  // Six quotes and no more: the pairs delimiting type, class and data-link. A
+  // seventh is a quote that came out of the card.
+  assert.equal((html.match(/"/g) ?? []).length, 6, html);
 });
 
 test("a known wiki link is a link, an unknown one is not clickable", () => {
   const html = renderMarkdown("[[fleet-ui]] and [[nowhere]]", cardNames);
 
-  assert.ok(html.includes('<a class="wikilink" data-link="fleet-ui">fleet-ui</a>'), html);
+  assert.ok(
+    html.includes('<button type="button" class="wikilink" data-link="fleet-ui">fleet-ui</button>'),
+    html,
+  );
   assert.ok(html.includes('<span class="wikilink wikilink-missing">nowhere</span>'), html);
   // The panel delegates on [data-link]; a missing card must carry no such
   // attribute or it would navigate to nothing.
@@ -77,8 +80,43 @@ test("a known wiki link is a link, an unknown one is not clickable", () => {
 
 test("an alias and a heading resolve to the note the server extracted", () => {
   const html = renderMarkdown("[[fleet-ui|the panel]] and [[fleet-ui#log]]", cardNames);
-  assert.ok(html.includes('data-link="fleet-ui">the panel</a>'), html);
-  assert.ok(html.includes('data-link="fleet-ui">fleet-ui#log</a>'), html);
+  assert.ok(html.includes('data-link="fleet-ui">the panel</button>'), html);
+  assert.ok(html.includes('data-link="fleet-ui">fleet-ui#log</button>'), html);
+});
+
+test("a link is reachable from the keyboard, a broken one is not a control", () => {
+  const html = renderMarkdown("[[fleet-ui]] and [[nowhere]]", cardNames);
+  // An <a> with no href is not focusable and not in the tab order: it would
+  // look like a link and work only for a mouse.
+  assert.ok(!/<a[\s>]/.test(html), `a link was rendered as an href-less anchor: ${html}`);
+  assert.ok(html.includes('<button type="button" class="wikilink"'), html);
+  // A card that does not exist has nothing to activate, so it is not a control
+  // and must not take a tab stop.
+  assert.ok(html.includes('<span class="wikilink wikilink-missing">'), html);
+});
+
+test("a code span wins over the constructs inside it", () => {
+  const html = renderMarkdown("a `[[fleet-ui]]` and `**not bold**`", cardNames);
+  assert.ok(html.includes("<code>[[fleet-ui]]</code>"), html);
+  assert.ok(html.includes("<code>**not bold**</code>"), html);
+  // The whole point: nothing inside backticks became a control.
+  assert.ok(!html.includes("data-link"), html);
+  assert.ok(!html.includes("<strong>"), html);
+});
+
+test("a backtick inside a link alias cannot produce crossed markup", () => {
+  const html = renderMarkdown("[[fleet-ui|a`b]] and `c` and [[fleet-ui]]", cardNames);
+  const opened = (html.match(/<button/g) ?? []).length;
+  const closed = (html.match(/<\/button>/g) ?? []).length;
+  assert.equal(opened, closed, `unbalanced markup: ${html}`);
+  assert.equal((html.match(/<code>/g) ?? []).length, (html.match(/<\/code>/g) ?? []).length, html);
+});
+
+test("a fenced block does not open or close with a blank line", () => {
+  // HTML drops a newline immediately after <pre>, never after <code>, so a
+  // newline between the two shows up as an empty first line in every block.
+  assert.equal(renderMarkdown("```\nx\n```", new Set()), "<pre><code>x</code></pre>");
+  assert.equal(renderMarkdown("```sh\na\nb\n```", new Set()), "<pre><code>a\nb</code></pre>");
 });
 
 test("headings, lists, bold and inline code render", () => {

@@ -62,19 +62,38 @@ function linkParts(inner) {
 }
 
 function inline(text, knownCards) {
-  return text
+  // Code spans are lifted out before anything else runs. Order alone would not
+  // do it: a wiki link inside backticks would still be matched inside the
+  // <code> a code-span pass had just produced, and a backtick inside a link's
+  // alias would let a later code-span step across an <a> that was already
+  // emitted and close it in the wrong place. Lifting them out first gives code
+  // spans the precedence markdown gives them and keeps every construct built
+  // from text that no other construct has touched.
+  //
+  // The placeholder is safe by construction rather than by hope: `text` has
+  // already been through escapeHTML, so it holds no "<" at all, and "<0>"
+  // cannot occur in it. Nothing emitted below matches <digits> either.
+  const spans = [];
+  const lifted = text.replace(CODE_SPAN, (_, code) => `<${spans.push(code) - 1}>`);
+
+  return lifted
     .replace(WIKILINK, (whole, inner) => {
       const { target, label } = linkParts(inner);
       if (target === "" || !knownCards.has(unescapeHTML(target))) {
         // A link to a card that does not exist is shown as a link that does not
         // work: no data-link attribute, so the panel's click delegation never
-        // sees it, and a class the stylesheet can mark as broken.
+        // sees it, and a class the stylesheet can mark as broken. A span, not a
+        // control: there is nothing here to activate.
         return `<span class="wikilink wikilink-missing">${label === "" ? whole : label}</span>`;
       }
-      return `<a class="wikilink" data-link="${target}">${label}</a>`;
+      // A button rather than an href-less <a>. An <a> with no href is not
+      // focusable, is not in the tab order and is not announced as a link, so
+      // it would look like a link and work only for a mouse. Following a link
+      // here opens a panel rather than navigating, which is what a button is.
+      return `<button type="button" class="wikilink" data-link="${target}">${label}</button>`;
     })
-    .replace(CODE_SPAN, "<code>$1</code>")
-    .replace(BOLD, "<strong>$1</strong>");
+    .replace(BOLD, "<strong>$1</strong>")
+    .replace(/<(\d+)>/g, (_, index) => `<code>${spans[Number(index)]}</code>`);
 }
 
 // renderMarkdown turns a card or documentation body into an HTML string.
@@ -89,6 +108,13 @@ export function renderMarkdown(text, knownCards) {
   const out = [];
   let inCode = false;
   let inList = false;
+  let atCodeStart = false;
+
+  // Closed onto the last line for the same reason, so a block does not end with
+  // a blank line either.
+  const closeCode = () => {
+    out[out.length - 1] += "</code></pre>";
+  };
 
   const closeList = () => {
     if (inList) {
@@ -100,13 +126,27 @@ export function renderMarkdown(text, knownCards) {
   for (const raw of lines) {
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     if (FENCE.test(line)) {
-      if (!inCode) closeList();
-      out.push(inCode ? "</code></pre>" : "<pre><code>");
+      if (inCode) {
+        closeCode();
+      } else {
+        closeList();
+        out.push("<pre><code>");
+        atCodeStart = true;
+      }
       inCode = !inCode;
       continue;
     }
     if (inCode) {
-      out.push(line);
+      // Appended to the open <pre><code> rather than pushed as its own entry:
+      // the join below puts a newline between entries, and HTML only ignores a
+      // newline immediately after <pre>, never after <code>. Pushed, every
+      // fenced block would open with a blank line.
+      if (atCodeStart) {
+        out[out.length - 1] += line;
+        atCodeStart = false;
+      } else {
+        out.push(line);
+      }
       continue;
     }
     if (BULLET.test(line)) {
@@ -131,6 +171,6 @@ export function renderMarkdown(text, knownCards) {
   closeList();
   // An unterminated fence closes here rather than leaking an open <pre> into
   // whatever the caller appends after this string.
-  if (inCode) out.push("</code></pre>");
+  if (inCode) closeCode();
   return out.join("\n");
 }

@@ -574,9 +574,39 @@ main {
   background: rgb(127 127 127 / 12%);
 }
 
-.wikilink {
+/* The three in-panel links are <button> elements, because an <a> with no href
+ * is not focusable and not in the tab order. These rules take a button's chrome
+ * off so it reads as the link it behaves like, without taking its keyboard
+ * behaviour away with it.
+ */
+.wikilink,
+.card-backlink,
+.card-session-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.wikilink,
+.card-backlink {
   cursor: pointer;
   text-decoration: underline;
+}
+
+.card-session-link {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.wikilink:focus-visible,
+.card-backlink:focus-visible,
+.card-session-link:focus-visible,
+.card-close:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 /* A link to a card that does not exist. It carries no data-link attribute, so it
@@ -598,8 +628,6 @@ main {
 
 .card-backlink {
   display: block;
-  cursor: pointer;
-  text-decoration: underline;
 }
 
 /* Kanban board (Task 4). #board is the .col-center child board.js renders

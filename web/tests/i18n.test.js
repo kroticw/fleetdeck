@@ -11,6 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 // The keys web/js/card.js asks for. Listed here rather than imported from the
 // module so that a key added to the panel and forgotten in one dictionary fails
@@ -25,6 +26,24 @@ const KEYS = [
   "card_write_refused",
   "backlinks",
 ];
+
+// Presence in a dictionary cannot be observed through t(): a Russian lookup
+// falls back to the English text, so a key missing from `ru` is indistinguishable
+// from one translated identically. Comparing the two languages' output would
+// therefore fail the first term that is genuinely spelled the same in both. The
+// dictionaries are read from the source instead, which is what "present in both"
+// actually means.
+const source = readFileSync(new URL("../js/i18n.js", import.meta.url), "utf8");
+
+function dictionary(name) {
+  const match = new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\};`).exec(source);
+  assert.ok(match, `web/js/i18n.js no longer declares a flat "const ${name} = {...}" object`);
+  return match[1];
+}
+
+function declares(body, key) {
+  return new RegExp(`(^|\\n)\\s*${key}:`).test(body);
+}
 
 let instance = 0;
 
@@ -47,16 +66,21 @@ test("a missing key renders as the key, never as nothing", async () => {
   }
 });
 
-test("every key the card panel asks for is answered in both languages", async () => {
+test("every key the card panel asks for is in both dictionaries", () => {
+  const en = dictionary("en");
+  const ru = dictionary("ru");
+  for (const key of KEYS) {
+    assert.ok(declares(en, key), `${key} is missing from the English dictionary`);
+    assert.ok(declares(ru, key), `${key} is missing from the Russian dictionary`);
+  }
+});
+
+test("and none of them falls through to the key itself", async () => {
   const english = await loadWith("en-GB");
   const russian = await loadWith("ru-RU");
   for (const key of KEYS) {
-    assert.notEqual(english.t(key), key, `${key} has no entry in the English dictionary`);
-    assert.notEqual(russian.t(key), key, `${key} has no entry in the Russian dictionary`);
-    // The Russian lookup falls back to English, so an entry missing from ru
-    // reads as English rather than as the key. Comparing the two is what
-    // actually catches it.
-    assert.notEqual(english.t(key), russian.t(key), `${key} is untranslated`);
+    assert.notEqual(english.t(key), key, `${key} renders as its own name in English`);
+    assert.notEqual(russian.t(key), key, `${key} renders as its own name in Russian`);
   }
 });
 

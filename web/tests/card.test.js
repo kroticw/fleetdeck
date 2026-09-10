@@ -22,21 +22,25 @@ function snapshot() {
   return JSON.parse(FIXTURE);
 }
 
+// A Set, like the real store's, not a single slot: a store that could only ever
+// hold one listener would quietly absorb a panel that was never disposed, which
+// is one of the two leaks these tests exist to see.
 function fakeStore(initial) {
-  let listener = null;
+  const listeners = new Set();
   return {
     subscribe(fn) {
-      listener = fn;
+      listeners.add(fn);
       fn(initial, true);
-      return () => {
-        listener = null;
-      };
+      return () => listeners.delete(fn);
     },
     push(snap) {
-      listener?.(snap, true);
+      for (const fn of [...listeners]) fn(snap, true);
     },
     get live() {
-      return listener !== null;
+      return listeners.size > 0;
+    },
+    get count() {
+      return listeners.size;
     },
   };
 }
@@ -44,13 +48,14 @@ function fakeStore(initial) {
 let dom;
 let realFetch;
 let renderCard;
+let wireCardPanel;
 
 beforeEach(async () => {
   dom = installDOM();
   realFetch = globalThis.fetch;
   // Imported after the document exists. The module reads it only when called,
   // but importing here keeps that independent of module caching order.
-  ({ renderCard } = await import("../js/card.js"));
+  ({ renderCard, wireCardPanel } = await import("../js/card.js"));
 });
 
 afterEach(() => {
@@ -73,9 +78,19 @@ function stubFetch(response) {
   const calls = [];
   globalThis.fetch = async (url, init) => {
     calls.push({ url, init, body: JSON.parse(init.body) });
-    return response;
+    return typeof response === "function" ? response(JSON.parse(init.body)) : response;
   };
   return calls;
+}
+
+// A response that does not settle until the test says so. Every ordering test
+// below is about what happens while a request is still in flight.
+function deferred() {
+  let release;
+  const promise = new Promise((resolve) => {
+    release = resolve;
+  });
+  return { promise, release: (value) => release(value) };
 }
 
 function answer(status, body) {
@@ -308,12 +323,142 @@ test("a session id becomes a control only when someone can act on it", () => {
   const opened = [];
   const { root } = open(snapshot(), FLEET_UI, { onOpenSession: (id) => opened.push(id) });
   const session = root.querySelector(".card-session");
-  assert.equal(session.tagName, "A");
+  // A button, not an href-less <a>: the latter is not focusable and not in the
+  // tab order, so it would work only for a mouse.
+  assert.equal(session.tagName, "BUTTON");
   fireEvent(session, "click");
   assert.deepEqual(opened, ["a1b2c3"]);
 
   const plain = open(snapshot());
   assert.equal(plain.root.querySelector(".card-session").tagName, "SPAN");
+});
+
+test("a backlink is a control the keyboard can reach", () => {
+  const { root } = open(snapshot());
+  assert.equal(root.querySelector(".card-backlink").tagName, "BUTTON");
+});
+
+test("an answer about one card never lands on another", async () => {
+  const { root } = open(snapshot());
+  const slow = deferred();
+  globalThis.fetch = async () => slow.promise;
+
+  const stage = root.querySelector("select[data-field=stage]");
+  stage.value = "review";
+  fireEvent(stage, "change");
+
+  // The operator follows a backlink while the write is still in flight.
+  fireEvent(root.querySelector(".card-backlink"), "click");
+  assert.equal(root.querySelector("h3").textContent, "Card keeping");
+
+  slow.release(answer(200, { written: true, committed: false, reason: "gpg-agent asked for a PIN" }));
+  await settle();
+
+  // A message about a write to fleet-ui drawn over card-keeping would be a
+  // message about one file shown on another.
+  assert.equal(
+    root.querySelector(".card-notice"),
+    null,
+    `${root.querySelector("h3").textContent} is showing a notice about a write to another card`,
+  );
+  assert.equal(root.querySelector(".card-error"), null);
+});
+
+test("a refusal about one card never reverts another card's control", async () => {
+  const { root } = open(snapshot());
+  const slow = deferred();
+  globalThis.fetch = async () => slow.promise;
+
+  const stage = root.querySelector("select[data-field=stage]");
+  stage.value = "review";
+  fireEvent(stage, "change");
+  fireEvent(root.querySelector(".card-backlink"), "click");
+
+  slow.release(answer(422, { error: "card has no stage field" }));
+  await settle();
+
+  assert.equal(root.querySelector(".card-error"), null);
+  // card-keeping's own stage, untouched by the answer to fleet-ui's write.
+  assert.equal(root.querySelector("select[data-field=stage]").value, "review");
+});
+
+test("two edits in a row keep their own answers and their own controls", async () => {
+  const { root } = open(snapshot());
+  const slowStage = deferred();
+  globalThis.fetch = async (_url, init) =>
+    JSON.parse(init.body).field === "stage" ? slowStage.promise : answer(204);
+
+  const stage = root.querySelector("select[data-field=stage]");
+  stage.value = "review";
+  fireEvent(stage, "change");
+
+  // A second edit, of the other field, answered before the first.
+  const progress = root.querySelector("select[data-field=progress]");
+  progress.value = "60";
+  fireEvent(progress, "change");
+  await settle();
+
+  slowStage.release(answer(200, { written: true, committed: false, reason: "gpg-agent asked for a PIN" }));
+  await settle();
+
+  // The slow answer must not have reverted the fast edit's control...
+  assert.equal(root.querySelector("select[data-field=progress]").value, "60");
+  // ...and must have arrived as its own message, naming its own field.
+  const notice = root.querySelector(".card-notice");
+  assert.ok(notice, "the slower write's answer was swallowed");
+  assert.ok(notice.textContent.startsWith("stage:"), notice.textContent);
+  assert.equal(root.querySelector("select[data-field=stage]").value, "review");
+});
+
+test("both fields can carry an answer at once, each naming itself", async () => {
+  const { root } = open(snapshot());
+  globalThis.fetch = async (_url, init) =>
+    JSON.parse(init.body).field === "stage"
+      ? answer(422, { error: "card has no stage field" })
+      : answer(200, { written: true, committed: false, reason: "gpg-agent asked for a PIN" });
+
+  const stage = root.querySelector("select[data-field=stage]");
+  stage.value = "review";
+  fireEvent(stage, "change");
+  await settle();
+
+  const progress = root.querySelector("select[data-field=progress]");
+  progress.value = "60";
+  fireEvent(progress, "change");
+  await settle();
+
+  const error = root.querySelector(".card-error");
+  const notice = root.querySelector(".card-notice");
+  assert.ok(error && error.textContent.startsWith("stage:"), error?.textContent);
+  assert.ok(notice && notice.textContent.startsWith("progress:"), notice?.textContent);
+  // The refused one reverted, the written one kept its value.
+  assert.equal(root.querySelector("select[data-field=stage]").value, "active");
+  assert.equal(root.querySelector("select[data-field=progress]").value, "60");
+});
+
+test("a superseded edit of the same field does not speak for the newer one", async () => {
+  const { root } = open(snapshot());
+  const first = deferred();
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    return call === 1 ? first.promise : answer(204);
+  };
+
+  let stage = root.querySelector("select[data-field=stage]");
+  stage.value = "review";
+  fireEvent(stage, "change");
+
+  stage = root.querySelector("select[data-field=stage]");
+  stage.value = "blocked";
+  fireEvent(stage, "change");
+  await settle();
+
+  first.release(answer(422, { error: "card has no stage field" }));
+  await settle();
+
+  assert.equal(root.querySelector(".card-error"), null, "a replaced edit reported its own failure");
+  assert.equal(root.querySelector("select[data-field=stage]").value, "blocked");
 });
 
 test("a value the board does not allow is shown as it is, not replaced", () => {
@@ -325,4 +470,111 @@ test("a value the board does not allow is shown as it is, not replaced", () => {
   const stage = root.querySelector("select[data-field=stage]");
   assert.equal(stage.value, "whatever-the-agent-wrote");
   assert.equal(stage.children[0].disabled, true);
+});
+
+// wireCardPanel — what makes the panel a panel, and what main.js is reduced to.
+
+function board() {
+  const node = dom.element("div");
+  const card = dom.element("div");
+  card.dataset.path = FLEET_UI;
+  node.append(card);
+  return { node, card };
+}
+
+test("a click on a board card opens the panel", () => {
+  const { node, card } = board();
+  const panel = dom.element("div");
+  panel.hidden = true;
+  const store = fakeStore(snapshot());
+
+  wireCardPanel(node, panel, { subscribe: store.subscribe });
+  fireEvent(card, "click");
+
+  assert.equal(panel.hidden, false);
+  assert.equal(panel.querySelector("h3").textContent, 'Fleet UI <panel> "v2"');
+});
+
+test("a click on nothing in particular opens nothing", () => {
+  const { node } = board();
+  const panel = dom.element("div");
+  panel.hidden = true;
+  const store = fakeStore(snapshot());
+
+  wireCardPanel(node, panel, { subscribe: store.subscribe });
+  fireEvent(node, "click");
+
+  assert.equal(panel.hidden, true);
+});
+
+test("opening a second card disposes the first", () => {
+  const { node, card } = board();
+  const second = dom.element("div");
+  second.dataset.path = CARD_KEEPING;
+  node.append(second);
+  const panel = dom.element("div");
+  const store = fakeStore(snapshot());
+
+  wireCardPanel(node, panel, { subscribe: store.subscribe });
+  fireEvent(card, "click");
+  fireEvent(second, "click");
+
+  assert.equal(panel.querySelector("h3").textContent, "Card keeping");
+
+  // Exactly one panel is alive. An undisposed first panel leaves its own
+  // subscription and its own Escape and click-outside handlers behind, and every
+  // card the operator opens adds another set — invisible on screen, because the
+  // second panel draws over the first, and unbounded.
+  assert.equal(store.count, 1, "a panel was left subscribed to the store");
+  assert.equal(
+    dom.document.listeners.get("keydown").size,
+    1,
+    "a panel left its Escape handler on the document",
+  );
+  assert.equal(dom.document.listeners.get("mousedown").size, 1);
+
+  fireDocumentEvent(dom.document, "keydown", { key: "Escape" });
+  assert.equal(panel.hidden, true);
+  assert.equal(store.live, false);
+  assert.equal(dom.document.listeners.get("keydown").size, 0);
+});
+
+test("closing empties the panel and hides it again", () => {
+  const { node, card } = board();
+  const panel = dom.element("div");
+  const store = fakeStore(snapshot());
+
+  wireCardPanel(node, panel, { subscribe: store.subscribe });
+  fireEvent(card, "click");
+  fireEvent(panel.querySelector(".card-close"), "click");
+
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.children.length, 0);
+});
+
+test("unwiring stops the board opening anything", () => {
+  const { node, card } = board();
+  const panel = dom.element("div");
+  panel.hidden = true;
+  const store = fakeStore(snapshot());
+
+  const unwire = wireCardPanel(node, panel, { subscribe: store.subscribe });
+  unwire();
+  fireEvent(card, "click");
+
+  assert.equal(panel.hidden, true);
+});
+
+test("a page without the elements says so instead of doing nothing quietly", () => {
+  const errors = [];
+  const realError = console.error;
+  console.error = (...args) => errors.push(args.join(" "));
+  try {
+    const unwire = wireCardPanel(null, dom.element("div"));
+    unwire();
+  } finally {
+    console.error = realError;
+  }
+  assert.equal(errors.length, 1);
+  assert.ok(errors[0].includes("#card-panel"), errors[0]);
 });
