@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -348,4 +350,40 @@ func (c *Collector) reportCount() int {
 	c.reportMu.Lock()
 	defer c.reportMu.Unlock()
 	return len(c.reports)
+}
+
+// TestASlowUsageEndpointDoesNotStallTheCycle covers the one source that reaches off
+// the machine. Every other source is local and bounded by its own package; a usage
+// request that never answers would otherwise freeze the whole collect cycle, and the
+// panel would stop showing sessions because a rate-limit gauge is slow.
+func TestASlowUsageEndpointDoesNotStallTheCycle(t *testing.T) {
+	original := usageTimeout
+	usageTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { usageTimeout = original })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	uf := usage.NewFetcher(func() (string, error) { return "token", nil }, srv.URL, time.Minute)
+
+	done := make(chan state.Snapshot, 1)
+	go func() {
+		done <- NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
+	}()
+
+	select {
+	case snap := <-done:
+		if snap.UsageError == "" {
+			t.Fatal("a usage request that timed out must light its own error field")
+		}
+		if snap.Limits != nil {
+			t.Fatal("a timed-out request produced no limits")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Collect must not wait on the usage endpoint indefinitely")
+	}
 }

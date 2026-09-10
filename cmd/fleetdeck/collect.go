@@ -42,6 +42,23 @@ const reportTTL = 5 * time.Minute
 // the model's real window.
 const reportedPercentWindow = 100
 
+// usageTimeout bounds the one source that leaves this machine.
+//
+// Every other source Collect asks is local and bounded by its own package: the daemon
+// client carries its own dials and deadlines, internal/board bounds every git
+// invocation. The usage endpoint is an unofficial HTTP handle behind a beta header
+// (spec section 3.2) reached with no client timeout of its own, so without a deadline
+// here one slow response freezes the whole collect cycle and the panel stops showing
+// sessions because a rate-limit gauge is slow. A failure is cached by nothing, so the
+// next tick simply tries again.
+//
+// It bounds the request, not the Keychain lookup that precedes it: reading the token
+// shells out to `security` with no context, which this cannot reach into.
+//
+// A var rather than a const solely so a test can shorten it instead of waiting the
+// real deadline out; nothing outside a test may write to it.
+var usageTimeout = 10 * time.Second
+
 // cachedUsage remembers the last context estimate together with the file state it was
 // computed from, so an idle session costs no reads at all. Transcripts reach tens of
 // megabytes and Collect runs every couple of seconds; without this the panel would
@@ -278,7 +295,9 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	c.pruneContextCache(c.enrich(snap.Sessions))
 
 	if c.cfg.UsageEnabled && c.usage != nil {
-		l, err := c.usage.Limits(ctx)
+		usageCtx, cancel := context.WithTimeout(ctx, usageTimeout)
+		l, err := c.usage.Limits(usageCtx)
+		cancel()
 		if err != nil {
 			snap.UsageError = err.Error()
 		} else {
