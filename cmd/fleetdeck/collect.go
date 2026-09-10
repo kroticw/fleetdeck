@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"math"
 	"os"
@@ -384,6 +385,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		cancel()
 		if err != nil {
 			snap.UsageError = err.Error()
+			snap.UsageErrorKind = classifyUsageError(err)
 		}
 		// l carries the last successfully fetched value even when err != nil
 		// (usage.Fetcher.Limits falls back to its cache on a failed refresh) --
@@ -399,4 +401,22 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		}
 	}
 	return snap
+}
+
+// classifyUsageError turns a usage.Fetcher error into the three buckets the
+// panel's text can honestly commit to. "auth" is deliberately narrow --
+// usage.ErrNoToken (nothing to send) and usage.ErrUnauthorized (a token
+// was sent and rejected) are the only two causes sign-in actually fixes;
+// "rate_limit" is the account's own request budget, which the panel must
+// not tell a person to sign in over; everything else is "other", which
+// promises neither outcome because neither is known to be true.
+func classifyUsageError(err error) string {
+	switch {
+	case errors.Is(err, usage.ErrNoToken), errors.Is(err, usage.ErrUnauthorized):
+		return "auth"
+	case errors.Is(err, usage.ErrRateLimited):
+		return "rate_limit"
+	default:
+		return "other"
+	}
 }

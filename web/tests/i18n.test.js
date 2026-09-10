@@ -73,9 +73,14 @@ const KEYS = [
   "theme_light",
   "theme_dark",
 
-  // web/js/header.js's stale-usage notice, added alongside the fresh
+  // web/js/header.js's stale-usage notices, added alongside the fresh
   // usage_down muting -- same reason as everything else on this list.
-  "usage_down_stale",
+  // Split into two once "sign-in needed" turned out to be shown for
+  // causes sign-in cannot fix (a rate limit): the wording now depends on
+  // cmd/fleetdeck/collect.go's classifyUsageError, not only on how long
+  // the failure has lasted.
+  "usage_down_auth",
+  "usage_down_rate_limited",
 
   // The gauges' own last-known-value label, shown when a failed refresh
   // falls back to usage.Fetcher's cache (cmd/fleetdeck/collect.go) instead

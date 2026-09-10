@@ -328,9 +328,23 @@ export function alarmHTML(connected, snap) {
 // decided: nothing while the endpoint answers, a calm muted line while it has
 // only just started failing, or a visible worded notice once it has failed
 // long enough that "wait, it will come back" would be a lie.
-export function usageProblemHTML(severity) {
+//
+// kind is snap.usageErrorKind (cmd/fleetdeck/collect.go's classifyUsageError)
+// and only changes the *worded* notice, not the quiet one: a brand-new
+// failure could still be anything, so the fresh line stays generic on
+// purpose. "sign-in needed" is shown only for kind "auth" -- the one case
+// where it is actually true (usage.ErrNoToken or an HTTP 401). "rate_limit"
+// gets its own wording that says what happened and that it should recover
+// on its own; anything else ("other", or an older snapshot with no kind at
+// all) falls back to the same generic notice the fresh state already uses,
+// which promises nothing it cannot back up.
+export function usageProblemHTML(severity, kind) {
   if (severity === "fresh") return `<span class="problem-quiet">${t("usage_down")}</span>`;
-  if (severity === "stale") return `<span class="problem-notice">${t("usage_down_stale")}</span>`;
+  if (severity === "stale") {
+    if (kind === "auth") return `<span class="problem-notice">${t("usage_down_auth")}</span>`;
+    if (kind === "rate_limit") return `<span class="problem-notice">${t("usage_down_rate_limited")}</span>`;
+    return `<span class="problem-notice">${t("usage_down")}</span>`;
+  }
   return "";
 }
 
@@ -378,7 +392,7 @@ export function renderHeader(root) {
       </div>
       <div class="counters">
         ${alarmHTML(connected, snap)}
-        ${usageProblemHTML(usageSeverity)}
+        ${usageProblemHTML(usageSeverity, snap.usageErrorKind)}
         <span class="counter counter-waiting ${waitingCount > 0 ? "counter-on" : ""}">${waitingCount} ${t("waiting_count")}</span>
         <span class="counter counter-stalled ${stalledCount > 0 ? "counter-on" : ""}">${stalledCount} ${t("stalled_count")} ${stalledList(stalledSessions)}</span>
       </div>`;

@@ -62,8 +62,72 @@ func TestExpiredTokenIsAnErrorNotZeroes(t *testing.T) {
 	defer srv.Close()
 
 	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
-	if _, err := f.Limits(context.Background()); err == nil {
+	_, err := f.Limits(context.Background())
+	if err == nil {
 		t.Fatal("an auth error must be reported; zero gauges would look like a healthy account")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("an authentication_error body must be ErrUnauthorized, got %v", err)
+	}
+}
+
+// TestAnHTTP401IsErrUnauthorizedEvenWithAnUnnamedErrorType covers the other
+// half of the ErrUnauthorized check: the status code alone, independent of
+// whatever the body's error.type happens to say -- the panel's "sign-in
+// needed" wording must not depend on the endpoint naming its own error the
+// way this test's body deliberately does not.
+func TestAnHTTP401IsErrUnauthorizedEvenWithAnUnnamedErrorType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"type":"some_future_type_nobody_wrote_a_case_for"}}`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	if _, err := f.Limits(context.Background()); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("HTTP 401 must be ErrUnauthorized regardless of error.type, got %v", err)
+	}
+}
+
+// TestRateLimitErrorIsDistinguishedFromAuthFailure is the fix this task
+// exists for: a rate_limit_error reply used to collapse into the exact same
+// generic error an expired token produces, and the panel's text could not
+// tell them apart -- "sign-in needed" is wrong advice for an account that
+// is simply being asked to slow down.
+func TestRateLimitErrorIsDistinguishedFromAuthFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"type":"rate_limit_error","message":"Rate limited. Please try again later."}}`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	_, err := f.Limits(context.Background())
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("want ErrRateLimited, got %v", err)
+	}
+	if errors.Is(err, ErrUnauthorized) {
+		t.Fatal("a rate limit must never also read as ErrUnauthorized")
+	}
+}
+
+// TestAnUnclassifiedErrorTypeIsNeitherSentinel covers the third bucket: an
+// error this package has no specific case for must not silently fall into
+// either sentinel, which would make the panel promise something ("sign-in
+// needed" or "it will recover on its own") it has no basis for.
+func TestAnUnclassifiedErrorTypeIsNeitherSentinel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"error":{"type":"overloaded_error"}}`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	_, err := f.Limits(context.Background())
+	if err == nil {
+		t.Fatal("an error body must still be reported as an error")
+	}
+	if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrRateLimited) {
+		t.Fatalf("an unrecognized error.type must not match either sentinel, got %v", err)
 	}
 }
 

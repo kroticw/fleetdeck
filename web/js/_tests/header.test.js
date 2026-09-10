@@ -353,9 +353,29 @@ test("offline and daemon_down still render as the red .problem span", () => {
 test("usage_down never joins the red .problem span, at any severity", () => {
   assert.equal(usageProblemHTML("none"), "");
   assert.equal(usageProblemHTML("fresh").includes("problem-quiet"), true);
-  assert.equal(usageProblemHTML("stale").includes("problem-notice"), true);
+  assert.equal(usageProblemHTML("stale", "auth").includes("problem-notice"), true);
   assert.equal(usageProblemHTML("fresh").includes('class="problem"'), false);
-  assert.equal(usageProblemHTML("stale").includes('class="problem"'), false);
+  assert.equal(usageProblemHTML("stale", "auth").includes('class="problem"'), false);
+});
+
+// usageProblemHTML's wording must depend on cmd/fleetdeck/collect.go's
+// classifyUsageError, not only on how long the failure has lasted: the bug
+// this card exists for was exactly "sign-in needed" shown for a cause
+// sign-in cannot fix (a rate limit). Only the "stale" (worded) severity
+// varies by kind -- "fresh" stays deliberately generic, see the function's
+// own comment.
+test("stale wording depends on the error kind, never defaults to sign-in", () => {
+  assert.equal(usageProblemHTML("stale", "auth").includes(t("usage_down_auth")), true);
+  assert.equal(usageProblemHTML("stale", "rate_limit").includes(t("usage_down_rate_limited")), true);
+  assert.equal(usageProblemHTML("stale", "rate_limit").includes(t("usage_down_auth")), false);
+  // "other", and an old snapshot with no kind at all, must not claim sign-in
+  // fixes it -- that claim is only ever true for kind "auth". Pinned as a
+  // positive fact (equals the generic notice), not only as an absence of
+  // the auth text: a version that rendered "" or dropped the notice
+  // entirely would still pass a not-equal-to-auth-text check, so that
+  // alone does not prove this branch renders anything at all.
+  assert.equal(usageProblemHTML("stale", "other"), `<span class="problem-notice">${t("usage_down")}</span>`);
+  assert.equal(usageProblemHTML("stale", undefined), `<span class="problem-notice">${t("usage_down")}</span>`);
 });
 
 // --- gauge: the flicker fix's visible half -------------------------------

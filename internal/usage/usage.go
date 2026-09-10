@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -12,6 +13,19 @@ import (
 // Endpoint is the production usage endpoint. It is unofficial and gated behind a
 // beta header: when it changes, the gauges go dark and the panel keeps working.
 const Endpoint = "https://api.anthropic.com/api/oauth/usage"
+
+// ErrUnauthorized means the endpoint rejected the token that was actually
+// sent -- HTTP 401, or an error body naming an authentication failure.
+// Unlike ErrNoToken (nothing to send in the first place), a token was sent
+// and refused. Both genuinely mean sign-in would fix it; nothing else this
+// endpoint can fail with does, which is the whole reason these are
+// distinguished from the caller's generic error instead of folded into it.
+var ErrUnauthorized = errors.New("usage endpoint rejected the token")
+
+// ErrRateLimited means the endpoint answered with its own rate-limit error
+// -- the account's request budget, not the token or its permissions. A
+// token that already works does not need signing in again because of this.
+var ErrRateLimited = errors.New("usage endpoint rate limited")
 
 type Window struct {
 	Utilization float64   `json:"utilization"`
@@ -91,7 +105,14 @@ func (f *Fetcher) Limits(ctx context.Context) (Limits, error) {
 		return f.staleCache(), fmt.Errorf("decode usage reply: %w", err)
 	}
 	if payload.Error != nil {
-		return f.staleCache(), fmt.Errorf("usage endpoint refused: %s", payload.Error.Type)
+		switch {
+		case payload.Error.Type == "rate_limit_error":
+			return f.staleCache(), fmt.Errorf("%w: %s", ErrRateLimited, payload.Error.Type)
+		case payload.Error.Type == "authentication_error" || resp.StatusCode == http.StatusUnauthorized:
+			return f.staleCache(), fmt.Errorf("%w: %s", ErrUnauthorized, payload.Error.Type)
+		default:
+			return f.staleCache(), fmt.Errorf("usage endpoint refused: %s", payload.Error.Type)
+		}
 	}
 	if payload.FiveHour == nil || payload.SevenDay == nil {
 		return f.staleCache(), fmt.Errorf("usage reply carries no windows")
