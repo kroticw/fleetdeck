@@ -62,7 +62,14 @@ const en = {
   // shared between them would tie one panel's wording to the other's.
   tab_digest: "digest",
   tab_screen: "screen",
-  write_to_session: "write to this session…",
+  // Says where a press lands, not what the key is called: the glyph on the
+  // button already says Esc or ↓, and what no glyph can say is that the press
+  // happens in a Claude Code session running elsewhere, where nothing undoes
+  // it. The operator read the bare row as window controls for this panel.
+  keys_to_session: "these keys are pressed in the live session:",
+  // The box types into that same live session, and Enter sends it there with
+  // no confirmation — a fact the box otherwise keeps to itself.
+  write_to_session: "write to the live session — Enter sends…",
   close_session: "close",
   no_steps: "no readable steps yet",
   terminal_missing: "the terminal library did not load",
@@ -120,7 +127,8 @@ const ru = {
   doc_open_failed: "не удалось открыть документ",
   tab_digest: "выжимка",
   tab_screen: "экран",
-  write_to_session: "написать в сессию…",
+  keys_to_session: "эти клавиши нажимаются в живой сессии:",
+  write_to_session: "написать в живую сессию — Enter отправит…",
   close_session: "закрыть",
   no_steps: "читаемых шагов пока нет",
   terminal_missing: "библиотека терминала не загрузилась",

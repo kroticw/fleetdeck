@@ -48,6 +48,10 @@ const KEYS = [
   "close_session",
   "no_steps",
   "terminal_missing",
+  // The one string in the panel that says a button leaves this machine. Missing
+  // from a dictionary it renders as "keys_to_session" above four bare glyphs,
+  // which is the state the operator already could not read.
+  "keys_to_session",
 
   // web/js/sessions.js's own column header and the theme override's button
   // (web/js/header.js renders it, web/js/theme.js decides its state) — both

@@ -1256,12 +1256,6 @@ main {
   gap: 2px;
 }
 
-.session-panel .s-actions {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
-
 .session-panel button {
   font: inherit;
   font-size: var(--fs-xs);
@@ -1297,6 +1291,52 @@ main {
 .session-panel .s-key {
   font-variant-numeric: tabular-nums;
   min-width: 34px;
+}
+
+/* The two classes of control in this panel, and why they are not one row.
+ *
+ * ✕ closes this panel. Nothing leaves the machine and reopening undoes it, so
+ * it stays in the header's top-right corner — where a close button belongs and
+ * where a person looks for one.
+ *
+ * The four keys are the opposite: each presses a key inside a Claude Code
+ * session running elsewhere, in work that is somebody's, and nothing takes it
+ * back. Drawn beside ✕ they read as one set of window controls, and the first
+ * person to see this panel who had not written it read them as exactly that and
+ * asked what the buttons were for. They are grouped down here with the box that
+ * writes into the same session, behind a label naming where the press lands.
+ * The grouping is the message: what stays here is at the top, what leaves is at
+ * the bottom. */
+.session-panel .s-close {
+  margin-left: auto;
+}
+
+.session-panel .s-keys {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.session-panel .s-keys-label {
+  margin-right: var(--gap-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+/* The name of the session this panel is pointing at, beside the tabs. It is a
+ * session's own name and can be any length, so it shrinks and clips with an
+ * ellipsis rather than pushing the close button off the row — min-width:0
+ * because a flex item will not shrink below its content without it. */
+.session-panel .s-who {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
 }
 
 /* The body is the one part that scrolls: the tabs, the error line and the

@@ -213,12 +213,37 @@ export function renderSession(
   let body = null;
   let errorLine = null;
   let input = null;
+  let nameLine = null;
 
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
+  };
+
+  // The name of the session this panel is pointing at, and the short id when the
+  // snapshot does not name it. The short id is never nothing: it is the identity
+  // the session list shows for an unnamed session and the one an operator can
+  // match against that list, whereas a blank header says only that the panel
+  // does not know where it points — under a key row that promises to press keys
+  // in "the live session".
+  const currentName = () => lookup(short)?.name || short;
+
+  // Resolved on every poll pass rather than captured when the panel opens, for
+  // the same reason the digest's full session id is (see the note above
+  // renderSession): a panel opened before the first snapshot lands would
+  // otherwise hold whatever was known then — nothing — for as long as it stays
+  // open, while the session sits named in the list beside it.
+  //
+  // Written only when it actually changed. A header rewritten once a second
+  // drops any selection inside it and costs the work for no visible difference,
+  // which is invisible in the resulting tree and therefore a counted assertion
+  // in session.test.js rather than a comment here alone.
+  const refreshName = () => {
+    if (!nameLine) return;
+    const name = currentName();
+    if (nameLine.textContent !== name) nameLine.textContent = name;
   };
 
   // showError writes into a line of its own above the input, rather than
@@ -313,8 +338,17 @@ export function renderSession(
 
   const startPolling = () => {
     const isDigest = tab === "digest";
+    const pass = isDigest ? digestPass : screenPass;
     poller = createPoller(
-      isDigest ? digestPass : screenPass,
+      async () => {
+        // Before the pass, not after it: a pass that throws — a session with no
+        // transcript, a daemon that went away — must still leave the header
+        // naming the session, and the digest pass throws precisely when the
+        // snapshot does not hold the session yet, which is the case the header
+        // has to recover from.
+        refreshName();
+        await pass();
+      },
       isDigest ? DIGEST_INTERVAL_MS : SCREEN_INTERVAL_MS,
       { timers, onError: (err) => showError(err.message) },
     );
@@ -359,6 +393,18 @@ export function renderSession(
   function drawShell() {
     root.hidden = false;
 
+    // What is in the box outlives the redraw. drawShell builds a new textarea on
+    // every tab switch, and this panel already holds the rule that a person's
+    // unsent words are the one thing it must not lose — text that failed to send
+    // comes back into the box. A tab switch is not even a failure, which makes
+    // dropping the words worse rather than better: nothing went wrong and they
+    // are gone anyway. And switching to the screen tab to see what a session is
+    // actually asking is exactly when a half-written answer exists.
+    //
+    // The caret is not carried with it: the redraw does not preserve focus
+    // either, so there is nothing to put a caret back into.
+    const typed = input ? input.value : "";
+
     const head = el("div", "s-head");
 
     const tabs = el("div", "s-tabs");
@@ -373,16 +419,15 @@ export function renderSession(
       tabs.appendChild(button);
     }
 
-    const actions = el("div", "s-actions");
-    for (const key of KEYS) {
-      const button = el("button", "s-key", key.label);
-      button.type = "button";
-      button.dataset.key = key.id;
-      button.addEventListener("click", () => {
-        void pressKey(key);
-      });
-      actions.appendChild(button);
-    }
+    // Beside the tabs, because the header is where a person looks to find out
+    // what they are looking at — and because the keys at the foot of the panel
+    // now say they are pressed in a live session, which is only half an answer
+    // until the panel says which one.
+    nameLine = el("div", "s-who", currentName());
+    // The name is the session list's own, and two sessions may carry the same
+    // one; the short id under the pointer tells them apart. A property, never
+    // interpolated into markup.
+    nameLine.title = short;
 
     const close = el("button", "s-close", "✕");
     close.type = "button";
@@ -392,9 +437,47 @@ export function renderSession(
       onClose();
     });
 
+    // The header holds the two controls that act on this panel and nothing
+    // else: the tabs, and the button that closes it. Both are undone by
+    // reopening the panel.
     head.appendChild(tabs);
-    head.appendChild(actions);
+    head.appendChild(nameLine);
     head.appendChild(close);
+
+    // The keys are not among them, and this is the change the operator's first
+    // look at this panel bought. Drawn where they used to be — a bare
+    // `Esc ↑ ↓ Enter ✕` row in the top-right corner, opposite the tabs — they
+    // are in the exact place every window on the operator's machine puts
+    // controls that act on the window, and he read them as that and asked what
+    // they were for. They are not that: each one presses a key inside a Claude
+    // Code session running somewhere else, in work that is somebody's, and
+    // nothing takes it back. A button whose purpose is unclear is either never
+    // pressed or pressed to find out, and `↓` pressed to find out moves a menu
+    // selection in that session.
+    //
+    // So they sit down here instead, against the box that writes into the same
+    // session, under a label that names the destination. Grouped by where the
+    // press lands, not by which corner had room.
+    //
+    // Only on the screen tab. The digest is transcript text already spoken, and
+    // it is the tab the panel opens on: the first meeting with these buttons was
+    // on the one tab where pressing them answers nothing on the screen in front
+    // of you. A control that does nothing meaningful where it is shown teaches a
+    // person that controls in this panel need not be understood.
+    let keys = null;
+    if (tab === "screen") {
+      keys = el("div", "s-keys");
+      keys.appendChild(el("span", "s-keys-label", t("keys_to_session")));
+      for (const key of KEYS) {
+        const button = el("button", "s-key", key.label);
+        button.type = "button";
+        button.dataset.key = key.id;
+        button.addEventListener("click", () => {
+          void pressKey(key);
+        });
+        keys.appendChild(button);
+      }
+    }
 
     body = el("div", "s-body");
 
@@ -410,6 +493,7 @@ export function renderSession(
     // Set as a property, never interpolated into markup: a translation holding
     // a quote would otherwise break out of the attribute it was written into.
     input.placeholder = t("write_to_session");
+    input.value = typed;
     input.addEventListener("keydown", (event) => {
       // Enter sends, Shift+Enter is a newline — the same bargain every chat
       // input makes.
@@ -419,7 +503,10 @@ export function renderSession(
     });
     form.appendChild(input);
 
-    root.replaceChildren(head, body, errorLine, form);
+    // keys is absent on the digest tab, and filtered out rather than replaced by
+    // an empty node: an empty container still takes the row's gap and leaves the
+    // writing area sitting at a different height on each tab.
+    root.replaceChildren(...[head, body, errorLine, keys, form].filter(Boolean));
   }
 
   drawShell();
