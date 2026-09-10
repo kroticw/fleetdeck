@@ -452,41 +452,10 @@ func Save(path string, c Config) error {
 		return fmt.Errorf("encode config: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp config file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
-
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write temp config file: %w", err)
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("set config file permissions: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync temp config file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp config file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replace config file: %w", err)
-	}
-
-	// Fsync the directory too, so the rename entry itself is durable across a crash,
-	// not just the file's contents. This is best-effort: not every platform supports
-	// syncing a directory handle, and the rename has already succeeded and is readable
-	// either way — only the crash-durability guarantee would be weaker without it.
-	if dirHandle, err := os.Open(dir); err == nil {
-		_ = dirHandle.Sync()
-		_ = dirHandle.Close()
-	}
-
-	return nil
+	// 0600 rather than whatever an existing file already had: Save may be
+	// creating this file for the first time, so there is no prior mode to
+	// preserve. SetField, which only ever edits a file that already exists,
+	// preserves that file's own mode instead — see its own call to this
+	// same helper.
+	return writeFileAtomically(path, raw, 0o600)
 }
