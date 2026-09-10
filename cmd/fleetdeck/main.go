@@ -216,6 +216,44 @@ func setOrchestratorSession(configPath string, collector *Collector, id string) 
 	return nil
 }
 
+// setSessionLabel is server.Deps.SetSessionLabel: write, or given an empty
+// label remove, the operator's own name for one session, persisting the
+// choice before the running collector reports it next.
+//
+// The write goes through config.SetSessionLabel first — the surgical,
+// comment-preserving path setOrchestratorSession uses for its own key,
+// extended to a dynamically-keyed map — falling back to a full config.Save
+// only when the file does not exist at all, for the same reason
+// setOrchestratorSession does: nothing hand-written to lose on a config
+// nobody has created yet. Any other failure (a malformed sessionID, a
+// newline in the label, a config missing the session_labels section
+// entirely) is returned as it is, never silently upgraded to a full rewrite
+// that would destroy exactly the comments SetSessionLabel exists to
+// protect.
+func setSessionLabel(configPath string, collector *Collector, sessionID, label string) error {
+	err := config.SetSessionLabel(configPath, sessionID, label)
+	if errors.Is(err, fs.ErrNotExist) {
+		// next.SessionLabels is collector.Config()'s own clone, not the
+		// live map c.cfg.SessionLabels — mutating it here is safe and
+		// touches nothing another goroutine can also be touching.
+		next := collector.Config()
+		if label == "" {
+			delete(next.SessionLabels, sessionID)
+		} else {
+			if next.SessionLabels == nil {
+				next.SessionLabels = map[string]string{}
+			}
+			next.SessionLabels[sessionID] = label
+		}
+		err = config.Save(configPath, next)
+	}
+	if err != nil {
+		return err
+	}
+	collector.SetSessionLabel(sessionID, label)
+	return nil
+}
+
 func main() {
 	// The subcommand is read before any flag is defined or parsed: `fleetdeck init`
 	// has flags of its own (--board, --force) and none of the panel's, and
@@ -397,6 +435,9 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		},
 		SetOrchestratorSession: func(id string) error {
 			return setOrchestratorSession(configPath, collector, id)
+		},
+		SetSessionLabel: func(sessionID, label string) error {
+			return setSessionLabel(configPath, collector, sessionID, label)
 		},
 	}
 }

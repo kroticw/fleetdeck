@@ -53,6 +53,10 @@ func testDeps() (Deps, *[]string) {
 			calls = append(calls, "orchestrator:"+id)
 			return nil
 		},
+		SetSessionLabel: func(sessionID, label string) error {
+			calls = append(calls, fmt.Sprintf("label:%s:%s", sessionID, label))
+			return nil
+		},
 	}, &calls
 }
 
@@ -455,6 +459,7 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 		{"status", func(d *Deps) { d.PutStatus = nil }, http.MethodPost, "/api/status", `{"sessionId":"a","model":"m","costUSD":0,"contextPercent":0}`},
 		{"digest", func(d *Deps) { d.Digest = nil }, http.MethodGet, "/api/sessions/a/digest", ""},
 		{"config", func(d *Deps) { d.SetOrchestratorSession = nil }, http.MethodPatch, "/api/config", `{"orchestratorSession":"abc"}`},
+		{"label", func(d *Deps) { d.SetSessionLabel = nil }, http.MethodPatch, "/api/sessions/a/label", `{"label":"x"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -598,5 +603,77 @@ func TestPatchConfigReportsAStoreFailure(t *testing.T) {
 	rec := do(d, http.MethodPatch, "/api/config", `{"orchestratorSession":"abc"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("want 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetSessionLabelReachesTheStore(t *testing.T) {
+	d, calls := testDeps()
+	rec := do(d, http.MethodPatch, "/api/sessions/11111111-1111-1111-1111-111111111111/label", `{"label":"orchestrator"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	want := "label:11111111-1111-1111-1111-111111111111:orchestrator"
+	if len(*calls) != 1 || (*calls)[0] != want {
+		t.Fatalf("unexpected calls: %v", *calls)
+	}
+}
+
+// TestSetSessionLabelAcceptsAnEmptyStringToRemove pins the route-level half
+// of the "empty label deletes" contract: an empty string is a legal request
+// (204), not a validation failure, and reaches the store as an empty label
+// rather than being rejected the way an absent key is.
+func TestSetSessionLabelAcceptsAnEmptyStringToRemove(t *testing.T) {
+	d, calls := testDeps()
+	rec := do(d, http.MethodPatch, "/api/sessions/11111111-1111-1111-1111-111111111111/label", `{"label":""}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	want := "label:11111111-1111-1111-1111-111111111111:"
+	if len(*calls) != 1 || (*calls)[0] != want {
+		t.Fatalf("unexpected calls: %v", *calls)
+	}
+}
+
+func TestSetSessionLabelRequiresTheLabelKey(t *testing.T) {
+	d, calls := testDeps()
+	rec := do(d, http.MethodPatch, "/api/sessions/11111111-1111-1111-1111-111111111111/label", `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("an absent key must be refused with 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("nothing must reach the store, got %v", *calls)
+	}
+	if !strings.Contains(rec.Body.String(), "label is required") {
+		t.Fatalf("the refusal must explain itself, got %s", rec.Body.String())
+	}
+}
+
+// TestSetSessionLabelReportsAMalformedSessionIDAsABadRequest is this route's
+// half of the "constrain the externally-supplied id by its expected shape"
+// requirement: the id arrives in the URL path, unchecked by decodeBody, and
+// must still never reach the store unrefused. internal/config.SetSessionLabel
+// is the layer that actually enforces the UUID shape before the id becomes a
+// YAML map key; this test only pins that its refusal surfaces as 400, not
+// 500 or a silent success.
+func TestSetSessionLabelReportsAMalformedSessionIDAsABadRequest(t *testing.T) {
+	d, calls := testDeps()
+	d.SetSessionLabel = func(sessionID, _ string) error {
+		return fmt.Errorf("sessionID must be a session UUID, got %q", sessionID)
+	}
+	rec := do(d, http.MethodPatch, "/api/sessions/not-a-uuid/label", `{"label":"x"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if calls != nil && len(*calls) != 0 {
+		t.Fatalf("no successful call should be recorded, got %v", *calls)
+	}
+}
+
+func TestSetSessionLabelReportsAStoreFailure(t *testing.T) {
+	d, _ := testDeps()
+	d.SetSessionLabel = func(string, string) error { return errors.New("could not save config") }
+	rec := do(d, http.MethodPatch, "/api/sessions/11111111-1111-1111-1111-111111111111/label", `{"label":"x"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

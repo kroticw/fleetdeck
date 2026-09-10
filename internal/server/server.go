@@ -112,6 +112,21 @@ type Deps struct {
 	// configuration store; the route then answers 503.
 	SetOrchestratorSession func(id string) error
 
+	// SetSessionLabel writes (or, given an empty label, deletes) the
+	// operator's own name for one session, persisted to the configuration
+	// file's session_labels map — see internal/config.SetSessionLabel,
+	// which this is expected to wrap. sessionID is the transcript UUID
+	// (daemon.Session.SessionID), matching handleDigest's own convention —
+	// never the daemon's short id, which is reassigned on every restart and
+	// cannot durably name anything.
+	//
+	// No frontend calls this route yet. It exists so the panel's next
+	// change — showing operator-assigned names once the neighbouring
+	// orchestrator/sessions restructure has landed — has something to write
+	// to; until then the label is stored and served in every snapshot
+	// (state.SessionView.Label) but rendered nowhere.
+	SetSessionLabel func(sessionID, label string) error
+
 	// interval overrides the WebSocket's one-second push cadence. It exists for
 	// tests, which cannot afford to wait whole seconds to observe a cadence; zero
 	// means the one second the panel actually uses.
@@ -137,6 +152,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/status", d.handleStatus)
 	mux.HandleFunc("GET /api/sessions/{id}/digest", d.handleDigest)
 	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
+	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
 	mux.HandleFunc("GET /ws", d.handleWS)
 	mux.Handle("GET /", staticHandler())
 	return guard(mux)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"math"
 	"os"
 	"sync"
@@ -120,11 +121,25 @@ func NewCollector(cfg config.Config, dc *daemon.Client, uf *usage.Fetcher, proje
 }
 
 // Config returns a copy of the collector's current configuration. Safe for
-// concurrent use with SetOrchestratorSession.
+// concurrent use with SetOrchestratorSession and SetSessionLabel.
+//
+// Every field of config.Config used to be a value type, which made "return
+// c.cfg" under RLock a genuinely independent snapshot: copying the struct
+// copied all of it. SessionLabels broke that silently — a map is a
+// reference type, so copying the struct only copies the map header, and the
+// copy still points at the very map SetSessionLabel mutates. Caught by
+// go test -race: a goroutine reading cfg.SessionLabels from a Config() the
+// poll loop's Collect() had just fetched, racing a goroutine calling
+// SetSessionLabel, is a "concurrent map read and map write" fatal error
+// outside of -race, not a panic anything can recover from. Cloning the map
+// here is what makes the rest of this type's "everything is a value copy"
+// contract true again.
 func (c *Collector) Config() config.Config {
 	c.cfgMu.RLock()
 	defer c.cfgMu.RUnlock()
-	return c.cfg
+	cfg := c.cfg
+	cfg.SessionLabels = maps.Clone(cfg.SessionLabels)
+	return cfg
 }
 
 // SetOrchestratorSession updates the pinned orchestrator session id kept in
@@ -135,6 +150,27 @@ func (c *Collector) SetOrchestratorSession(id string) {
 	c.cfgMu.Lock()
 	c.cfg.OrchestratorSession = id
 	c.cfgMu.Unlock()
+}
+
+// SetSessionLabel updates one entry of the in-memory session_labels map kept
+// alongside the rest of the collector's configuration — the same "caller
+// persists to disk first, this only updates what Collect() reports next"
+// division of labor as SetOrchestratorSession, so a failed config.Save never
+// leaves memory ahead of the file on disk. An empty label deletes the
+// in-memory entry entirely rather than storing an empty string, matching
+// internal/config.SetSessionLabel's own contract for the file itself: the
+// two must never disagree about whether a session has a label.
+func (c *Collector) SetSessionLabel(sessionID, label string) {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	if label == "" {
+		delete(c.cfg.SessionLabels, sessionID)
+		return
+	}
+	if c.cfg.SessionLabels == nil {
+		c.cfg.SessionLabels = map[string]string{}
+	}
+	c.cfg.SessionLabels[sessionID] = label
 }
 
 // PutStatus records what cmd/fleetdeck-status posted. It is server.Deps.PutStatus,
@@ -242,13 +278,25 @@ func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.D
 // at all: nothing outside a session can obtain either, which is why cmd/fleetdeck-status
 // exists. A session with no live report keeps an empty model and a nil cost, and the
 // panel shows neither rather than inventing one.
-func (c *Collector) enrich(views []state.SessionView) map[string]struct{} {
+// labels is the configuration file's session_labels map, keyed by the same
+// transcript UUID as views[i].SessionID. It is read fresh from cfg on every
+// call rather than cached on the Collector: a label an operator just wrote
+// through the session-label route must show up on the very next Collect(),
+// and there is nothing else Collector already mirrors in memory the way
+// SetOrchestratorSession does for the pinned orchestrator id. A session
+// whose id has no entry here simply gets no label — labels are never pruned
+// when a session disappears from the daemon's list (see
+// internal/config.SetSessionLabel's own comment), so a stale entry for a
+// dead session is expected and harmless: this loop only ever assigns a
+// label to a view that is already in the daemon's live list.
+func (c *Collector) enrich(views []state.SessionView, labels map[string]string) map[string]struct{} {
 	live := map[string]struct{}{}
 	for i := range views {
 		id := views[i].SessionID
 		if id == "" {
 			continue
 		}
+		views[i].Label = labels[id]
 		if path, err := transcript.Locate(c.projectsDir, id); err == nil {
 			live[path] = struct{}{}
 			estimate, haveEstimate, silentFor := c.transcriptState(path)
@@ -328,7 +376,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	snap.Cards = cards
 	snap.Sessions = state.Link(sessions, cards)
 	snap.OrphanCards = state.OrphanCards(sessions, cards)
-	c.pruneContextCache(c.enrich(snap.Sessions))
+	c.pruneContextCache(c.enrich(snap.Sessions, cfg.SessionLabels))
 
 	if cfg.UsageEnabled && c.usage != nil {
 		usageCtx, cancel := context.WithTimeout(ctx, usageTimeout)

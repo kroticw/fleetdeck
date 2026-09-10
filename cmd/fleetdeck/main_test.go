@@ -471,3 +471,124 @@ func TestSetOrchestratorSessionNeverFallsBackToSaveForAnExistingFile(t *testing.
 		t.Fatal("the collector must not report a pin that was never actually persisted")
 	}
 }
+
+const testSessionUUID = "11111111-1111-1111-1111-111111111111"
+
+// TestSetSessionLabelSurgicallyEditsAnExistingFile is setSessionLabel's own
+// version of TestSetOrchestratorSessionSurgicallyEditsAnExistingFile: a
+// hand-written comment on a sibling entry must survive a label write.
+func TestSetSessionLabelSurgicallyEditsAnExistingFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "session_labels:\n" +
+		"    22222222-2222-2222-2222-222222222222: existing  # do not touch by hand\n" +
+		"server:\n  port: 7777\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
+
+	if err := setSessionLabel(p, collector, testSessionUUID, "orchestrator"); err != nil {
+		t.Fatalf("setSessionLabel: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "# do not touch by hand") {
+		t.Fatalf("a hand-written comment on a sibling entry must survive, got:\n%s", got)
+	}
+	if !strings.Contains(got, testSessionUUID+": orchestrator") {
+		t.Fatalf("the new entry must actually be written, got:\n%s", got)
+	}
+	if collector.Config().SessionLabels[testSessionUUID] != "orchestrator" {
+		t.Fatalf("the collector must report the new label on its next Collect, got %+v", collector.Config().SessionLabels)
+	}
+}
+
+// TestSetSessionLabelCreatesAConfigWhenNoneExists mirrors
+// TestSetOrchestratorSessionCreatesAConfigWhenNoneExists: a panel that has
+// never been through `fleetdeck init` must still accept the panel's first
+// label rather than erroring out because config.SetSessionLabel has no file
+// to edit.
+func TestSetSessionLabelCreatesAConfigWhenNoneExists(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
+
+	if err := setSessionLabel(p, collector, testSessionUUID, "first-label"); err != nil {
+		t.Fatalf("setSessionLabel: %v", err)
+	}
+
+	got, err := config.Load(p)
+	if err != nil {
+		t.Fatalf("a config must have been created and must parse: %v", err)
+	}
+	if got.SessionLabels[testSessionUUID] != "first-label" {
+		t.Fatalf("SessionLabels[%s] = %q, want first-label", testSessionUUID, got.SessionLabels[testSessionUUID])
+	}
+	if collector.Config().SessionLabels[testSessionUUID] != "first-label" {
+		t.Fatal("the collector must report the new label")
+	}
+}
+
+// TestSetSessionLabelNeverFallsBackToSaveForAnExistingFile mirrors
+// TestSetOrchestratorSessionNeverFallsBackToSaveForAnExistingFile: a config
+// file that exists but is missing session_labels entirely (hand-edited down
+// to something unusual) must be an error, never a silent full rewrite that
+// would destroy the comments this write path exists to protect.
+func TestSetSessionLabelNeverFallsBackToSaveForAnExistingFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "server:\n  port: 7777  # hand-tuned, do not overwrite\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
+
+	err := setSessionLabel(p, collector, testSessionUUID, "label")
+	if err == nil {
+		t.Fatal("a config missing session_labels must be an error, not a silent full rewrite")
+	}
+
+	raw, readErr := os.ReadFile(p)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(raw) != content {
+		t.Fatalf("a refused write must leave the file byte for byte as it was, got:\n%s", string(raw))
+	}
+	if _, ok := collector.Config().SessionLabels[testSessionUUID]; ok {
+		t.Fatal("the collector must not report a label that was never actually persisted")
+	}
+}
+
+// TestSetSessionLabelEmptyRemovesTheEntryFromTheCollector pins the
+// collector-side half of the "empty label deletes" contract: after a
+// removal, the in-memory map must no longer report the entry at all, not an
+// empty string — the same distinction internal/config.SetSessionLabel
+// enforces on disk.
+func TestSetSessionLabelEmptyRemovesTheEntryFromTheCollector(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(p, config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
+	if err := setSessionLabel(p, collector, testSessionUUID, "temporary"); err != nil {
+		t.Fatalf("setSessionLabel: %v", err)
+	}
+
+	if err := setSessionLabel(p, collector, testSessionUUID, ""); err != nil {
+		t.Fatalf("setSessionLabel(\"\"): %v", err)
+	}
+
+	if _, ok := collector.Config().SessionLabels[testSessionUUID]; ok {
+		t.Fatalf("want the entry gone entirely, got %+v", collector.Config().SessionLabels)
+	}
+	got, err := config.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.SessionLabels[testSessionUUID]; ok {
+		t.Fatalf("want the entry gone from disk too, got %+v", got.SessionLabels)
+	}
+}

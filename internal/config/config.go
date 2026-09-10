@@ -12,10 +12,23 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// fileMu serialises every read-modify-write-and-atomic-rename cycle this
+// package performs against a configuration file: Save, SetField and
+// SetSessionLabel. Two independently-triggerable HTTP routes can now write
+// the same file at once — the orchestrator pin and a session label, or two
+// session labels for different sessions — and without this each writer
+// reads the same original bytes and each writes back its own version, one
+// silently losing the other's change. There is exactly one process that
+// ever holds this file open for writing (the fleetdeck panel), so a single
+// in-process mutex is the whole fix: this is not a multi-process lock and
+// does not need to be one.
+var fileMu sync.Mutex
 
 // NotifyConfig is never serialised directly either — see Config below.
 type NotifyConfig struct {
@@ -51,10 +64,20 @@ type Config struct {
 	BoardPath           string
 	DocsPaths           []string
 	OrchestratorSession string
-	Notify              NotifyConfig
-	DaemonPollInterval  time.Duration
-	UsageEnabled        bool
-	ServerPort          int
+	// SessionLabels is the operator's own naming for sessions, keyed by the
+	// session's transcript UUID (daemon.Session.SessionID) rather than its
+	// short id: the short id is the daemon's to reassign, the UUID is not, and
+	// a label surviving that reassignment is the whole reason to key on it
+	// instead. A session's own name from the daemon (when it has one) already
+	// covers the common case; this exists for the sessions that started with
+	// no name and cannot be renamed after the fact — see internal/state's
+	// SessionView.Label for where a value here reaches the panel, and
+	// internal/server's session-label route for how it gets written.
+	SessionLabels      map[string]string
+	Notify             NotifyConfig
+	DaemonPollInterval time.Duration
+	UsageEnabled       bool
+	ServerPort         int
 }
 
 // configDuration is time.Duration decoded from YAML with its own validation-shaped
@@ -126,8 +149,13 @@ type file struct {
 	Orchestrator struct {
 		Session string `yaml:"session"`
 	} `yaml:"orchestrator"`
-	Notify notifyFile `yaml:"notify"`
-	Daemon struct {
+	// SessionLabels is a plain map, not a slice of {id, label} pairs: the
+	// session UUID is already a unique key, and a map lets SetSessionLabel
+	// (internal/config/write.go) find, add, or remove exactly one entry by
+	// that key without touching the shape of anything else in the file.
+	SessionLabels map[string]string `yaml:"session_labels"`
+	Notify        notifyFile        `yaml:"notify"`
+	Daemon        struct {
 		PollInterval configDuration `yaml:"poll_interval"`
 	} `yaml:"daemon"`
 	Usage struct {
@@ -157,6 +185,7 @@ func configToFile(c Config) file {
 	f.Board.Path = c.BoardPath
 	f.Docs.Paths = c.DocsPaths
 	f.Orchestrator.Session = c.OrchestratorSession
+	f.SessionLabels = c.SessionLabels
 	f.Notify.Enabled.Waiting = c.Notify.Waiting
 	f.Notify.Enabled.Failed = c.Notify.Failed
 	f.Notify.Enabled.Silent = c.Notify.Silent
@@ -174,6 +203,7 @@ func fileToConfig(f file) Config {
 		BoardPath:           f.Board.Path,
 		DocsPaths:           f.Docs.Paths,
 		OrchestratorSession: f.Orchestrator.Session,
+		SessionLabels:       f.SessionLabels,
 		Notify: NotifyConfig{
 			Waiting:      f.Notify.Enabled.Waiting,
 			Failed:       f.Notify.Enabled.Failed,
@@ -407,6 +437,9 @@ func sweepStaleTempFiles(dir, base string) {
 // holds across a crash or power loss, not only a killed process: without the sync, the
 // rename can reach disk before the data it points to does.
 func Save(path string, c Config) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+
 	if err := validate(c); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
