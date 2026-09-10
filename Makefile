@@ -78,7 +78,16 @@ verify-ldflags:
 #
 # The members are named explicitly rather than tarring the staging directory, so the
 # archive can only ever contain the binaries this run built.
+#
+# The recipe empties DISTDIR wholesale, so it refuses to run against a directory that
+# is plainly not its own: DISTDIR is overridable, and `make dist DISTDIR=.` must not be
+# a way to delete a working tree.
 dist:
+	@case "$(DISTDIR)" in \
+		""|.|./|..|../|/|/*/..*) \
+			echo "dist: refusing to empty '$(DISTDIR)': DISTDIR must be a directory this target owns" >&2; \
+			exit 1;; \
+	esac
 	@rm -rf "$(DISTDIR)"
 	@mkdir -p "$(DISTDIR)"
 	@for arch in $(DIST_ARCHES); do \
