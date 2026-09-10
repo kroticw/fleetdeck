@@ -20,6 +20,8 @@ const en = {
   resets_in: "resets in",
   usage_down: "limits unavailable",
   offline: "disconnected",
+  card_broken: "unreadable card",
+  session_dead: "session is dead",
 };
 
 const ru = {
@@ -39,6 +41,8 @@ const ru = {
   resets_in: "сброс через",
   usage_down: "лимиты недоступны",
   offline: "нет связи",
+  card_broken: "карточка не разбирается",
+  session_dead: "сессия мертва",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;

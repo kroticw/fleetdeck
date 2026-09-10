@@ -1,6 +1,7 @@
 import { connect, subscribe } from "./store.js";
 import { renderSessions } from "./sessions.js";
 import { renderHeader } from "./header.js";
+import { renderBoard } from "./board.js";
 
 subscribe((snap, connected) => {
   document.title = connected ? `fleetdeck (${snap?.sessions?.length ?? 0})` : "fleetdeck — offline";
@@ -12,7 +13,14 @@ function openSession(short) {
   console.log("open session", short);
 }
 
+// Placeholder until a later task adds the card panel: opening a card just
+// logs its path for now.
+function onOpenCard(path) {
+  console.log("open card", path);
+}
+
 renderSessions(document.getElementById("sessions"), openSession);
 renderHeader(document.getElementById("header"));
+renderBoard(document.getElementById("board"), onOpenCard);
 
 connect();
