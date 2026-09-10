@@ -69,12 +69,8 @@ A file containing more than one YAML document (separated by a `---` line partway
 
 ## Where the configuration file lives
 
-There is no default or implicit search path for the configuration file today. The code that loads configuration must be given an explicit file path; nothing in this repository currently calls it, and there is no command-line flag or environment variable that supplies one.
-
-The intended location, once there is a `fleetdeck` binary and an `init` command to write it, is `~/.config/fleetdeck/config.yaml`. That path is part of the design, not something this code reads from or writes to today.
+`fleetdeck` reads its configuration from the path the `--config` flag names, defaulting to `~/.config/fleetdeck/config.yaml` (`defaultConfigPath` in `cmd/fleetdeck/main.go`) when the flag is not given. `fleetdeck init` writes that default path the first time it runs, if nothing is there yet.
 
 ## Where other files live
 
-> **Not implemented yet.** This section describes the intended behaviour, not what the current build does. Nothing named here exists in the repository at the time of writing.
-
-Besides the configuration file at `~/.config/fleetdeck/config.yaml`, the design calls for a launchd agent definition (a `.plist` file) to start the panel automatically, and a log file for the panel's own output. Neither exists yet: there is no `.plist` file anywhere in this repository, and no panel process to write a log in the first place.
+`fleetdeck init` also writes the launchd agent that starts the panel at login, to `~/Library/LaunchAgents/dev.fleetdeck.panel.plist`, and points that agent's `StandardOutPath`/`StandardErrorPath` at `~/Library/Logs/fleetdeck.log`. See [`getting-started.md`](getting-started.md#loading-the-launch-agent) for the whole flow.

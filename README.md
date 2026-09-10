@@ -22,15 +22,13 @@ This repository is under active development. As of this writing:
 - The panel runs and serves on `127.0.0.1:7777`: the web interface, the fleet snapshot behind it, a WebSocket stream of that snapshot, and the routes that type into a session and move a card.
 - `fleetdeck init` exists. It writes the configuration file when there is none, creates the board directory with one example card when it is empty, points Claude Code's `statusLine` at `fleetdeck-status`, and installs the launchd agent. A step that would overwrite something you configured yourself refuses and says how to proceed instead.
 - The launchd agent is written to `~/Library/LaunchAgents/dev.fleetdeck.panel.plist`, with its log in `~/Library/Logs/fleetdeck.log`. `init` does not load it: it prints the `launchctl bootstrap` command and leaves that decision to you.
-- There is still no release process and nothing published to install from. Building from source is the only way in.
+- Building from source works (`make build`), and so does a tagged release: pushing a `v*` tag runs `.github/workflows/release.yaml`, which tests, builds `darwin-arm64` and `darwin-amd64` archives with `make dist`, verifies them, and publishes them as a GitHub Release. See "Installation" below.
 
 What exists and works today: the Go packages behind the panel — reading and writing board cards, loading configuration, talking to the Claude Code daemon's control socket, reading session transcripts, reading account usage limits, and sending macOS notifications — the `fleetdeck` panel binary that assembles them, the `fleetdeck-status` statusline reporter, and the Claude Code plugin under `plugin/`. Each is described under "Packages" below.
 
-No screenshot appears in this document yet.
-
 ## Installation
 
-> **Not implemented yet.** There is no release process and nothing published to download. Building from source, described below, is the only way to install fleetdeck today.
+Install by building from source, or from a GitHub Release: pushing a `v*` tag runs the `release` workflow (`.github/workflows/release.yaml`), which tests, builds `darwin-arm64` and `darwin-amd64` archives with `make dist`, verifies them, and publishes them.
 
 `make build` produces both binaries in `bin/`: `fleetdeck`, the panel, and `fleetdeck-status`, the statusline reporter. Keep the two together — `init` looks for the reporter beside the panel binary and records that path in Claude Code's settings.
 
@@ -51,7 +49,7 @@ Requires Go 1.27 (see `go.mod`) and, for linting, `golangci-lint` v2.13.2 on `PA
 ```sh
 make build    # every binary under cmd/* into bin/
 make test     # go test ./... -race -count=1
-make test-web # node --test web/tests/ (the frontend; needs node, no npm)
+make test-web # runs every *.test.js under web/ (the frontend; needs node, no npm)
 make lint     # go vet, gofmt -l, golangci-lint run
 ```
 
