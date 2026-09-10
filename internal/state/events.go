@@ -134,7 +134,7 @@ func sessionRuleText(rule string, silenceAfter time.Duration) string {
 // its condition becomes true and stays quiet for as long as it remains true,
 // per spec section 6 ("повторные баннеры по одному и тому же событию не
 // шлются: событием считается смена состояния, а не его наличие"). The very
-// very first snapshot — prev was never assembled, so its At is zero — fires
+// first snapshot — prev was never assembled, so its At is zero — fires
 // nothing: every standing state in next would otherwise look brand new.
 //
 // That guard keys on prev.At and nothing else. An observed empty fleet is a fact
@@ -168,6 +168,13 @@ func sessionRuleText(rule string, silenceAfter time.Duration) string {
 // operator to treat "the API is rate-limited" the same as "someone is
 // waiting on you", which is exactly the conflation section 5 of
 // docs/protocol/daemon-control-socket.md warns against.
+//
+// The silence rule is the deliberate exception to that quiet: it applies to a
+// stalled session exactly as it does to a running one. "Resolves itself" is a claim
+// about the usual case, not a guarantee — spec section 1's recorded failure is three
+// sessions standing for two hours after the usage limit that stalled them had already
+// reset. A stall that outlives the silence threshold has stopped being the quiet kind
+// of trouble, and the silence rule is then the only rule left that calls a person.
 func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleared []string) {
 	if prev.At.IsZero() {
 		return nil, nil
