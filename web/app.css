@@ -50,6 +50,10 @@ body {
   gap: var(--gap);
   margin-left: auto;
   flex-wrap: wrap;
+  /* A flex item will not shrink below its content's minimum width unless it is
+     told it may, and the stall reasons' content is a paragraph. Without this
+     the strip grows to fit the paragraph instead of clipping it. */
+  min-width: 0;
 }
 
 #header .gauge {
@@ -122,7 +126,36 @@ body {
 }
 
 #header .stall-reasons {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--gap);
+  min-width: 0;
   font-size: 0.85em;
+  opacity: 0.8;
+}
+
+/* One stalled reason, clipped to a single line.
+ *
+ * The daemon copies an incoming message's text into `detail` verbatim, so a
+ * reason is a paragraph as often as it is a phrase. Left to wrap, three of
+ * them turn this strip into a wall a quarter of the window tall and push the
+ * board down out of sight. The whole reason stays in the element's title, so
+ * clipping costs nothing but the scroll.
+ *
+ * max-width in ch rather than a percentage: the cap has to hold when the
+ * counters row is the only thing in the header and there is no competition for
+ * the space, which is exactly when a percentage resolves to "all of it".
+ */
+#header .stall-reason {
+  min-width: 0;
+  max-width: 48ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#header .stall-more {
+  flex: none;
   opacity: 0.8;
 }
 
@@ -412,7 +445,19 @@ main {
   margin-top: 2px;
 }
 
+/* A session's reason, clipped to three lines with an ellipsis, full text in
+ * title. Same reason as the header's: `detail` carries whole messages, and an
+ * unclipped one pushes every session below it off the screen. Three lines is
+ * enough to tell one reason from another at a glance, which is what this
+ * column is for; reading the rest is what the tooltip and the session panel
+ * are for.
+ */
 .sreason {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
   font-size: 0.85em;
   margin-top: 4px;
   overflow-wrap: anywhere;
