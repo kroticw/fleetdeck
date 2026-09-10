@@ -19,14 +19,14 @@ fleetdeck's answer is a panel that watches the sessions and the board together, 
 This repository is under active development. As of this writing:
 
 - Two binaries build from source: `fleetdeck`, the panel, and `fleetdeck-status`, the statusline reporter (see "Packages" below).
-- The panel runs and serves on `127.0.0.1:7777`: the fleet snapshot, a WebSocket stream of it, and the routes that type into a session and move a card. There is no web UI yet — a browser pointed at that address gets a 404, so the API is all there is to talk to.
+- The panel runs and serves on `127.0.0.1:7777`: the web interface, the fleet snapshot behind it, a WebSocket stream of that snapshot, and the routes that type into a session and move a card.
 - `fleetdeck init` exists. It writes the configuration file when there is none, creates the board directory with one example card when it is empty, points Claude Code's `statusLine` at `fleetdeck-status`, and installs the launchd agent. A step that would overwrite something you configured yourself refuses and says how to proceed instead.
 - The launchd agent is written to `~/Library/LaunchAgents/dev.fleetdeck.panel.plist`, with its log in `~/Library/Logs/fleetdeck.log`. `init` does not load it: it prints the `launchctl bootstrap` command and leaves that decision to you.
 - There is still no release process and nothing published to install from. Building from source is the only way in.
 
 What exists and works today: the Go packages behind the panel — reading and writing board cards, loading configuration, talking to the Claude Code daemon's control socket, reading session transcripts, reading account usage limits, and sending macOS notifications — the `fleetdeck` panel binary that assembles them, the `fleetdeck-status` statusline reporter, and the Claude Code plugin under `plugin/`. Each is described under "Packages" below.
 
-There is no web interface yet, so no screenshot appears in this document.
+No screenshot appears in this document yet.
 
 ## Installation
 
