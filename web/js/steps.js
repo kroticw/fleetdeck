@@ -19,6 +19,7 @@
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { stripToolNote, unwrapEnvelope } from "./envelope.js";
+import { t } from "./i18n.js";
 
 
 
@@ -80,6 +81,27 @@ export function fillStep(row, step, classFor) {
     // way, and one hover from being read when someone needs to chase a lead.
     if (wrapper.detail) from.setAttribute("title", wrapper.detail);
     row.appendChild(from);
+  } else if (step.role === "user") {
+    // Three different things live in this thread: what the operator typed,
+    // what this session answered, and what another agent sent. The third
+    // carries its own signature, above. The first carried none, and was drawn
+    // in the same class as the third — so a person's own words read as a
+    // message from an agent whose signature had gone missing, separated from
+    // it by a shade of background and by an alignment that does nothing to any
+    // line long enough to wrap.
+    //
+    // Which leaves this: a step that is not an envelope and not an answer was
+    // typed into this session's box by the person sitting at it, and says so.
+    row.appendChild(element("div", "step-from step-typed", t("typed_here")));
+    // On the row rather than inside it, so a pane can mark the whole block
+    // without either pane's row class having to mean anything here: both call
+    // an envelope and a typed message by the same role, and only this knows
+    // which of the two a row holds.
+    row.dataset.typed = "1";
+  } else {
+    // Cleared explicitly. A row is refilled in place when its step changes, and
+    // a step that stopped being a typed message would otherwise keep the mark.
+    delete row.dataset.typed;
   }
 
   const body = element("div", "step-body");

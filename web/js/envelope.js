@@ -54,6 +54,26 @@ export function parseAgentMessage(text) {
   return { from: attributes.from, at: attributes.at ?? "", id: attributes.id ?? "", body: joinParts(match[2], match[3]) };
 }
 
+// A session on another machine, or one reached over a socket rather than
+// through the fleet's own roster, wraps its message in a different tag with
+// different attribute names for the same two facts. It is recognised here for
+// the same reason as the one above and for one more: an unrecognised envelope
+// now gets attributed to the operator, so leaving this out would sign another
+// session's words with a person's name.
+const CROSS_SESSION = /^<cross-session-message\s+([^>]*)>([\s\S]*?)(?:<\/cross-session-message>([\s\S]*))?$/;
+
+export function parseCrossSessionMessage(text) {
+  const match = CROSS_SESSION.exec(String(text ?? "").trim());
+  if (!match) return null;
+  const attributes = {};
+  for (const [, name, value] of match[1].matchAll(ATTRIBUTE)) attributes[name] = value;
+  // The readable name if there is one, the socket if there is not. Without
+  // either, the wrapper says nothing the body does not.
+  const from = attributes["from-name"] || attributes.from;
+  if (!from) return null;
+  return { from, at: "", id: attributes.from ?? "", body: joinParts(match[2], match[3]) };
+}
+
 // A background task's notification arrives as eight nested tags, of which two
 // say what happened — the status and the summary — and the rest are identifiers.
 // Raw, it is a screenful of machinery around one sentence.
@@ -101,7 +121,7 @@ export function parseTaskNotification(text) {
 // showing a tag, since a digest is read to find out what happened, and what it
 // does not show did not happen as far as the reader can tell.
 export function unwrapEnvelope(text) {
-  const agent = parseAgentMessage(text);
+  const agent = parseAgentMessage(text) ?? parseCrossSessionMessage(text);
   if (agent) {
     return {
       label: agent.at ? `${agent.from} · ${agent.at}` : agent.from,

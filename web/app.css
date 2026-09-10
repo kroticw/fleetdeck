@@ -1749,3 +1749,47 @@ main {
   font-size: var(--fs-2xs);
 }
 
+/* The operator's own words in a thread.
+ *
+ * A thread holds three different things — what the operator typed, what the
+ * session answered, and what another agent sent — and the first and the third
+ * were drawn in the same class, separated by a tint of background and by
+ * align-self: flex-end, which does nothing at all to any line long enough to
+ * wrap. In the dark theme the tint was very nearly the surface it sat on.
+ *
+ * So the distinction is a word and a bar, not a shade: a signature that reads
+ * at a glance, and an edge that finds the message in a thread where one answer
+ * can be twenty times the height of the line that prompted it.
+ *
+ * Every colour here is a theme token rather than a literal, which is what makes
+ * it survive both themes: --accent-strong is a different colour in each, and
+ * the mark stays as legible against one surface as the other.
+ *
+ * The row is found by its data attribute, not by a role class. Both panes give
+ * a typed message and a forwarded one the same role; only steps.js knows which
+ * of the two a row holds, and it says so there.
+ */
+
+.step-typed {
+  /* .step-from dims itself to sit out of the way. This one is the opposite:
+   * it is the thing a person scans for. */
+  opacity: 1;
+  color: var(--accent-strong);
+  font-weight: 700;
+  font-size: 0.72em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.o-msg[data-typed="1"] {
+  border-left: 3px solid var(--accent-strong);
+  /* Keeps the text where it was: the bar takes its width from the padding
+   * rather than shifting every typed message three pixels to the right. */
+  padding-left: 5px;
+}
+
+.session-panel .s-step[data-typed="1"] {
+  border-left: 3px solid var(--accent-strong);
+  padding-left: 5px;
+}
+
