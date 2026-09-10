@@ -139,6 +139,44 @@ test("the session panel's rules are top-level rules", () => {
   }
 });
 
+// A message row must be sized by the thread, never by its own content.
+//
+// The operator reported a message "cut on both sides". One declaration did all
+// of it: align-self: flex-end on a user row. In a column flex container that
+// replaces "stretch to the container" with "size to your content", and a <pre>
+// that does not wrap has a min-content width of its longest line — so a message
+// carrying a table of numbers grew to 553px inside a 390px thread. The
+// right-hand cut followed from the width; the left-hand one was not scrolling
+// at all, which is why nothing could be scrolled back: flex-end pins the
+// oversized row's right edge to the container and pushes the excess out of the
+// start side, so the row began at -161px, outside the window.
+//
+// Nothing here can see a browser. What it can do is keep the declaration from
+// coming back and keep the two floors that make the row's width the thread's
+// business, which is what the live measurement then confirms.
+test("a message row is sized by the thread, not by the longest line inside it", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector) => {
+    const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
+    assert.ok(match, `${selector} has no rule in web/app.css`);
+    return match[2];
+  };
+
+  const row = body("\\.o-msg");
+  assert.match(row, /min-width:\s*0/, ".o-msg lost its min-width floor");
+  assert.match(row, /max-width:\s*100%/, ".o-msg lost its max-width ceiling");
+
+  // The one that caused it. A row that opts out of stretching is a row sized by
+  // its widest child, which is the defect however the rest is spelled.
+  for (const selector of ["\\.o-msg", "\\.o-msg\\.o-user"]) {
+    assert.doesNotMatch(
+      body(selector),
+      /align-self/,
+      `${selector} declares align-self again — a message row must be stretched by the thread`,
+    );
+  }
+});
+
 // The mark on the operator's own messages is the whole of the distinction
 // between his words and an agent's, in both panes and in both themes.
 test("the operator's own messages are marked in both panes, in colours that follow the theme", () => {
