@@ -8,14 +8,40 @@ import (
 
 // Event is a change worth a banner (spec section 6).
 type Event struct {
-	Key   string `json:"key"`
+	// Key identifies the standing state this event is about, so a banner already
+	// shown is not shown again and can be taken back down when the state ends.
+	// Its format is part of the contract with the notifier: "session:<short>:<rule>"
+	// and "card:<path>:<stage>".
+	Key string `json:"key"`
+	// Kind is exactly one of "waiting", "failed", "silent" and "card_blocked", the
+	// four toggles under notify.enabled in internal/config. It exists so a caller
+	// deciding whether a rule is switched on can read the answer instead of
+	// re-deriving it from Key: a card event's Key ends in the stage, so the single
+	// card_blocked toggle would otherwise have to be matched against two different
+	// suffixes ("blocked" and "review"), which is exactly the kind of duplicated
+	// rule this package has already been bitten by.
+	Kind string `json:"kind"`
+	// Short is the daemon short id for a session event, empty for a card event;
+	// Path is the card path for a card event, empty for a session event. Exactly
+	// one of the two is set, so the subject of a banner can be acted on (opened,
+	// replied to) without taking Key apart.
+	Short string `json:"short,omitempty"`
+	Path  string `json:"path,omitempty"`
 	Title string `json:"title"`
 	Text  string `json:"text"`
 }
 
+// The four event kinds, one per notify.enabled toggle in internal/config.
+const (
+	kindWaiting     = "waiting"
+	kindFailed      = "failed"
+	kindSilent      = "silent"
+	kindCardBlocked = "card_blocked"
+)
+
 // sessionRuleOrder is the order the three session rules are reported in, so that a
 // session standing on more than one produces the same list of keys every run.
-var sessionRuleOrder = [...]string{"waiting", "failed", "silent"}
+var sessionRuleOrder = [...]string{kindWaiting, kindFailed, kindSilent}
 
 // standingRules reports which of the three session rules s currently satisfies. It is
 // the single place each rule is stated, so fire and clear cannot drift apart: a key is
@@ -34,10 +60,10 @@ func standingRules(s SessionView, silenceAfter time.Duration) map[string]bool {
 		return rules
 	}
 	if s.Waiting() {
-		rules["waiting"] = true
+		rules[kindWaiting] = true
 	}
 	if s.State == "failed" {
-		rules["failed"] = true
+		rules[kindFailed] = true
 	}
 	// Note that being Stalled() is no exemption here. Stalled has no banner of its
 	// own because it resolves itself — but spec section 1's recorded case is three
@@ -45,7 +71,7 @@ func standingRules(s SessionView, silenceAfter time.Duration) map[string]bool {
 	// reset. When a stall does not resolve, this rule is the only one left that
 	// calls a person.
 	if silenceAfter > 0 && s.SilentFor >= silenceAfter {
-		rules["silent"] = true
+		rules[kindSilent] = true
 	}
 	return rules
 }
@@ -68,11 +94,11 @@ func sessionRuleSets(sessions []SessionView, silenceAfter time.Duration) map[str
 // sessionRuleText is the banner body for a rule that has just become true.
 func sessionRuleText(rule string, silenceAfter time.Duration) string {
 	switch rule {
-	case "waiting":
+	case kindWaiting:
 		return "is waiting for an answer"
-	case "failed":
+	case kindFailed:
 		return "ended in failure"
-	case "silent":
+	case kindSilent:
 		return fmt.Sprintf("has been silent for over %s", silenceAfter)
 	}
 	return ""
@@ -134,7 +160,13 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 			key := fmt.Sprintf("session:%s:%s", s.Short, rule)
 			switch {
 			case now[rule] && !was[rule]:
-				fire = append(fire, Event{Key: key, Title: s.Name, Text: sessionRuleText(rule, silenceAfter)})
+				fire = append(fire, Event{
+					Key:   key,
+					Kind:  rule,
+					Short: s.Short,
+					Title: s.Name,
+					Text:  sessionRuleText(rule, silenceAfter),
+				})
 			case was[rule] && !now[rule]:
 				cleared = append(cleared, key)
 			}
@@ -198,6 +230,8 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 		if notifiableStage(c.Stage) {
 			fire = append(fire, Event{
 				Key:   fmt.Sprintf("card:%s:%s", c.Path, c.Stage),
+				Kind:  kindCardBlocked,
+				Path:  c.Path,
 				Title: c.Title,
 				Text:  "card moved to " + c.Stage,
 			})

@@ -441,3 +441,65 @@ func TestCardRecoveringFromParseErrorIsNotANewStage(t *testing.T) {
 		t.Fatalf("nothing was standing to be cleared: %v", cleared)
 	}
 }
+
+// TestEventKindMapsOntoTheConfigToggles pins item 8. internal/config has four
+// notify.enabled toggles — waiting, failed, silent, card_blocked — and deciding
+// whether an event is allowed to fire meant parsing Key by suffix, with two different
+// suffixes ("blocked" and "review") behind the single card_blocked toggle. Kind states
+// the answer instead of leaving it to be re-derived at every call site.
+func TestEventKindMapsOntoTheConfigToggles(t *testing.T) {
+	failed := idleView("f")
+	failed.State = "failed"
+	silent := idleView("s")
+	silent.SilentFor = 45 * time.Minute
+
+	prev := Snapshot{
+		At:       observedAt,
+		Sessions: []SessionView{idleView("w"), idleView("f"), idleView("s")},
+		Cards: []board.Card{
+			{Path: "/b/blocked.md", Stage: "active"},
+			{Path: "/b/review.md", Stage: "active"},
+		},
+	}
+	next := Snapshot{
+		At:       observedAt.Add(time.Second),
+		Sessions: []SessionView{waitingView("w"), failed, silent},
+		Cards: []board.Card{
+			{Path: "/b/blocked.md", Stage: "blocked"},
+			{Path: "/b/review.md", Stage: "review"},
+		},
+	}
+	fire, _ := Diff(prev, next, 30*time.Minute)
+
+	byKey := map[string]Event{}
+	for _, e := range fire {
+		byKey[e.Key] = e
+	}
+	want := map[string]struct{ kind, short, path string }{
+		"session:w:waiting":          {"waiting", "w", ""},
+		"session:f:failed":           {"failed", "f", ""},
+		"session:s:silent":           {"silent", "s", ""},
+		"card:/b/blocked.md:blocked": {"card_blocked", "", "/b/blocked.md"},
+		// A card entering review is governed by the card_blocked toggle too; the
+		// stage itself stays visible in Key and Text.
+		"card:/b/review.md:review": {"card_blocked", "", "/b/review.md"},
+	}
+	if len(fire) != len(want) {
+		t.Fatalf("expected one event per rule, got %d: %+v", len(fire), fire)
+	}
+	for key, w := range want {
+		got, ok := byKey[key]
+		if !ok {
+			t.Fatalf("missing event %s in %+v", key, fire)
+		}
+		if got.Kind != w.kind {
+			t.Errorf("%s: Kind must name the config toggle, want %q got %q", key, w.kind, got.Kind)
+		}
+		if got.Short != w.short {
+			t.Errorf("%s: Short want %q got %q", key, w.short, got.Short)
+		}
+		if got.Path != w.path {
+			t.Errorf("%s: Path want %q got %q", key, w.path, got.Path)
+		}
+	}
+}
