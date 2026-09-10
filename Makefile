@@ -59,7 +59,7 @@ DISTDIR  ?= dist
 # project (spec section 1), so this is the whole list, not a default subset.
 DIST_ARCHES ?= arm64 amd64
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist window-app
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist window-app install
 
 # Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
 # see BUILD_BIN_NAMES above.
@@ -190,3 +190,53 @@ window-app:
 	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
 	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
 	@echo "window-app: $(BINDIR)/fleetdeck.app (open it, or: open $(BINDIR)/fleetdeck.app)"
+
+# INSTALLDIR is where `make install` puts fleetdeck and fleetdeck-status: a
+# fixed, stable path something outside this repository points at directly --
+# a launchd agent's ProgramArguments, Claude Code's statusLine.command --
+# and which a rebuild must land on again at the same path, or whatever
+# pointed there keeps running the binary from before. Defaults to the
+# conventional ~/.local/bin; overridable because nothing about this project
+# requires that particular directory, and a fresh machine may not have it on
+# PATH yet at all.
+INSTALLDIR ?= $(HOME)/.local/bin
+
+# INSTALL_BIN_NAMES is deliberately its own list, not BIN_NAMES or
+# DIST_BIN_NAMES: those answer "what does this repository build", this
+# answers "what needs a stable path outside it". fleetdeck-window is built
+# by window-app instead, as an .app bundle launched by opening it, never by
+# a fixed path something else stores and reuses -- it has no business here.
+# A third command under cmd/ that does need a stable path does not get one
+# by accident of being added to cmd/; it gets one by being added to this
+# list on purpose.
+INSTALL_BIN_NAMES := fleetdeck fleetdeck-status
+
+# install builds fleetdeck and fleetdeck-status fresh from this tree and
+# writes them to INSTALLDIR, overwriting whatever is already there under
+# those names. It never runs itself -- nothing else in this Makefile or in
+# CI calls it -- because INSTALLDIR is the operator's own path, outside this
+# repository, and it is their call when whatever a launch agent or Claude
+# Code's statusLine.command is currently running from that path changes.
+#
+# Each binary's own sha256 is printed right after it is written, not merely
+# "done": a copy that silently failed, or landed somewhere the operator did
+# not expect, reads identically to a real one in a bare "installed" message,
+# and this project has already spent a day on exactly that gap once today
+# (see the local rate-limits file's own trace mechanism, added for the same
+# reason on a different path).
+#
+# Each binary is built to a throwaway name first and only then moved onto
+# the real one, never straight onto INSTALLDIR/$$b: go build refuses to
+# overwrite a target that is not recognizably one of its own prior outputs
+# ("already exists and is not an object file"), which is exactly the shape
+# a first install, or a stale file left by something else entirely, can
+# take -- and the whole point of this target is to replace what is there
+# unconditionally, not to succeed only when it already guessed right about
+# what that was.
+install:
+	@mkdir -p "$(INSTALLDIR)"
+	@for b in $(INSTALL_BIN_NAMES); do \
+		go build -ldflags "$(LDFLAGS)" -o "$(INSTALLDIR)/.$$b.new" ./cmd/$$b || exit 1; \
+		mv -f "$(INSTALLDIR)/.$$b.new" "$(INSTALLDIR)/$$b"; \
+		echo "install: $(INSTALLDIR)/$$b  sha256=$$(shasum -a 256 "$(INSTALLDIR)/$$b" | cut -d' ' -f1)"; \
+	done
