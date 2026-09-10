@@ -85,7 +85,58 @@ export function parseAgentMessage(text) {
   // nothing to gain by removing it and a line of text to lose by getting it
   // wrong.
   if (!attributes.from) return null;
-  return { from: attributes.from, at: attributes.at ?? "", body: match[2].trim() };
+  return { from: attributes.from, at: attributes.at ?? "", id: attributes.id ?? "", body: match[2].trim() };
+}
+
+// A background task's notification arrives as eight nested tags, of which two
+// say what happened — the status and the summary — and the rest are identifiers.
+// Raw, it is a screenful of machinery around one sentence.
+//
+// The identifiers are not dropped: they are useless to read and they are the
+// only way to chase a lead afterwards, so they move out of the reading line
+// into detail, which the panel hangs on the row as a tooltip.
+const TASK_NOTIFICATION = /^<task-notification>([\s\S]*?)(?:<\/task-notification>)?$/;
+
+function nested(text, name) {
+  const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text);
+  return match ? match[1].trim() : "";
+}
+
+export function parseTaskNotification(text) {
+  const match = TASK_NOTIFICATION.exec(String(text ?? "").trim());
+  if (!match) return null;
+  const inner = match[1];
+  const status = nested(inner, "status");
+  const summary = nested(inner, "summary");
+  // Without either of these there is nothing a person could read in place of
+  // the tags, and replacing text with less text is not an improvement.
+  if (!status && !summary) return null;
+  const label = [t("background_task"), status, summary].filter(Boolean).join(" · ");
+  const detail = [nested(inner, "task-id"), nested(inner, "tool-use-id"), nested(inner, "output-file")]
+    .filter(Boolean)
+    .join("\n");
+  return { label, detail, body: nested(inner, "result") || nested(inner, "note") };
+}
+
+// unwrapStep is the one question buildStep asks: is this step an envelope, and
+// if so, what should a person see instead of it?
+//
+// Every wrapper here is recognised the same strict way and fails the same soft
+// way: the tag must open the step and must carry something worth showing, or the
+// step is left exactly as it arrived. The fleet talks about these tags, so a
+// step that merely names one has to survive — and swallowing text is worse than
+// showing a tag, since a digest is read to find out what happened, and what it
+// does not show did not happen as far as the reader can tell.
+export function unwrapStep(text) {
+  const agent = parseAgentMessage(text);
+  if (agent) {
+    return {
+      label: agent.at ? `${agent.from} · ${agent.at}` : agent.from,
+      detail: agent.id ?? "",
+      body: agent.body,
+    };
+  }
+  return parseTaskNotification(text);
 }
 
 // stepKey is what tells an unchanged step from a changed one. It is the step's
@@ -290,12 +341,20 @@ export function renderOrchestrator(root) {
     row.dataset.stepKey = stepKey(step);
     row.replaceChildren();
 
-    const wrapper = parseAgentMessage(step.text);
+    const wrapper = unwrapStep(step.text);
     if (wrapper) {
-      row.appendChild(el("div", "o-msg-from", wrapper.at ? `${wrapper.from} · ${wrapper.at}` : wrapper.from));
+      const from = el("div", "o-msg-from", wrapper.label);
+      // The identifiers hang here rather than in the reading line: out of the
+      // way, and one hover from being read when someone needs to chase a lead.
+      if (wrapper.detail) from.setAttribute("title", wrapper.detail);
+      row.appendChild(from);
     }
     const body = el("div", "o-msg-body");
-    body.innerHTML = renderMarkdown(wrapper ? wrapper.body : step.text, NO_CARDS);
+    const text = wrapper ? wrapper.body : step.text;
+    // A wrapper whose whole content was the envelope leaves nothing to render;
+    // the attribution line is then the entire step, which is honest — that is
+    // all the notification actually said.
+    if (text) body.innerHTML = renderMarkdown(text, NO_CARDS);
     row.appendChild(body);
     return row;
   };
