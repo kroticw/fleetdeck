@@ -156,6 +156,16 @@ func main() {
 	w.SetTitle("fleetdeck")
 	w.SetSize(1440, 900, webview.HintNone)
 
+	// Both calls need the native window, which is already valid here --
+	// confirmed by timing, not assumed: SetTitle/SetSize above already rely
+	// on the same fact. installMenu is what makes Cmd+X/C/V/A/Z (and Cmd+Q)
+	// do anything at all; see menu_darwin.c for why. installCloseToHide
+	// keeps the window's "owns only itself" contract: the red button hides
+	// it rather than tearing down the engine underneath a still-running
+	// panel, the same way a browser tab survives being put away.
+	installMenu()
+	installCloseToHide(w.Window())
+
 	ctx, cancel := context.WithTimeout(context.Background(), reachabilityTimeout)
 	up := reachable(ctx, *url)
 	cancel()
