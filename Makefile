@@ -63,8 +63,32 @@ test:
 # patterns; web/js/_tests/ sits inside js/ but is skipped because the "all:"
 # prefix is deliberately absent and plain directory walking ignores a leading
 # "_"), and a third one would be added the same way. `find` cannot miss it.
+#
+# Two ways this target could report success without having checked anything, both
+# closed below. Without node on PATH the recipe would fail on the command itself,
+# and a target that dies with "node: command not found" is one a person reads as
+# an environment problem to be stepped around rather than a suite that did not
+# run; and node given no file to run at all — a `find` that matched nothing, a
+# directory renamed — falls back to its own discovery and can report success over
+# zero tests, which is indistinguishable on screen from a suite that passed.
+# A missing node is therefore a stated failure, and a run that executed zero
+# tests is a failure.
+#
+# The TAP reporter rather than the default one, because that count has to be read
+# by something other than a person for the second check to exist at all.
 test-web:
-	node --test $$(find web -name '*.test.js' | sort)
+	@command -v node >/dev/null 2>&1 || { \
+		echo "test-web: node not found on PATH. Install Node (https://nodejs.org/) — the frontend tests cannot be skipped into passing." >&2; \
+		exit 1; \
+	}
+	@output=$$(node --test --test-reporter=tap $$(find web -name '*.test.js' | sort)); status=$$?; \
+	printf '%s\n' "$$output"; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
+	count=$$(printf '%s\n' "$$output" | sed -n 's/^# tests \([0-9][0-9]*\)$$/\1/p' | tail -1); \
+	if [ -z "$$count" ] || [ "$$count" -eq 0 ]; then \
+		echo "test-web: no test ran — the suite is not being found, which is not the same as it passing" >&2; \
+		exit 1; \
+	fi
 
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
