@@ -1,8 +1,14 @@
-// Package state assembles one snapshot out of the daemon's session list, the
-// board's cards, the transcript reader's context estimate and the usage
-// fetcher's limits, and decides which changes between two snapshots are
-// worth a notification. It performs no I/O of its own, knows nothing about
-// the web server built on top of it, and never writes anywhere.
+// Package state holds the snapshot type the panel is rendered from and the rules
+// deciding which changes between two snapshots are worth a notification.
+//
+// It does not assemble the snapshot. Every source that feeds one — the daemon's
+// session list, the board's cards, the transcript reader's context estimate, the
+// usage fetcher's limits — reaches it as an argument, because this package performs
+// no I/O whatsoever: that is what makes both the linking and the whole notification
+// rule set testable from plain values with no daemon, no board directory and no
+// network. The caller does the reading, fills in the fields Link cannot, and
+// decides how often to look. This package knows nothing about the web server built
+// on top of it and never writes anywhere.
 package state
 
 import (
