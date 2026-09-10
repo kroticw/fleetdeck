@@ -65,6 +65,11 @@ afterEach(() => {
 
 function open(snap, path = FLEET_UI, options = {}) {
   const root = dom.element("div");
+  // In the page before anything is drawn into it, as the panel's root is in a
+  // browser. It matters for more than realism: a node outside the document has
+  // no layout, so anything the panel measures while building is measured
+  // against zero.
+  dom.document.body.appendChild(root);
   const store = fakeStore(snap);
   const closed = [];
   const dispose = renderCard(root, path, () => closed.push(true), {
@@ -549,3 +554,23 @@ test("a page without the panel element says so instead of doing nothing quietly"
   assert.equal(errors.length, 1);
   assert.ok(errors[0].includes("#card-panel"), errors[0]);
 });
+
+test("the scroll indicator measures the body after it is in the page", () => {
+  // A live browser found this and no unit test could: the mark was taken while
+  // the body was still being assembled, so every table and code block in a card
+  // "fitted" and none was ever marked. The fade turned up only after a resize —
+  // after the reader had already found the scrolling by hand.
+  //
+  // The tree cannot show it, because the tree is identical either way. What
+  // separates the two is when the measurement happened, so that is what is
+  // asserted: no search for the scrolling boxes may run against a detached node.
+  const { root } = open(snapshot());
+  const early = dom.document.searches.filter((s) => s.selector.includes("md-table") && !s.connected);
+  assert.deepEqual(early, [], "measured before the body was in the page");
+  assert.ok(
+    dom.document.searches.some((s) => s.selector.includes("md-table") && s.connected),
+    "and it is measured at all",
+  );
+  assert.ok(root);
+});
+

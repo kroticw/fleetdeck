@@ -9,11 +9,18 @@ const { SCROLLABLE_CLASS, markScrollable, markScrollablesWithin, watchScrollable
 
 // A box that a test describes rather than lays out: how wide its content is,
 // how wide its window on that content is, and how far along it has scrolled.
-function box(scrollWidth, clientWidth, scrollLeft = 0) {
+//
+// Appended to the document, and not as a formality: a node outside the page has
+// no layout, so both widths read zero however they were set, and a measurement
+// taken from it is false in the one direction that matters — it always says
+// "fits". A test that measures a detached box proves nothing, which is the
+// defect this file exists to catch.
+function box(scrollWidth, clientWidth, scrollLeft = 0, parent = dom.document.body) {
   const el = dom.element("div");
   el.scrollWidth = scrollWidth;
   el.clientWidth = clientWidth;
   el.scrollLeft = scrollLeft;
+  parent.appendChild(el);
   return el;
 }
 
@@ -76,13 +83,11 @@ test("marking keeps the classes a node already had", () => {
 
 test("every matching box is marked, not the first", () => {
   const root = dom.element("div");
-  const wide = box(600, 300);
-  const narrow = box(300, 300);
-  const alsoWide = box(900, 300);
-  for (const el of [wide, narrow, alsoWide]) {
-    el.className = "md-table";
-    root.appendChild(el);
-  }
+  dom.document.body.appendChild(root);
+  const wide = box(600, 300, 0, root);
+  const narrow = box(300, 300, 0, root);
+  const alsoWide = box(900, 300, 0, root);
+  for (const el of [wide, narrow, alsoWide]) el.className = "md-table";
   markScrollablesWithin(root, ".md-table");
   assert.ok(wide.classList.contains(SCROLLABLE_CLASS));
   assert.ok(!narrow.classList.contains(SCROLLABLE_CLASS), "one that fits stays unmarked");
@@ -100,9 +105,9 @@ test("watching twice does not attach two listeners", () => {
 
 test("scrolling inside the root re-measures", () => {
   const root = dom.element("div");
-  const table = box(600, 300);
+  dom.document.body.appendChild(root);
+  const table = box(600, 300, 0, root);
   table.className = "md-table";
-  root.appendChild(table);
   watchScrollables(root, ".md-table");
   fireEvent(root, "scroll");
   assert.ok(table.classList.contains(SCROLLABLE_CLASS));
@@ -115,10 +120,55 @@ test("a window resize re-measures", () => {
   // The same content crosses the fits/doesn't boundary on a resize with no new
   // snapshot to trigger a render.
   const root = dom.element("div");
-  const table = box(600, 300);
+  dom.document.body.appendChild(root);
+  const table = box(600, 300, 0, root);
   table.className = "md-table";
-  root.appendChild(table);
   watchScrollables(root, ".md-table");
   fireEvent(dom.window, "resize");
   assert.ok(table.classList.contains(SCROLLABLE_CLASS));
 });
+
+// --- measuring a node that is not in the page yet ---
+//
+// The defect a live browser found and this file could not: the mark was taken
+// while the body was still being built, before it was put into the document.
+// A detached node has no layout, so every box "fitted" and nothing was ever
+// marked. It only appeared after a resize — that is, after the reader had
+// already discovered the scrolling for themselves.
+
+test("a detached box cannot be measured and is not marked", () => {
+  const loose = dom.element("div");
+  loose.scrollWidth = 900;
+  loose.clientWidth = 300;
+  assert.equal(loose.scrollWidth, 0, "no layout outside the document");
+  assert.equal(loose.clientWidth, 0, "neither width, not just the one");
+  markScrollable(loose);
+  assert.ok(!loose.classList.contains(SCROLLABLE_CLASS));
+});
+
+test("the same box, once in the page, is marked", () => {
+  // The control for the test above: the widths are unchanged, only the node's
+  // place in the page is — which is exactly the difference the old tests could
+  // not express, and so did not notice.
+  const el = dom.element("div");
+  el.scrollWidth = 900;
+  el.clientWidth = 300;
+  dom.document.body.appendChild(el);
+  markScrollable(el);
+  assert.ok(el.classList.contains(SCROLLABLE_CLASS));
+});
+
+test("marking a subtree that is not in the page marks nothing", () => {
+  const detachedRoot = dom.element("div");
+  const table = dom.element("div");
+  table.className = "md-table";
+  table.scrollWidth = 900;
+  table.clientWidth = 300;
+  detachedRoot.appendChild(table);
+  markScrollablesWithin(detachedRoot, ".md-table");
+  assert.ok(!table.classList.contains(SCROLLABLE_CLASS), "measured too early");
+  dom.document.body.appendChild(detachedRoot);
+  markScrollablesWithin(detachedRoot, ".md-table");
+  assert.ok(table.classList.contains(SCROLLABLE_CLASS), "and correct once it is in the page");
+});
+

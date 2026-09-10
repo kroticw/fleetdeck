@@ -55,6 +55,12 @@ const BULLET = /^[-*]\s+/;
 // "0." means it, and renumbering from 1 would contradict text that refers to
 // "пункт 0".
 const ORDERED = /^(\d+)\.\s+/;
+
+// A thematic break. It is not rendered as one — that is a construct this
+// renderer does not have — but it does end the paragraph above it, which is
+// what it did before paragraphs were joined at all. Without this, "---" glues
+// itself to the line below and reads as a dash mid-sentence.
+const BREAK = /^\s*([-*_])\1{2,}\s*$/;
 const HEADING = /^(#{1,4})\s+(.*)$/;
 // Matches internal/board's own linkRe, so the panel renders a link exactly where
 // the server extracted one. A narrower pattern here would leave "[[note|alias]]"
@@ -267,8 +273,16 @@ export function renderMarkdown(text, knownCards) {
     // the list, and swallowing that paragraph would be the same defect
     // reversed.
     if (item !== null && /^\s+\S/.test(line)) {
-      item.push(line.trim());
-      continue;
+      const trimmed = line.trim();
+      // …unless the indented line is itself an item. Nested lists are out of
+      // scope, and leaving a nested item where it was is the lesser of the two
+      // wrongs available: absorbed into the parent's text it reads as prose —
+      // "parent - child - child2" — with its markers passing for dashes in a
+      // sentence, and nothing on screen says a list was flattened.
+      if (!BULLET.test(trimmed) && !ORDERED.test(trimmed)) {
+        item.push(trimmed);
+        continue;
+      }
     }
     if (BULLET.test(line)) {
       flushPara();
@@ -285,8 +299,12 @@ export function renderMarkdown(text, knownCards) {
         closeList();
         // start is written only where it says something: a list beginning at 1
         // begins where a reader already assumes it does.
+        // A number too large to be exact is written as an exponent, and
+        // start="1e+23" is not an integer — the browser drops it. An attribute
+        // that cannot mean anything is not written.
         const first = Number(ordered[1]);
-        out.push(first === 1 ? "<ol>" : `<ol start="${first}">`);
+        const explicit = Number.isSafeInteger(first) && first !== 1;
+        out.push(explicit ? `<ol start="${first}">` : "<ol>");
         listTag = "ol";
       }
       item = [line.replace(ORDERED, "")];
@@ -323,6 +341,11 @@ export function renderMarkdown(text, knownCards) {
       closeBlocks();
       const level = heading[1].length + 1;
       out.push(`<h${level}>${inline(heading[2], known)}</h${level}>`);
+      continue;
+    }
+    if (BREAK.test(line)) {
+      closeBlocks();
+      out.push(`<p>${inline(line.trim(), known)}</p>`);
       continue;
     }
     if (line.trim() === "") {

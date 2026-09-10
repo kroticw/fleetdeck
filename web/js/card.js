@@ -221,10 +221,6 @@ export function renderCard(root, path, onClose, options = {}) {
 
     const body = el("div", "card-body");
     body.innerHTML = renderMarkdown(card.body, new Set(known));
-        // Tables and code blocks scroll sideways inside their own box, and on macOS
-    // nothing says so until the pointer is already there. Marked after every
-    // render, because both are rebuilt with the body.
-    markScrollablesWithin(body, ".md-table, pre");
     nodes.push(body);
 
     if (backlinks.length > 0) {
@@ -272,6 +268,11 @@ export function renderCard(root, path, onClose, options = {}) {
 
     root.hidden = false;
     root.replaceChildren(...build(latest, card, known, orphan, backlinks));
+    // After the panel is in the page, never while it is being built: a node
+    // outside the document has no layout, so both widths read zero and every
+    // box "fits". Measured there, the mark never appeared at all — and looked
+    // correct, because nothing on screen said it was missing.
+    markScrollablesWithin(root, ".md-table, pre");
     if (focusField) {
       // The control the operator was using has just been replaced by the
       // rebuild. Putting the focus back is the difference between a panel that

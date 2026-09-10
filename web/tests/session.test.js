@@ -128,6 +128,10 @@ afterEach(() => {
 
 async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }) } = {}) {
   const root = dom.element("div");
+  // In the page before the panel draws into it, as it is in a browser: a node
+  // outside the document has no layout, and anything measured against it reads
+  // zero.
+  dom.document.body.appendChild(root);
   const timers = fakeTimers();
   let closed = 0;
   const stop = renderSession(root, SHORT, () => {
@@ -720,4 +724,21 @@ test("text typed and not sent survives a tab switch, in both directions", async 
   fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
   await settle();
   assert.equal(panel.input().value, typed, "gone on the way back");
+});
+
+test("the thread's scrolling boxes are measured after they are in the page", async () => {
+  stubFetch(answer({ body: [{ role: "assistant", text: "| a | b |\n| --- | --- |\n| 1 | 2 |" }] }));
+  await mount();
+  // The same defect the card panel had, in the column that shows a session's
+  // conversation: fillStep builds a body, renders markdown into it, and appends
+  // it to the row afterwards. Measured at build time, a wide table or a long
+  // command line in a step never got the fade that says there is more to the
+  // right — and nothing on screen showed the mark was missing.
+  const searches = dom.document.searches.filter((s) => s.selector.includes("md-table"));
+  assert.deepEqual(
+    searches.filter((s) => !s.connected),
+    [],
+    "measured before the step was in the page",
+  );
+  assert.ok(searches.length > 0, "and measured at all");
 });

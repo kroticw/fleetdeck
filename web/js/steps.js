@@ -90,14 +90,7 @@ export function fillStep(row, step, classFor) {
   // A wrapper whose whole content was the envelope leaves nothing to render;
   // the attribution line is then the entire step, which is honest — that is all
   // the notification actually said.
-  if (text) {
-    body.innerHTML = renderMarkdown(text, NO_CARDS);
-    // Same fade as everywhere else: a wide table or a long command line in a
-    // step runs past the column's edge with nothing at rest to say so. The
-    // scroll listener is not here but on the thread container, once — steps are
-    // diffed rather than rebuilt, so attaching per step would pile up.
-    markScrollablesWithin(body, ".md-table, pre");
-  }
+  if (text) body.innerHTML = renderMarkdown(text, NO_CARDS);
   row.appendChild(body);
   return row;
 }
@@ -137,6 +130,13 @@ export function syncSteps(container, steps, classFor) {
   while (container.children.length > steps.length) {
     container.children[container.children.length - 1].remove();
   }
+
+  // Once, over the whole container, and only here: a step's body is measured
+  // for scrolling, and a node that is not yet in the page has no layout to
+  // measure — every box would read as fitting. fillStep builds a body and
+  // attaches it afterwards, so measuring there answered about nothing. Walking
+  // the container is also what catches the rows this sync left untouched.
+  markScrollablesWithin(container, ".md-table, pre");
 
   if (stick) container.scrollTop = container.scrollHeight;
 }

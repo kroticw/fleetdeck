@@ -453,3 +453,52 @@ test("markup split across a wrapped item still renders", () => {
   assert.ok(html.includes("<strong>Это прод с живыми пользователями.</strong>"));
 });
 
+// --- a continuation has two ends of its own ---
+
+test("an indented bullet is not swallowed into the item above it", () => {
+  // Nested lists are not supported and are not made so here. What must not
+  // happen is worse than not supporting them: the nested items were being
+  // joined into the parent's text, so "- parent / - child / - child2" read as
+  // one line, "parent - child - child2", with the dashes looking like dashes in
+  // a sentence. Unsupported and visible beats absorbed and invisible.
+  const html = renderMarkdown("- parent\n  - child\n  - child2\n- next", new Set());
+  assert.ok(!html.includes("parent - child"), "the nested items are not glued into the parent");
+  assert.ok(html.includes("child"), "and they are still on screen");
+});
+
+test("an indented numbered item is not swallowed either", () => {
+  const html = renderMarkdown("1. one\n   1. sub\n2. two", new Set());
+  assert.ok(!html.includes("one 1. sub"), "the nested item is not glued into the parent");
+  assert.ok(html.includes("sub"));
+});
+
+test("a plain indented line is still a continuation", () => {
+  // The control for both tests above: the rule they narrow must keep working
+  // for the case it was written for.
+  const html = renderMarkdown("- Нашёл ломающее изменение — остановись и спроси, не\n  импровизируй.", new Set());
+  assert.equal((html.match(/<li>/g) ?? []).length, 1);
+  assert.ok(html.includes("не импровизируй."));
+});
+
+test("a huge number is not turned into an exponent in the start attribute", () => {
+  // Number("99999999999999999999999") is 1e+23, and start="1e+23" is not an
+  // integer, so a browser drops the attribute. Nothing dangerous — the pattern
+  // only matches digits — but a value that cannot mean anything should not be
+  // written at all.
+  const html = renderMarkdown("99999999999999999999999. item", new Set());
+  assert.ok(!html.includes("e+"), "no exponent in the markup");
+  assert.ok(html.includes("<li>item</li>"));
+});
+
+test("a thematic break does not glue itself to the line below", () => {
+  // Not rendered as a rule — this renderer has no such construct, and adding
+  // one is not this change. But joining it to the next line turned "---" into a
+  // dash in the middle of a sentence, which is a regression against what the
+  // renderer did before paragraphs were joined at all.
+  const html = renderMarkdown("абзац\n---\ntext", new Set());
+  assert.ok(!html.includes("--- text"), "not joined into the paragraph below");
+  assert.ok(!html.includes("абзац ---"), "nor into the paragraph above");
+  assert.ok(html.includes("<p>text</p>"));
+  assert.ok(html.indexOf("абзац") < html.indexOf("---"), "the paragraph above closes first");
+});
+
