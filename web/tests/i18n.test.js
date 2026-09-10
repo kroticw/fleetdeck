@@ -57,7 +57,7 @@ const KEYS = [
   // is the one that keeps a session stopping to ask from being read as a hang,
   // and falling through to its own key would say "image_may_ask_permission" at
   // exactly the moment a person needs a sentence.
-  "attach_image",
+  "image_no_session",
   "image_too_large",
   "image_wrong_type",
   "image_may_ask_permission",

@@ -1591,39 +1591,12 @@ main {
 }
 
 
-/* Attaching an image to a session (web/js/session.js).
- *
- * The file input is hidden and the button stands in for it: a file input cannot
- * be given wording of our own any other way, and the button is what carries the
- * accessible name. Hidden with the attribute, so the [hidden] rule above is what
- * actually hides it.
- */
-
-.session-panel .s-attach-row {
-  display: flex;
-  align-items: center;
-  gap: var(--gap);
-  margin-top: 4px;
-}
-
-.session-panel .s-attach {
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 0.85em;
-  padding: 2px 8px;
-}
-
-.session-panel .s-attach:hover {
-  background: var(--surface-hover);
-}
-
 /* A notice is not a failure and must not look like one: the session stopping to
  * ask for permission is an expected step, and colouring it like an error teaches
- * the operator to read the error line as noise. */
+ * the operator to read the error line as noise. It is where a pasted image
+ * reports itself — there is no attach control any more, by the operator's own
+ * request: pasting is the gesture, and a button beside the box was taking room
+ * for something that should simply happen. */
 
 .session-panel .s-notice {
   font-size: 0.85em;
