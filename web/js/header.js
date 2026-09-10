@@ -61,16 +61,30 @@ function isFlagOnlyStalled(s) {
   return s.state === "blocked" || s.tempo === "blocked";
 }
 
-// How long a flag-only stall must hold before the counter shows it. No live
-// daemon was available to stopwatch the actual delivery-to-settle window for
-// this fix, so this is an architecture-derived estimate, not a measured
-// one: daemon.poll_interval defaults to 2s (internal/config.go), so the
-// registry itself can lag a message's arrival by up to one poll cycle
-// before state/needs catch up, and the panel's own snapshot push adds up to
-// ~1s more (see the comment on subscribe(), in store.js). 4 poll cycles is
-// a deliberately generous multiple of that floor, not a number read off a
-// stopwatch -- replace it with a real one if a live daemon ever supplies it.
-export const BLOCKED_SETTLE_MS = 8000;
+// How long a flag-only stall must hold before the counter shows it.
+//
+// A bare blocked flag (state or tempo, needs empty) is genuinely ambiguous,
+// not just briefly noisy: it covers both a message still mid-delivery
+// (transient, clears on its own) and a session truly parked waiting on a
+// person (real, does not clear). Dropping either signal to "fix" the
+// transient case would silently reintroduce the other: this project already
+// caught and fixed the under-reporting side once -- see
+// internal/daemon/client_test.go's "e4fa5037" fixture record, an hour-long
+// real stall with this exact flag shape (tempo=active, state=blocked) -- and
+// under-reporting is the worse of the two failures (it hides someone
+// genuinely waiting), so the threshold has to sit clearly above the
+// transient case without crowding the real one.
+//
+// Three numbers, not one: measured lower bound of the transient case, 2.5
+// minutes (observed live on an 8-session fleet under load; the flag had not
+// cleared by the end of that observation window, so this is a floor, not a
+// full duration); known duration of the real case, roughly an hour
+// (client_test.go's own attested capture, record e4fa5037); chosen
+// threshold, 10 minutes -- comfortably above the measured floor, far below
+// the attested real case. The transient case's true upper bound is still
+// being measured on a live fleet; if it turns out closer to ten minutes than
+// to three, this single constant is what to revisit.
+export const BLOCKED_SETTLE_MS = 10 * 60 * 1000;
 
 // Session identity for tracking how long a flag-only stall has held.
 // Mirrors the field sessions.js keys its own DOM rows on (data-short).
