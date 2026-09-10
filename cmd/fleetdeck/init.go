@@ -116,8 +116,14 @@ func runInit(env initEnv) error {
 
 	// Loading the agent is a change to a machine's login behaviour, and it is the
 	// operator's to make: init prints the command and does not run it.
+	//
+	// bootstrap, not load: man launchctl lists load under LEGACY SUBCOMMANDS and
+	// names bootstrap among its recommended replacements. This line is the one
+	// instruction an operator copies verbatim, so it carries the current spelling.
+	// $(id -u) is left for the shell to expand — gui/<uid> is how the same man page
+	// spells the target for a user's GUI domain.
 	if steps[len(steps)-1].err == nil {
-		fmt.Fprintf(&report, "\nstart the panel at login with:\n  launchctl load %s\n",
+		fmt.Fprintf(&report, "\nstart the panel at login with:\n  launchctl bootstrap gui/$(id -u) %s\n",
 			filepath.Join(env.home, "Library", "LaunchAgents", launchAgentFile))
 	}
 	if _, err := io.WriteString(out, report.String()); err != nil {

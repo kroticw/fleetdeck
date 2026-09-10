@@ -34,10 +34,18 @@ go install github.com/kroticw/fleetdeck/cmd/fleetdeck-status@latest
 `init` записывает агента и не загружает его. Запуск программы при каждом входе в систему — это изменение вашей машины, и делать его вам. Команда печатается в конце вывода `init`:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
 ```
 
-Агент запускает бинарь `fleetdeck` оттуда, где он лежал в момент запуска `init`, поднимает его при входе в систему, перезапускает, если тот завершился, и направляет оба его потока вывода в `~/Library/Logs/fleetdeck.log`. `launchctl unload` с тем же путём останавливает его. После переноса бинаря запустите `fleetdeck init` снова, чтобы записался новый путь, затем выгрузите и загрузите агента заново.
+`gui/$(id -u)` — это ваш собственный GUI-домен: агент работает от вашего имени, в вашей сессии входа. `bootstrap` и `bootout` — актуальные подкоманды; `launchctl load` и `unload` ещё работают, но в `man launchctl` числятся среди устаревших.
+
+Агент запускает бинарь `fleetdeck` оттуда, где он лежал в момент запуска `init`, поднимает его при входе в систему, перезапускает, если тот завершился, и направляет оба его потока вывода в `~/Library/Logs/fleetdeck.log`. Отменить это:
+
+```bash
+launchctl bootout gui/$(id -u)/dev.fleetdeck.panel
+```
+
+После переноса бинаря запустите `fleetdeck init` снова, чтобы записался новый путь, затем выполните bootout и bootstrap для агента заново.
 
 ## Открытие пульта
 

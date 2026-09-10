@@ -505,3 +505,22 @@ func TestInitTwiceChangesNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestInitPrintsTheCurrentLaunchctlSpelling(t *testing.T) {
+	home := t.TempDir()
+	var out bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: &out}); err != nil {
+		t.Fatal(err)
+	}
+	agent := filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)
+
+	want := "launchctl bootstrap gui/$(id -u) " + agent
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("init must print %q, got:\n%s", want, out.String())
+	}
+	// load is a legacy subcommand on current macOS, and this line is the one an
+	// operator copies verbatim.
+	if strings.Contains(out.String(), "launchctl load") {
+		t.Fatalf("init still prints the legacy spelling:\n%s", out.String())
+	}
+}

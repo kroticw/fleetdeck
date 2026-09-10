@@ -34,10 +34,18 @@ Two cases end in a refusal rather than an edit, both for the same reason — `in
 `init` writes the agent and does not load it. Starting a program at every login is a change to your machine, and it is yours to make. The command is printed at the end of `init`'s output:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
 ```
 
-The agent runs the `fleetdeck` binary from wherever it was when `init` ran, starts it at login, restarts it if it exits, and sends both its output streams to `~/Library/Logs/fleetdeck.log`. `launchctl unload` with the same path stops it. After moving the binary, re-run `fleetdeck init` to record the new path, then unload and load the agent again.
+`gui/$(id -u)` is your own GUI domain — the agent runs as you, in your login session. `bootstrap` and `bootout` are the current subcommands; `launchctl load` and `unload` still work but are listed under legacy subcommands in `man launchctl`.
+
+The agent runs the `fleetdeck` binary from wherever it was when `init` ran, starts it at login, restarts it if it exits, and sends both its output streams to `~/Library/Logs/fleetdeck.log`. To undo it:
+
+```bash
+launchctl bootout gui/$(id -u)/dev.fleetdeck.panel
+```
+
+After moving the binary, re-run `fleetdeck init` to record the new path, then bootout and bootstrap the agent again.
 
 ## Opening the panel
 
