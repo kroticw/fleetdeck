@@ -1,13 +1,151 @@
-/* fleetdeck window skeleton.
+/* fleetdeck — design tokens and theme.
  *
- * This task lays down only the shell: a header strip and three columns.
- * Column contents, zone colors, progress bars and themes belong to the
- * modules that render into them and are added by later tasks.
+ * One token system for the whole page, not the two this file used to carry
+ * (the session list mixed currentColor through color-mix(), the kanban board
+ * used flat hex) — this is that consolidation.
+ *
+ * Dark is the base palette (bare :root): it is what the panel has shipped
+ * with, and every token below states a real value for it, not a mix left to
+ * fall out of currentColor. Light is a full second palette, not a derived
+ * one, overridden in two ways that must not fight each other: the system's
+ * own prefers-color-scheme, and an explicit choice recorded in data-theme on
+ * <html> (web/js/theme.js) that outranks the system. A person is never left
+ * looking at "dark, and whatever the browser felt like doing with it."
+ *
+ * Semantic tokens carry meaning, not decoration, and the meaning is narrow on
+ * purpose: --danger is a failure or something that will not resolve itself —
+ * a broken write, a dead source, a card in trouble. --attn is a priority
+ * signal — a session waiting on a person, an unplanned zone, a stage that
+ * needs eyes soon. Anything calm — a stalled session (nothing is wrong, it is
+ * just not moving), a dead session on a card that is already done, a low
+ * zone — is --text-muted, the same quiet grey text already uses. A dead
+ * session on a *done* card is the normal end of a task, not an incident, and
+ * painting it the same red as a write failure was the actual defect a live
+ * run surfaced: a board of finished work read as a wall of errors.
  */
 
 :root {
   color-scheme: light dark;
+
+  /* Surfaces, back to front. */
+  --bg: #14161a;
+  --surface: #1b1e24;
+  --surface-raised: #21252c;
+  --surface-hover: #292e36;
+  --border: #2c313a;
+  --border-strong: #3c4149;
+  --shadow: rgb(0 0 0 / 45%);
+
+  /* Text, most to least prominent. */
+  --text: #e7e9ec;
+  --text-muted: #9aa1ac;
+  --text-faint: #6b7280;
+
+  /* The app's own accent — used for focus, links, the active tab, and the
+     "planned" zone. Teal rather than the blue every dashboard reaches for,
+     and kept out of the danger/attn family so it never reads as an alert. */
+  --accent: #34a99a;
+  --accent-strong: #4fc4b5;
+
+  /* Severity, exactly three steps. */
+  --danger: #e5484d;
+  --attn: #d88a15;
+  --ok: #3fb950;
+
+  /* Kanban zone accents. Urgent and unplanned deliberately reuse --danger
+     and --attn — a zone is a planning-priority signal, not a session-state
+     one, but "red/amber means look here" is one visual language the whole
+     page should speak, not two that happen to agree by coincidence.
+     Planned uses the app's own accent (on the roadmap, not on fire); nice-
+     to-have and the fallback for an unrecognised zone are both --text-muted:
+     low priority and unknown priority read the same until proven otherwise. */
+  --zone-urgent: var(--danger);
+  --zone-unplanned: var(--attn);
+  --zone-planned: var(--accent-strong);
+  --zone-nice: var(--text-faint);
+  --zone-none: var(--border-strong);
+
+  /* Radii and shadow, one scale each. */
+  --radius-sm: 4px;
+  --radius: 8px;
+
+  /* Spacing rhythm. Everything else in this file is one of these three or a
+     literal multiple of --gap; nothing invents its own px value. */
+  --gap-sm: 4px;
   --gap: 8px;
+  --gap-lg: 16px;
+
+  /* Type scale, in rem off the 14px root below — fixed steps so nesting two
+     "smaller" rules can no longer compound into something smaller than any
+     step actually calls for, which is what the em-based sizes this replaced
+     were doing throughout the file. */
+  --fs-2xs: 0.75rem;
+  --fs-xs: 0.85rem;
+  --fs-sm: 0.95rem;
+  --fs-md: 1.15rem;
+}
+
+/* A control panel read for hours at a stretch does not need a 16px browser
+ * default carrying six different em-scaled fractions of itself throughout
+ * the file — that is exactly how the same nominal "0.85em" ends up at a
+ * different actual size in every component that nests it. One root size,
+ * and every other size in the file is a --fs-* step off it. */
+html {
+  font-size: 87.5%; /* 14px at a 16px browser default */
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-raised: #ffffff;
+    --surface-hover: #edeff2;
+    --border: #dde1e7;
+    --border-strong: #c2c8d1;
+    --shadow: rgb(20 22 26 / 16%);
+
+    --text: #1a1d22;
+    --text-muted: #5b6470;
+    --text-faint: #8791a0;
+
+    --accent: #1f7a72;
+    --accent-strong: #15645d;
+
+    --danger: #c92a2a;
+    --attn: #a15c00;
+    --ok: #2f9e44;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-hover: #edeff2;
+  --border: #dde1e7;
+  --border-strong: #c2c8d1;
+  --shadow: rgb(20 22 26 / 16%);
+
+  --text: #1a1d22;
+  --text-muted: #5b6470;
+  --text-faint: #8791a0;
+
+  --accent: #1f7a72;
+  --accent-strong: #15645d;
+
+  --danger: #c92a2a;
+  --attn: #a15c00;
+  --ok: #2f9e44;
+}
+
+:root[data-theme="dark"] {
+  /* The system may still be light here — this only re-affirms color-scheme
+     so native form controls (the usage <meter>s, <select>s) render with dark
+     chrome even when the OS itself is set to light. Every custom property
+     above already equals the bare :root value in that case, so nothing else
+     needs restating. */
+  color-scheme: dark;
 }
 
 * {
@@ -23,6 +161,17 @@ body {
   display: flex;
   flex-direction: column;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Visible keyboard focus, one rule for every element in the page that does
+ * not already carry its own :focus-visible treatment (the card/session
+ * panels' own links and close buttons keep theirs, below, since currentColor
+ * there tracks a fixed-position overlay rather than this ring). */
+:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
 }
 
 #header {
@@ -31,11 +180,13 @@ body {
   align-items: center;
   gap: calc(var(--gap) * 2);
   padding: var(--gap) calc(var(--gap) * 2);
-  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 #header .brand {
   font-weight: 600;
+  color: var(--text);
 }
 
 #header .limits {
@@ -60,7 +211,9 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
 }
 
 #header .gauge-track {
@@ -78,7 +231,7 @@ body {
 
 /* WebKit/Blink */
 #header .gauge-track::-webkit-meter-bar {
-  background: color-mix(in srgb, currentColor 15%, transparent);
+  background: var(--border-strong);
   border: none;
 }
 #header .gauge-track::-webkit-meter-optimum-value,
@@ -88,33 +241,36 @@ body {
 }
 
 #header .gauge-cool {
-  color: #2f9e44;
+  color: var(--ok);
 }
 
 #header .gauge-warm {
-  color: #e8590c;
+  color: var(--attn);
 }
 
 #header .gauge-hot {
-  color: #e03131;
+  color: var(--danger);
 }
 
 #header .gauge-off {
-  color: color-mix(in srgb, currentColor 45%, transparent);
+  color: var(--text-faint);
 }
 
 #header .problem {
-  color: #e03131;
+  color: var(--danger);
   font-weight: 600;
+  font-size: var(--fs-xs);
 }
 
 #header .counter {
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
 }
 
 #header .counter-waiting.counter-on {
   font-weight: 700;
-  color: #e8590c;
+  color: var(--danger);
 }
 
 #header .counter-stalled {
@@ -130,7 +286,7 @@ body {
   align-items: baseline;
   gap: var(--gap);
   min-width: 0;
-  font-size: 0.85em;
+  font-size: var(--fs-2xs);
   opacity: 0.8;
 }
 
@@ -159,16 +315,46 @@ body {
   opacity: 0.8;
 }
 
+/* A person overriding the system theme — web/js/theme.js. Kept visually
+ * quiet: it lives beside the brand, not among the counters that are the
+ * actual point of the header. */
+.theme-toggle {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
 main {
   flex: 1;
   display: flex;
   min-height: 0;
   gap: var(--gap);
+  padding: var(--gap);
+  background: var(--bg);
 }
 
+/* The three columns share one surface treatment — background, border,
+ * radius — so the panel reads as three distinct zones at a glance instead of
+ * three blocks of content separated only by a gap. A missing header was the
+ * other half of that problem: the board and the orchestrator both named
+ * themselves (a tab strip, a session name), but the session list never did,
+ * so the third of three zones looked unowned. */
 .col {
   min-width: 0;
   overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .col-orchestrator {
@@ -189,6 +375,27 @@ main {
   gap: var(--gap);
   padding: var(--gap);
   font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+/* .o-back — a sibling task's button back to the session picker, added to
+ * .o-head. No markup or behaviour here, only the style a plain <button>
+ * needs to read as a quiet secondary control rather than default UA chrome:
+ * that task does not own this file and was told it would not have to. */
+.o-back {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.o-back:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .o-name {
@@ -200,18 +407,20 @@ main {
 .o-ctx {
   flex: none;
   font-weight: 400;
-  opacity: 0.7;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .o-error {
   flex: none;
-  margin: 0 var(--gap) var(--gap);
+  margin: var(--gap) var(--gap) 0;
   padding: 6px 8px;
-  border-radius: 4px;
-  background: color-mix(in srgb, red 15%, transparent);
-  color: inherit;
-  font-size: 0.9em;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  color: var(--text);
+  font-size: var(--fs-xs);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -223,8 +432,9 @@ main {
  * background refresh retried automatically every few seconds, not something
  * the operator needs to act on the way a failed send does. */
 .o-error-digest {
-  background: color-mix(in srgb, orange 12%, transparent);
-  opacity: 0.85;
+  background: color-mix(in srgb, var(--attn) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--attn) 35%, var(--border));
+  opacity: 0.9;
 }
 
 /* .o-stale marks the whole column as showing a snapshot the socket is no
@@ -237,9 +447,10 @@ main {
   flex: none;
   margin: var(--gap) var(--gap) 0;
   padding: 4px 8px;
-  border-radius: 4px;
-  background: color-mix(in srgb, orange 20%, transparent);
-  font-size: 0.85em;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--attn) 18%, var(--surface));
+  color: var(--text);
+  font-size: var(--fs-xs);
   text-align: center;
 }
 
@@ -247,7 +458,7 @@ main {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 var(--gap);
+  padding: var(--gap);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -255,16 +466,17 @@ main {
 
 .o-msg {
   padding: 6px 8px;
-  border-radius: 6px;
-  background: color-mix(in srgb, currentColor 6%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 0.95em;
+  font-size: var(--fs-sm);
 }
 
 .o-msg.o-user {
   align-self: flex-end;
-  background: color-mix(in srgb, currentColor 12%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-hover));
 }
 
 .o-msg.o-dead {
@@ -275,12 +487,19 @@ main {
 .o-form {
   flex: none;
   padding: var(--gap);
+  border-top: 1px solid var(--border);
 }
 
 .o-form textarea {
   width: 100%;
   resize: vertical;
   font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 6px;
   box-sizing: border-box;
 }
 
@@ -293,7 +512,7 @@ main {
 }
 
 .o-pick-empty {
-  opacity: 0.7;
+  color: var(--text-muted);
   margin: 0;
 }
 
@@ -306,22 +525,27 @@ main {
 .o-pick-item {
   text-align: left;
   padding: 6px 8px;
-  border-radius: 4px;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
   background: transparent;
-  color: inherit;
+  color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
 .o-pick-item:hover {
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  background: var(--surface-hover);
 }
 
 .col-center {
   flex: 2 1 50%;
   display: flex;
   flex-direction: column;
+  /* Appended rather than folded into the block above, so this stays the one
+     place a later task added to the shell instead of rewriting a rule its
+     sibling modules also render into. It exists so #card-panel and
+     #session-panel, both children of this column, can cover the board. */
+  position: relative;
 }
 
 #board {
@@ -331,70 +555,74 @@ main {
 
 .col-sessions {
   flex: 1 1 25%;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--gap);
 }
 
 /* Session list (web/js/sessions.js)
  *
- * Tokens defined on :root so both a light and a dark system theme read
- * correctly — nothing here hardcodes a single-theme palette. Waiting gets a
- * strong, unmistakable highlight; Stalled gets its own quieter marker that
- * must never be confused with Waiting — that distinction is the point of
- * this task.
+ * Waiting gets a strong, unmistakable highlight; Stalled gets its own
+ * quieter marker that must never be confused with Waiting — that distinction
+ * is the point of this task, and it now shares --danger/--text-muted with
+ * every other "needs a person" / "calm" signal on the page instead of its
+ * own separate orange-and-gray pair.
  */
-:root {
-  --srow-bg: color-mix(in srgb, currentColor 4%, transparent);
-  --srow-border: color-mix(in srgb, currentColor 12%, transparent);
-  --waiting-bg: color-mix(in srgb, orange 22%, transparent);
-  --waiting-border: darkorange;
-  --stalled-bg: color-mix(in srgb, gray 18%, transparent);
-  --stalled-border: gray;
-  --ctx-track-bg: color-mix(in srgb, currentColor 14%, transparent);
-  --ctx-cool: seagreen;
-  --ctx-warm: goldenrod;
-  --ctx-hot: crimson;
-  --muted: color-mix(in srgb, currentColor 55%, transparent);
-}
 
-.col-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
+/* .slist-head — the one addition to sessions.js this task makes (see
+   web/js/theme.js's own note for the other, and the branch's commit message
+   for why: the board names itself via its tab, the orchestrator via the
+   session it is open on, and the session list named nothing at all, which is
+   the specific gap the live run's "no separation between the three zones"
+   was pointing at). Sticky rather than a wrapper div around the rows: the
+   rows are still rendered as .col-sessions's direct children — no new
+   markup nesting, just one new leading element — and .col-sessions already
+   scrolls via the shared .col rule, so a sticky header pins itself to that
+   scroll without one. */
+.slist-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
   padding: var(--gap);
+  font-weight: 600;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .sempty {
-  padding: 1em;
+  margin: var(--gap-lg) var(--gap);
   text-align: center;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .sempty-error {
-  color: crimson;
+  color: var(--danger);
   font-weight: 600;
 }
 
 .srow {
-  border: 1px solid var(--srow-border);
-  background: var(--srow-bg);
-  border-radius: 6px;
+  margin: var(--gap) var(--gap) 0;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  border-radius: var(--radius);
   padding: 8px 10px;
-  margin-bottom: var(--gap);
   cursor: pointer;
 }
 
 .srow:hover {
-  border-color: var(--muted);
+  border-color: var(--border-strong);
 }
 
 .srow-waiting {
-  background: var(--waiting-bg);
-  border-color: var(--waiting-border);
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-hover));
+  border-color: var(--danger);
   border-width: 2px;
 }
 
 .srow-stalled {
-  background: var(--stalled-bg);
-  border-color: var(--stalled-border);
+  background: var(--surface);
+  border-color: var(--border-strong);
   border-style: dashed;
 }
 
@@ -419,29 +647,28 @@ main {
 
 .sbadge {
   flex: none;
-  font-size: 0.7em;
+  font-size: var(--fs-2xs);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .sbadge-waiting {
-  background: var(--waiting-border);
+  background: var(--danger);
   color: #fff;
 }
 
 .sbadge-stalled {
-  background: var(--stalled-border);
-  color: #fff;
+  background: var(--border-strong);
+  color: var(--text);
 }
 
 .smeta {
   display: flex;
   gap: 8px;
-  font-size: 0.85em;
-  color: var(--muted);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -458,27 +685,28 @@ main {
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
-  font-size: 0.85em;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
   margin-top: 4px;
   overflow-wrap: anywhere;
 }
 
 .scard {
   margin-top: 4px;
-  font-size: 0.85em;
-  color: var(--muted);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
 }
 
 .ctx {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.8em;
+  font-size: var(--fs-2xs);
   margin-top: 6px;
 }
 
 .ctx-unknown {
-  color: var(--muted);
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -486,7 +714,7 @@ main {
   flex: 1;
   height: 6px;
   border-radius: 3px;
-  background: var(--ctx-track-bg);
+  background: var(--border);
   overflow: hidden;
   display: inline-block;
 }
@@ -498,20 +726,20 @@ main {
 }
 
 .ctx-cool .ctx-fill {
-  background: var(--ctx-cool);
+  background: var(--ok);
 }
 
 .ctx-warm .ctx-fill {
-  background: var(--ctx-warm);
+  background: var(--attn);
 }
 
 .ctx-hot .ctx-fill {
-  background: var(--ctx-hot);
+  background: var(--danger);
 }
 
 .ctx-pct {
   flex: none;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .est {
@@ -525,23 +753,15 @@ main {
  * style attributes as well as inline <style>, and a blocked one fails silently.
  */
 
-/* Appended rather than folded into the .col-center block above, so this task adds
- * to the shell instead of rewriting a rule its sibling modules also render into.
- * It exists so #card-panel, which is a child of that column, can cover the board.
- */
-.col-center {
-  position: relative;
-}
-
 #card-panel {
   position: absolute;
   inset: 0;
   z-index: 2;
   overflow: auto;
-  padding: 12px;
-  background: Canvas;
-  color: CanvasText;
-  box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+  padding: var(--gap-lg);
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 0 16px var(--shadow);
 }
 
 .card-head {
@@ -553,11 +773,20 @@ main {
 
 .card-title {
   margin: 0;
+  font-size: var(--fs-md);
 }
 
 .card-close {
   flex: none;
+  font: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
   cursor: pointer;
+}
+
+.card-close:hover {
+  color: var(--text);
 }
 
 .card-fields {
@@ -571,10 +800,20 @@ main {
   display: flex;
   align-items: center;
   gap: 4px;
+  font-size: var(--fs-sm);
 }
 
 .card-field-name {
-  opacity: 0.7;
+  color: var(--text-muted);
+}
+
+.card-field select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
 }
 
 .card-meta {
@@ -582,41 +821,55 @@ main {
   flex-wrap: wrap;
   gap: var(--gap);
   margin-bottom: var(--gap);
+  font-size: var(--fs-sm);
 }
 
 .card-session {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* light-dark() rather than a single hex value: the shell declares
- * `color-scheme: light dark`, so this panel is rendered on both a light and a
- * dark ground and one fixed red is unreadable on one of them.
- */
-.card-session-dead,
+/* A dead session is not, on its own, an incident — see the file header — and
+   the panel is a poor place to re-litigate that regardless of the card's own
+   stage the way the board does (kcol[data-stage="done"], further down):
+   the board's amber-for-non-done exists to help a person scanning many
+   cards at once notice one worth a second look, and that job is already
+   done by the time a card is open here. The panel offers no unlink action
+   either, so there is nothing for alarm to prompt. Genuine problems —
+   a write that failed, a card that does not parse — stay --danger below;
+   only the dead-session fact is carved out as calm information. */
+.card-session-dead {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
 .card-error,
 .card-parse-error {
-  color: light-dark(#b3261e, #f2b8b5);
+  color: var(--danger);
+  font-size: var(--fs-sm);
 }
 
 /* The written-but-not-committed notice. Deliberately not styled as an error: the
  * edit did take effect, and the wording and the colour both have to say so.
  */
 .card-notice {
-  color: light-dark(#7a5900, #f0c674);
+  color: var(--attn);
+  font-size: var(--fs-sm);
 }
 
 .card-empty {
-  opacity: 0.7;
+  color: var(--text-muted);
 }
 
 .card-body {
   overflow-wrap: anywhere;
+  margin-top: var(--gap);
 }
 
 .card-body pre {
   overflow: auto;
-  padding: 8px;
-  background: rgb(127 127 127 / 12%);
+  padding: var(--gap);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
 }
 
 /* The three in-panel links are <button> elements, because an <a> with no href
@@ -631,7 +884,7 @@ main {
   border: none;
   background: none;
   font: inherit;
-  color: inherit;
+  color: var(--accent);
   text-align: left;
 }
 
@@ -644,14 +897,8 @@ main {
 .card-session-link {
   cursor: pointer;
   text-decoration: underline dotted;
-}
-
-.wikilink:focus-visible,
-.card-backlink:focus-visible,
-.card-session-link:focus-visible,
-.card-close:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* A link to a card that does not exist. It carries no data-link attribute, so it
@@ -659,35 +906,40 @@ main {
  */
 .wikilink-missing {
   cursor: default;
+  color: var(--text-faint);
   text-decoration: underline dotted;
-  opacity: 0.6;
 }
 
 .card-backlinks {
-  margin-top: 16px;
+  margin-top: var(--gap-lg);
+  font-size: var(--fs-sm);
 }
 
 .card-backlinks-title {
   margin: 0 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
 
 .card-backlink {
   display: block;
 }
 
-/* Kanban board (Task 4). #board is the .col-center child board.js renders
- * into; it becomes the horizontal row of stage columns. */
+/* Kanban board.
+ *
+ * Zone accent, progress, and the broken/dead-card states are semantic —
+ * see the file header for the severity rules they follow. */
 
 #board {
   display: flex;
   align-items: flex-start;
   gap: var(--gap);
   overflow-x: auto;
-  padding: var(--gap) 0;
+  padding: var(--gap);
 }
 
 .kerror {
-  color: #d33;
+  color: var(--danger);
   padding: var(--gap);
 }
 
@@ -708,6 +960,10 @@ main {
   gap: 6px;
   min-height: 0;
   overflow-y: auto;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap-sm);
 }
 
 .kcol h5 {
@@ -715,75 +971,103 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.85em;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
 }
 
 .kcount {
-  font-size: 0.85em;
-  opacity: 0.8;
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
 }
 
 .kcard {
   border-left: 3px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .zone-urgent {
-  border-left-color: #d33;
+  border-left-color: var(--zone-urgent);
 }
 
 .zone-unplanned {
-  border-left-color: #d88a15;
+  border-left-color: var(--zone-unplanned);
 }
 
 .zone-planned {
-  border-left-color: #2b6fd8;
+  border-left-color: var(--zone-planned);
 }
 
 .zone-niceToHave {
-  border-left-color: #888;
+  border-left-color: var(--zone-nice);
 }
 
 .zone-none {
-  border-left-color: #ccc;
+  border-left-color: var(--zone-none);
 }
 
 .ktitle {
-  font-size: 0.9em;
+  font-size: var(--fs-sm);
   font-weight: 600;
+  color: var(--text);
   overflow-wrap: anywhere;
 }
 
 .ksession {
-  font-size: 0.8em;
-  opacity: 0.7;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
+/* A dead session, on a card in any other stage, still needs a person's
+   attention: something was pointed at a session that is gone and nobody
+   has said what to do about it. .kcard-orphan and .ksession-dead alone
+   (no further class on the card) are the "still needs a look" case and
+   stay --attn. The muted case below is layered on top of that, for the
+   one stage where a dead session is not news. */
 .ksession-dead {
-  color: #d33;
-  opacity: 1;
+  color: var(--attn);
+  font-weight: 600;
 }
 
 .kcard-orphan {
-  background: rgba(211, 51, 51, 0.1);
+  background: color-mix(in srgb, var(--attn) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--attn) 30%, var(--border));
+}
+
+/* The fix for the live-run finding: a dead session on a card already in the
+   "done" column is the normal end of a task, not an open question — the
+   work finished and the session that did it ended with it. Scoped to
+   .kcol[data-stage="done"] rather than to the card's own state, since
+   "done" is what makes a dead session unremarkable; the same card orphaned
+   in any other column is still --attn above. */
+.kcol[data-stage="done"] .kcard-orphan {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.kcol[data-stage="done"] .ksession-dead {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .kcard-broken {
-  border-left-color: #d33;
+  border-left-color: var(--danger);
   border-left-style: dashed;
-  background: rgba(211, 51, 51, 0.08);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
 }
 
 .kbroken {
-  font-size: 0.8em;
+  font-size: var(--fs-2xs);
   font-style: italic;
-  opacity: 0.85;
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
@@ -791,7 +1075,7 @@ main {
   height: 4px;
   border-radius: 2px;
   margin-top: 6px;
-  background: rgba(127, 127, 127, 0.25);
+  background: var(--border);
   overflow: hidden;
 }
 
@@ -799,7 +1083,7 @@ main {
   display: block;
   height: 100%;
   width: 0;
-  background: #2b6fd8;
+  background: var(--accent);
 }
 
 /* Centre-column sections (web/js/sections.js) and the documentation section
@@ -825,24 +1109,30 @@ main {
   flex: none;
   display: flex;
   gap: var(--gap);
-  padding: var(--gap) calc(var(--gap) * 2) 0;
+  padding: var(--gap) var(--gap-lg) 0;
+  border-bottom: 1px solid var(--border);
 }
 
 #tabs .tab {
   cursor: pointer;
   border: none;
   background: none;
-  color: inherit;
+  color: var(--text-muted);
   font: inherit;
-  padding: 4px 8px;
+  font-size: var(--fs-sm);
+  padding: 4px 2px 8px;
+  margin-bottom: -1px;
   border-bottom: 2px solid transparent;
-  opacity: 0.7;
+}
+
+#tabs .tab:hover {
+  color: var(--text);
 }
 
 #tabs .tab.on {
-  opacity: 1;
+  color: var(--text);
   font-weight: 600;
-  border-bottom-color: currentColor;
+  border-bottom-color: var(--accent);
 }
 
 #docs {
@@ -854,8 +1144,8 @@ main {
   display: flex;
   height: 100%;
   min-height: 0;
-  gap: calc(var(--gap) * 2);
-  padding: var(--gap) calc(var(--gap) * 2);
+  gap: var(--gap-lg);
+  padding: var(--gap-lg);
 }
 
 .docs-list {
@@ -872,17 +1162,24 @@ main {
   cursor: pointer;
   border: none;
   background: none;
-  color: inherit;
+  color: var(--text-muted);
   font: inherit;
+  font-size: var(--fs-sm);
   text-align: left;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
 }
 
+.docs-entry:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
 .docs-entry.on {
+  color: var(--text);
   font-weight: 600;
-  background: color-mix(in srgb, currentColor 12%, transparent);
+  background: var(--surface-hover);
 }
 
 .docs-body {
@@ -894,8 +1191,8 @@ main {
 .docs-body pre {
   overflow-x: auto;
   padding: var(--gap);
-  border-radius: 4px;
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
 }
 
 /* A section with nothing to show and a section that failed are different
@@ -903,11 +1200,11 @@ main {
  * is something an operator has to act on. */
 
 .docs-empty {
-  opacity: 0.7;
+  color: var(--text-muted);
 }
 
 .docs-error {
-  color: #b3261e;
+  color: var(--danger);
   overflow-wrap: anywhere;
 }
 
@@ -924,26 +1221,23 @@ main {
  *
  * Like the card panel, this uses no style attribute anywhere: style-src 'self'
  * blocks inline styles, and blocks them silently.
- *
- * No colour here is a single-theme literal: like the session list above,
- * everything is mixed from currentColor so both a light and a dark system theme
- * read correctly.
  */
 #session-panel {
   position: absolute;
   inset: 0;
   z-index: 2;
-  background: Canvas;
-  color: CanvasText;
-  box-shadow: 0 0 12px rgb(0 0 0 / 25%);
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 0 16px var(--shadow);
 }
 
 .session-panel {
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--gap);
-  padding: var(--gap);
+  padding: var(--gap-lg);
 }
 
 .session-panel .s-head {
@@ -951,6 +1245,10 @@ main {
   display: flex;
   align-items: center;
   gap: var(--gap);
+  padding: 0;
+  border-bottom: none;
+  font-weight: 600;
+  font-size: var(--fs-md);
 }
 
 .session-panel .s-tabs {
@@ -966,21 +1264,34 @@ main {
 
 .session-panel button {
   font: inherit;
-  color: inherit;
-  background: var(--srow-bg);
-  border: 1px solid var(--srow-border);
-  border-radius: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   padding: 2px 10px;
   cursor: pointer;
 }
 
 .session-panel button:hover {
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  background: var(--surface);
+}
+
+.session-panel .s-close {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.session-panel .s-close:hover {
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 .session-panel .s-tab-on {
   font-weight: 600;
-  background: color-mix(in srgb, currentColor 14%, transparent);
+  background: var(--surface);
+  border-color: var(--accent);
 }
 
 .session-panel .s-key {
@@ -994,16 +1305,18 @@ main {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 1px solid var(--srow-border);
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: var(--gap);
+  background: var(--surface);
 }
 
 .session-panel .s-step {
+  font-size: var(--fs-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   padding: 4px 0;
-  border-bottom: 1px solid var(--srow-border);
+  border-bottom: 1px solid var(--border);
 }
 
 .session-panel .s-step:last-child {
@@ -1016,11 +1329,11 @@ main {
 
 .session-panel .s-step-assistant,
 .session-panel .s-step-other {
-  opacity: 0.9;
+  color: var(--text-muted);
 }
 
 .session-panel .s-empty {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .session-panel .s-term {
@@ -1032,8 +1345,9 @@ main {
  * would cost them the very output they were reading. */
 .session-panel .s-error {
   flex: none;
-  color: #e03131;
+  color: var(--danger);
   font-weight: 600;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
 
@@ -1045,10 +1359,11 @@ main {
 .session-panel .s-input {
   flex: 1;
   font: inherit;
-  color: inherit;
-  background: var(--srow-bg);
-  border: 1px solid var(--srow-border);
-  border-radius: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
   padding: 6px;
   resize: vertical;
 }

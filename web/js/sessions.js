@@ -177,18 +177,24 @@ export function rowHtml(s) {
     </article>`;
 }
 
+// The column's own name, shown in every state including the empty and error
+// ones: the other two columns name themselves through what they show (the
+// board's tab, the orchestrator's open session), and this one otherwise
+// named nothing at all — the specific gap a live run's screenshot found.
+const HEAD = `<div class="slist-head">${escapeHtml(t("sessions_title"))}</div>`;
+
 export function renderSessions(root, onSelect) {
   subscribe((snap, connected) => {
     // Before the first successful connection, or after a dropped/unparseable
     // frame, snapshot is null and connected is false — render a neutral
     // connecting state rather than dereferencing a snapshot that isn't there.
     if (!snap || !connected) {
-      root.innerHTML = `<div class="sempty">${escapeHtml(t("connecting"))}</div>`;
+      root.innerHTML = `${HEAD}<div class="sempty">${escapeHtml(t("connecting"))}</div>`;
       return;
     }
 
     if (snap.daemonError) {
-      root.innerHTML = `<div class="sempty sempty-error">${escapeHtml(t("daemon_down"))}</div>`;
+      root.innerHTML = `${HEAD}<div class="sempty sempty-error">${escapeHtml(t("daemon_down"))}</div>`;
       return;
     }
 
@@ -197,7 +203,7 @@ export function renderSessions(root, onSelect) {
     const sessions = snap.sessions ?? [];
 
     if (sessions.length === 0) {
-      root.innerHTML = `<div class="sempty">${escapeHtml(t("no_sessions"))}</div>`;
+      root.innerHTML = `${HEAD}<div class="sempty">${escapeHtml(t("no_sessions"))}</div>`;
       return;
     }
 
@@ -211,7 +217,7 @@ export function renderSessions(root, onSelect) {
       (isWaiting(s) ? waitingRows : otherRows).push(s);
     }
 
-    root.innerHTML = [...waitingRows, ...otherRows].map(rowHtml).join("");
+    root.innerHTML = HEAD + [...waitingRows, ...otherRows].map(rowHtml).join("");
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
