@@ -92,25 +92,32 @@ func TestEmbeddedFSIsNotEmpty(t *testing.T) {
 // unexpected extra entry, such as a .DS_Store or editor scratch file swept in
 // by an "all:" embed prefix that should not be there.
 //
-// This set is exact on purpose. web/vendor/ (xterm.js) is added to it by the
-// task that vendors that dependency — update this list there, don't loosen
-// the assertion to "contains" instead of "equals".
+// This set is exact on purpose. A new file under web/ is added to this list by
+// the task that adds it — don't loosen the assertion to "contains" instead of
+// "equals". web/vendor/ is here because the session panel's terminal needs
+// xterm.js served from the binary; the licence file beside it is not optional
+// decoration, it is what makes redistributing the bundle legal, and listing it
+// here is what would catch its removal.
 func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 	want := map[string]bool{
-		"index.html":         true,
-		"app.css":            true,
-		"js/store.js":        true,
-		"js/main.js":         true,
-		"js/api.js":          true,
-		"js/i18n.js":         true,
-		"js/sessions.js":     true,
-		"js/header.js":       true,
-		"js/board.js":        true,
-		"js/orchestrator.js": true,
-		"js/markdown.js":     true,
-		"js/card.js":         true,
-		"js/sections.js":     true,
-		"js/docs.js":         true,
+		"index.html":           true,
+		"app.css":              true,
+		"js/store.js":          true,
+		"js/main.js":           true,
+		"js/api.js":            true,
+		"js/i18n.js":           true,
+		"js/sessions.js":       true,
+		"js/header.js":         true,
+		"js/board.js":          true,
+		"js/orchestrator.js":   true,
+		"js/markdown.js":       true,
+		"js/card.js":           true,
+		"js/sections.js":       true,
+		"js/docs.js":           true,
+		"vendor/xterm.js":      true,
+		"vendor/xterm.css":     true,
+		"vendor/LICENSE.xterm": true,
+		"vendor/README.md":     true,
 	}
 	got := map[string]bool{}
 	if err := fs.WalkDir(web.FS, ".", func(file string, d fs.DirEntry, err error) error {
