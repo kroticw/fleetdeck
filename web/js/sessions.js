@@ -21,6 +21,7 @@
 // only field that still explains a flags-only Stalled session.
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
+import { envelopeText } from "./envelope.js";
 
 // Closed vocabulary of "no person needed" needs strings, copied verbatim
 // (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
@@ -145,9 +146,18 @@ export function rowHtml(s) {
   // keeps the text itself intact -- spec 3.1 wants detail carried verbatim
   // because a person has to read it, so it has to stay reachable here rather
   // than only in the daemon.
-  const reason = waiting || stalled ? reasonText(s) : "";
+  const raw = waiting || stalled ? reasonText(s) : "";
+  // The envelope comes off, and nothing else does. What a session says about
+  // why it stopped is carried verbatim (spec 3.1) because a person decides from
+  // its exact words whether they are being called — so this is NOT rendered as
+  // markdown, unlike a conversation step. Stripping the tag is not a paraphrase:
+  // every word that was inside it is still here, in order.
+  //
+  // The title keeps the text exactly as the daemon wrote it, envelope included,
+  // so nothing is out of reach.
+  const reason = envelopeText(raw);
   const reasonHtml = reason
-    ? `<div class="sreason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</div>`
+    ? `<div class="sreason" title="${escapeHtml(raw)}">${escapeHtml(reason)}</div>`
     : "";
 
   const name = s.name || s.short || "";

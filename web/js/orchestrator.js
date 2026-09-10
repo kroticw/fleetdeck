@@ -1,7 +1,12 @@
 import { subscribe, get } from "./store.js";
 import { sendText, setOrchestratorSession } from "./api.js";
 import { t } from "./i18n.js";
-import { renderMarkdown } from "./markdown.js";
+// Re-exported rather than moved out of sight: these were this module's public
+// surface before the shared one existed, and the tests that pin their behaviour
+// are the same tests. Where a step is drawn now lives in steps.js.
+export { parseAgentMessage, parseTaskNotification, unwrapEnvelope } from "./envelope.js";
+export { atBottom, stepKey, STICK_THRESHOLD_PX } from "./steps.js";
+import { syncSteps as syncStepRows } from "./steps.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column and its own input.
@@ -57,111 +62,6 @@ export function pickableSessions(sessions) {
 // through markup, so it cannot be markup no matter what it contains.
 export function pickerLabel(session) {
   return session.name || session.short;
-}
-
-// Fleet messages arrive in a transcript wrapped in an <agent-message> tag that
-// carries who wrote it and when. Shown raw it is half a line of attributes
-// before every message and a closing tag after it — the operator reads more
-// wrapper than message.
-//
-// The match is deliberately strict and the failure is deliberately soft: the
-// tag must open the step and its attributes must include a sender, or the step
-// is left exactly as it arrived. Something that merely looks like a tag is
-// text, and swallowing text is worse than showing a tag — a digest is read to
-// find out what happened, and what it does not show did not happen as far as
-// the reader can tell.
-//
-// A missing closing tag is accepted because a digest is a tail of a transcript
-// and can cut anywhere, including mid-message.
-const AGENT_MESSAGE = /^<agent-message\s+([^>]*)>([\s\S]*?)(?:<\/agent-message>)?$/;
-const ATTRIBUTE = /([a-z-]+)="([^"]*)"/g;
-
-export function parseAgentMessage(text) {
-  const match = AGENT_MESSAGE.exec(String(text ?? "").trim());
-  if (!match) return null;
-  const attributes = {};
-  for (const [, name, value] of match[1].matchAll(ATTRIBUTE)) attributes[name] = value;
-  // Without a sender the wrapper says nothing the body does not, so there is
-  // nothing to gain by removing it and a line of text to lose by getting it
-  // wrong.
-  if (!attributes.from) return null;
-  return { from: attributes.from, at: attributes.at ?? "", id: attributes.id ?? "", body: match[2].trim() };
-}
-
-// A background task's notification arrives as eight nested tags, of which two
-// say what happened — the status and the summary — and the rest are identifiers.
-// Raw, it is a screenful of machinery around one sentence.
-//
-// The identifiers are not dropped: they are useless to read and they are the
-// only way to chase a lead afterwards, so they move out of the reading line
-// into detail, which the panel hangs on the row as a tooltip.
-const TASK_NOTIFICATION = /^<task-notification>([\s\S]*?)(?:<\/task-notification>)?$/;
-
-function nested(text, name) {
-  const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text);
-  return match ? match[1].trim() : "";
-}
-
-export function parseTaskNotification(text) {
-  const match = TASK_NOTIFICATION.exec(String(text ?? "").trim());
-  if (!match) return null;
-  const inner = match[1];
-  const status = nested(inner, "status");
-  const summary = nested(inner, "summary");
-  // Without either of these there is nothing a person could read in place of
-  // the tags, and replacing text with less text is not an improvement.
-  if (!status && !summary) return null;
-  const label = [t("background_task"), status, summary].filter(Boolean).join(" · ");
-  const detail = [nested(inner, "task-id"), nested(inner, "tool-use-id"), nested(inner, "output-file")]
-    .filter(Boolean)
-    .join("\n");
-  return { label, detail, body: nested(inner, "result") || nested(inner, "note") };
-}
-
-// unwrapStep is the one question buildStep asks: is this step an envelope, and
-// if so, what should a person see instead of it?
-//
-// Every wrapper here is recognised the same strict way and fails the same soft
-// way: the tag must open the step and must carry something worth showing, or the
-// step is left exactly as it arrived. The fleet talks about these tags, so a
-// step that merely names one has to survive — and swallowing text is worse than
-// showing a tag, since a digest is read to find out what happened, and what it
-// does not show did not happen as far as the reader can tell.
-export function unwrapStep(text) {
-  const agent = parseAgentMessage(text);
-  if (agent) {
-    return {
-      label: agent.at ? `${agent.from} · ${agent.at}` : agent.from,
-      detail: agent.id ?? "",
-      body: agent.body,
-    };
-  }
-  return parseTaskNotification(text);
-}
-
-// stepKey is what tells an unchanged step from a changed one. It is the step's
-// own role and text, not the markup they render into: the rendered form is
-// derived, and comparing derived output would make the diff depend on the
-// renderer as well as on the data.
-export function stepKey(step) {
-  return `${step.role}\u0000${step.text}`;
-}
-
-// How close to the end counts as "reading the newest message". A person who
-// has scrolled up even slightly is reading, and their position is theirs; a
-// person sitting at the bottom is following along and wants to keep following.
-// A few dozen pixels of slack absorbs a part-line offset and a sub-pixel
-// rounding difference without turning either into a decision.
-export const STICK_THRESHOLD_PX = 48;
-
-// atBottom must be asked BEFORE the DOM changes, because appending to a thread
-// changes scrollHeight and so changes the answer. An element that does not
-// scroll at all (nothing in it yet, or shorter than its box) is at the bottom
-// by definition, which is what puts a freshly opened conversation at its newest
-// message.
-export function atBottom(el, threshold = STICK_THRESHOLD_PX) {
-  if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
 }
 
 // viewSignature is everything this column actually shows, and nothing else.
@@ -315,81 +215,9 @@ export function renderOrchestrator(root) {
     return session ? session.short : short;
   };
 
-  // buildStep renders one step of the conversation.
-  //
-  // The body goes through markdown.js — the same renderer the cards and the
-  // documentation use, rather than a second one — so ** reads as bold and a
-  // fenced block reads as code. That renderer escapes its whole input before it
-  // assembles anything, which is what makes it safe to hand its output to
-  // innerHTML: a step's text comes from the daemon, and the fleet is open (spec
-  // 3.1), so it is untrusted like a card body is untrusted. Nothing else here
-  // touches innerHTML; the sender and the time are set as text.
-  //
-  // An empty Set of known cards, deliberately: a conversation has no card names
-  // to resolve links against, so a [[link]] renders as a link that does not
-  // work rather than one that goes somewhere wrong.
-  const NO_CARDS = new Set();
-
-  const buildStep = (step) => fillStep(el("div", ""), step);
-
-  // fillStep writes one step into a row, whether the row is new or is being
-  // updated. A row that is being updated keeps its node: only a step whose own
-  // data changed gets here at all, and reusing the node keeps the thread's
-  // children stable for everything around it.
-  const fillStep = (row, step) => {
-    row.className = `o-msg o-${step.role}`;
-    row.dataset.stepKey = stepKey(step);
-    row.replaceChildren();
-
-    const wrapper = unwrapStep(step.text);
-    if (wrapper) {
-      const from = el("div", "o-msg-from", wrapper.label);
-      // The identifiers hang here rather than in the reading line: out of the
-      // way, and one hover from being read when someone needs to chase a lead.
-      if (wrapper.detail) from.setAttribute("title", wrapper.detail);
-      row.appendChild(from);
-    }
-    const body = el("div", "o-msg-body");
-    const text = wrapper ? wrapper.body : step.text;
-    // A wrapper whose whole content was the envelope leaves nothing to render;
-    // the attribution line is then the entire step, which is honest — that is
-    // all the notification actually said.
-    if (text) body.innerHTML = renderMarkdown(text, NO_CARDS);
-    row.appendChild(body);
-    return row;
-  };
-
-  // syncSteps updates the thread in place: a step whose role and text are
-  // unchanged is left exactly as it is, node and all. That is what lets a
-  // selection survive a poll that returned the same twenty steps it returned
-  // three seconds ago.
-  const syncSteps = (thread) => {
-    const stick = atBottom(thread);
-    const rows = thread.children;
-
-    for (let i = 0; i < steps.length; i += 1) {
-      const step = steps[i];
-      const existing = rows[i];
-      if (!existing) {
-        thread.appendChild(buildStep(step));
-        continue;
-      }
-      // The comparison is on the step's own data, kept on the node, not on the
-      // markup it produced: a rendered form is derived, and diffing derived
-      // output would make an unchanged step depend on the renderer holding
-      // still as well as on the data.
-      if (existing.dataset.stepKey === stepKey(step)) continue;
-      fillStep(existing, step);
-    }
-    while (thread.children.length > steps.length) {
-      thread.children[thread.children.length - 1].remove();
-    }
-
-    // Only now, and only if they were already following the newest message. A
-    // person who scrolled up is reading, and dragging them back down makes a
-    // conversation longer than one screen impossible to read at all.
-    if (stick) thread.scrollTop = thread.scrollHeight;
-  };
+  // How a step's row is classed here. The shared renderer owns everything
+  // inside a step; a pane owns what its rows are called.
+  const stepClass = (role) => `o-msg o-${role}`;
 
   const goBack = async () => {
     pickerRequested = true;
@@ -515,7 +343,7 @@ export function renderOrchestrator(root) {
       return;
     }
 
-    syncSteps(thread);
+    syncStepRows(thread, steps, stepClass);
   };
 
   const refreshDigest = async () => {
