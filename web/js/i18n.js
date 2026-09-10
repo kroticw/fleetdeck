@@ -39,6 +39,20 @@ const en = {
   card_not_committed: "the change is in the card file and did not reach the git history",
   card_write_refused: "the change was refused and nothing was written",
   backlinks: "linked from",
+
+  // Centre-column sections (web/js/sections.js) and the documentation section
+  // (web/js/docs.js). The two failure keys stay separate because they are
+  // separate facts: the list failing means there is no documentation to browse,
+  // while one document failing to open says nothing about the others. Both are
+  // prefixes to the server's own sentence, which names the directory or the rule
+  // — the detail an operator acts on — and is never reworded here.
+  tab_board: "Board",
+  tab_docs: "Docs",
+  pick_doc: "pick a document",
+  doc_opening: "opening…",
+  docs_empty: "no documents in the configured directories",
+  docs_list_failed: "the documentation could not be listed",
+  doc_open_failed: "this document could not be opened",
 };
 
 const ru = {
@@ -71,6 +85,14 @@ const ru = {
   card_not_committed: "правка лежит в файле карточки и не попала в историю git",
   card_write_refused: "правка отклонена, ничего не записано",
   backlinks: "ссылаются сюда",
+
+  tab_board: "Доска",
+  tab_docs: "Доки",
+  pick_doc: "выберите документ",
+  doc_opening: "открываем…",
+  docs_empty: "в настроенных каталогах нет документов",
+  docs_list_failed: "не удалось построить список документации",
+  doc_open_failed: "не удалось открыть документ",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;

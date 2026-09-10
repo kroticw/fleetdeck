@@ -27,6 +27,17 @@ const KEYS = [
   "card_not_committed",
   "card_write_refused",
   "backlinks",
+
+  // web/js/sections.js and web/js/docs.js. The tab labels are on this list for
+  // the same reason as the rest: a tab that fell back to its own key would read
+  // "tab_docs" in the interface.
+  "tab_board",
+  "tab_docs",
+  "pick_doc",
+  "doc_opening",
+  "docs_empty",
+  "docs_list_failed",
+  "doc_open_failed",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

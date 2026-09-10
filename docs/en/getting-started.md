@@ -1,10 +1,10 @@
 # Getting started
 
-This page walks through installing fleetdeck, opening the panel, creating a first board card, and connecting it to a running Claude Code session. The panel has no web interface yet; the section on opening it says exactly what answers at that address today. The last section, about the `session` field, describes the design as it exists today and is the part worth reading carefully.
+This page walks through installing fleetdeck, opening the panel, creating a first board card, and connecting it to a running Claude Code session. The last section, about the `session` field, describes the design as it exists today and is the part worth reading carefully.
 
 ## Installing the binary
 
-There is no release to download yet, so build from source. `make build` puts two binaries in `bin/`:
+Build from source with `make build`, which puts two binaries in `bin/`:
 
 - `fleetdeck` — the panel, and the `init` command described below;
 - `fleetdeck-status` — the statusline reporter Claude Code runs for every session.
@@ -51,7 +51,7 @@ After moving the binary, re-run `fleetdeck init` to record the new path, then bo
 
 The panel listens on `http://127.0.0.1:7777` — the loopback interface only, on the port `server.port` sets (see [`configuration.md`](configuration.md)). Load the launch agent to have it running at login, or run `fleetdeck` in a terminal.
 
-There is no web interface yet: a browser pointed at that address gets a 404. What answers today is the API that interface will use — `GET /api/snapshot` for the state of the whole fleet, `GET /ws` for a live stream of it, and the routes that type into a session and move a card. Only pages the panel served itself may call them: a request carrying any other `Origin` is refused with 403, and a request body that is not `application/json` with 415.
+A browser pointed at that address gets the panel. The routes the page uses are callable directly too — `GET /api/snapshot` for the state of the whole fleet, `GET /ws` for a live stream of it, `GET /api/docs` and `GET /api/docs/content` for the directories `docs.paths` names, and the routes that type into a session and move a card. Only pages the panel served itself may call them: a request carrying any other `Origin` is refused with 403, and a request body that is not `application/json` with 415.
 
 To check that it is up:
 
@@ -65,7 +65,7 @@ Creating a card does not require the panel: a card is a markdown file with YAML 
 
 ## Linking a card to a session
 
-A card is connected to a running session through one frontmatter field: `session`. The orchestrator fills this field in when it starts a session for a card, and from that point the card's `session` value is the identifier the panel (once it exists) will use to find that session's live state on the daemon.
+A card is connected to a running session through one frontmatter field: `session`. The orchestrator fills this field in when it starts a session for a card, and from that point the card's `session` value is the identifier the panel uses to find that session's live state on the daemon.
 
 ## Why `session` is the only connecting field
 

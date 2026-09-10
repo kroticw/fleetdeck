@@ -68,3 +68,44 @@ test("the card panel's rules are top-level rules", () => {
     assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
   }
 });
+
+test("the documentation section's rules are top-level rules", () => {
+  const { topLevel } = scan(css);
+  const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));
+
+  // .docs is the section's own two-pane layout: nested, the list and the body
+  // stop being side by side and the document falls below the list.
+  assert.ok(selectors.has(".docs"), ".docs is not a top-level rule in web/app.css");
+
+  // These carry meaning rather than decoration. Without them the current tab and
+  // the open document are indistinguishable from the rest, and a section that is
+  // empty looks exactly like one that failed.
+  for (const selector of ["#tabs .tab.on", ".docs-entry.on", ".docs-empty", ".docs-error"]) {
+    assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
+  }
+});
+
+// The switcher hides a section with the hidden attribute, and `hidden` is only
+// display:none from the user-agent stylesheet: any author rule outranks it.
+// #board carries display:flex for its columns, so hiding it did nothing until
+// this rule existed — the board stayed on screen with the documentation section
+// stacked under it, which no test saw and one screenshot did.
+test("hidden actually hides, whatever display a section's own rule sets", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const block = /\[hidden\]\s*\{([^}]*)\}/.exec(stripped);
+  assert.ok(block, "web/app.css has no [hidden] rule, so hiding a section is at the mercy of its own display");
+  assert.match(
+    block[1].replace(/\s+/g, " "),
+    /display\s*:\s*none\s*!important/,
+    "[hidden] must force display:none, or a section with its own display stays on screen",
+  );
+
+  // The rule only matters for elements that have a display of their own. Both
+  // sections do, which is exactly why the guarantee has to be unconditional.
+  for (const selector of ["#board", "#docs"]) {
+    assert.ok(
+      new RegExp(`${selector}\\s*\\{`).test(stripped),
+      `${selector} is not a top-level rule in web/app.css`,
+    );
+  }
+});
