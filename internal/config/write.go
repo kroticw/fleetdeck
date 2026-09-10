@@ -34,6 +34,15 @@ func SetField(path, key, value string) error {
 	if key == "" {
 		return fmt.Errorf("key must not be empty")
 	}
+	// A value containing a newline would make yaml.v3 marshal it as a block
+	// scalar spanning several lines, which breaks the one promise this
+	// function makes: it touches exactly one line. Refused here, before
+	// anything is read or written, rather than left to the parseability
+	// guard below to catch after the fact for some indentations and not
+	// others.
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("value must not contain a newline: SetField only ever rewrites a single line")
+	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -169,18 +178,24 @@ func replaceLeafLine(line, indent, key, value string) (string, error) {
 }
 
 // trailingComment returns the "# ..." suffix of rest (everything after a
-// mapping key's colon), or "" when there is none. It is quote-aware only
-// insofar as it must not mistake a "#" inside a quoted scalar for a comment
-// marker — the values this ever runs against are plain identifiers that
-// yaml.v3 does not quote, so a full YAML scalar grammar is not needed, only
-// enough of one not to corrupt a hand-written quoted value it did not choose
-// to write itself.
+// mapping key's colon), or "" when there is none. It only ever reads the old
+// value being discarded, so getting this wrong cannot corrupt the new one —
+// but it still follows YAML's own rule for where a comment may start (at the
+// very beginning of the value, or after whitespace) rather than treating
+// every "#" as one: an unquoted value like `a#b` is the single scalar "a#b",
+// not "a" followed by a comment, and must not be split as if it were. It is
+// quote-aware only insofar as it must not mistake a "#" inside a quoted
+// scalar for a comment marker — the values this ever runs against are plain
+// identifiers that yaml.v3 does not quote, so a full YAML scalar grammar is
+// not needed, only enough of one not to corrupt a hand-written quoted value
+// it did not choose to write itself.
 func trailingComment(rest string) string {
 	i := 0
 	n := len(rest)
 	for i < n && (rest[i] == ' ' || rest[i] == '\t') {
 		i++
 	}
+	valueStart := i
 	if i < n && (rest[i] == '"' || rest[i] == '\'') {
 		quote := rest[i]
 		i++
@@ -195,9 +210,10 @@ func trailingComment(rest string) string {
 			}
 			i++
 		}
+		valueStart = i
 	}
 	for i < n {
-		if rest[i] == '#' {
+		if rest[i] == '#' && (i == valueStart || rest[i-1] == ' ' || rest[i-1] == '\t') {
 			return rest[i:]
 		}
 		i++

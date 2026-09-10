@@ -151,6 +151,59 @@ func TestSubstituteNestedFieldTopLevelKeyIgnoresASameNamedNestedKeyAboveIt(t *te
 	}
 }
 
+// TestSetFieldRefusesAValueContainingANewline guards the one-line-touched
+// promise this function makes: yaml.v3 marshals a string with an embedded
+// newline as a multi-line block scalar, which would splice extra lines into
+// the file instead of rewriting the one line SetField was asked for.
+func TestSetFieldRefusesAValueContainingANewline(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "orchestrator:\n  session: old\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetField(p, "orchestrator.session", "line one\nline two"); err == nil {
+		t.Fatal("a value containing a newline must be refused, not turned into a multi-line block scalar")
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != content {
+		t.Fatalf("a refused write must leave the file untouched, got:\n%s", string(raw))
+	}
+}
+
+// TestSetFieldDoesNotTreatAHashInsideAnUnquotedValueAsAComment pins YAML's
+// own comment rule: a "#" only starts a comment when it is preceded by
+// whitespace (or begins the value). `a#b` is the single scalar "a#b", not
+// "a" followed by a comment "#b" -- treating it as the latter would splice a
+// meaningless fragment of the discarded old value onto the new line.
+func TestSetFieldDoesNotTreatAHashInsideAnUnquotedValueAsAComment(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "orchestrator:\n  session: a#b\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetField(p, "orchestrator.session", "new"); err != nil {
+		t.Fatalf("SetField: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if strings.Contains(got, "#b") {
+		t.Fatalf("a hash with no preceding whitespace was part of the old value, not a comment, and must not reappear as one: %s", got)
+	}
+	if !strings.Contains(got, "session: new\n") {
+		t.Fatalf("want a clean new value with nothing appended, got:\n%s", got)
+	}
+}
+
 func TestSetFieldOnAFileWithNoSuchKeyIsAnError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(p, []byte("server:\n  port: 7777\n"), 0o600); err != nil {
