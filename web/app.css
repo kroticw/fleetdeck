@@ -1,0 +1,61 @@
+/* fleetdeck window skeleton.
+ *
+ * This task lays down only the shell: a header strip and three columns.
+ * Column contents, zone colors, progress bars and themes belong to the
+ * modules that render into them and are added by later tasks.
+ */
+
+:root {
+  color-scheme: light dark;
+  --gap: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#header {
+  flex: none;
+}
+
+main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  gap: var(--gap);
+}
+
+.col {
+  min-width: 0;
+  overflow: auto;
+}
+
+.col-orchestrator {
+  flex: 1 1 25%;
+}
+
+.col-center {
+  flex: 2 1 50%;
+  display: flex;
+  flex-direction: column;
+}
+
+#board {
+  flex: 1;
+  min-height: 0;
+}
+
+.col-sessions {
+  flex: 1 1 25%;
+}

@@ -112,5 +112,6 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/status", d.handleStatus)
 	mux.HandleFunc("GET /ws", d.handleWS)
+	mux.Handle("GET /", staticHandler())
 	return guard(mux)
 }
