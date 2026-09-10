@@ -1,9 +1,11 @@
 package transcript
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +68,91 @@ func TestDigestSurvivesBrokenLines(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].Text != "ok" {
 		t.Fatalf("one broken line must not discard the good ones: %+v", steps)
+	}
+}
+
+// TestDigestDropsHousekeepingEnvelopes guards the noise filter ported from
+// plugin/scripts/transcript_digest.py. The last five text-bearing lines are
+// four housekeeping envelopes (local-command output, a command name/message
+// pair, an interruption marker) and one real answer; only the real one must
+// survive. Break it by removing the isNoise call in Digest's visit closure
+// and this test fails with 5 steps instead of 1.
+func TestDigestDropsHousekeepingEnvelopes(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "housekeeping.jsonl")
+	lines := []string{
+		`{"type":"user","timestamp":"2026-09-09T00:00:01Z","message":{"role":"user","content":"<local-command-stdout>build ok</local-command-stdout>"}}`,
+		`{"type":"user","timestamp":"2026-09-09T00:00:02Z","message":{"role":"user","content":"<command-name>/clear</command-name>"}}`,
+		`{"type":"user","timestamp":"2026-09-09T00:00:03Z","message":{"role":"user","content":"<command-message>clear</command-message>"}}`,
+		`{"type":"assistant","timestamp":"2026-09-09T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
+		`{"type":"assistant","timestamp":"2026-09-09T00:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"The deploy script now defaults DEPLOY_ENV to staging."}]}}`,
+	}
+	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := Digest(p, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("want only the real answer to survive, got %d steps: %+v", len(steps), steps)
+	}
+	if steps[0].Text != "The deploy script now defaults DEPLOY_ENV to staging." {
+		t.Fatalf("want the real answer, got %q", steps[0].Text)
+	}
+}
+
+// TestDigestNonPositiveLimitReturnsNoSteps pins down the behavior of a
+// non-positive limit: zero steps, not "no limit" reading the whole file.
+// Break it by reverting the `limit > 0 &&` removal in Digest and this test
+// fails because the whole fixture's steps come back instead of none.
+func TestDigestNonPositiveLimitReturnsNoSteps(t *testing.T) {
+	for _, limit := range []int{0, -1, -5} {
+		steps, err := Digest("testdata/session.jsonl", limit)
+		if err != nil {
+			t.Fatalf("limit %d: unexpected error: %v", limit, err)
+		}
+		if len(steps) != 0 {
+			t.Fatalf("limit %d: want 0 steps, got %d", limit, len(steps))
+		}
+	}
+}
+
+// TestDigestDropsLineWithUnparsableTimestamp guards against a swallowed
+// time.Parse error yielding a Step with a zero At field indistinguishable
+// from a genuinely-timestamped line, which would silently corrupt the
+// oldest-first ordering callers rely on. Break it by reverting to
+// `at, _ := time.Parse(...)` and this test fails because the bad-timestamp
+// line comes back with a zero time as though it were real.
+func TestDigestDropsLineWithUnparsableTimestamp(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "bad-timestamp.jsonl")
+	bad := `{"type":"user","timestamp":"not-a-time","message":{"role":"user","content":"hello"}}`
+	good := `{"type":"assistant","timestamp":"2026-09-09T00:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`
+	if err := os.WriteFile(p, []byte(bad+"\n"+good+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := Digest(p, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("want the unparsable-timestamp line dropped, got %d steps: %+v", len(steps), steps)
+	}
+	if steps[0].Text != "hi" {
+		t.Fatalf("want the good line to survive, got %q", steps[0].Text)
+	}
+}
+
+// TestTextJoinsAdjacentBlocksWithSeparator guards against concatenating two
+// text blocks with no separator, which runs the words at the seam together.
+// Break it by reverting to `out += b.Text` in rawLine.text and this test
+// fails on "onetwo" instead of "one\ntwo".
+func TestTextJoinsAdjacentBlocksWithSeparator(t *testing.T) {
+	r := rawLine{Message: struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}{Content: json.RawMessage(`[{"type":"text","text":"one"},{"type":"text","text":"two"}]`)}}
+	if got, want := r.text(), "one\ntwo"; got != want {
+		t.Fatalf("want %q, got %q", want, got)
 	}
 }
 

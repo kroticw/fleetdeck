@@ -52,6 +52,51 @@ func TestContextUsageUnknownModelFallsBack(t *testing.T) {
 	}
 }
 
+// TestContextUsageSkipsSyntheticZeroUsage guards against the bug where a
+// trailing synthetic entry (an interruption or an API error, model
+// "<synthetic>", usage fully populated but all zero) made ContextUsage stop
+// at that line and report an empty context for a session that was actually
+// nearly full. Break it by reverting the skip in context.go's visit closure
+// and this test fails with 0 tokens instead of 598037.
+func TestContextUsageSkipsSyntheticZeroUsage(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "synthetic-tail.jsonl")
+	realLine := `{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_creation_input_tokens":244,"cache_read_input_tokens":599992}}}`
+	synthetic := `{"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	if err := os.WriteFile(p, []byte(realLine+"\n"+synthetic+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ContextUsage(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tokens != 600238 {
+		t.Fatalf("want the real entry's 600238 tokens, got %d", got.Tokens)
+	}
+	if got.Window != 1000000 {
+		t.Fatalf("want opus-5 window, got %d", got.Window)
+	}
+}
+
+// TestContextUsageFableWindow guards the missing table entry: real
+// transcripts carry model "claude-fable-5" (distinct from
+// "claude-fable-5-1"), and a miss used to fall back to 200k, understating a
+// session's actual headroom. Break it by deleting the "claude-fable-5" entry
+// from the windows map and this test fails on the 200k fallback.
+func TestContextUsageFableWindow(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "fable.jsonl")
+	line := `{"type":"assistant","message":{"model":"claude-fable-5","usage":{"input_tokens":1,"cache_read_input_tokens":1}}}`
+	if err := os.WriteFile(p, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ContextUsage(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Window != 1000000 {
+		t.Fatalf("claude-fable-5 window must be 1M, got %d", got.Window)
+	}
+}
+
 func TestContextUsageUsesLastNotFirst(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "multi.jsonl")
 	first := `{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":1,"cache_read_input_tokens":1}}}`

@@ -16,12 +16,17 @@ type Usage struct {
 	Estimated bool `json:"estimated"`
 }
 
-// windows maps a model name to its context window. Unknown models fall back to 200k,
-// the smallest window in current use, so an unrecognized future model is never
-// reported as having more headroom than it might actually have.
+// windows maps a model name to the largest context window that model can run
+// under. A session may in fact be capped lower than its listed window
+// depending on which beta or account tier granted it, so a hit in this table
+// is a ceiling, not a guarantee of the session's actual capacity. An
+// unrecognized model falls back to 200k, the smallest window in current use,
+// so at least the unknown case is never reported as having more headroom
+// than the most constrained known model has.
 var windows = map[string]int{
 	"claude-opus-5":    1_000_000,
 	"claude-sonnet-5":  1_000_000,
+	"claude-fable-5":   1_000_000,
 	"claude-fable-5-1": 1_000_000,
 	"claude-haiku-4-5": 200_000,
 }
@@ -65,6 +70,17 @@ func ContextUsage(path string) (Usage, error) {
 			return false
 		}
 		if json.Unmarshal(envelope.Message, &last) != nil {
+			return false
+		}
+		// Claude Code writes synthetic assistant entries for an interruption
+		// or an API error: model "<synthetic>" with a fully populated but
+		// all-zero usage block. That block is present, not meaningful — skip
+		// it and keep walking back for the last real usage instead of
+		// reporting an empty context for a session that may be nearly full.
+		if last.Model == "<synthetic>" {
+			return false
+		}
+		if last.Usage.Input == 0 && last.Usage.CacheCreation == 0 && last.Usage.CacheRead == 0 {
 			return false
 		}
 		found = true

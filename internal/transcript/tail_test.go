@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,10 +18,6 @@ import (
 // fixtures elsewhere in this package never cut a line in half, so a broken
 // guard would slip through unnoticed there.
 func TestReverseLinesWithTinyChunksReconstructsExactOrder(t *testing.T) {
-	old := startChunk
-	startChunk = 8
-	t.Cleanup(func() { startChunk = old })
-
 	var want []string
 	var b strings.Builder
 	for i := 0; i < 50; i++ {
@@ -40,7 +37,7 @@ func TestReverseLinesWithTinyChunksReconstructsExactOrder(t *testing.T) {
 	defer f.Close()
 
 	var got []string
-	if err := reverseLines(f, func(line []byte) bool {
+	if err := reverseLinesFrom(f, 8, func(line []byte) bool {
 		got = append(got, string(line))
 		return false
 	}); err != nil {
@@ -65,14 +62,14 @@ func TestReverseLinesCrossesChunkBoundaries(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "big.jsonl")
 
 	var b strings.Builder
-	const total = 4000 // long enough to clear startChunk (64KB) several times over
+	const total = 4000 // long enough to clear defaultStartChunk (64KB) several times over
 	for i := 0; i < total; i++ {
 		fmt.Fprintf(&b, "line %04d %s\n", i, strings.Repeat("x", 40))
 	}
 	if err := os.WriteFile(p, []byte(b.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if int64(b.Len()) <= startChunk {
+	if int64(b.Len()) <= defaultStartChunk {
 		t.Fatalf("fixture too small to exercise chunk growth: %d bytes", b.Len())
 	}
 
@@ -116,6 +113,44 @@ func TestReverseLinesCrossesChunkBoundaries(t *testing.T) {
 	}
 }
 
+// shortReader is a readerAtSeeker whose ReadAt always returns fewer bytes
+// than requested, simulating the kind of short read reverseLinesFrom must
+// not silently tolerate.
+type shortReader struct {
+	size int64
+}
+
+func (s *shortReader) Seek(_ int64, _ int) (int64, error) {
+	return s.size, nil
+}
+
+func (s *shortReader) ReadAt(p []byte, _ int64) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	// Fill only half the buffer and report io.EOF, exactly the shape that
+	// would leave the rest of the caller's buffer zero-padded if trusted.
+	n := len(p) / 2
+	for i := range p[:n] {
+		p[i] = 'x'
+	}
+	return n, io.EOF
+}
+
+// TestReverseLinesRejectsShortRead breaks the "read must fill the buffer"
+// assertion in reverseLinesFrom on purpose: shortReader always returns half
+// the requested bytes. Before the assertion was added, this fed a
+// half-zero-padded buffer straight into line splitting instead of failing.
+func TestReverseLinesRejectsShortRead(t *testing.T) {
+	err := reverseLinesFrom(&shortReader{size: 100}, 100, func(line []byte) bool {
+		t.Fatalf("visit must not run on a short read, got line %q", line)
+		return true
+	})
+	if err == nil {
+		t.Fatal("a short read must be reported as an error, not silently zero-padded")
+	}
+}
+
 // TestDigestOverLargeFile exercises Digest itself, not just reverseLines,
 // against a file far bigger than one tail chunk, mixing broken and textless
 // lines throughout so the limit is only satisfied after crossing a chunk
@@ -138,7 +173,7 @@ func TestDigestOverLargeFile(t *testing.T) {
 	if err := os.WriteFile(p, []byte(b.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if int64(b.Len()) <= startChunk {
+	if int64(b.Len()) <= defaultStartChunk {
 		t.Fatalf("fixture too small to exercise chunk growth: %d bytes", b.Len())
 	}
 

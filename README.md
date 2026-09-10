@@ -49,5 +49,6 @@ Durations (`poll_interval`, `silence_after`) must be a duration string such as `
 - `internal/daemon` — a client for the daemon's Unix control socket: discovery, ownership/security checks on the socket and the control key file, and the `ping`, `list`, `reply`, and `attach` (screen read / key send) operations. The full wire protocol it implements is documented in [`docs/protocol/daemon-control-socket.md`](docs/protocol/daemon-control-socket.md) — read that first before changing anything in this package.
 - `internal/config` — loads and saves the YAML config file described above.
 - `internal/version` — the build version, injected at link time by `make build`/`make verify-ldflags`; see that package's own tests for how the injection is verified.
+- `internal/transcript` — reads Claude Code session transcripts from the tail: locating a session's `.jsonl` file by UUID, a text digest of its recent steps, and an estimate of context-window occupancy for when the statusline reporter is absent.
 
-Both `internal/daemon` and `internal/config` are standard-library-only (`internal/config` also uses `gopkg.in/yaml.v3`) and know nothing about the web server built on top of them.
+`internal/daemon`, `internal/config` and `internal/transcript` are standard-library-only (`internal/config` also uses `gopkg.in/yaml.v3`) and know nothing about the web server built on top of them.

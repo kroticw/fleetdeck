@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -25,7 +26,9 @@ type rawLine struct {
 	} `json:"message"`
 }
 
-// text extracts plain text from a content field that is either a string or a block list.
+// text extracts plain text from a content field that is either a string or a
+// block list. Adjacent text blocks are joined with a newline; concatenating
+// them directly runs the words at the seam together.
 func (r rawLine) text() string {
 	var s string
 	if json.Unmarshal(r.Message.Content, &s) == nil {
@@ -38,20 +41,57 @@ func (r rawLine) text() string {
 	if json.Unmarshal(r.Message.Content, &blocks) != nil {
 		return ""
 	}
-	out := ""
+	var parts []string
 	for _, b := range blocks {
-		if b.Type == "text" {
-			out += b.Text
+		if b.Type == "text" && b.Text != "" {
+			parts = append(parts, b.Text)
 		}
 	}
-	return out
+	return strings.Join(parts, "\n")
+}
+
+// noisePrefixes marks a text block as Claude Code housekeeping rather than
+// real conversation content: local-command envelopes, interruption markers,
+// skill scaffolding notices. Ported from NOISE_PREFIXES in
+// plugin/scripts/transcript_digest.py, the Python digest this list first
+// came from — keep the two lists in sync so they can be compared line by
+// line.
+var noisePrefixes = []string{
+	"<local-command",
+	"<command-name",
+	"<command-message",
+	"Caveat:",
+	"Base directory for this skill:",
+	"[Request interrupted",
+}
+
+// isNoise reports whether text is empty or a housekeeping envelope rather
+// than a real conversational step.
+func isNoise(text string) bool {
+	stripped := strings.TrimLeft(text, " \t\r\n")
+	if stripped == "" {
+		return true
+	}
+	for _, prefix := range noisePrefixes {
+		if strings.HasPrefix(stripped, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Digest returns up to limit of the most recent steps, oldest first. It reads
 // the transcript from the tail, so answering a small request never requires
-// loading a file of tens of megabytes in full. An empty transcript is an
-// error: nothing to look at is not the same as nothing found.
+// loading a file of tens of megabytes in full. A non-positive limit means
+// zero steps were asked for: it returns an empty result without opening the
+// file, rather than being read as "no limit" and forcing a full read. An
+// empty transcript is an error: nothing to look at is not the same as
+// nothing found.
 func Digest(path string, limit int) ([]Step, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s", ErrNoTranscript, path)
@@ -81,12 +121,18 @@ func Digest(path string, limit int) ([]Step, error) {
 			return false
 		}
 		txt := r.text()
-		if txt == "" {
+		if isNoise(txt) {
 			return false
 		}
-		at, _ := time.Parse(time.RFC3339, r.Timestamp)
+		at, err := time.Parse(time.RFC3339, r.Timestamp)
+		if err != nil {
+			// No trustworthy timestamp: dropping the line is safer than
+			// keeping it with a zero time indistinguishable from a real one,
+			// which would corrupt the oldest-first ordering callers rely on.
+			return false
+		}
 		newestFirst = append(newestFirst, Step{Role: r.Type, Text: txt, At: at})
-		return limit > 0 && len(newestFirst) >= limit
+		return len(newestFirst) >= limit
 	}
 	if err := reverseLines(f, visit); err != nil {
 		return nil, err
