@@ -28,8 +28,8 @@ import { syncSteps as syncStepRows } from "./steps.js";
 // no amount of restoring them afterwards is the same thing, because the restore
 // only knows what the code thought to save.
 //
-// So: the frame is built once per mode, the thread's steps are diffed against
-// what is on screen, and a step that has not changed is not touched at all.
+// So: the frame is built once, the thread's steps are diffed against what is
+// on screen, and a step that has not changed is not touched at all.
 
 // resolveOrchestrator is the pure core of "which session, if any, does the
 // pin point at right now" — kept free of get()/DOM so it can be tested
@@ -74,17 +74,22 @@ export function pickerLabel(session) {
 // somewhere else ticked. Redrawing on those is what made the column feel slow;
 // worse, a redraw is what loses a selection, so an unrelated session's progress
 // bar could wipe the text a person was in the middle of copying.
-export function viewSignature(snap, connected, pickerRequested) {
+//
+// The pickable session list is tracked unconditionally now, pinned or not:
+// the dropdown that assigns the orchestrator lives in this column's own head
+// at all times (see renderOrchestrator), not only while nothing is pinned,
+// so a session joining or leaving the fleet has to reach it even mid-
+// conversation. Losing a selection to that is not the risk it used to be —
+// every part draw() touches is diffed in place (setText, syncStepRows, the
+// dropdown's own option-list comparison), so a redraw the list forces is not
+// a rebuild the way the picker's old full-screen replacement was.
+export function viewSignature(snap, connected) {
   const { sessions, short, session } = resolveOrchestrator(snap);
-  const pinned = short && !pickerRequested;
   return JSON.stringify({
     connected,
-    pickerRequested,
     short,
     hasSnapshot: snap != null,
-    // The picker lists sessions, so it depends on the list; the conversation
-    // does not, and must not redraw when the list changes under it.
-    sessions: pinned ? null : pickableSessions(sessions).map((s) => [s.short, s.name ?? "", s.label ?? ""]),
+    sessions: pickableSessions(sessions).map((s) => [s.short, s.name ?? "", s.label ?? ""]),
     session: session
       ? [session.short, session.name ?? "", session.label ?? "", session.sessionId, contextPercent(session.context)]
       : null,
@@ -106,11 +111,11 @@ export function renderOrchestrator(root) {
   // the message from a failed send: sendText fails, refreshDigest is kicked
   // off right after it regardless, and if the transcript itself is still
   // readable that poll succeeds and blanks the very error the operator needed
-  // to see. sendError covers sendText, the picker's setOrchestratorSession and
-  // the back button's unpin — anything the operator directly triggered — and is
-  // cleared only by the next such attempt. digestError covers the periodic
-  // digest poll alone and is cleared only by that poll succeeding. Neither may
-  // clear the other.
+  // to see. sendError covers sendText, the dropdown's own setOrchestratorSession
+  // and the label edit's setSessionLabel — anything the operator directly
+  // triggered — and is cleared only by the next such attempt. digestError
+  // covers the periodic digest poll alone and is cleared only by that poll
+  // succeeding. Neither may clear the other.
   let sendError = "";
   let digestError = "";
 
@@ -120,14 +125,6 @@ export function renderOrchestrator(root) {
   // waiting out the 3-second interval.
   let fetchedFor = null;
 
-  // The operator asked to go back to the session list. It is held here, not
-  // derived from configuration, because the configuration write that clears the
-  // pin can fail — and when it does, the screen must still do what was asked
-  // while saying that a reload will undo it. Without this the next snapshot,
-  // still carrying the old pin, would drag the column straight back into the
-  // conversation the operator just left.
-  let pickerRequested = false;
-
   // Set while the pinned session's own name is being edited in place. draw()
   // must not touch .o-name while this is true — the same "do not disturb
   // what is being typed into" rule the textarea already gets for free by
@@ -135,9 +132,12 @@ export function renderOrchestrator(root) {
   // input) for the duration of the edit.
   let editingLabel = false;
 
-  // The mode currently built into the DOM, so the frame is rebuilt only when
-  // the mode itself changes. null means nothing has been built yet.
-  let mode = null;
+  // Whether the conversation frame has been built into root yet. There is
+  // only ever one shape now — the operator's complaint was that a second one
+  // existed (a full-screen session picker duplicating the task list on the
+  // right) — so this is a plain guard against rebuilding it, not a mode to
+  // switch between.
+  let built = false;
   let painted = null;
 
   const resolve = () => {
@@ -177,14 +177,10 @@ export function renderOrchestrator(root) {
     else parent.appendChild(row);
   };
 
-  const buildConversationFrame = (onBack) => {
+  const buildConversationFrame = () => {
     root.replaceChildren();
 
     const head = el("div", "o-head");
-    const back = el("button", "o-back", t("back_to_sessions"));
-    back.setAttribute("type", "button");
-    back.addEventListener("click", onBack);
-    head.append(back);
     head.append(el("span", "o-name", ""));
     // Always visible, never only on hover: a control that only shows itself
     // to a pointer already hovering it does not exist for a person who has
@@ -196,6 +192,36 @@ export function renderOrchestrator(root) {
     editBtn.setAttribute("title", t("edit_label"));
     editBtn.addEventListener("click", startEditingLabel);
     head.append(editBtn);
+
+    // The one control left for saying which session is the orchestrator: a
+    // plain <select>, not a screen of its own. Choosing an option changes the
+    // pin in place, without ever leaving the conversation already on screen —
+    // the previous picker replaced this whole column with a list of every
+    // session, which was a second, confusable way to do exactly what
+    // clicking a session in the task list on the right already does. Its
+    // own options are synced in draw(), never rebuilt here: this frame is
+    // only ever built once.
+    const pickSelect = document.createElement("select");
+    pickSelect.className = "o-pick-select";
+    pickSelect.setAttribute("aria-label", t("pick_orchestrator"));
+    pickSelect.title = t("pick_orchestrator");
+    pickSelect.addEventListener("change", async () => {
+      const nextShort = pickSelect.value;
+      try {
+        await setOrchestratorSession(nextShort);
+        sendError = "";
+      } catch (err) {
+        // The write failed, so the configuration still names whichever
+        // session was actually pinned before — the very next draw() reads
+        // that back and sets the select's value to it, reverting the
+        // choice on screen without any separate "still really pinned"
+        // state to track: the selected option already is the truth.
+        sendError = `${t("orchestrator_pin_failed")}: ${err.message}`;
+      }
+      draw();
+    });
+    head.append(pickSelect);
+
     root.appendChild(head);
 
     root.appendChild(el("div", "o-thread"));
@@ -308,75 +334,27 @@ export function renderOrchestrator(root) {
   // inside a step; a pane owns what its rows are called.
   const stepClass = (role) => `o-msg o-${role}`;
 
-  const goBack = async () => {
-    pickerRequested = true;
-    try {
-      // Clearing the pin is what makes the screen and the configuration agree.
-      // Leaving it set would mean a reload silently puts the operator back in
-      // the conversation they just chose to leave, which is the same class of
-      // lie as a control showing a value the file does not hold.
-      await setOrchestratorSession("");
-      sendError = "";
-    } catch (err) {
-      // The navigation still happens — it is local, and it is what was asked.
-      // What failed is only the saving of it, and that is worth saying plainly
-      // rather than hiding behind a screen that looks like it worked.
-      sendError = `${t("unpin_failed")}: ${err.message}`;
-    }
-    draw();
-  };
-
-  const drawPicker = (sessions, currentShort) => {
-    // The picker holds no scroll position, no caret and no selection, so it is
-    // rebuilt whole — there is nothing here for a rebuild to destroy. It is
-    // built from nodes rather than markup all the same: session names and short
-    // ids come from the daemon, and text put in with textContent cannot be
-    // markup however it is spelled.
-    const pick = el("div", "o-pick");
-    if (!isConnected) pick.appendChild(el("div", "o-stale", t("offline")));
-    pick.appendChild(el("p", "o-pick-empty", t("pick_orchestrator")));
-
-    const list = el("div", "o-pick-list");
-    for (const session of pickableSessions(sessions)) {
-      // The picker is reached only after goBack has already cleared the pin
-      // (or nothing was ever pinned), so currentShort is ordinarily empty —
-      // except when that clearing PATCH itself failed, and the screen still
-      // shows the list while the old pin is, in fact, still the real one. A
-      // person reading the list in that moment must see which item that is,
-      // not mistake a browser focus ring on the first button for a mark that
-      // was never drawn — the exact confusion a naive read of this screen
-      // produced once already.
-      const current = currentShort !== "" && session.short === currentShort;
-      const item = el("button", current ? "o-pick-item o-pick-item-current" : "o-pick-item", pickerLabel(session));
-      item.setAttribute("type", "button");
-      item.dataset.short = session.short;
-      if (current) {
-        item.setAttribute("aria-current", "true");
-        item.setAttribute("title", t("current_orchestrator"));
-      }
-      item.addEventListener("click", async () => {
-        try {
-          await setOrchestratorSession(session.short);
-          sendError = "";
-          // The operator has chosen; the request to see the list is spent, and
-          // leaving it set would keep them staring at the list they just used.
-          pickerRequested = false;
-        } catch (err) {
-          sendError = err.message;
-        }
-        draw();
-      });
-      list.appendChild(item);
-    }
-    pick.appendChild(list);
-
-    if (sendError) pick.appendChild(el("div", "o-error o-error-send", sendError));
-    root.replaceChildren(pick);
+  // syncSelectOptions rebuilds the dropdown's <option> children only when the
+  // set actually differs from what is on screen — the same "diff before you
+  // touch it" discipline every other part of draw() follows, so a redraw
+  // this column's own gate lets through cannot disturb an open dropdown a
+  // person happens to be looking at for no reason.
+  const syncSelectOptions = (select, wanted) => {
+    const have = [...select.options].map((o) => [o.value, o.textContent]);
+    if (JSON.stringify(have) === JSON.stringify(wanted)) return;
+    select.replaceChildren(
+      ...wanted.map(([value, label]) => {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = label;
+        return opt;
+      }),
+    );
   };
 
   const draw = () => {
     const { snap, sessions, short, session } = resolve();
-    const pinned = short !== "" && !pickerRequested;
+    const pinned = short !== "";
 
     // A pin change, or the pinned session showing up after being absent,
     // means the digest on screen belongs to a different session (or none)
@@ -392,27 +370,9 @@ export function renderOrchestrator(root) {
       digestError = "";
     }
 
-    // Nothing pinned, and nothing to pick from either: the socket may simply
-    // not be connected yet, or the daemon has no sessions. Say so plainly —
-    // this is not a failure.
-    if (!pinned && (!snap || sessions.length === 0)) {
-      mode = "empty";
-      const pick = el("div", "o-pick");
-      if (!isConnected) pick.appendChild(el("div", "o-stale", t("offline")));
-      pick.appendChild(el("p", "o-pick-empty", t("pick_orchestrator")));
-      root.replaceChildren(pick);
-      return;
-    }
-
-    if (!pinned) {
-      mode = "picker";
-      drawPicker(sessions, short);
-      return;
-    }
-
-    if (mode !== "conversation") {
-      mode = "conversation";
-      buildConversationFrame(goBack);
+    if (!built) {
+      built = true;
+      buildConversationFrame();
     }
 
     const head = root.querySelector(".o-head");
@@ -423,7 +383,10 @@ export function renderOrchestrator(root) {
     // an <input> for the duration, and querying for a span that is not
     // there right now would be a silent no-op anyway — this says why.
     if (!editingLabel) {
-      setText(head.querySelector(".o-name"), session ? session.label || session.name || session.short : short);
+      setText(
+        head.querySelector(".o-name"),
+        session ? session.label || session.name || session.short : t("not_pinned"),
+      );
     }
 
     const pct = session ? contextPercent(session.context) : null;
@@ -436,23 +399,38 @@ export function renderOrchestrator(root) {
       head.appendChild(el("span", "o-ctx", `${pct}%`));
     }
 
+    // The dropdown's options mirror the daemon's own pickable session list;
+    // its value mirrors the truth in the snapshot, never a locally-held
+    // choice. A failed write (see buildConversationFrame's change handler)
+    // leaves that truth unchanged, so setting the value from `short` here —
+    // after the failure, same as before it — is what reverts the control to
+    // what is actually pinned, with nothing extra to track.
+    const select = head.querySelector(".o-pick-select");
+    syncSelectOptions(select, [["", t("not_pinned")], ...pickableSessions(sessions).map((s) => [s.short, pickerLabel(s)])]);
+    if (select.value !== short) select.value = short;
+
     showRow(root, "o-error o-error-digest", digestError, thread);
     showRow(root, "o-error o-error-send", sendError, root.querySelector(".o-form"));
 
-    // A session the daemon no longer lists has no sessionId to write a label
-    // against — disabled rather than hidden, so the control's place on
-    // screen stays stable and its state (not just its presence) says why a
-    // click would do nothing.
+    // A session with no sessionId — nothing pinned, or the daemon no longer
+    // lists the pinned one — has nothing to write a label against, and
+    // nothing live to type a message into. Disabled rather than hidden, so
+    // each control's place on screen stays stable and its state (not just
+    // its presence) says why a click or a keystroke would do nothing.
     const editBtn = head.querySelector(".o-name-edit");
     if (editBtn) editBtn.disabled = !session;
+    const area = root.querySelector("textarea");
+    if (area) area.disabled = !session;
 
     if (!session) {
-      // Pinned, but the daemon does not currently list that session: there is
-      // nothing to resolve a digest against, so none is requested. The one row
-      // saying so is the thread's whole content.
+      // Two different facts read the same at this point — nothing pinned at
+      // all, or pinned to a session the daemon no longer lists — and the
+      // thread's one row must say which, not paper over the difference.
+      const message = pinned ? t("session_not_listed") : t("no_orchestrator_thread");
+      const cls = pinned ? "o-msg o-dead" : "o-thread-empty";
       const only = thread.children[0];
-      if (!only || only.className !== "o-msg o-dead") {
-        thread.replaceChildren(el("div", "o-msg o-dead", t("session_not_listed")));
+      if (!only || only.className !== cls) {
+        thread.replaceChildren(el("div", cls, message));
       }
       return;
     }
@@ -461,8 +439,8 @@ export function renderOrchestrator(root) {
   };
 
   const refreshDigest = async () => {
-    const { short, session } = resolve();
-    if (!session || (short !== "" && pickerRequested)) return;
+    const { session } = resolve();
+    if (!session) return;
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(session.sessionId)}/digest?limit=20`);
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText);
@@ -479,7 +457,7 @@ export function renderOrchestrator(root) {
     // The gate: a snapshot that changes nothing this column shows changes
     // nothing on screen either. Without it every push from the daemon reached
     // draw(), and every draw could disturb the thread.
-    const signature = viewSignature(snap, connected, pickerRequested);
+    const signature = viewSignature(snap, connected);
     if (signature === painted) return;
     painted = signature;
     isConnected = connected;

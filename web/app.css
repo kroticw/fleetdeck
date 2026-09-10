@@ -411,26 +411,6 @@ main {
   border-bottom: 1px solid var(--border);
 }
 
-/* .o-back — a sibling task's button back to the session picker, added to
- * .o-head. No markup or behaviour here, only the style a plain <button>
- * needs to read as a quiet secondary control rather than default UA chrome:
- * that task does not own this file and was told it would not have to. */
-.o-back {
-  font: inherit;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  cursor: pointer;
-}
-
-.o-back:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
 .o-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -517,6 +497,16 @@ main {
   font-style: italic;
 }
 
+/* .o-thread-empty is the other reason the thread can have nothing to show:
+ * unlike .o-msg.o-dead (a pin the daemon no longer lists), nothing is pinned
+ * at all yet. Sharing .o-msg.o-dead's own quiet, non-alarming treatment
+ * rather than inventing a second one — the two are different facts but the
+ * same kind of "nothing to act on here" moment. */
+.o-thread-empty {
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .o-form {
   flex: none;
   padding: var(--gap);
@@ -534,40 +524,6 @@ main {
   border-radius: var(--radius-sm);
   padding: 6px;
   box-sizing: border-box;
-}
-
-.o-pick {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
-  padding: var(--gap);
-}
-
-.o-pick-empty {
-  color: var(--text-muted);
-  margin: 0;
-}
-
-.o-pick-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.o-pick-item {
-  text-align: left;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.o-pick-item:hover {
-  background: var(--surface-hover);
 }
 
 .col-center {
@@ -1664,12 +1620,13 @@ main {
 }
 
 /* Session labels (web/js/orchestrator.js, web/js/sessions.js) — the
- * operator's own name for a session, edited in place. Kept as its own block
- * at the end of the file, per this branch's own instruction, rather than
- * folded into .o-name/.sname above: two sibling tasks (images, markdown
- * tables) also append their own blocks here, and a rule scattered into an
- * older section is a rule the next merge has to find by reading, not by
- * looking at the bottom of the file.
+ * operator's own name for a session, edited in place — and, further down,
+ * .o-pick-select, the dropdown that replaced orchestrator.js's own former
+ * full-screen session picker. Kept as its own block at the end of the file,
+ * per this branch's own instruction, rather than folded into .o-name/.sname
+ * above: two sibling tasks (images, markdown tables) also append their own
+ * blocks here, and a rule scattered into an older section is a rule the next
+ * merge has to find by reading, not by looking at the bottom of the file.
  *
  * Every edit affordance below is deliberately visible without a hover and
  * without focus — a plain-text control (the theme button, before this same
@@ -1723,19 +1680,28 @@ main {
   opacity: 1;
 }
 
-/* .o-pick-item-current marks the one session the picker's own list can, on
- * rare occasions (an unpin that failed to save — see orchestrator.js's
- * drawPicker), still show as genuinely pinned. A background-only mark reads
- * exactly like a focus ring at a glance, which is the confusion this exists
- * to remove — the checkmark is text, not decoration, so it survives being
- * described rather than seen. */
-.o-pick-item-current {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: var(--accent);
+/* .o-pick-select is the one control left for assigning the orchestrator: a
+ * plain <select> living in .o-head at all times, replacing a picker that used
+ * to swap this whole column for a list of every session — a second,
+ * confusable way to do what clicking a session in the task list on the right
+ * already does. Its value is always the true pin (see orchestrator.js's
+ * draw()), so there is no separate "still really pinned" mark to style the
+ * way the picker once needed one: the selected option already says so. */
+.o-pick-select {
+  flex: none;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  max-width: 40%;
 }
 
-.o-pick-item-current::before {
-  content: "✓ ";
+.o-pick-select:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .label-edit-btn {

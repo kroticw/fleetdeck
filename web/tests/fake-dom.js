@@ -304,6 +304,14 @@ class FakeNode {
 }
 
 class FakeSelect extends FakeNode {
+  // A real HTMLSelectElement.options is an HTMLOptionsCollection — array-like
+  // and iterable, never the live NodeList children already is elsewhere in
+  // this file. children is already a plain array, which satisfies both for
+  // every use the panel makes of it (spreading it, reading .length, mapping).
+  get options() {
+    return this.children;
+  }
+
   get value() {
     const chosen = this.children.find((option) => option.selected);
     // A real select always has a selection: with nothing marked, it shows its

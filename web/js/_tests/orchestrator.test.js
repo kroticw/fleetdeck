@@ -253,24 +253,28 @@ const PIN = {
 test("another session's context moving changes nothing this column shows", () => {
   const later = structuredClone(PIN);
   later.sessions[1].context.tokens = 90;
-  assert.equal(viewSignature(PIN, true, false), viewSignature(later, true, false));
+  assert.equal(viewSignature(PIN, true), viewSignature(later, true));
 });
 
 test("the pinned session's own context moving does change it", () => {
   const later = structuredClone(PIN);
   later.sessions[0].context.tokens = 90;
-  assert.notEqual(viewSignature(PIN, true, false), viewSignature(later, true, false));
+  assert.notEqual(viewSignature(PIN, true), viewSignature(later, true));
 });
 
 test("losing the socket changes it, pinned or not", () => {
-  assert.notEqual(viewSignature(PIN, true, false), viewSignature(PIN, false, false));
+  assert.notEqual(viewSignature(PIN, true), viewSignature(PIN, false));
 });
 
-test("a session joining the fleet leaves a pinned conversation alone but changes the picker", () => {
+// The dropdown that assigns the orchestrator lives in the head at all
+// times now, pinned or not, so a session joining or leaving the fleet has
+// to reach it even mid-conversation — unlike the old full-screen picker,
+// which only existed while nothing was pinned and so only needed the list
+// tracked in that state.
+test("a session joining the fleet changes the signature even while pinned, for the dropdown's sake", () => {
   const bigger = structuredClone(PIN);
   bigger.sessions.push({ short: "new", name: "newcomer", sessionId: "u-9" });
-  assert.equal(viewSignature(PIN, true, false), viewSignature(bigger, true, false));
-  assert.notEqual(viewSignature(PIN, true, true), viewSignature(bigger, true, true));
+  assert.notEqual(viewSignature(PIN, true), viewSignature(bigger, true));
 });
 
 // --- the column, driven over time ---
@@ -500,10 +504,20 @@ test("a snapshot that does change something runs the render", async () => {
   c.dom.restore();
 });
 
-test("there is a way back to the session list, and it clears the pin", async () => {
+// --- assigning the orchestrator through the dropdown, not a screen of its own ---
+//
+// The operator's own complaint: a full-screen session picker used to replace
+// this whole column, offering a second, confusable way to do what clicking a
+// session in the task list on the right already does. It is gone; a plain
+// <select> in the head does the one thing that is not already available
+// elsewhere — saying which session the orchestrator is — without ever
+// leaving the conversation on screen.
+
+test("choosing the empty option in the dropdown clears the pin", async () => {
   const c = await column(structuredClone(PIN));
-  const back = c.root.querySelector(".o-back");
-  assert.ok(back, "an operator must not be locked into the session they picked");
+  const select = c.root.querySelector(".o-pick-select");
+  assert.ok(select, "an operator must not be locked into the session they picked");
+  assert.equal(select.value, "abc", "the dropdown starts on the true pin");
 
   const patches = [];
   const realFetch = globalThis.fetch;
@@ -515,19 +529,21 @@ test("there is a way back to the session list, and it clears the pin", async () 
     return realFetch();
   };
 
-  fireEvent(back, "click");
+  select.value = "";
+  fireEvent(select, "change");
   await settle();
   await settle();
 
   assert.deepEqual(patches, [{ orchestratorSession: "" }], "the pin is cleared, so a reload does not lock them in again");
-  assert.ok(c.root.querySelector(".o-pick"), "and the column shows the list");
+  assert.ok(c.root.querySelector(".o-thread"), "the column never left the conversation view to do it");
 
   globalThis.fetch = realFetch;
   c.dom.restore();
 });
 
-test("when clearing the pin fails, the screen still goes back and says a reload will not", async () => {
+test("when the write fails, the dropdown reverts to what is actually pinned and says so", async () => {
   const c = await column(structuredClone(PIN));
+  const select = c.root.querySelector(".o-pick-select");
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     if (String(url).includes("/api/config")) {
@@ -536,17 +552,23 @@ test("when clearing the pin fails, the screen still goes back and says a reload 
     return realFetch();
   };
 
-  fireEvent(c.root.querySelector(".o-back"), "click");
+  select.value = "";
+  fireEvent(select, "change");
   await settle();
   await settle();
 
-  assert.ok(c.root.querySelector(".o-pick"), "the navigation is local and still happens");
-  assert.ok(c.root.querySelector(".o-error"), "and the failure to save it is not hidden");
+  assert.ok(c.root.querySelector(".o-error"), "the failure to save it is not hidden");
+  // The configuration never actually changed, so the very next draw() reads
+  // the true pin back and the dropdown reverts to it — no separate "still
+  // really pinned" mark to maintain, the selected option already is the
+  // truth.
+  assert.equal(select.value, "abc", "the dropdown shows what is actually pinned, not what was merely clicked");
 
-  // The next snapshot still carries the old pin; it must not drag them back.
+  // The next snapshot still carries the old pin; it must not read as a
+  // change and must not disturb the conversation.
   globalThis.fetch = realFetch;
   await c.push(structuredClone(PIN));
-  assert.ok(c.root.querySelector(".o-pick"), "a stale pin in the snapshot does not undo what was asked");
+  assert.equal(select.value, "abc");
   c.dom.restore();
 });
 
@@ -632,8 +654,9 @@ test("a step that only talks about a notification tag is rendered whole", async 
   c.dom.restore();
 });
 
-test("picking a session from the list opens its conversation", async () => {
-  const c = await column(structuredClone(PIN));
+test("choosing a session in the dropdown pins it, without leaving the conversation view", async () => {
+  const nothingPinned = { orchestratorSession: "", sessions: structuredClone(PIN.sessions) };
+  const c = await column(nothingPinned);
   const realFetch = globalThis.fetch;
   let pinnedTo = null;
   globalThis.fetch = async (url, init) => {
@@ -644,41 +667,42 @@ test("picking a session from the list opens its conversation", async () => {
     return realFetch();
   };
 
-  fireEvent(c.root.querySelector(".o-back"), "click");
-  await settle();
-  assert.ok(c.root.querySelector(".o-pick"), "back to the list first");
+  const select = c.root.querySelector(".o-pick-select");
+  assert.ok(select, "the dropdown is offered even with nothing pinned yet");
+  const options = [...select.options].map((o) => o.value);
+  assert.ok(options.includes("abc") && options.includes("zzz"), "it offers the fleet's own sessions");
 
-  const item = c.root.querySelector(".o-pick-item");
-  assert.ok(item, "the list offers the fleet's sessions");
-  fireEvent(item, "click");
+  select.value = "abc";
+  fireEvent(select, "change");
   await settle();
   await settle();
 
   assert.equal(pinnedTo, "abc", "picking pins that session");
-  assert.ok(c.root.querySelector(".o-thread"), "and the column leaves the list for the conversation");
+  assert.ok(c.root.querySelector(".o-thread"), "the column was never replaced by a separate screen to do it");
 
   globalThis.fetch = realFetch;
   c.dom.restore();
 });
 
-test("a session named as markup reaches the picker as text, not as an element", async () => {
+test("a session named as markup reaches the dropdown as text, not as an element", async () => {
   // The fleet is open (spec 3.1): a session name is not this codebase's text.
-  // The picker builds nodes and sets textContent, so a name spelled as a tag is
-  // a label that reads like a tag — there is no parser between it and the DOM.
+  // The dropdown's options are built with createElement and textContent, so a
+  // name spelled as a tag is a label that reads like a tag — there is no
+  // parser between it and the DOM.
   const hostile = {
     orchestratorSession: "",
     sessions: [{ short: 'q"><img src=x onerror=alert(1)>', name: "<script>alert(1)</script>", sessionId: "u-1" }],
   };
   const c = await column(hostile);
-  const item = c.root.querySelector(".o-pick-item");
-  assert.ok(item, "the session is offered");
-  assert.equal(item.textContent, "<script>alert(1)</script>", "the name is the label, verbatim and inert");
-  assert.equal(item.dataset.short, 'q"><img src=x onerror=alert(1)>', "and the short id is data, not markup");
-  assert.equal(item.children.length, 0, "no element was created from either of them");
+  const select = c.root.querySelector(".o-pick-select");
+  const option = [...select.options].find((o) => o.value === 'q"><img src=x onerror=alert(1)>');
+  assert.ok(option, "the session is offered");
+  assert.equal(option.textContent, "<script>alert(1)</script>", "the name is the label, verbatim and inert");
+  assert.equal(option.children.length, 0, "no element was created from it");
   c.dom.restore();
 });
 
-test("a hostile label reaches .o-name and the picker only as text", async () => {
+test("a hostile label reaches .o-name and the dropdown only as text", async () => {
   const hostile = 'q"><img src=x onerror=alert(1)>';
   const withLabel = structuredClone(PIN);
   withLabel.sessions[0].label = hostile;
@@ -687,11 +711,10 @@ test("a hostile label reaches .o-name and the picker only as text", async () => 
   assert.equal(name.textContent, hostile, "the label wins over the name, verbatim and inert");
   assert.equal(name.children.length, 0, "no element was created from it");
 
-  fireEvent(c.root.querySelector(".o-back"), "click");
-  await settle();
-  const item = c.root.querySelector(`.o-pick-item[data-short="abc"]`);
-  assert.equal(item.textContent, hostile, "the picker prefers the same label");
-  assert.equal(item.children.length, 0);
+  const select = c.root.querySelector(".o-pick-select");
+  const option = [...select.options].find((o) => o.value === "abc");
+  assert.equal(option.textContent, hostile, "the dropdown prefers the same label");
+  assert.equal(option.children.length, 0);
   c.dom.restore();
 });
 
@@ -817,45 +840,47 @@ test("editing is disabled for a pinned session the daemon no longer lists", asyn
   c.dom.restore();
 });
 
-// --- marking the currently pinned session in the picker ---
+// --- nothing pinned yet: still one column, one view, no way out to browse ---
+//
+// This is the operator's own acceptance standard, restated: open the panel
+// and find no way at all to reach another session's conversation from this
+// column — not "the picker is gone", but the actual absence of a path.
 
-test("the picker marks the still-pinned session when going back failed to unpin it", async () => {
-  const c = await column(structuredClone(PIN));
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    if (String(url).includes("/api/config")) {
-      return { ok: false, status: 503, statusText: "config is read-only", json: async () => ({ error: "config is read-only" }) };
-    }
-    return realFetch(url, init);
-  };
-
-  fireEvent(c.root.querySelector(".o-back"), "click");
-  await settle();
-  await settle();
-
-  const items = c.root.querySelectorAll(".o-pick-item");
-  const current = items.filter((item) => item.dataset.short === "abc");
-  assert.equal(current.length, 1);
-  assert.ok(
-    current[0].className.split(/\s+/).includes("o-pick-item-current"),
-    "the session that is, in fact, still pinned must be marked — a person must not mistake a focus ring for this",
-  );
-  assert.equal(current[0].getAttribute("aria-current"), "true");
-  const others = items.filter((item) => item.dataset.short !== "abc");
-  for (const other of others) {
-    assert.ok(!other.className.split(/\s+/).includes("o-pick-item-current"), "only the actually-pinned one is marked");
-  }
-
-  globalThis.fetch = realFetch;
+test("with nothing pinned, the thread says so and nothing else — never a list of sessions to browse", async () => {
+  const c = await column({ orchestratorSession: "", sessions: structuredClone(PIN.sessions) });
+  const thread = c.root.querySelector(".o-thread");
+  assert.equal(thread.children.length, 1);
+  assert.ok(thread.children[0].className.includes("o-thread-empty"));
+  // The only session-shaped things anywhere in the column are the dropdown's
+  // own <option>s — nothing clickable, nothing that opens another view.
+  assert.equal(c.root.querySelectorAll("button[data-short], a[data-short]").length, 0);
   c.dom.restore();
 });
 
-test("the picker marks nobody when nothing is actually pinned", async () => {
-  const c = await column({ orchestratorSession: "", sessions: [{ short: "abc", name: "a", sessionId: "u-1" }] });
-  const item = c.root.querySelector(".o-pick-item");
-  assert.ok(!item.className.split(/\s+/).includes("o-pick-item-current"));
-  assert.equal(item.getAttribute("aria-current"), null);
+test("with nothing pinned, the header names nothing rather than showing a blank", async () => {
+  const c = await column({ orchestratorSession: "", sessions: structuredClone(PIN.sessions) });
+  const name = c.root.querySelector(".o-name");
+  assert.notEqual(name.textContent, "", "a blank name reads as a bug, not as an unmade choice");
   c.dom.restore();
+});
+
+test("with nothing pinned, there is nothing live to write into or label", async () => {
+  const c = await column({ orchestratorSession: "", sessions: structuredClone(PIN.sessions) });
+  assert.equal(c.root.querySelector("textarea").disabled, true, "there is no session to send text to");
+  assert.equal(c.root.querySelector(".o-name-edit").disabled, true, "there is no session to label");
+  c.dom.restore();
+});
+
+test("a session pinned but not currently listed reads differently from nothing pinned at all", async () => {
+  const notListed = await column({ orchestratorSession: "abc", sessions: [] });
+  const notListedText = notListed.root.querySelector(".o-thread").children[0].textContent;
+  notListed.dom.restore();
+
+  const nothingPinned = await column({ orchestratorSession: "", sessions: structuredClone(PIN.sessions) });
+  const nothingPinnedText = nothingPinned.root.querySelector(".o-thread").children[0].textContent;
+  nothingPinned.dom.restore();
+
+  assert.notEqual(notListedText, nothingPinnedText, "these are two different facts and must not read as the same message");
 });
 
 test("a digest that came back shorter drops the rows that are gone", async () => {
@@ -907,7 +932,7 @@ test("a note on a step that has no envelope is stripped too", async () => {
 
 // Last on purpose: closing the socket leaves the real store in its reconnect
 // backoff, and every case in this file shares that one store.
-test("the disconnected marker shows in the picker once the socket drops", async () => {
+test("the disconnected marker shows even with nothing pinned, once the socket drops", async () => {
   const c = await column({ orchestratorSession: "", sessions: [{ short: "abc", sessionId: "u-1" }] });
   assert.equal(c.root.querySelector(".o-stale"), null, "connected: no marker");
 
