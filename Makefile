@@ -63,8 +63,15 @@ test:
 # patterns; web/js/_tests/ sits inside js/ but is skipped because the "all:"
 # prefix is deliberately absent and plain directory walking ignores a leading
 # "_"), and a third one would be added the same way. `find` cannot miss it.
+#
+# `find` finding the right files does not by itself prove node ran every test
+# in them: a file whose test() call sits behind a condition that never holds
+# still exits 0, the same way the missing-file bug above did, because nothing
+# is left standing to fail. scripts/run-web-tests.sh runs node and then checks
+# its own output for exactly that — see the script's own comment for why a
+# plain pass/fail count was tried first and was not enough.
 test-web:
-	node --test $$(find web -name '*.test.js' | sort)
+	@scripts/run-web-tests.sh
 
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
