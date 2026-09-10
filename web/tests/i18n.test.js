@@ -92,8 +92,7 @@ const KEYS = [
   // The unfold one carries the most weight: when the column is folded it is the
   // only thing left on screen, and a button reading "column_unfold" is a column
   // nobody can get back.
-  "column_widen",
-  "column_narrow",
+  "column_drag",
   "column_fold",
   "column_unfold",
 ];

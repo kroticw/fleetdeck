@@ -332,7 +332,11 @@ async function column(first, steps = [{ role: "assistant", text: "first" }]) {
   requests = [];
   imageFails = null;
   store.connect();
+  // In a <main> of its own, as it is in the page: the column puts its resize
+  // edge NEXT to itself, and a column with no parent has nowhere to put one.
+  const main = dom.element("main");
   const root = dom.element("section");
+  main.appendChild(root);
   renderOrchestrator(root);
   socket.push(first);
   await settle();
@@ -967,27 +971,31 @@ test("the column carries its remembered width from the first paint, not the firs
   c.dom.restore();
 });
 
-test("wider and narrower move the column", async () => {
+// The buttons that used to widen and narrow are gone: the operator looked at
+// them and asked for the edge instead. What is pinned here is that the edge
+// exists, that it is put where a pointer can reach it, and that it says what it
+// is — the dragging arithmetic and whether a person can SEE it are answered by
+// a browser, in the acceptance run, because neither is a thing this stand-in
+// can be asked.
+const grip = (c) => c.root.parentElement?.children.find((n) => String(n.className).includes("o-grip"));
+
+test("the column has an edge to drag, next to it rather than inside it", async () => {
   const c = await column(structuredClone(PIN));
 
-  fireEvent(sizeButton(c, "widen"), "click");
-  await settle();
-  assert.equal(c.root.style.getPropertyValue("--o-width"), "32%");
-
-  fireEvent(sizeButton(c, "narrow"), "click");
-  fireEvent(sizeButton(c, "narrow"), "click");
-  await settle();
-  assert.equal(c.root.style.getPropertyValue("--o-width"), "20%");
+  const handle = grip(c);
+  assert.ok(handle, "no resize handle was created at all");
+  // Inside the column it would scroll away with the content: .col carries
+  // overflow: auto. Break it by appending to `root` and this fails.
+  assert.equal(handle.parentNode, c.root.parentElement, "the handle was put inside the column");
+  assert.notEqual(handle.attributes["aria-label"], undefined, "the handle does not say what it is");
   c.dom.restore();
 });
 
-test("the ends of the ladder are said by the buttons, not left to be discovered", async () => {
+test("no buttons are left offering to do what the edge does", async () => {
   const c = await column(structuredClone(PIN));
 
-  for (let i = 0; i < 6; i += 1) fireEvent(sizeButton(c, "widen"), "click");
-  await settle();
-  assert.equal(sizeButton(c, "widen").disabled, true, "the widest step still offers to widen");
-  assert.equal(sizeButton(c, "narrow").disabled, false, "and narrowing is still possible");
+  assert.equal(sizeButton(c, "widen"), null, "the widen button is back");
+  assert.equal(sizeButton(c, "narrow"), null, "the narrow button is back");
   c.dom.restore();
 });
 
@@ -1010,8 +1018,6 @@ test("a folded column still carries the control that brings it back", async () =
 
 test("and pressing it gives the column back at the width it had", async () => {
   const c = await column(structuredClone(PIN));
-  fireEvent(sizeButton(c, "widen"), "click");
-  await settle();
   const chosen = c.root.style.getPropertyValue("--o-width");
 
   fireEvent(sizeButton(c, "fold"), "click");
@@ -1024,16 +1030,20 @@ test("and pressing it gives the column back at the width it had", async () => {
   c.dom.restore();
 });
 
-// A folded column cannot be made wider or narrower — there is nothing on screen
-// to widen. Saying so with the controls beats letting a press do nothing.
-test("the sizing controls stand down while the column is folded", async () => {
+// A folded column has no edge, and an edge with nothing behind it is a strip a
+// person can drag that does nothing. Break it by leaving the grip on screen and
+// this fails.
+test("the edge goes away while the column is folded, and comes back with it", async () => {
   const c = await column(structuredClone(PIN));
+  assert.equal(grip(c).hidden, false, "precondition: the edge is there to begin with");
 
   fireEvent(sizeButton(c, "fold"), "click");
   await settle();
+  assert.equal(grip(c).hidden, true, "a folded column kept an edge that resizes nothing");
 
-  assert.equal(sizeButton(c, "widen").disabled, true);
-  assert.equal(sizeButton(c, "narrow").disabled, true);
+  fireEvent(sizeButton(c, "unfold"), "click");
+  await settle();
+  assert.equal(grip(c).hidden, false, "the edge did not come back with the column");
   c.dom.restore();
 });
 
