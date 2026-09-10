@@ -368,8 +368,30 @@ func appendNewSessionLabelsSection(raw []byte, sessionID, label string) ([]byte,
 // substituteSessionLabel returns the new file content, or (nil, nil) when
 // label is empty and sessionID had no entry to remove — the caller reads a
 // nil, nil-error result as "nothing to do" rather than as an empty file.
+//
+// A file ending in "\n" splits into a trailing "" element that is not a
+// blank line in the file at all — it is what comes after the last real
+// line's own newline, i.e. nothing. Left in lines, the child-scanning loop
+// below cannot tell it apart from a genuine blank line inside the section
+// (both trim to "") and treats it as one more child to skip past, which
+// pushed end past the true end of the file for a session_labels section
+// with nothing after it — the ordinary case, since it is usually the last
+// key in the file. A second label landed after that phantom line instead of
+// before it: a blank line spliced into the section, and the file's own
+// closing newline gone, moved in front of the new entry instead of after
+// it. Trimmed here once and reattached on every return below, exactly the
+// property this function must not disturb for a file that already had it —
+// or never had it, for one hand-edited to end without a trailing newline.
 func substituteSessionLabel(raw []byte, sessionID, label string) ([]byte, error) {
-	lines := strings.Split(string(raw), "\n")
+	trailingNewline := strings.HasSuffix(string(raw), "\n")
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	join := func(lines []string) []byte {
+		out := strings.Join(lines, "\n")
+		if trailingNewline {
+			out += "\n"
+		}
+		return []byte(out)
+	}
 
 	header := -1
 	for i, l := range lines {
@@ -432,7 +454,7 @@ func substituteSessionLabel(raw []byte, sessionID, label string) ([]byte, error)
 		out := make([]string, 0, len(lines)-1)
 		out = append(out, lines[:entryLine]...)
 		out = append(out, lines[entryLine+1:]...)
-		return []byte(strings.Join(out, "\n")), nil
+		return join(out), nil
 	}
 
 	scalar, err := yaml.Marshal(label)
@@ -449,7 +471,7 @@ func substituteSessionLabel(raw []byte, sessionID, label string) ([]byte, error)
 			newLine += "  " + comment
 		}
 		lines[entryLine] = newLine
-		return []byte(strings.Join(lines, "\n")), nil
+		return join(lines), nil
 	}
 
 	// Inserting the section's first entry. An empty flow-style header
@@ -493,7 +515,7 @@ func substituteSessionLabel(raw []byte, sessionID, label string) ([]byte, error)
 	out = append(out, lines[:insertAt]...)
 	out = append(out, newLine)
 	out = append(out, lines[insertAt:]...)
-	return []byte(strings.Join(out, "\n")), nil
+	return join(out), nil
 }
 
 // writeFileAtomically writes data to path without ever leaving a truncated
