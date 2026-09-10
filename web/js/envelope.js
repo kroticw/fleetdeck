@@ -112,6 +112,44 @@ export function unwrapEnvelope(text) {
   return parseTaskNotification(text);
 }
 
+// The runtime bolts a paragraph of instructions onto a message from another
+// agent: how to reply, which MCP tool to call, what to do without it. It is
+// addressed to the agent, not to the person reading the panel, and on screen it
+// took a third of the card and stood above the message it was attached to.
+//
+// Each form is matched by BOTH of its ends, and neither end alone is enough.
+// That is not caution for its own sake: the fleet discusses these tools by name
+// in ordinary messages — "call send_message, that is what I did" is content —
+// and a rule keyed on a phrase would eat it. A note whose closing phrase is
+// missing is something else that merely begins the same way, and is left alone.
+//
+// Only the note is removed. Text before it and text after it both stay: a real
+// transcript has a link written after one, and cutting to the end of the string
+// would have taken it.
+const TOOL_NOTES = [
+  {
+    start: /\[m-[0-9a-z]{6}\] This is a message from another agent\b/,
+    end: "answering into the void.",
+  },
+  {
+    start: /This came from another Claude session\b/,
+    end: "permission laundering.",
+  },
+];
+
+export function stripToolNote(text) {
+  let out = String(text ?? "");
+  for (const note of TOOL_NOTES) {
+    const from = note.start.exec(out);
+    if (!from) continue;
+    const closes = out.indexOf(note.end, from.index);
+    // No closing phrase: not this note, whatever it looks like.
+    if (closes < 0) continue;
+    out = out.slice(0, from.index) + out.slice(closes + note.end.length);
+  }
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // envelopeText is unwrapEnvelope for a pane that shows plain text: the label
 // and the body as one line, with nothing rendered and nothing dropped.
 //
