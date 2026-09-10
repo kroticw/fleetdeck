@@ -186,7 +186,7 @@ git commit --signoff -m "chore: module skeleton with build version and CI"
 
 > **Поправка (пост-фактум, ветка feat/server).** Ниже описан плоский формат ключей
 > (`board_path`, `server_port` и так далее) и прямой `yaml.Unmarshal` в `Config`. Это не то,
-> что в итоге пошло в код: коммит `ec5287b` заменил его на вложенный формат
+> что в итоге пошло в код: реализация заменила его на вложенный формат
 > (`board.path`, `server.port`, `notify.enabled.*`, `daemon.poll_interval`, `usage.enabled`)
 > с отдельным приватным типом `file` для (де)сериализации и `yaml.KnownFields(true)`, чтобы
 > неизвестные и плоские ключи были ошибкой, а не молча игнорировались. `Config` вообще не

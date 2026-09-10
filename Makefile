@@ -9,7 +9,7 @@ LDFLAGS  := -X github.com/kroticw/fleetdeck/internal/version.value=$(VERSION)
 build:
 	@dirs="$$(ls -d cmd/*/ 2>/dev/null)"; \
 	if [ -z "$$dirs" ]; then \
-		go build ./... || exit 1; \
+		go build -ldflags "$(LDFLAGS)" ./... || exit 1; \
 	else \
 		for dir in $$dirs; do \
 			b=$$(basename $$dir); \

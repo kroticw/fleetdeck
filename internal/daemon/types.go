@@ -31,7 +31,7 @@ type Session struct {
 	Source     string `json:"source"`
 	Needs      string `json:"needs"`
 	// Dying is true when the job is being killed or retired (see
-	// docs/protocol/daemon-control-socket.md sections 4 and 8). A session's presence in
+	// docs/protocol/daemon-control-socket.md section 4). A session's presence in
 	// a `list` reply with no `dying` flag is what marks it as alive; without this field
 	// a dying session is indistinguishable from a live one at the parse boundary.
 	Dying bool `json:"dying"`
@@ -40,7 +40,7 @@ type Session struct {
 // stalledNeedsPrefixes is the closed "no person needed" vocabulary: the daemon's own
 // non-question needs renderings, matched by prefix, case-sensitively, against the
 // daemon's own wording. Extracted from the installed CLI 2.1.263 binary (see
-// docs/protocol/daemon-control-socket.md section 3.1), it covers the design spec's
+// docs/protocol/daemon-control-socket.md section 5), it covers the design spec's
 // four stall categories:
 //
 //	limit      -> "usage limit reached"
@@ -80,7 +80,7 @@ func isStalledNeeds(needs string) bool {
 // are set by a mechanism the session does not control, so a session waiting on its own
 // subagents and one waiting on a person are indistinguishable in those two flags alone;
 // only Needs (and, in the flag-only case documented on Stalled, Detail) says in words
-// what is actually happening. See docs/protocol/daemon-control-socket.md section 3.1.
+// what is actually happening. See docs/protocol/daemon-control-socket.md section 5.
 //
 // Needs empty means never Waiting: with no words from the daemon, there is nothing to
 // tell "waiting on a person" apart from "waiting on my own subagents", and guessing the
@@ -114,7 +114,7 @@ func (s Session) Waiting() bool {
 //     Waiting -- per Waiting's own doc comment, a bare flag with no words cannot be
 //     told apart from a session waiting on its own subagents, so it is never promoted
 //     to the counter a person is expected to act on. It still must not be hidden
-//     entirely: docs/protocol/daemon-control-socket.md section 3.1 requires a session
+//     entirely: docs/protocol/daemon-control-socket.md section 5 requires a session
 //     stalled by this rule to be presented with Detail shown verbatim, since Detail is
 //     the only field that can still distinguish "awaiting a decision from a person"
 //     from "awaiting my own work" once Needs has nothing to say.

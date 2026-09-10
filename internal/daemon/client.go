@@ -46,6 +46,11 @@ var socketGlobBase = "/tmp"
 // "most recently started daemon" — a dead socket left behind by a crashed daemon can
 // sort before a live one. Try each candidate and return the first that is both safely
 // owned and actually accepts a connection.
+//
+// The ordering matters for skipping a dead candidate; it is not a deliberate choice
+// among several live ones. Exactly one live daemon per uid is the expected shape in
+// production — see resolveSocketCandidate's own comment for what happens on the rarer
+// path where more than one is actually live at once.
 func SocketPath() (string, error) {
 	currentUser, err := user.Current()
 	if err != nil {
@@ -76,6 +81,13 @@ func SocketPath() (string, error) {
 // crashed daemon's stale socket, say). Reporting either as plain unavailability,
 // indistinguishable from "the daemon just isn't running", would throw away the only
 // evidence available for either case.
+//
+// When more than one candidate is both safely owned and actually live at the same
+// time — several daemon processes running for the same uid, which is not the expected
+// shape but is not prevented by anything this function checks — the one returned is
+// simply the first in lexicographic order, not the newest or otherwise most
+// significant one. This function makes no attempt to distinguish that case from the
+// single-live-daemon case; the choice among several live daemons is arbitrary.
 func resolveSocketCandidate(matches []string) (string, error) {
 	if len(matches) == 0 {
 		return "", ErrDaemonUnavailable
@@ -372,10 +384,21 @@ var (
 	errKeyFileUnknownOwner = errors.New("cannot determine the owner of the control key file")
 	errKeyFileWrongOwner   = errors.New("control key file is owned by a different user")
 	errKeyFileInsecureMode = errors.New("control key file is readable or writable by group or other")
+	errKeyDirSymlink       = errors.New("control key directory is a symlink, refusing to use it")
+	errKeyDirUnknownOwner  = errors.New("cannot determine the owner of the control key directory")
+	errKeyDirWrongOwner    = errors.New("control key directory is owned by a different user")
+	errKeyDirInsecureMode  = errors.New("control key directory is readable, writable, or searchable by group or other")
 )
 
 // checkKeyFileSecurity refuses a control key file that is not owned by wantUID, or is
-// readable or writable by group or other. wantUID is a parameter, rather than
+// readable or writable by group or other, and applies the same two checks to the
+// file's immediate containing directory — section 6 of the protocol document requires
+// that directory to be mode 0700, owned by the user, same as the key file itself.
+// This is symmetric with checkSocketOwnership's own check on the socket path, except
+// it stops at the one containing directory section 6 actually names rather than
+// walking every ancestor up to a root-owned boundary: unlike /tmp, the key file's
+// parent directories above ~/.claude/daemon are not a shared, world-writable location
+// a local attacker could plant something under. wantUID is a parameter, rather than
 // checkKeyFileSecurity reading os.Getuid() itself, purely so a test can exercise the
 // ownership-mismatch branch without needing a second real user account.
 func checkKeyFileSecurity(path string, wantUID int) error {
@@ -408,11 +431,44 @@ func checkKeyFileSecurity(path string, wantUID int) error {
 	if !keyFileModeIsSecure(info.Mode()) {
 		return errKeyFileInsecureMode
 	}
+
+	return checkKeyDirSecurity(filepath.Dir(path), wantUID)
+}
+
+// checkKeyDirSecurity refuses a control key directory that is not owned by wantUID, or
+// is readable, writable, or searchable by group or other — the 0700 section 6 of the
+// protocol document requires. It is the directory half of checkKeyFileSecurity, not a
+// general-purpose ancestor walk: a symlinked directory is refused outright rather than
+// resolved, since (unlike /tmp on macOS) there is no legitimate production shape in
+// which ~/.claude/daemon is itself a symlink.
+func checkKeyDirSecurity(dir string, wantUID int) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errKeyDirSymlink
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errKeyDirUnknownOwner
+	}
+
+	if int(stat.Uid) != wantUID {
+		return errKeyDirWrongOwner
+	}
+	if !keyFileModeIsSecure(info.Mode()) {
+		return errKeyDirInsecureMode
+	}
 	return nil
 }
 
 // keyFileModeIsSecure reports whether mode denies every group and other permission
-// bit, matching the 0600 docs/protocol/daemon-control-socket.md section 6 documents.
+// bit. It is shared by the key file check (0600) and the containing directory check
+// (0700): both are the same rule — no group or other bits at all — just applied to
+// different modes; see docs/protocol/daemon-control-socket.md section 6.
 func keyFileModeIsSecure(mode os.FileMode) bool {
 	return mode&0o077 == 0
 }
@@ -474,14 +530,21 @@ func New(socketPath string, key func() (string, error)) *Client {
 // socket directory — its directory name is not stable across restarts — is recovered
 // from automatically instead of leaving the client stuck with ErrDaemonUnavailable
 // until the process holding it is itself restarted.
+//
+// Discover never fails because no daemon happens to be running yet: this is the
+// client meant to survive a daemon that is not up at construction time (a process
+// started before the daemon, or racing its startup), not just one that restarts later.
+// It resolves eagerly when a socket already exists, purely so a caller gets an
+// immediately-usable path in the common case, but a failure to do so here is not
+// reported — it is left for dial's own re-resolution to pick up on first use,
+// identically to how a later restart is handled.
 func Discover(key func() (string, error)) (*Client, error) {
-	path, err := SocketPath()
-	if err != nil {
-		return nil, err
-	}
-	c := New(path, key)
+	c := New("", key)
 	c.discoverable = true
 	c.resolve = SocketPath
+	if path, err := SocketPath(); err == nil {
+		c.socketPath = path
+	}
 	return c, nil
 }
 
@@ -526,6 +589,14 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	conn, err := dialChecked(ctx, path)
 	if err == nil {
 		return conn, nil
+	}
+	// A dial failure caused by ctx already being done (context.Canceled,
+	// context.DeadlineExceeded) is not evidence the socket path is stale — the caller
+	// has simply given up. Re-resolving anyway would still spend up to c.resolve's own
+	// fixed budget (500ms per candidate; see below) chasing a socket for a request
+	// that can no longer use the answer.
+	if ctx.Err() != nil {
+		return nil, err
 	}
 	if !c.discoverable || c.resolve == nil {
 		return nil, err
@@ -650,12 +721,16 @@ func readBoundedLine(reader *bufio.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Checked before appending, not after: appending first and checking
+		// afterward would let a line's own terminating '\n' slip through one byte
+		// past the cap, since the very next branch returns success as soon as it
+		// sees that byte.
+		if len(line) >= maxLineBytes {
+			return nil, fmt.Errorf("line exceeds %d bytes", maxLineBytes)
+		}
 		line = append(line, b)
 		if b == '\n' {
 			return line, nil
-		}
-		if len(line) > maxLineBytes {
-			return nil, fmt.Errorf("line exceeds %d bytes", maxLineBytes)
 		}
 	}
 }
@@ -847,8 +922,8 @@ func detectKick(data []byte, closed bool) (prefix []byte, detail string, kicked 
 // the very first call, exactly like an ordinary idle detection with no special-cased
 // "first byte" grace period; SendKeys wants this, since silence for the whole window is
 // itself the expected, successful outcome for most key deliveries (see
-// docs/protocol/daemon-control-socket.md section 3, item 8: there is no per-delivery
-// acknowledgement).
+// docs/protocol/daemon-control-socket.md section 3, under `attach`: there is no
+// per-delivery acknowledgement).
 //
 // Both ReadScreen and SendKeys build their kick detection on this one routine (paired
 // with detectKick) so they cannot drift apart on what counts as "the connection closing"
@@ -1321,7 +1396,7 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false, time.Now().Add(c.screenDeadline))
 
 	// The kick marker means this attach connection was evicted (see detectKick's
-	// comment for the full three-condition rule, and
+	// comment for the two-condition rule, and
 	// docs/protocol/daemon-control-socket.md section 8). A real kick is a normal event —
 	// someone attached by hand and took over — so the screen accumulated before the
 	// marker is still returned alongside the typed error, rather than thrown away: the

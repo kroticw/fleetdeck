@@ -177,6 +177,33 @@ func validate(c Config) error {
 	return nil
 }
 
+// missingAncestorDirs returns, ordered from the outermost missing ancestor down to dir
+// itself, every directory in dir's chain that does not exist yet — exactly the set
+// os.MkdirAll(dir, ...) is about to create. It stops at the first ancestor that already
+// exists: that one, and everything above it, existed before this call and is not
+// something the caller created, so it must never be included.
+func missingAncestorDirs(dir string) []string {
+	var missing []string
+	for p := dir; ; {
+		if _, err := os.Stat(p); err == nil {
+			break
+		}
+		missing = append(missing, p)
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		p = parent
+	}
+	// Reverse into outermost-first order, so the caller can chmod a parent before its
+	// child if it ever needs to (chmod itself does not require that ordering, but
+	// producing it here means a future caller does not have to re-derive it).
+	for i, j := 0, len(missing)-1; i < j; i, j = i+1, j-1 {
+		missing[i], missing[j] = missing[j], missing[i]
+	}
+	return missing
+}
+
 // Save writes the config file, creating parent directories as needed.
 //
 // It validates before writing anything, so it can never leave behind a config that
@@ -195,21 +222,26 @@ func Save(path string, c Config) error {
 	}
 
 	dir := filepath.Dir(path)
-	_, statErr := os.Stat(dir)
-	dirAlreadyExisted := statErr == nil
+	// Recorded before MkdirAll runs, not after: this is the only way to tell which
+	// levels MkdirAll is about to create itself, as opposed to ones that already
+	// existed and that Save therefore has no business touching (see below).
+	created := missingAncestorDirs(dir)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	// MkdirAll's mode argument is subject to umask, so a directory it just created
-	// might not actually end up as 0700 without an explicit chmod. That chmod must
-	// only apply to a directory this call created itself: dir's path comes from
+	// might not actually end up as 0700 without an explicit chmod — and that applies
+	// to every level MkdirAll creates in this one call, not only the last: a
+	// multi-level create (e.g. --config a/b/c/config.yaml where only a exists)
+	// creates both b and c, and both need the same explicit guarantee. This chmod
+	// must only apply to a directory this call created itself: dir's path comes from
 	// outside (the --config flag), so unconditionally chmod'ing whatever directory it
 	// resolves to — as this used to do — would silently tighten a directory Save has
 	// no business touching (e.g. $HOME, the first time a caller points --config at a
 	// file directly inside it).
-	if !dirAlreadyExisted {
-		if err := os.Chmod(dir, 0o700); err != nil {
+	for _, d := range created {
+		if err := os.Chmod(d, 0o700); err != nil {
 			return fmt.Errorf("set config dir permissions: %w", err)
 		}
 	}

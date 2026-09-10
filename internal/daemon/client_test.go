@@ -8,7 +8,7 @@ package daemon
 // happen to contain that form. It is nonetheless attested: this form was observed live
 // on this machine, a session parked for roughly an hour with
 // detail="awaiting user decision on a dependency version". Under the current rule
-// (docs/protocol/daemon-control-socket.md section 3.1) a bare blocked flag with empty
+// (docs/protocol/daemon-control-socket.md section 5) a bare blocked flag with empty
 // needs is Stalled, never Waiting — State and Tempo are set by a mechanism the session
 // does not control, so this record cannot be told apart from one merely coordinating
 // its own subagents by the flags alone, even though its Detail text reads like a
@@ -16,7 +16,7 @@ package daemon
 // shown verbatim for a session stalled this way.
 //
 // The fifth (short "f5ab6148") is also added by hand, to cover the `"dying": true` key
-// documented in docs/protocol/daemon-control-socket.md sections 4 and 8: a job being
+// documented in docs/protocol/daemon-control-socket.md section 4: a job being
 // killed or retired carries this extra key, and its absence on every other record here
 // is exactly what is supposed to mean "alive". Its other fields are invented the same
 // way as e4fa5037's: plausible values of the same shape, not drawn from a live capture.
@@ -423,7 +423,7 @@ func TestRateLimitedIsStalledNotWaiting(t *testing.T) {
 // coordinating its own subagents. This holds even though Detail's text here
 // ("awaiting a decision") reads exactly like a person-facing decision — Detail is not
 // consulted by Waiting or Stalled at all; it is surfaced by the UI once a session
-// lands in Stalled this way (see docs/protocol/daemon-control-socket.md section 3.1),
+// lands in Stalled this way (see docs/protocol/daemon-control-socket.md section 5),
 // not read by either method here.
 func TestBareBlockedStateWithEmptyNeedsIsStalledNotWaiting(t *testing.T) {
 	s := Session{State: "blocked", Tempo: "active", Needs: "", Detail: "awaiting a decision"}
@@ -1438,6 +1438,34 @@ func TestControlKeyAcceptsSecureFile(t *testing.T) {
 	}
 	if key != "deadbeefdeadbeefdeadbeefdeadbeef" {
 		t.Errorf("expected the trimmed key value, got %q", key)
+	}
+}
+
+// TestCheckKeyFileSecurityRefusesInsecureContainingDirectory covers the recommendation
+// that checkKeyFileSecurity checked the key file's own owner and mode but stopped
+// there, even though section 6 of the protocol document requires the containing
+// directory to be mode 0700 too — unlike checkSocketOwnership's symmetric check on the
+// socket path, which walks every enclosing directory. A correctly-moded control.key
+// sitting inside a world-writable directory must still be refused: another user with
+// write access to that directory could replace the key file itself (with, say, a
+// symlink into a file only they control) between this check and ControlKey's read of
+// it, and a check that only ever looks at the leaf file misses that entirely.
+func TestCheckKeyFileSecurityRefusesInsecureContainingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.WriteFile(keyPath, []byte("deadbeefdeadbeefdeadbeefdeadbeef"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	err := checkKeyFileSecurity(keyPath, os.Getuid())
+	if err == nil {
+		t.Fatal("expected a correctly-moded key file inside a 0777 directory to be refused")
+	}
+	if !errors.Is(err, errKeyDirInsecureMode) {
+		t.Errorf("expected errKeyDirInsecureMode, got %v", err)
 	}
 }
 
@@ -2863,6 +2891,44 @@ func TestNonDiscoverableClientDoesNotRetryDeadSocket(t *testing.T) {
 	_, err = client.ListSessions(context.Background())
 	if !errors.Is(err, ErrDaemonUnavailable) {
 		t.Errorf("expected ErrDaemonUnavailable, got %v", err)
+	}
+}
+
+// TestDialDoesNotReResolveOnDeadContext covers a discoverable client whose first dial
+// attempt fails because ctx is already done (context.Canceled or
+// context.DeadlineExceeded), not because the socket is actually gone. c.resolve
+// (SocketPath, for a real Discover-created client) takes no context and dials each
+// glob candidate with its own fixed 500ms timeout, so re-resolving in this case just
+// spends up to that long for no reason: the caller has already given up. dial must
+// check ctx.Err() and return immediately, before ever calling resolve.
+func TestDialDoesNotReResolveOnDeadContext(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	path := listener.Addr().String()
+
+	var resolveCalls int32
+	client := New(path, func() (string, error) { return "key", nil })
+	client.discoverable = true
+	client.resolve = func() (string, error) {
+		atomic.AddInt32(&resolveCalls, 1)
+		return path, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = client.dial(ctx)
+	if err == nil {
+		t.Fatal("expected dial against an already-cancelled context to fail")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected the dial error to still surface context.Canceled via errors.Is, got %v", err)
+	}
+	if got := atomic.LoadInt32(&resolveCalls); got != 0 {
+		t.Errorf("expected dial not to re-resolve on an already-dead context, got %d resolve call(s)", got)
 	}
 }
 
@@ -4549,6 +4615,73 @@ func TestDiscoverWiresResolveToSocketPathAndSetsInitialPath(t *testing.T) {
 	}
 }
 
+// TestDiscoverSucceedsWithNoDaemonPresentThenResolvesOnceOneAppears covers the
+// recommendation that Discover could not be constructed before the daemon was up:
+// Discover used to call SocketPath() eagerly and fail the whole construction with
+// ErrDaemonUnavailable when nothing was listening yet. There is no cmd/ in this
+// repository yet, so the first real consumer of this client would hit exactly that
+// start-order problem and have no choice but to retry Discover itself in a loop.
+//
+// This overrides socketGlobBase to an empty temporary directory (no daemon present at
+// all), confirms Discover still succeeds with no path resolved, then plants a live
+// socket under it and confirms a call through the client resolves and connects
+// without needing a new Client to be constructed.
+func TestDiscoverSucceedsWithNoDaemonPresentThenResolvesOnceOneAppears(t *testing.T) {
+	base := shortTempDir(t)
+	orig := socketGlobBase
+	socketGlobBase = base
+	t.Cleanup(func() { socketGlobBase = orig })
+
+	client, err := Discover(func() (string, error) { return "key", nil })
+	if err != nil {
+		t.Fatalf("Discover with no daemon present must not fail, got: %v", err)
+	}
+	if !client.discoverable {
+		t.Error("expected a Discover-created client to be discoverable")
+	}
+	if got := client.currentSocketPath(); got != "" {
+		t.Errorf("expected no socket path resolved yet with no daemon present, got %q", got)
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		t.Fatalf("user.Current: %v", err)
+	}
+	dir := filepath.Join(base, fmt.Sprintf("cc-daemon-%s", currentUser.Uid), "session1")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	sockPath := filepath.Join(dir, "control.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				reader := bufio.NewReader(conn)
+				if _, err := reader.ReadString('\n'); err != nil {
+					return
+				}
+				conn.Write([]byte(`{"ok":true,"op":"ping","version":"test","proto":1}` + "\n"))
+			}(conn)
+		}
+	}()
+
+	if _, err := client.Ping(context.Background()); err != nil {
+		t.Fatalf("expected Ping to succeed once a daemon appears, got: %v", err)
+	}
+	if got := client.currentSocketPath(); got != sockPath {
+		t.Errorf("expected the newly resolved path to be cached, got %q, want %q", got, sockPath)
+	}
+}
+
 // --- Item 4: trimToRuneBoundary's actual loop body ---
 
 // TestTrimToRuneBoundaryDropsPartialMultiByteRunePrefix cuts through the middle of a
@@ -4577,6 +4710,27 @@ func TestReadBoundedLineRefusesOversizedLine(t *testing.T) {
 	_, err := readBoundedLine(reader)
 	if err == nil {
 		t.Fatal("expected an error for a line exceeding maxLineBytes")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("expected the cap violation to be visible in the error, got: %v", err)
+	}
+}
+
+// TestReadBoundedLineRejectsLineThatOnlyExceedsTheCapWithItsNewline covers the exact
+// boundary: readBoundedLine used to check len(line) > maxLineBytes only after
+// appending the byte just read, so a line of exactly maxLineBytes content bytes
+// followed by a terminating '\n' returned successfully with a total buffered length
+// of maxLineBytes+1 — one byte past the documented cap — because the newline check
+// short-circuited before the overflow check ever ran. The cap must be enforced before
+// a byte is appended, not after, so the buffer never holds more than maxLineBytes
+// bytes even counting the newline that ends it.
+func TestReadBoundedLineRejectsLineThatOnlyExceedsTheCapWithItsNewline(t *testing.T) {
+	data := append(bytes.Repeat([]byte("a"), maxLineBytes), '\n') // maxLineBytes+1 bytes total
+	reader := bufio.NewReader(bytes.NewReader(data))
+
+	_, err := readBoundedLine(reader)
+	if err == nil {
+		t.Fatal("expected a line whose length, including its newline, exceeds maxLineBytes to be refused")
 	}
 	if !strings.Contains(err.Error(), "exceeds") {
 		t.Errorf("expected the cap violation to be visible in the error, got: %v", err)

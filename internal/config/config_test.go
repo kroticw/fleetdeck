@@ -354,10 +354,65 @@ func TestSaveWritesCompleteValidYAML(t *testing.T) {
 	}
 }
 
+// TestMissingAncestorDirsReturnsEveryLevelMkdirAllWouldCreate covers the recommendation
+// that Save chmod'ed only the leaf directory MkdirAll created, not any intermediate
+// level created in the same call. missingAncestorDirs is the piece that makes fixing
+// this possible: it must report every directory in the chain that does not exist yet,
+// not just dir itself, so Save can chmod each one explicitly rather than trusting
+// MkdirAll's own mode argument — which is subject to umask for every level it creates,
+// not only the last — to have gotten every one of them right on its own.
+func TestMissingAncestorDirsReturnsEveryLevelMkdirAllWouldCreate(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "a", "b", "c")
+
+	got := missingAncestorDirs(dir)
+
+	want := []string{
+		filepath.Join(base, "a"),
+		filepath.Join(base, "a", "b"),
+		filepath.Join(base, "a", "b", "c"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d missing directories, got %d: %v", len(want), len(got), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("missing dir %d: expected %q, got %q", i, w, got[i])
+		}
+	}
+}
+
+// TestMissingAncestorDirsStopsAtAnExistingAncestor covers the other half: a directory
+// that already exists before Save's call must never appear in the list, since Save
+// must never chmod a directory it did not create itself (see
+// TestSaveLeavesExistingDirectoryPermissionsUnchanged).
+func TestMissingAncestorDirsStopsAtAnExistingAncestor(t *testing.T) {
+	base := t.TempDir() // already exists
+	dir := filepath.Join(base, "a", "b")
+
+	got := missingAncestorDirs(dir)
+
+	want := []string{
+		filepath.Join(base, "a"),
+		filepath.Join(base, "a", "b"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d missing directories, got %d: %v", len(want), len(got), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("missing dir %d: expected %q, got %q", i, w, got[i])
+		}
+	}
+}
+
 func TestSaveWritesFilePerms0600AndDirPerms0700(t *testing.T) {
 	// Use a subdirectory Save must create itself via MkdirAll, so the directory's
-	// permissions are also Save's doing, not an artefact of t.TempDir().
-	dir := filepath.Join(t.TempDir(), "sub", "dir")
+	// permissions are also Save's doing, not an artefact of t.TempDir(). Two levels
+	// ("sub" and "dir") so the leaf and an intermediate directory MkdirAll created in
+	// the same call can be checked separately below.
+	base := t.TempDir()
+	dir := filepath.Join(base, "sub", "dir")
 	p := filepath.Join(dir, "c.yaml")
 
 	if err := Save(p, Default()); err != nil {
@@ -378,6 +433,15 @@ func TestSaveWritesFilePerms0600AndDirPerms0700(t *testing.T) {
 	}
 	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
 		t.Errorf("expected config dir mode 0700, got %o", perm)
+	}
+
+	intermediate := filepath.Join(base, "sub")
+	intermediateInfo, err := os.Stat(intermediate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := intermediateInfo.Mode().Perm(); perm != 0o700 {
+		t.Errorf("expected intermediate dir %q mode 0700, got %o", intermediate, perm)
 	}
 }
 
