@@ -62,7 +62,18 @@ func unavailable(w http.ResponseWriter, what string) {
 // unknown fields are refused rather than dropped, so a typo fails loudly, and a
 // second JSON value after the first is refused rather than ignored.
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	return decodeBodyLimit(w, r, v, maxBodyBytes)
+}
+
+// decodeBodyLimit is decodeBody with the ceiling named by the caller. It exists
+// because maxBodyBytes is sized for a typed prompt, and one route carries an
+// image instead — see image.go. The limit is a parameter rather than a second
+// copy of this function so the three rules above cannot drift apart between
+// them, and it is applied here rather than by the caller because
+// http.MaxBytesReader replaces the body: a wrapper applied outside would be
+// silently overwritten by the one this function sets.
+func decodeBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
@@ -83,7 +94,11 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 func decodeFailed(w http.ResponseWriter, err error) bool {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
-		fail(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request body must not exceed %d bytes", maxBodyBytes))
+		// The limit comes from the error, not from maxBodyBytes: routes no longer
+		// share one ceiling, and a message naming a limit other than the one that
+		// actually refused the request sends the reader to the wrong constant.
+		fail(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("request body must not exceed %d bytes", tooLarge.Limit))
 		return false
 	}
 	fail(w, http.StatusBadRequest, "malformed body: "+err.Error())

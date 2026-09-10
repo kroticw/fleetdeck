@@ -298,6 +298,22 @@ func defaultConfigPath() string {
 	return filepath.Join(home, ".config", "fleetdeck", "config.yaml")
 }
 
+// imagesDir is where an image attached to a session is kept: the panel's own
+// directory under the user's home, never a directory the operator's work lives
+// in.
+//
+// An empty string when the home directory cannot be determined, which the server
+// reads as "not wired for this" and answers 503 — the one thing it must not do
+// is fall back to a relative path, which would put the files wherever the panel
+// happened to be started from.
+func imagesDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "fleetdeck", "images")
+}
+
 // projectsDir is where Claude Code keeps session transcripts.
 func projectsDir() string {
 	home, err := os.UserHomeDir()
@@ -420,6 +436,14 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		// directories a document request may resolve into. Left unwired, the key
 		// would be parsed, validated and read by nobody.
 		DocsRoots: cfg.DocsPaths,
+
+		// Deliberately outside any repository the operator works in, and not
+		// derived from a session's own working directory: a file written into a
+		// working tree survives the conversation that produced it and eventually
+		// reaches somebody's commit. The cost of keeping it out is one permission
+		// prompt the first time a session reads from here, which the operator
+		// answers from the panel — see internal/server/image.go.
+		ImageDir: imagesDir(),
 
 		// This is the other end of cmd/fleetdeck-status: the reporter posts to
 		// /api/status, the server hands it here, and Collect prefers it over the
