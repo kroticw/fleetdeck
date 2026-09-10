@@ -247,12 +247,11 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	snap := state.Snapshot{At: c.now()}
 
 	var sessions []daemon.Session
-	switch {
-	case c.daemon == nil:
+	if c.daemon == nil {
 		// A panel built without a daemon client is a configuration fact, not a
 		// crash. It reports the same way an unreachable daemon does.
 		snap.DaemonError = daemon.ErrDaemonUnavailable.Error()
-	default:
+	} else {
 		var err error
 		sessions, err = c.daemon.ListSessions(ctx)
 		if err != nil {
