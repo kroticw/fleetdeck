@@ -222,6 +222,25 @@ class FakeNode {
     for (const child of children) this.appendChild(child);
   }
 
+  // The two relations a module needs when it puts an element NEXT TO another
+  // rather than inside it — a resize handle between two columns, for instance.
+  // parentNode already exists above; these are the names the DOM gives the same
+  // two facts, and code written against a browser uses them.
+  get parentElement() {
+    return this.parentNode;
+  }
+
+  get nextSibling() {
+    const parent = this.parentNode;
+    if (!parent) return null;
+    const at = parent.children.indexOf(this);
+    return at < 0 ? null : (parent.children[at + 1] ?? null);
+  }
+
+  get firstChild() {
+    return this.children[0] ?? null;
+  }
+
   // insertBefore and remove exist because a column that updates in place has to
   // put a row back where it belongs and take one away again, rather than
   // rebuilding the list around it.

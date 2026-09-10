@@ -139,6 +139,32 @@ test("the session panel's rules are top-level rules", () => {
   }
 });
 
+// The edge a person drags to resize the orchestrator column has to be seen.
+//
+// An invisible strip that responds to dragging is, for anyone who has not been
+// told it is there, a strip that does not exist — and a browser is the only
+// thing that can say whether it reads as a control, which is what the
+// acceptance screenshots are for. What can be kept here is the floor: it is
+// painted, it says which way it moves, and the column it sizes cannot be
+// squeezed below a usable width by any percentage.
+test("the resize edge is painted and says which way it moves", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector) => {
+    const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
+    assert.ok(match, `${selector} has no rule in web/app.css`);
+    return match[2];
+  };
+
+  const edge = body("\\.o-grip");
+  assert.match(edge, /cursor:\s*col-resize/, "the edge does not say it can be dragged sideways");
+  assert.match(edge, /background:\s*var\(--/, "the edge is not painted, so nobody can find it");
+
+  // The pixel floor, alongside the percentage one in web/js/columnwidth.js. A
+  // percentage minimum on a narrow window is a handful of pixels — "not zero"
+  // and practically zero.
+  assert.match(body("\\.col-orchestrator"), /min-width:\s*\d+px/, "the column lost its pixel floor");
+});
+
 // A message row must be sized by the thread, never by its own content.
 //
 // The operator reported a message "cut on both sides". One declaration did all

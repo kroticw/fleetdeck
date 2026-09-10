@@ -16,8 +16,7 @@ const en = {
   // The controls that size the orchestrator column. "unfold" especially: when
   // the column is folded it is the only thing left on screen, and a button
   // reading "column_unfold" would be a column nobody can get back.
-  column_widen: "make the column wider",
-  column_narrow: "make the column narrower",
+  column_drag: "drag to resize the column",
   column_fold: "fold the column away",
   column_unfold: "bring the column back",
   waiting: "Waiting",
@@ -123,8 +122,7 @@ const ru = {
   background_task: "фоновая задача",
   typed_here: "оператор",
 
-  column_widen: "шире",
-  column_narrow: "уже",
+  column_drag: "потяните, чтобы изменить ширину колонки",
   column_fold: "свернуть колонку",
   column_unfold: "развернуть колонку",
   waiting: "Ждёт",
