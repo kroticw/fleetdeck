@@ -46,6 +46,23 @@ export function stallReason(s) {
 
 const MAX_STALL_REASONS = 3;
 
+// escapeHTML neutralizes the five characters that matter when text is
+// interpolated into an HTML template literal. Sessions are not
+// developer-controlled text (spec 3.1: the fleet is open, sessions we did
+// not write can join it) -- needs/detail must be treated as untrusted
+// content wherever they reach innerHTML, even though CSP's script-src
+// 'self' already blocks the classic <script>-execution form of the attack.
+// Dictionary strings from t() are our own literals and are never passed
+// through this function.
+export function escapeHTML(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // humanDuration turns a future timestamp into a short "3h 20m" string.
 function humanDuration(iso) {
   const ms = new Date(iso).getTime() - Date.now();
@@ -78,12 +95,19 @@ function gauge(label, window_) {
 }
 
 // stalledList renders the "M stalled" counter's reason rows: up to
-// MAX_STALL_REASONS reasons shown verbatim, then a "+N more" tail. The count
-// itself is never truncated -- only the listed reason text is.
-function stalledList(stalledSessions) {
+// MAX_STALL_REASONS reasons shown verbatim (escaped -- see escapeHTML),
+// then a "+N more" tail. The count itself is never truncated -- only the
+// listed reason text is. Sessions with no reason text (the flag-only
+// Stalled branch with an empty detail) are dropped from the joined list
+// rather than leaving a stray empty entry between separators.
+export function stalledList(stalledSessions) {
   if (stalledSessions.length === 0) return "";
-  const shown = stalledSessions.slice(0, MAX_STALL_REASONS).map((s) => stallReason(s));
-  const rest = stalledSessions.length - shown.length;
+  const shown = stalledSessions
+    .slice(0, MAX_STALL_REASONS)
+    .map((s) => stallReason(s))
+    .filter((reason) => reason !== "")
+    .map((reason) => escapeHTML(reason));
+  const rest = stalledSessions.length - Math.min(stalledSessions.length, MAX_STALL_REASONS);
   const tail = rest > 0 ? ` +${rest} more` : "";
   return `<span class="stall-reasons">${shown.join("; ")}${tail}</span>`;
 }
