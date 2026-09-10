@@ -48,8 +48,14 @@ test:
 # No npm and no dependencies: web/package.json exists only to tell node that the
 # files under web/ are ES modules, and web/tests/ sits outside web/embed.go's
 # go:embed patterns so nothing here reaches the binary.
+#
+# The test files are named one by one through the shell's glob rather than by
+# handing node the directory: `node --test web/tests/` is read as a module
+# specifier by some node versions and fails with MODULE_NOT_FOUND before a single
+# test runs, which is what CI hit on node 24 while node 26 walked the directory
+# happily.
 test-web:
-	node --test web/tests/
+	node --test web/tests/*.test.js
 
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
