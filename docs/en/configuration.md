@@ -22,6 +22,8 @@ Switching one of the `notify.enabled.*` keys on turns a rule on, not a guarantee
 
 `board.path` names the board's root directory, not the directory cards live in directly: the panel reads cards from a `cards` subdirectory underneath it (`<board.path>/cards/*.md`), matching the layout `plugin/templates/board/` lays out (`cards/`, `archive/`, `scripts/`, `README.md`). A `board.path` that exists but has no `cards` subdirectory is reported as a distinct, more specific error than an empty board.
 
+`docs.paths` names the directories the panel's documentation section reads. Every markdown file under them is listed, and a document is served only when it resolves to somewhere inside one of them: a symlink inside a documentation directory that points out of it is refused, exactly as a card write outside the board directory is. Nothing but markdown is served, so a directory holding notes and credentials side by side hands out only the notes. Configuring no directory at all, and configuring directories that turn out not to be readable, are both reported as such rather than shown as an empty documentation set — "there is no documentation" and "the directory you named is not there" are different statements, and only one of them is fixed by editing this file.
+
 ## Example file
 
 ```yaml

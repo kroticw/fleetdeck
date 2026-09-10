@@ -85,6 +85,15 @@ type Deps struct {
 	// board is.
 	BoardDir string
 
+	// DocsRoots are the directories the documentation section reads from, and the
+	// only directories a document request may resolve into. Like BoardDir, this is
+	// not a capability the panel simply lacks when it is empty: a document path
+	// arrives from the browser, and without roots there is nothing to confine it
+	// to. Both documentation routes answer 404 saying no roots are configured
+	// rather than reading an unconfined path or showing an empty list, which would
+	// claim there is no documentation instead of that none was configured.
+	DocsRoots []string
+
 	// PutStatus records a statusline reporter's report. It cannot fail: the
 	// reporter never reads the response and a panel that cannot store a report
 	// has nothing useful to say about it, so the receiver's only job is to refuse
@@ -123,6 +132,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/keys", d.handleSendKeys)
 	mux.HandleFunc("GET /api/sessions/{id}/screen", d.handleScreen)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
+	mux.HandleFunc("GET /api/docs", d.handleDocsList)
+	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)
 	mux.HandleFunc("POST /api/status", d.handleStatus)
 	mux.HandleFunc("GET /api/sessions/{id}/digest", d.handleDigest)
 	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
