@@ -587,6 +587,52 @@ func Discover(key func() (string, error)) *Client {
 	return c
 }
 
+// attachResizesSessionToCols and attachResizesSessionToRows are the terminal geometry every attach this client opens asks
+// for. The name is the warning: on this daemon, asking is resizing.
+//
+// What the daemon does with it, measured against CLI 2.1.263 by reading the session's
+// own tty device (`stty -a < /dev/ttysNNN`) rather than the frames it sends, because a
+// frame is rendered per attacher and says nothing about the PTY behind it:
+//
+//   - a freshly created background session runs at 200x50;
+//   - one ReadScreen at 80x24 leaves the session's PTY at 80x24;
+//   - a viewer that stays attached at 190x45 puts it at 190x45, and every other
+//     attacher's stream turns 190 columns wide at that moment;
+//   - when an attacher disconnects, the daemon restores the size from whoever is still
+//     attached; with nobody left, the last size stays.
+//
+// So the panel polling this once a second makes a watched session's width flap: with a
+// 190-column viewer attached, eight seconds of polling produced nine 190→80→190
+// transitions, against zero over the same span with the polling stopped.
+//
+// The field is required, and zero is not a way to opt out. An attach sent without
+// cols/rows, or with zeros, is answered
+// {"ok":false,"error":"malformed request: Invalid input","code":"EUNKNOWN"} and no
+// screen comes back at all.
+//
+// Nor can a client send the size the session already has: the daemon reports it
+// nowhere. It is absent from a `list` record (see the field list in
+// docs/protocol/daemon-control-socket.md section 4), and a successful attach header
+// carries, in full:
+//
+//	{"ok":true,"op":"attach","decModes":[1000,1002,1003,1006,2004,2031,1004],
+//	 "via":"spare","booting":false,"tempo":"active","state":"running",
+//	 "cached":false,"stale":false,"workerCliVersion":"2.1.263"}
+//
+// Which leaves the value below tied to something else: 80x24 is also what the panel's
+// own xterm.js is built with (web/js/session.js, no cols/rows and no fit addon, so the
+// library's own 80x24 default stands). The two are one pair. The screen tab looks
+// correct today because the panel shrinks the session to the width of its own
+// terminal, so changing this number alone does not remove a defect — it trades a
+// resized session for an unreadable one: a 190-column frame drawn into an 80-column
+// xterm loses its header, splits one horizontal rule into four, and wraps the end of
+// the status line onto the start of the next. Whatever moves this must move the
+// browser's terminal in the same change.
+const (
+	attachResizesSessionToCols = 80
+	attachResizesSessionToRows = 24
+)
+
 // dialTimeout bounds the connect(2) call itself, independently of whatever deadline
 // (if any) ctx carries. context.Background() is the documented call path for
 // ListSessions, SendText, SendKeys and Ping — only ReadScreen derives a context
@@ -1356,12 +1402,10 @@ func trimToRuneBoundary(b []byte) []byte {
 // is intentional, but it means ctx's deadline is a ceiling this method can shorten,
 // never one it lets a caller stretch.
 //
-// cols/rows are fixed at 80x24 for this attach. This is not an open risk: the daemon's
-// own attach handler stores the requested geometry per-attacher
-// (attachers.set(id, {cols, rows, ...})) and never calls the session's resize from it.
-// Only the separate "resize" operation invokes the session's resize(cols, rows). So
-// passing cols/rows on attach has no side effect on anyone's terminal, and a poller
-// calling ReadScreen on a cadence cannot reshape a user's session.
+// The geometry this attach asks for is attachResizesSessionToCols/Rows — read their comment
+// before changing anything about the size of what comes back. Asking is resizing:
+// the size travels into the session's real PTY and every other viewer of that
+// session sees it.
 func (c *Client) ReadScreen(ctx context.Context, session string, tail int) ScreenResult {
 	out, err := c.readScreenWithDeadline(ctx, session, tail)
 	if isProtoErr(err) {
@@ -1455,8 +1499,8 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 		"proto": proto,
 		"op":    "attach",
 		"short": session,
-		"cols":  80,
-		"rows":  24,
+		"cols":  attachResizesSessionToCols,
+		"rows":  attachResizesSessionToRows,
 	}
 
 	if err := c.writeRequest(conn, req); err != nil {
@@ -1598,8 +1642,8 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 		"proto": proto,
 		"op":    "attach",
 		"short": session,
-		"cols":  80,
-		"rows":  24,
+		"cols":  attachResizesSessionToCols,
+		"rows":  attachResizesSessionToRows,
 		"auth":  key,
 	}
 
