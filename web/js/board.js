@@ -73,8 +73,19 @@ function columnHTML(label, stage, cards, orphanPaths) {
 // render draws every column from one snapshot. snap may be null (before the
 // first frame arrives, or after the socket drops) — that renders the same
 // empty board a snapshot with no cards would, never an error and never a
-// blank root.
+// blank root. A snapshot with boardError set (state.Snapshot.BoardError,
+// e.g. a misconfigured board path or zero cards found) is a distinct case
+// from that: cards is nil either way, but the board failed to load rather
+// than loading and finding nothing, so it must not look identical to a
+// healthy empty board (spec section 7's "degrade in parts, never silently").
+// snap?.boardError rather than snap.boardError so this still falls through
+// to the normal empty-columns render when snap itself is null.
 function render(root, snap) {
+  if (snap?.boardError) {
+    root.innerHTML = `<div class="kerror">${escapeHTML(snap.boardError)}</div>`;
+    return;
+  }
+
   const cards = snap?.cards ?? [];
   const orphanPaths = new Set(snap?.orphanCards ?? []);
 
