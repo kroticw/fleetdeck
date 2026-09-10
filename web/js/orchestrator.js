@@ -253,13 +253,14 @@ export function renderOrchestrator(root) {
       const target = sendTo();
       if (!target) return;
       area.value = "";
-      // Whatever the last paste had to say, it said about a path that has now
-      // left the box. Keeping it would leave a sentence about a permission
-      // prompt standing over a conversation it no longer describes.
-      pasteNotice = "";
       try {
         await sendText(target, text);
         sendError = "";
+        // Only on success. Whatever the last paste had to say, it said it about
+        // a path that has just left the box — but a failed send puts that path
+        // back, and the sentence explaining that the session is about to ask
+        // permission is true again along with it.
+        pasteNotice = "";
       } catch (err) {
         sendError = err.message;
         area.value = text;

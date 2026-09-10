@@ -9,7 +9,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { installDOM, settle } from "./fake-dom.js";
+import { installDOM, fireEvent, settle } from "./fake-dom.js";
 import { renderSession } from "../js/session.js";
 
 const SHORT = "sess-1";
@@ -78,9 +78,40 @@ afterEach(() => {
   dom.restore();
 });
 
+// A clock this file can advance by hand. It used to be four stubs that swallowed
+// every timer, which made the panel's background poll unrepresentable here — and
+// the poll is exactly what was erasing the messages these tests are about.
+function fakeTimers() {
+  let nextId = 1;
+  const pending = new Map();
+  const cancel = (id) => pending.delete(id);
+  return {
+    setTimeout(fn) {
+      const id = nextId++;
+      pending.set(id, { fn, repeating: false });
+      return id;
+    },
+    setInterval(fn) {
+      const id = nextId++;
+      pending.set(id, { fn, repeating: true });
+      return id;
+    },
+    clearTimeout: cancel,
+    clearInterval: cancel,
+    async tick() {
+      for (const [id, timer] of [...pending.entries()]) {
+        if (!timer.repeating) pending.delete(id);
+        timer.fn();
+      }
+      await settle();
+      await settle();
+    },
+  };
+}
+
 async function mount() {
   const root = dom.element("div");
-  const timers = { setTimeout: () => 1, setInterval: () => 2, clearTimeout() {}, clearInterval() {} };
+  const timers = fakeTimers();
   const stop = renderSession(root, SHORT, () => {}, {
     timers,
     lookup: () => ({ short: SHORT, sessionId: FULL }),
@@ -89,6 +120,7 @@ async function mount() {
 
   return {
     root,
+    timers,
     stop,
     input: () => root.querySelector(".s-input"),
     errorText: () => {
@@ -197,4 +229,112 @@ test("a stopped panel stops accepting pastes", async () => {
   await settle();
 
   assert.equal(uploads.length, 0);
+});
+
+// --- the two message lines, compared against the other pane -----------------
+//
+// Everything below came out of pasting the same things into this panel and into
+// the orchestrator column and printing the two answers side by side. All of it
+// was invisible to the tests above, which asked whether this panel says the
+// right thing and never whether it goes on saying it.
+
+// The worst of the three, and the one a person would report as "nothing
+// happened": the panel showed why an image was refused, and the next digest
+// poll — a few seconds later, at most — wiped it. Break it by pointing
+// digestPass's success back at showError and this test fails with an empty line.
+test("a refused paste survives the background poll that follows it", async () => {
+  const panel = await mount();
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/image")) {
+      return { ok: false, status: 415, statusText: "", json: async () => ({ error: "not an image the panel can attach" }) };
+    }
+    return { ok: true, status: 200, statusText: "OK", json: async () => ({ steps: [], screen: "" }) };
+  };
+
+  await panel.paste(pasteEvent({ file: fakeFile(PNG) }));
+  assert.match(panel.errorText(), /not an image/, "precondition: the refusal was shown");
+
+  await panel.timers.tick();
+
+  assert.match(panel.errorText(), /not an image/, "a successful background poll erased the refusal");
+});
+
+// The other direction of the same rule: a failing poll must not be silenced by
+// an old operator error either, and neither may clear the other's slot.
+test("a failing poll reports without waiting for the operator to do something", async () => {
+  const panel = await mount();
+  globalThis.fetch = async () => {
+    throw new Error("the daemon went away");
+  };
+
+  await panel.timers.tick();
+
+  assert.match(panel.errorText(), /daemon went away/);
+});
+
+// It describes a path that has just left the box, so it must not outlive it —
+// and the orchestrator column already behaved this way, which is how the
+// difference was found.
+test("the permission notice goes away when the message is sent", async () => {
+  const panel = await mount();
+
+  await panel.paste(pasteEvent({ file: fakeFile(PNG) }));
+  assert.notEqual(panel.noticeText(), "", "precondition: the notice was shown");
+
+  panel.input().dispatchEvent({ type: "keydown", key: "Enter", shiftKey: false, preventDefault() {} });
+  await settle();
+  await settle();
+
+  assert.equal(panel.noticeText(), "", "the notice outlived the path it was about");
+});
+
+// But only when the message actually went. A failed send puts the path back in
+// the box, and the sentence about the permission prompt is true again with it.
+test("a failed send keeps both the path and the notice", async () => {
+  const panel = await mount();
+  await panel.paste(pasteEvent({ file: fakeFile(PNG) }));
+  const withPath = panel.input().value;
+  assert.notEqual(withPath, "", "precondition: the path is in the box");
+
+  globalThis.fetch = async () => {
+    throw new Error("the daemon refused it");
+  };
+  panel.input().dispatchEvent({ type: "keydown", key: "Enter", shiftKey: false, preventDefault() {} });
+  await settle();
+  await settle();
+
+  assert.equal(panel.input().value, withPath, "the path was lost with the failed send");
+  assert.notEqual(panel.noticeText(), "", "the notice went away while the path it describes stayed");
+});
+
+// The panel rebuilds both lines on a tab switch, and switching to the screen tab
+// to see what a session is actually asking is exactly when there is a message
+// worth keeping. Break it by removing the repaint after replaceChildren and this
+// test fails with an empty line.
+test("a message survives a tab switch, like the half-written text beside it", async () => {
+  const panel = await mount();
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/image")) {
+      return { ok: false, status: 415, statusText: "", json: async () => ({ error: "not an image the panel can attach" }) };
+    }
+    return { ok: true, status: 200, statusText: "OK", json: async () => ({ steps: [], screen: "" }) };
+  };
+  await panel.paste(pasteEvent({ file: fakeFile(PNG) }));
+  assert.match(panel.errorText(), /not an image/, "precondition: the refusal was shown");
+  const errorLineBefore = panel.root.querySelector(".s-error");
+
+  // The screen tab by name, not "every tab in turn": selectTab does nothing
+  // when the tab asked for is the one already open, so a loop that starts on
+  // the digest tab can end back on it having rebuilt nothing — which is how
+  // this test first passed against a panel that did throw the message away.
+  const screen = panel.root.querySelector('[data-tab="screen"]');
+  assert.ok(screen, "no screen tab to switch to");
+  fireEvent(screen, "click");
+  await settle();
+  await settle();
+
+  // The switch has to have happened, or this test proves nothing: the line it
+  // reads would simply be the one that was never rebuilt.
+  assert.notEqual(panel.root.querySelector(".s-error"), errorLineBefore, "the tab switch did not rebuild the panel");
+  assert.match(panel.errorText(), /not an image/, "the message was thrown away with the line it sat in");
 });
