@@ -26,6 +26,7 @@ import { fetchDigest, fetchScreen, sendKeys, sendText } from "./api.js";
 import { get } from "./store.js";
 import { t } from "./i18n.js";
 import { syncSteps } from "./steps.js";
+import { createPending } from "./pending.js";
 import { wireImagePaste } from "./pasteimage.js";
 
 // How many transcript steps the digest asks for, and how often each tab
@@ -341,7 +342,21 @@ export function renderSession(
   // inside a step; this pane owns what its rows are called.
   const stepClass = (role) => `s-step s-step-${KNOWN_ROLES.has(role) ? role : "other"}`;
 
-  const renderSteps = (steps) => {
+  // The last list the server sent, kept so the thread can be redrawn between
+  // polls — which is the whole point of drawing a sent message at once.
+  let serverSteps = [];
+
+  // What has been sent and has not come back out of the transcript yet. Shared
+  // with the orchestrator column rather than written twice: the two panes
+  // disagreeing about when a message is on screen is exactly the class of
+  // defect this pair has already produced once.
+  const pending = createPending();
+
+  const renderSteps = (fromServer) => {
+    // merge, not the server's list alone: whatever has been sent and has not
+    // come back out of the transcript yet is drawn at the end, where the real
+    // one will land.
+    const steps = pending.merge(fromServer);
     if (steps.length === 0) {
       // The server errors on a transcript it cannot read, so an empty list is
       // a transcript that exists and holds nothing readable. Still says so:
@@ -376,7 +391,8 @@ export function renderSession(
       // by itself once the session is in a snapshot.
       throw new Error(t("session_not_listed"));
     }
-    renderSteps(await fetchDigest(sessionId, DIGEST_LIMIT));
+    serverSteps = await fetchDigest(sessionId, DIGEST_LIMIT);
+    renderSteps(serverSteps);
     showPollError("");
   };
 
@@ -450,6 +466,15 @@ export function renderSession(
     const typed = input.value;
     if (typed.trim() === "") return;
     input.value = "";
+    // Drawn before the request goes out, not after it comes back: the wait a
+    // person feels is not the request (about six milliseconds) but the poll
+    // that brings the message back out of the transcript, which was a second in
+    // the common case and ten in the worst one measured.
+    //
+    // Only on the digest tab. The screen tab has the terminal in this same
+    // container, and drawing steps into it would take the terminal off screen.
+    const echo = pending.add(typed.trim());
+    if (tab === "digest") renderSteps(serverSteps);
     try {
       await sendText(short, typed.trim());
       showError("");
@@ -461,7 +486,11 @@ export function renderSession(
     } catch (err) {
       // The one failure this panel must not have. Losing what somebody typed
       // is worse than any error message, so the text goes back exactly as it
-      // was and the message goes beside it.
+      // was and the message goes beside it. And off the thread with it: the
+      // message is in nobody's hands, and leaving it drawn would say it reached
+      // the session.
+      pending.drop(echo);
+      if (tab === "digest") renderSteps(serverSteps);
       input.value = typed;
       showError(err.message);
     }

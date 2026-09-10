@@ -8,6 +8,7 @@ export { parseAgentMessage, parseTaskNotification, unwrapEnvelope } from "./enve
 export { atBottom, stepKey, STICK_THRESHOLD_PX } from "./steps.js";
 import { syncSteps as syncStepRows } from "./steps.js";
 import { wireImagePaste } from "./pasteimage.js";
+import { createPending } from "./pending.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column and its own input.
@@ -99,6 +100,12 @@ export function viewSignature(snap, connected) {
 
 export function renderOrchestrator(root) {
   let steps = [];
+
+  // What has been sent and has not come back out of the transcript yet. Shared
+  // with the session panel rather than written twice: the two panes disagreeing
+  // about when a message is on screen is exactly the class of defect this pair
+  // has already produced once.
+  const pending = createPending();
 
   // Set by the store subscription on every push (including the initial
   // synchronous one) and read by draw() whenever it runs — including the
@@ -253,6 +260,12 @@ export function renderOrchestrator(root) {
       const target = sendTo();
       if (!target) return;
       area.value = "";
+      // Drawn before the request goes out, not after it comes back: the wait a
+      // person feels is not the request (about six milliseconds) but the poll
+      // that brings the message back out of the transcript, which was a second
+      // in the common case and ten in the worst one measured.
+      const echo = pending.add(text);
+      draw();
       try {
         await sendText(target, text);
         sendError = "";
@@ -262,6 +275,10 @@ export function renderOrchestrator(root) {
         // permission is true again along with it.
         pasteNotice = "";
       } catch (err) {
+        // The message is in nobody's hands, so it comes off the screen and the
+        // words go back where they were. Leaving it drawn would say they
+        // reached the session.
+        pending.drop(echo);
         sendError = err.message;
         area.value = text;
       }
@@ -476,7 +493,11 @@ export function renderOrchestrator(root) {
       return;
     }
 
-    syncStepRows(thread, steps, stepClass);
+    // merge, not steps: whatever has been sent and has not come back out of the
+    // transcript yet is drawn at the end, where the real one will land. It is
+    // done here rather than at the fetch because a redraw between polls — a
+    // pasted image, a failed send — must show it too.
+    syncStepRows(thread, pending.merge(steps), stepClass);
   };
 
   const refreshDigest = async () => {

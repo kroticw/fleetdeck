@@ -726,6 +726,72 @@ test("text typed and not sent survives a tab switch, in both directions", async 
   assert.equal(panel.input().value, typed, "gone on the way back");
 });
 
+// --- a sent message on screen at once ---------------------------------------
+//
+// Measured before any of this was written: from the keystroke to the text
+// appearing, the request itself takes about six milliseconds and the rest is
+// waiting for the message to come back out of the transcript through a poll —
+// a second in the common case, ten in the worst run seen. Meanwhile the box
+// emptied and the thread did not change, which reads as "it did not send".
+
+// A step's text is markdown assigned as innerHTML, and the stand-in DOM's
+// textContent does not see through that — a probe reading textContent finds
+// nothing for ANY step, including the ones the server sent, so it reports the
+// same "not there" whether the feature works or not. Read the bodies.
+const bodies = (panel) => [...panel.root.querySelectorAll(".step-body")].map((n) => n.innerHTML).join("\n");
+
+test("a message is in the thread before any poll brings it back", async () => {
+  stubFetch(answer({ body: [{ role: "assistant", text: "готово" }] }));
+  const panel = await mount();
+  assert.match(bodies(panel), /готово/, "control: the probe can see a step that is definitely drawn");
+
+  panel.input().value = "перезапусти панель";
+  await panel.pressEnter();
+
+  // No tick: this is the state of the thread between polls, which is where the
+  // whole wait used to live. Break it by drawing only what the server sent and
+  // this test fails with the message nowhere.
+  assert.match(bodies(panel), /перезапусти панель/);
+});
+
+test("and it is gone again if the send failed", async () => {
+  stubFetch((url) => {
+    if (url.includes("/text")) return answer({ status: 502, body: { error: "the daemon went away" } });
+    return answer({ body: [{ role: "assistant", text: "готово" }] });
+  });
+  const panel = await mount();
+
+  panel.input().value = "перезапусти панель";
+  await panel.pressEnter();
+
+  // Both halves matter: a message that stayed on screen would say it reached
+  // the session, and text that vanished from the box would be lost outright.
+  assert.doesNotMatch(bodies(panel), /перезапусти панель/, "a message nobody received was left on screen");
+  assert.equal(panel.input().value, "перезапусти панель", "and the words were lost with it");
+  assert.match(panel.errorText(), /daemon went away/);
+});
+
+test("when the poll brings the real one, it is there once", async () => {
+  let sent = false;
+  stubFetch((url) => {
+    if (url.includes("/text")) {
+      sent = true;
+      return answer({ body: null, status: 204 });
+    }
+    return answer({ body: sent ? [{ role: "user", text: "перезапусти панель" }] : [] });
+  });
+  const panel = await mount();
+
+  panel.input().value = "перезапусти панель";
+  await panel.pressEnter();
+  await panel.timers.tick();
+
+  const rows = [...panel.root.querySelectorAll(".s-step")].filter((r) =>
+    (r.querySelector(".step-body")?.innerHTML ?? "").includes("перезапусти панель"),
+  );
+  assert.equal(rows.length, 1, `the message is on screen ${rows.length} times`);
+});
+
 test("the thread's scrolling boxes are measured after they are in the page", async () => {
   stubFetch(answer({ body: [{ role: "assistant", text: "| a | b |\n| --- | --- |\n| 1 | 2 |" }] }));
   await mount();
