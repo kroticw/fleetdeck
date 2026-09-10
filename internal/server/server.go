@@ -1,6 +1,13 @@
 // Package server exposes the panel's snapshot over HTTP and WebSocket and accepts
-// the four writes the panel performs: text into a session, keys into a session, one
-// field of one card, and a statusline reporter's report.
+// every write the panel performs.
+//
+// Deliberately not a list, and deliberately not a count. This comment said "the
+// four writes" while there were seven routes answering a write method, because
+// each of the three additions since — a configuration patch, a session label, an
+// image — was made without anyone thinking to come back here. A sentence naming
+// a number goes stale on somebody else's change and keeps sounding authoritative
+// while it does. New() below is the list, it cannot drift from itself, and spec
+// section 5 is where the kinds of write are argued rather than enumerated.
 //
 // It performs no I/O of its own beyond the connection it is answering. Every source
 // it needs — the assembled snapshot, the daemon client, the board writer, the store
