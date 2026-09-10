@@ -115,11 +115,16 @@ func sessionIDSafe(id string) bool {
 }
 
 func (d Deps) handleUploadImage(w http.ResponseWriter, r *http.Request) {
-	if d.ImageDir == "" {
-		// Without a directory of its own there is nowhere to put a file that is
-		// not somebody else's. Guessing one is how a panel starts writing into a
-		// repository.
-		unavailable(w, "a directory to keep session images in")
+	// Absolute, not merely non-empty. A relative directory is resolved against
+	// the process's working directory — for a launch agent, a directory nobody
+	// chose — so a panel configured that way scatters files wherever it was
+	// started from. Observed while mutation-testing this file: with the check
+	// disabled, an empty ImageDir became the relative path "abc123" and wrote
+	// three images straight into the repository. A configured-but-relative
+	// directory does the same thing with no mutation at all, so this checks for
+	// what is required rather than for the one value that is obviously wrong.
+	if !filepath.IsAbs(d.ImageDir) {
+		unavailable(w, "an absolute directory to keep session images in")
 		return
 	}
 

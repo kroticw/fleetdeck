@@ -41,6 +41,21 @@ func imageDeps(t *testing.T) (Deps, string) {
 	return d, dir
 }
 
+// workingDirEntries is the package directory's contents as a set, so a test can
+// say what a request created rather than what happens to be lying there.
+func workingDirEntries(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read working directory: %v", err)
+	}
+	names := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		names[entry.Name()] = true
+	}
+	return names
+}
+
 func imageBody(raw []byte) string {
 	return fmt.Sprintf(`{"data":%q}`, base64.StdEncoding.EncodeToString(raw))
 }
@@ -312,13 +327,34 @@ func TestImageRefusesEmptyData(t *testing.T) {
 
 // Same rule as the board directory: without somewhere of its own to write, this
 // route does not guess. It says the panel is not wired for it.
-func TestImageWithoutADirectoryIsUnavailable(t *testing.T) {
-	d, _ := testDeps()
-	d.ImageDir = ""
+//
+// A relative directory counts as not wired, and that is the case worth pinning:
+// it is resolved against the process's working directory — for a launch agent, a
+// directory nobody chose — so a panel configured that way would scatter files
+// wherever it was started from. Found while mutation-testing this file, when a
+// disabled emptiness check turned "" into the relative path "abc123" and wrote
+// three images into the repository itself.
+func TestImageWithoutAnAbsoluteDirectoryIsUnavailable(t *testing.T) {
+	for _, dir := range []string{"", "images", "./images", "../images"} {
+		t.Run(dir, func(t *testing.T) {
+			d, _ := testDeps()
+			d.ImageDir = dir
 
-	rec := do(d, http.MethodPost, "/api/sessions/abc123/image", imageBody(pngBytes))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("want 503, got %d: %s", rec.Code, rec.Body.String())
+			// Compared before and after rather than checked for absence: what
+			// this asserts is that the request created nothing, and a directory
+			// that was already there — left by an earlier run, or by anything
+			// else — is not this request's doing and must not be read as it.
+			before := workingDirEntries(t)
+			rec := do(d, http.MethodPost, "/api/sessions/abc123/image", imageBody(pngBytes))
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("want 503 for ImageDir %q, got %d: %s", dir, rec.Code, rec.Body.String())
+			}
+			for name := range workingDirEntries(t) {
+				if !before[name] {
+					t.Fatalf("a relative ImageDir wrote %q into the working directory", name)
+				}
+			}
+		})
 	}
 }
 
