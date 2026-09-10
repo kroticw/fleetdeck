@@ -49,10 +49,13 @@ fleetdeck задуман как единое локальное окно для 
 Требуется Go 1.27 (см. `go.mod`) и, для линтинга, `golangci-lint` v2.13.2 в `PATH`.
 
 ```sh
-make build   # every binary under cmd/* into bin/
-make test    # go test ./... -race -count=1
-make lint    # go vet, gofmt -l, golangci-lint run
+make build    # every binary under cmd/* into bin/
+make test     # go test ./... -race -count=1
+make test-web # node --test web/tests/ (the frontend; needs node, no npm)
+make lint     # go vet, gofmt -l, golangci-lint run
 ```
+
+`make test-web` запускает тесты фронтенда в собственном тест-раннере node. Он не входит в `make test`, который остаётся только про Go, чтобы в окружении без node всё равно проходила полная проверка Go; CI запускает оба. Никакого npm install и никаких зависимостей скачивать не нужно.
 
 `make verify-ldflags` собирает и запускает единственный тест, который проверяет, что путь символа внедрения версии релизной сборки (`internal/version`) по-прежнему разрешается; он не входит в `make test`, потому что требует собственных `-ldflags`, и CI запускает его отдельным шагом.
 

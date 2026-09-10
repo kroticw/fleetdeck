@@ -1,0 +1,93 @@
+{
+  "sessions": [
+    {
+      "short": "a1b2c3",
+      "nonce": "n1",
+      "sessionId": "6f1c9a52-0f4e-4a0b-9d33-2f0c1f5a77bd",
+      "pid": 4242,
+      "attempt": 1,
+      "startedAt": 1788951600000,
+      "createdAt": 1788951600000,
+      "cwd": "/repo/fleetdeck",
+      "backend": "claude",
+      "tempo": "active",
+      "state": "working",
+      "detail": "writing the card panel",
+      "intent": "fleetdeck ui",
+      "name": "ui5",
+      "agent": "claude",
+      "cliVersion": "2.1.263",
+      "source": "daemon",
+      "needs": "",
+      "dying": false,
+      "context": {
+        "tokens": 120000,
+        "window": 1000000,
+        "estimated": false
+      },
+      "cardPath": "/board/fleet-ui.md",
+      "silentFor": 90000000000,
+      "model": "Claude Opus 5",
+      "costUSD": 1.25
+    }
+  ],
+  "cards": [
+    {
+      "path": "/board/fleet-ui.md",
+      "zone": "planned",
+      "stage": "active",
+      "progress": 40,
+      "session": "a1b2c3",
+      "repo": "fleetdeck",
+      "created": "2026-09-01",
+      "title": "Fleet UI \u003cpanel\u003e \"v2\"",
+      "body": "# Fleet UI \u003cpanel\u003e \"v2\"\n\nDepends on [[card-keeping]] and on [[nowhere]].\n\n- **stage** and progress are the two fields the panel writes\n- everything else on this card belongs to the agent\n\nAn agent can write anything here, including \u003cimg src=x onerror=alert(1)\u003e.\n\n```sh\necho \"\u003cscript\u003ealert(1)\u003c/script\u003e\"\n```\n",
+      "links": [
+        "card-keeping",
+        "nowhere"
+      ]
+    },
+    {
+      "path": "/board/card-keeping.md",
+      "zone": "niceToHave",
+      "stage": "review",
+      "progress": 80,
+      "session": "dead99",
+      "repo": "fleetdeck",
+      "created": "2026-08-20",
+      "title": "Card keeping",
+      "body": "# Card keeping\n\nSee [[fleet-ui]] for the panel.\n",
+      "links": [
+        "fleet-ui"
+      ]
+    },
+    {
+      "path": "/board/broken.md",
+      "zone": "",
+      "stage": "",
+      "progress": 0,
+      "session": "",
+      "repo": "",
+      "created": "",
+      "title": "",
+      "body": "",
+      "links": null,
+      "parseError": "no frontmatter block"
+    }
+  ],
+  "limits": {
+    "fiveHour": {
+      "utilization": 0.42,
+      "resetsAt": "2026-09-09T15:00:00Z"
+    },
+    "sevenDay": {
+      "utilization": 0.11,
+      "resetsAt": "2026-09-13T12:00:00Z"
+    },
+    "fetchedAt": "2026-09-09T12:00:00Z"
+  },
+  "orphanCards": [
+    "/board/card-keeping.md"
+  ],
+  "at": "2026-09-09T12:00:00Z"
+}
