@@ -16,6 +16,7 @@ import (
 
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/state"
+	"github.com/kroticw/fleetdeck/internal/transcript"
 )
 
 // ErrFieldWrittenNotCommitted is what SetCardField wraps when the field reached
@@ -90,6 +91,18 @@ type Deps struct {
 	// a report it could not attribute to a session.
 	PutStatus func(sessionID, model string, contextPercent, costUSD float64)
 
+	// Digest returns up to limit of the most recent readable steps of a
+	// session's transcript, oldest first. sessionID is the transcript UUID
+	// (daemon.Session.SessionID), the identifier transcript.Locate matches on
+	// — never the daemon's short id.
+	Digest func(sessionID string, limit int) ([]transcript.Step, error)
+
+	// SetOrchestratorSession pins (or, given an empty string, unpins) the session
+	// shown in the orchestrator column, and persists the choice to the
+	// configuration file. A nil value means a panel wired without a
+	// configuration store; the route then answers 503.
+	SetOrchestratorSession func(id string) error
+
 	// interval overrides the WebSocket's one-second push cadence. It exists for
 	// tests, which cannot afford to wait whole seconds to observe a cadence; zero
 	// means the one second the panel actually uses.
@@ -111,6 +124,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/screen", d.handleScreen)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/status", d.handleStatus)
+	mux.HandleFunc("GET /api/sessions/{id}/digest", d.handleDigest)
+	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
 	mux.HandleFunc("GET /ws", d.handleWS)
 	mux.Handle("GET /", staticHandler())
 	return guard(mux)

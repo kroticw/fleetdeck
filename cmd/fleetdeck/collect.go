@@ -82,7 +82,9 @@ type reported struct {
 // the others are unaffected. This is where spec section 7's degrade-in-parts rule
 // becomes code.
 type Collector struct {
-	cfg         config.Config
+	cfg   config.Config
+	cfgMu sync.RWMutex // guards cfg; everything else in Collector has its own mutex already
+
 	daemon      *daemon.Client
 	usage       *usage.Fetcher
 	projectsDir string
@@ -115,6 +117,24 @@ func NewCollector(cfg config.Config, dc *daemon.Client, uf *usage.Fetcher, proje
 		reports:      map[string]reported{},
 		now:          time.Now,
 	}
+}
+
+// Config returns a copy of the collector's current configuration. Safe for
+// concurrent use with SetOrchestratorSession.
+func (c *Collector) Config() config.Config {
+	c.cfgMu.RLock()
+	defer c.cfgMu.RUnlock()
+	return c.cfg
+}
+
+// SetOrchestratorSession updates the pinned orchestrator session id kept in
+// memory. The caller must persist it to disk first (config.Save) — this only
+// updates what Collect() reports next, so a failed save never leaves memory
+// ahead of the config file.
+func (c *Collector) SetOrchestratorSession(id string) {
+	c.cfgMu.Lock()
+	c.cfg.OrchestratorSession = id
+	c.cfgMu.Unlock()
 }
 
 // PutStatus records what cmd/fleetdeck-status posted. It is server.Deps.PutStatus,
@@ -275,7 +295,9 @@ func (c *Collector) pruneContextCache(live map[string]struct{}) {
 // in the snapshot and leaves every other field alone, so a dead daemon still returns
 // a full board and an unreadable board still returns a full session list.
 func (c *Collector) Collect(ctx context.Context) state.Snapshot {
+	cfg := c.Config()
 	snap := state.Snapshot{At: c.now()}
+	snap.OrchestratorSession = cfg.OrchestratorSession
 
 	var sessions []daemon.Session
 	if c.daemon == nil {
@@ -294,9 +316,9 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	}
 
 	var cards []board.Card
-	if c.cfg.BoardPath != "" {
+	if cfg.BoardPath != "" {
 		var err error
-		cards, err = board.Scan(c.cfg.BoardPath)
+		cards, err = board.Scan(cfg.BoardPath)
 		if err != nil {
 			snap.BoardError = err.Error()
 			cards = nil
@@ -308,7 +330,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	snap.OrphanCards = state.OrphanCards(sessions, cards)
 	c.pruneContextCache(c.enrich(snap.Sessions))
 
-	if c.cfg.UsageEnabled && c.usage != nil {
+	if cfg.UsageEnabled && c.usage != nil {
 		usageCtx, cancel := context.WithTimeout(ctx, usageTimeout)
 		l, err := c.usage.Limits(usageCtx)
 		cancel()

@@ -22,6 +22,8 @@ const en = {
   offline: "disconnected",
   card_broken: "unreadable card",
   session_dead: "session is dead",
+  pick_orchestrator: "pick the orchestrator session",
+  write_to_orchestrator: "write to the orchestrator…",
 };
 
 const ru = {
@@ -43,6 +45,8 @@ const ru = {
   offline: "нет связи",
   card_broken: "карточка не разбирается",
   session_dead: "сессия мертва",
+  pick_orchestrator: "выберите сессию оркестратора",
+  write_to_orchestrator: "написать оркестру…",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;

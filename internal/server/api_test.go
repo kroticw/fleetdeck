@@ -14,6 +14,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/state"
+	"github.com/kroticw/fleetdeck/internal/transcript"
 )
 
 // testDeps returns a Deps whose every function is wired to a recorder, plus the
@@ -43,6 +44,14 @@ func testDeps() (Deps, *[]string) {
 		},
 		PutStatus: func(sessionID, model string, contextPercent, costUSD float64) {
 			calls = append(calls, fmt.Sprintf("status:%s:%s:%.1f:%.2f", sessionID, model, contextPercent, costUSD))
+		},
+		Digest: func(sessionID string, limit int) ([]transcript.Step, error) {
+			calls = append(calls, fmt.Sprintf("digest:%s:%d", sessionID, limit))
+			return []transcript.Step{{Role: "assistant", Text: "hi"}}, nil
+		},
+		SetOrchestratorSession: func(id string) error {
+			calls = append(calls, "orchestrator:"+id)
+			return nil
 		},
 	}, &calls
 }
@@ -444,6 +453,8 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 		{"screen", func(d *Deps) { d.ReadScreen = nil }, http.MethodGet, "/api/sessions/a/screen", ""},
 		{"cards", func(d *Deps) { d.SetCardField = nil }, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"stage","value":"new"}`},
 		{"status", func(d *Deps) { d.PutStatus = nil }, http.MethodPost, "/api/status", `{"sessionId":"a","model":"m","costUSD":0,"contextPercent":0}`},
+		{"digest", func(d *Deps) { d.Digest = nil }, http.MethodGet, "/api/sessions/a/digest", ""},
+		{"config", func(d *Deps) { d.SetOrchestratorSession = nil }, http.MethodPatch, "/api/config", `{"orchestratorSession":"abc"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -503,5 +514,89 @@ func TestPatchCardTreatsNothingToCommitAsSuccessEvenWhenWrappedAsUncommitted(t *
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDigestIsServed(t *testing.T) {
+	d, _ := testDeps()
+	d.Digest = func(_ string, limit int) ([]transcript.Step, error) {
+		if limit != 7 {
+			t.Errorf("limit must reach the source, got %d", limit)
+		}
+		return []transcript.Step{{Role: "assistant", Text: "hello"}}, nil
+	}
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/sessions/abc/digest?limit=7", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "hello") {
+		t.Fatalf("digest not served: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDigestWithoutTranscriptIsNotAnEmptyList(t *testing.T) {
+	d, _ := testDeps()
+	d.Digest = func(string, int) ([]transcript.Step, error) { return nil, transcript.ErrNoTranscript }
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/sessions/abc/digest", nil))
+	if rec.Code == http.StatusOK {
+		t.Fatal("a missing transcript must be an error, not an empty digest that looks like a quiet session")
+	}
+}
+
+func TestDigestDefaultsTheLimit(t *testing.T) {
+	d, _ := testDeps()
+	d.Digest = func(_ string, limit int) ([]transcript.Step, error) {
+		if limit != 20 {
+			t.Errorf("want the default limit of 20, got %d", limit)
+		}
+		return []transcript.Step{{Role: "assistant", Text: "hello"}}, nil
+	}
+	rec := do(d, http.MethodGet, "/api/sessions/abc/digest", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPatchConfigSetsTheOrchestratorSession(t *testing.T) {
+	d, calls := testDeps()
+	rec := do(d, http.MethodPatch, "/api/config", `{"orchestratorSession":"abc123"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 1 || (*calls)[0] != "orchestrator:abc123" {
+		t.Fatalf("unexpected calls: %v", *calls)
+	}
+}
+
+func TestPatchConfigAcceptsAnEmptyStringToUnpin(t *testing.T) {
+	d, calls := testDeps()
+	rec := do(d, http.MethodPatch, "/api/config", `{"orchestratorSession":""}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 1 || (*calls)[0] != "orchestrator:" {
+		t.Fatalf("unexpected calls: %v", *calls)
+	}
+}
+
+func TestPatchConfigRequiresTheOrchestratorSessionKey(t *testing.T) {
+	d, calls := testDeps()
+	rec := do(d, http.MethodPatch, "/api/config", `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("an absent key must be refused with 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("nothing must reach the store, got %v", *calls)
+	}
+	if !strings.Contains(rec.Body.String(), "orchestratorSession is required") {
+		t.Fatalf("the refusal must explain itself, got %s", rec.Body.String())
+	}
+}
+
+func TestPatchConfigReportsAStoreFailure(t *testing.T) {
+	d, _ := testDeps()
+	d.SetOrchestratorSession = func(string) error { return errors.New("could not save config") }
+	rec := do(d, http.MethodPatch, "/api/config", `{"orchestratorSession":"abc"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

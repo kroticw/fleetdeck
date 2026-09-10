@@ -140,6 +140,122 @@ main {
 
 .col-orchestrator {
   flex: 1 1 25%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Orchestrator column content (web/js/orchestrator.js). The column itself is
+ * the flex container declared above; everything here lays out what gets
+ * rendered inside it. */
+
+.o-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: var(--gap);
+  font-weight: 600;
+}
+
+.o-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.o-ctx {
+  flex: none;
+  font-weight: 400;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.o-error {
+  flex: none;
+  margin: 0 var(--gap) var(--gap);
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, red 15%, transparent);
+  color: inherit;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.o-thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--gap);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.o-msg {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.95em;
+}
+
+.o-msg.o-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.o-msg.o-dead {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.o-form {
+  flex: none;
+  padding: var(--gap);
+}
+
+.o-form textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.o-pick {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+}
+
+.o-pick-empty {
+  opacity: 0.7;
+  margin: 0;
+}
+
+.o-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.o-pick-item {
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.o-pick-item:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
 }
 
 .col-center {

@@ -353,3 +353,52 @@ func (d Deps) handleStatus(w http.ResponseWriter, r *http.Request) {
 	d.PutStatus(body.SessionID, body.Model, body.ContextPercent, body.CostUSD)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleDigest serves the readable moments of a session's transcript. id is
+// the transcript UUID (daemon.Session.SessionID), not the daemon's short id —
+// transcript.Locate matches on the UUID and nothing else.
+func (d Deps) handleDigest(w http.ResponseWriter, r *http.Request) {
+	if d.Digest == nil {
+		unavailable(w, "a transcript reader")
+		return
+	}
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	steps, err := d.Digest(r.PathValue("id"), limit)
+	if err != nil {
+		fail(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, steps)
+}
+
+// handlePatchConfig writes the one setting spec section 11 has this panel
+// write: which session is pinned to the orchestrator column. The field is a
+// pointer because an absent key (400: nothing was asked for) and an explicit
+// empty string (204: unpin, a legal request) are different outcomes — the
+// same device handleSendText uses for Submit *bool.
+func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
+	if d.SetOrchestratorSession == nil {
+		unavailable(w, "a configuration store")
+		return
+	}
+	var body struct {
+		OrchestratorSession *string `json:"orchestratorSession"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.OrchestratorSession == nil {
+		fail(w, http.StatusBadRequest, "orchestratorSession is required")
+		return
+	}
+	if err := d.SetOrchestratorSession(*body.OrchestratorSession); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
