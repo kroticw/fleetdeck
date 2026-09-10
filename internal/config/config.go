@@ -26,17 +26,24 @@ type NotifyConfig struct {
 	SilenceAfter time.Duration
 }
 
-// NeverSilences reports whether SilenceAfter is the sentinel value 0. validate rejects a
-// negative SilenceAfter because it is ambiguous — "always silent" and "never silent" are
-// both readings of a negative window, depending on how it is later compared — and 0 is
-// exactly as ambiguous on its own: "silence immediately" and "never silence" are both
-// readings of a zero-length window too. This method is where that ambiguity is resolved,
-// once, for the whole codebase: 0 means never silence, i.e. every occurrence is reported.
-// A future consumer of SilenceAfter must call this rather than comparing SilenceAfter to
-// zero itself, so the decision cannot be re-made differently somewhere else. See
-// README.md's "Configuration" section for the user-facing statement of this rule.
-func (n NotifyConfig) NeverSilences() bool {
-	return n.SilenceAfter == 0
+// SilenceDisabled reports whether the silence rule is switched off.
+//
+// SilenceAfter is not a repeat-suppression window: spec line 248 defines
+// notify.silence_after as "сколько сессия должна молчать, чтобы это считалось
+// событием" — the threshold a session's silence must exceed before it is an event at
+// all. No session can be silent for less than no time, so a zero threshold read
+// literally would make every session an event the moment it is first seen, and the
+// whole fleet would arrive as banners. The only reading that leaves the setting a way
+// to say "do not call me about silence" is that 0 turns the rule off; validate rejects
+// a negative value outright, but this method treats one as off too rather than let an
+// unvalidated struct built in code fire on everything.
+//
+// This method is where that decision is made once for the whole codebase: a consumer of
+// SilenceAfter must call it rather than compare SilenceAfter to zero itself, so the
+// meaning cannot be re-decided differently somewhere else. See README.md's
+// "Configuration" section for the user-facing statement of the same rule.
+func (n NotifyConfig) SilenceDisabled() bool {
+	return n.SilenceAfter <= 0
 }
 
 // Config is never serialised directly — Save/Load marshal the nested unexported
@@ -320,7 +327,7 @@ func describeYAMLError(err error) error {
 // socket, or a negative silence window that means either "always silent" or "never
 // silent" depending on how it is later compared — neither of which is what a negative
 // duration was meant to express. Zero is not rejected here: unlike a negative value, it
-// has one defined meaning (see NotifyConfig.NeverSilences) rather than two competing
+// has one defined meaning (see NotifyConfig.SilenceDisabled) rather than two competing
 // ones, so there is nothing for validate to refuse.
 func validate(c Config) error {
 	if c.ServerPort < 1 || c.ServerPort > 65535 {
