@@ -8,7 +8,9 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/kroticw/fleetdeck/internal/board"
 )
@@ -265,6 +267,12 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 // progress step off the ladder, a cross-field rule — which is the caller's mistake
 // (400).
 //
+// One family of refusals is not about the request at all: a card whose own
+// content cannot accept the write — no frontmatter block, frontmatter that will
+// not parse, no line for the field, a substitution that would change the file's
+// line count. The request was well formed and the card is not, so it answers 422
+// rather than telling the operator they asked wrongly.
+//
 // The last branch is a default rather than a test, because board returns those
 // refusals as plain errors with no sentinel to match on. Filesystem failures are
 // recognised structurally instead of by message, which is why the default can be
@@ -277,9 +285,38 @@ func cardWriteStatus(err error) int {
 		return http.StatusNotFound
 	case isFilesystemError(err):
 		return http.StatusInternalServerError
+	case isUnwritableCard(err):
+		return http.StatusUnprocessableEntity
 	default:
 		return http.StatusBadRequest
 	}
+}
+
+// unwritableCard lists board.SetField's own wording for the failures that are
+// the card's fault rather than the request's.
+//
+// Matching on message text is a seam, and it is here because internal/board
+// draws no sentinel around this family: a reworded message there turns a 422
+// silently back into a 400, which no test in this package would notice. A
+// sentinel in internal/board would close it properly.
+var unwritableCard = []string{
+	"has no frontmatter to write into",
+	"has malformed frontmatter",
+	"line count would change",
+}
+
+// hasNoFieldLine matches board's "card <path> has no <field> field", a card whose
+// frontmatter simply does not carry the line the write would replace.
+var hasNoFieldLine = regexp.MustCompile(`has no [a-z]+ field`)
+
+func isUnwritableCard(err error) bool {
+	msg := err.Error()
+	for _, phrase := range unwritableCard {
+		if strings.Contains(msg, phrase) {
+			return true
+		}
+	}
+	return hasNoFieldLine.MatchString(msg)
 }
 
 func isFilesystemError(err error) bool {

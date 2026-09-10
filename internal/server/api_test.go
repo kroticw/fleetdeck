@@ -287,6 +287,57 @@ func TestPatchCardReportsARefusedValueAsBadRequest(t *testing.T) {
 	}
 }
 
+// A card the board cannot write into is not the caller's mistake: the request
+// was well formed and the card is not. Answering 400 tells the operator to fix a
+// request that was fine.
+//
+// These run against the real board.SetField rather than a stub, so the messages
+// the status mapping keys on come from board itself. A rewording there fails
+// this test instead of quietly turning a 422 back into a 400.
+func TestPatchCardReportsACardThatCannotAcceptTheWriteAsUnprocessable(t *testing.T) {
+	cases := map[string]struct {
+		card  string
+		field string
+		value string
+		want  int
+	}{
+		"no frontmatter at all":      {"# just a heading\n", "progress", "40", http.StatusUnprocessableEntity},
+		"frontmatter will not parse": {"---\nstage: [unclosed\n---\n", "progress", "40", http.StatusUnprocessableEntity},
+		"no line for the field":      {"---\nstage: new\n---\n", "progress", "40", http.StatusUnprocessableEntity},
+		// Still the caller's mistake: a value the board will never accept.
+		"value off the ladder": {"---\nstage: new\nprogress: 0\n---\n", "progress", "37", http.StatusBadRequest},
+		// And so is a field the panel does not own.
+		"field the panel does not own": {"---\nstage: new\nprogress: 0\n---\n", "session", "abc", http.StatusBadRequest},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			d, _, card := cardDeps(t)
+			if err := os.WriteFile(card, []byte(tc.card), 0o600); err != nil {
+				t.Fatalf("write card: %v", err)
+			}
+			d.SetCardField = board.SetField
+			body := `{"path":"c.md","field":"` + tc.field + `","value":"` + tc.value + `"}`
+			if rec := do(d, http.MethodPatch, "/api/cards", body); rec.Code != tc.want {
+				t.Fatalf("want %d, got %d: %s", tc.want, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// The one refusal in this family that no card content can be built to provoke
+// from outside: board refuses a substitution that would change the file's line
+// count. It is still the card's fault, not the request's.
+func TestPatchCardReportsALineCountRefusalAsUnprocessable(t *testing.T) {
+	d, _, _ := cardDeps(t)
+	d.SetCardField = func(string, string, string) error {
+		return errors.New("card c.md refusing to write: line count would change")
+	}
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPatchCardRefusesAnEmptyPath(t *testing.T) {
 	d, calls, _ := cardDeps(t)
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"","field":"stage","value":"done"}`)
