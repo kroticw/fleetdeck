@@ -48,6 +48,17 @@ const KEYS = [
   "close_session",
   "no_steps",
   "terminal_missing",
+
+  // web/js/sessions.js's own column header and the theme override's button
+  // (web/js/header.js renders it, web/js/theme.js decides its state) — both
+  // added by the same task that added this comment. On this list for the
+  // same reason as everything else here: a key missing from one dictionary
+  // fails here, not silently in whichever language this machine's locale
+  // is not.
+  "sessions_title",
+  "theme_auto",
+  "theme_light",
+  "theme_dark",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

@@ -126,6 +126,37 @@ export function createPoller(pass, delayMs, { timers = globalThis, onError = () 
   };
 }
 
+// terminalTheme reads the panel's own colour tokens (app.css's :root custom
+// properties, already resolved for whichever theme is current) and turns
+// them into the object xterm.js's `theme` constructor option wants.
+//
+// Without this xterm falls back to its own default palette — a light grey on
+// black regardless of what the rest of the page is doing — which is
+// invisible as a defect for as long as the whole app is dark-only, and is
+// exactly what a live run surfaced once light became a real, chosen theme:
+// the terminal stayed a solid black rectangle inside an otherwise light
+// panel. Read once, at the moment the terminal is built (the panel is torn
+// down and rebuilt on every open, so this does not need to react to a theme
+// switch mid-session — only a fresh open needs to start on the right one).
+//
+// getComputedStyle and document.documentElement are both real-browser-only:
+// web/tests/fake-dom.js's FakeDocument has neither, on purpose — it is a
+// wiring test double, not a layout engine. Returning undefined here rather
+// than throwing lets those tests construct a terminal exactly as they did
+// before this function existed; the real page always has both.
+function terminalTheme() {
+  if (typeof getComputedStyle !== "function" || !document.documentElement) return undefined;
+  const style = getComputedStyle(document.documentElement);
+  const token = (name) => style.getPropertyValue(name).trim();
+  return {
+    background: token("--surface"),
+    foreground: token("--text"),
+    cursor: token("--accent"),
+    cursorAccent: token("--surface"),
+    selectionBackground: token("--surface-hover"),
+  };
+}
+
 // defaultTerminalFactory builds an xterm.js terminal in `host`.
 //
 // window.Terminal is what web/vendor/xterm.js assigns when index.html loads it
@@ -136,7 +167,12 @@ export function createPoller(pass, delayMs, { timers = globalThis, onError = () 
 function defaultTerminalFactory(host) {
   const Terminal = globalThis.Terminal;
   if (typeof Terminal !== "function") return null;
-  const terminal = new Terminal({ convertEol: true, fontSize: 12, scrollback: 2000 });
+  const terminal = new Terminal({
+    convertEol: true,
+    fontSize: 12,
+    scrollback: 2000,
+    theme: terminalTheme(),
+  });
   terminal.open(host);
   return terminal;
 }

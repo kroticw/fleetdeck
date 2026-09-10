@@ -1340,6 +1340,19 @@ main {
   height: 100%;
 }
 
+/* web/vendor/xterm.css hardcodes .xterm-viewport's background to #000 — a
+ * vendored file this task does not otherwise touch, and one #session-panel
+ * (an id, beating xterm.css's two-class selector regardless of the two
+ * stylesheets' load order in index.html) is enough to override without
+ * editing it. The canvas-rendered text and cursor are a separate surface,
+ * set by web/js/session.js's terminalTheme() at construction time; this
+ * rule is only the DOM chrome underneath and around that canvas. Together
+ * they are what stop the terminal from being a solid black rectangle inside
+ * an otherwise light panel — the specific defect a live run surfaced. */
+#session-panel .xterm-viewport {
+  background-color: var(--surface);
+}
+
 /* Errors sit between what the tab is showing and the box being typed into,
  * where a person is already looking — never on top of the content, which
  * would cost them the very output they were reading. */
