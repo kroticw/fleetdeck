@@ -194,6 +194,13 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, "a board")
 		return
 	}
+	if d.BoardDir == "" {
+		// A panel that was never told where its board is cannot confine a write,
+		// and must not guess: the path in the request would then be free to name
+		// any file on the disk that has frontmatter.
+		unavailable(w, "a board directory")
+		return
+	}
 	var body struct {
 		Path  string `json:"path"`
 		Field string `json:"field"`
@@ -206,7 +213,19 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "path is required: a card write must name the card it writes")
 		return
 	}
-	switch err := d.SetCardField(body.Path, body.Field, body.Value); {
+	path, err := confineToBoard(d.BoardDir, body.Path)
+	switch {
+	case errors.Is(err, errOutsideBoard):
+		fail(w, http.StatusForbidden, "card writes are confined to the board directory")
+		return
+	case err != nil:
+		// The board directory itself could not be resolved, so nothing can be
+		// checked against it. That is the panel's configuration being wrong, not
+		// the request.
+		unavailable(w, "a readable board directory")
+		return
+	}
+	switch err := d.SetCardField(path, body.Field, body.Value); {
 	case err == nil:
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, board.ErrNothingToCommit):

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -210,45 +211,65 @@ func TestScreenReportsAFailureWithoutDroppingWhatItRead(t *testing.T) {
 	}
 }
 
-func TestPatchCardWritesTheField(t *testing.T) {
+// cardDeps wires testDeps to a real board directory holding one card, and
+// returns the card's resolved path — resolved because the handler confines
+// writes by resolving both sides, and on macOS t.TempDir() sits under /var,
+// which is a symlink to /private/var.
+func cardDeps(t *testing.T) (Deps, *[]string, string) {
+	t.Helper()
 	d, calls := testDeps()
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"progress","value":"40"}`)
+	board := t.TempDir()
+	card := filepath.Join(board, "c.md")
+	if err := os.WriteFile(card, []byte("---\nstage: new\n---\n"), 0o600); err != nil {
+		t.Fatalf("write card: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(card)
+	if err != nil {
+		t.Fatalf("resolve card: %v", err)
+	}
+	d.BoardDir = board
+	return d, calls, resolved
+}
+
+func TestPatchCardWritesTheField(t *testing.T) {
+	d, calls, card := cardDeps(t)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if len(*calls) != 1 || (*calls)[0] != "card:/b/c.md:progress:40" {
+	if len(*calls) != 1 || (*calls)[0] != "card:"+card+":progress:40" {
 		t.Fatalf("unexpected calls: %v", *calls)
 	}
 }
 
 func TestPatchCardRefusesFieldsThePanelDoesNotOwn(t *testing.T) {
-	d, _ := testDeps()
+	d, _, _ := cardDeps(t)
 	d.SetCardField = func(string, string, string) error {
 		return fmt.Errorf("%w: session", board.ErrUnknownField)
 	}
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"session","value":"x"}`)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"session","value":"x"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("writing a foreign field must be refused with 400, got %d", rec.Code)
 	}
 }
 
 func TestPatchCardReportsAMissingCardAsNotFound(t *testing.T) {
-	d, _ := testDeps()
+	d, _, _ := cardDeps(t)
 	d.SetCardField = func(path, _, _ string) error {
 		return fmt.Errorf("re-read card before write: %w", &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist})
 	}
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/gone.md","field":"stage","value":"done"}`)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"gone.md","field":"stage","value":"done"}`)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("a card that does not exist must be 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestPatchCardReportsAWriteFailureAsServerError(t *testing.T) {
-	d, _ := testDeps()
+	d, _, _ := cardDeps(t)
 	d.SetCardField = func(path, _, _ string) error {
 		return fmt.Errorf("rename temp file over card: %w", &os.LinkError{Op: "rename", Old: path, New: path, Err: fs.ErrPermission})
 	}
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"stage","value":"done"}`)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"done"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("an I/O failure must be 500, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -258,16 +279,16 @@ func TestPatchCardReportsAWriteFailureAsServerError(t *testing.T) {
 // touches the disk, and returns a plain error for it. That is the client's mistake,
 // not the server's, so it must not be reported as a 500.
 func TestPatchCardReportsARefusedValueAsBadRequest(t *testing.T) {
-	d, _ := testDeps()
+	d, _, _ := cardDeps(t)
 	d.SetCardField = func(string, string, string) error { return errors.New(`unknown stage "shipping"`) }
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"stage","value":"shipping"}`)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"shipping"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a refused value must be 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestPatchCardRefusesAnEmptyPath(t *testing.T) {
-	d, calls := testDeps()
+	d, calls, _ := cardDeps(t)
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"","field":"stage","value":"done"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", rec.Code)
@@ -375,7 +396,7 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			d, _ := testDeps()
+			d, _, _ := cardDeps(t)
 			tc.blank(&d)
 			rec := do(d, tc.method, tc.target, tc.body)
 			if rec.Code != http.StatusServiceUnavailable {
@@ -391,11 +412,11 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 // operator would redo an edit that already happened, and doing that twice to a
 // progress field moves it somewhere nobody asked for.
 func TestPatchCardReportsAnUncommittedWriteAsSuccess(t *testing.T) {
-	d, _ := testDeps()
+	d, _, _ := cardDeps(t)
 	d.SetCardField = func(string, string, string) error {
 		return fmt.Errorf("%w: git commit timed out after 30s, likely a signing passphrase prompt", ErrFieldWrittenNotCommitted)
 	}
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"progress","value":"40"}`)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a written but uncommitted field must be 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -411,11 +432,11 @@ func TestPatchCardReportsAnUncommittedWriteAsSuccess(t *testing.T) {
 // Nothing to commit means the field already held this value, so no history is
 // missing and there is nothing to tell the operator about.
 func TestPatchCardReportsNothingToCommitAsAnOrdinarySuccess(t *testing.T) {
-	d, _ := testDeps()
+	d, _, _ := cardDeps(t)
 	d.SetCardField = func(string, string, string) error {
 		return fmt.Errorf("nothing to commit for c.md: %w", board.ErrNothingToCommit)
 	}
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"progress","value":"40"}`)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("nothing to commit must be an ordinary success, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -424,11 +445,11 @@ func TestPatchCardReportsNothingToCommitAsAnOrdinarySuccess(t *testing.T) {
 // The same sentinel wrapped both ways round: a commit that found nothing to do is
 // not a write missing from git history, whichever way the caller wrapped it.
 func TestPatchCardTreatsNothingToCommitAsSuccessEvenWhenWrappedAsUncommitted(t *testing.T) {
-	d, _ := testDeps()
+	d, _, _ := cardDeps(t)
 	d.SetCardField = func(string, string, string) error {
 		return fmt.Errorf("%w: %w", ErrFieldWrittenNotCommitted, board.ErrNothingToCommit)
 	}
-	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"progress","value":"40"}`)
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
 	}

@@ -68,10 +68,21 @@ type Deps struct {
 	// wrapping board.ErrNothingToCommit means the card already held the value, and
 	// is answered as an ordinary success. Everything else is a failed write.
 	//
-	// path arrives from the browser, so whatever this function is wired to is
-	// responsible for confining writes to the board directory. The server cannot
-	// do that check: it is not told where the board is.
+	// path arrives from the browser and is confined to BoardDir before this
+	// function is called, so what it receives is always an absolute path that
+	// resolves to somewhere inside the board.
 	SetCardField func(path, field, value string) error
+
+	// BoardDir is the only directory card writes may touch. Every path a card
+	// write arrives with is resolved and checked against it, and anything that
+	// lands elsewhere is refused before board.SetField — which will rewrite a
+	// frontmatter line in any file that has one — ever sees it.
+	//
+	// Unlike the functions above, an empty BoardDir is not a capability the panel
+	// simply lacks: SetCardField without it is a write with nothing confining it.
+	// The card route answers 503 in that case rather than guessing where the
+	// board is.
+	BoardDir string
 
 	// PutStatus records a statusline reporter's report. It cannot fail: the
 	// reporter never reads the response and a panel that cannot store a report
