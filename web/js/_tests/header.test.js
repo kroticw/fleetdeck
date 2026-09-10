@@ -20,6 +20,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isWaiting, isStalled, stallReason, escapeHTML, stalledList } from "../header.js";
 
+// The reasons a person actually sees, in order. Each reason is its own
+// element so the stylesheet can clip each one independently, so "what is
+// shown" is the list of those elements' contents rather than a run of text
+// split on a separator.
+function shownReasons(html) {
+  return [...html.matchAll(/<span class="stall-reason" title="[^"]*">([^<]*)<\/span>/g)].map(
+    (m) => m[1],
+  );
+}
+
 test("a question in needs is waiting, not stalled", () => {
   const s = { needs: "answer: pick one (A · B)" };
   assert.equal(isWaiting(s), true);
@@ -84,9 +94,8 @@ test("stalledList drops reasons that are empty strings instead of leaving a stra
   const noReason = { needs: "", state: "blocked", detail: "" };
   const withReason = { needs: "usage limit reached" };
   const html = stalledList([withReason, noReason]);
-  assert.equal(html.includes("; ;"), false);
-  assert.equal(html.includes(";  ;"), false);
-  assert.equal(html, '<span class="stall-reasons">usage limit reached</span>');
+  assert.deepEqual(shownReasons(html), ["usage limit reached"]);
+  assert.equal(html.includes("stall-more"), false);
 });
 
 test("stalledList's tail counts non-empty reasons left out, not sessions past a fixed slot", () => {
@@ -109,10 +118,9 @@ test("stalledList's tail counts non-empty reasons left out, not sessions past a 
   assert.equal(html.includes("+1 more"), true);
   assert.equal(html.includes("+2 more"), false);
   // None of the 3 shown reasons is empty/blank.
-  const listPart = html.replace(/<span class="stall-reasons">|<\/span>/g, "").replace(/ \+\d+ more$/, "");
-  const shownReasons = listPart.split("; ");
-  assert.equal(shownReasons.length, 3);
-  for (const reason of shownReasons) {
+  const shown = shownReasons(html);
+  assert.equal(shown.length, 3);
+  for (const reason of shown) {
     assert.notEqual(reason.trim(), "");
   }
 });
@@ -134,8 +142,47 @@ test("stalledList shows no tail when an in-slice empty reason is backfilled by a
   ];
   const html = stalledList(sessions);
   assert.equal(html.includes("more"), false);
-  assert.equal(
-    html,
-    '<span class="stall-reasons">usage limit reached; login required; rate limited</span>',
-  );
+  assert.deepEqual(shownReasons(html), [
+    "usage limit reached",
+    "login required",
+    "rate limited",
+  ]);
+});
+
+// --- Long reasons must not turn the header into a wall of text ---
+//
+// The daemon puts the text of an incoming message into `detail` verbatim, so
+// any session someone has written to carries a paragraph, not a phrase. The
+// spec (section 4) requires the row to carry the reason in words; it does not
+// require it to carry all of them at once. What it does require is that the
+// words stay reachable — the whole argument for "words beat flags" is that a
+// person needs to read them.
+
+test("each stalled reason is its own element, so one long reason cannot run into the next", () => {
+  const html = stalledList([{ needs: "usage limit reached" }, { needs: "login required" }]);
+  const rows = html.match(/class="stall-reason"/g) ?? [];
+  assert.equal(rows.length, 2, "each reason needs its own box to be clipped independently");
+});
+
+test("a long reason keeps its full text in the title attribute, not only what fits on screen", () => {
+  const long = "context deadline exceeded while " + "x".repeat(400);
+  const html = stalledList([{ needs: "", state: "blocked", detail: long }]);
+  const title = html.match(/title="([^"]*)"/)?.[1];
+  assert.ok(title, "a clipped reason must carry its full text somewhere reachable");
+  assert.equal(title, long, "the title must hold the whole reason, not a shortened copy");
+});
+
+test("a reason's title is escaped, so a quote in detail cannot end the attribute", () => {
+  const nasty = 'he said "go" <img src=x onerror=alert(1)>';
+  const html = stalledList([{ needs: "", state: "blocked", detail: nasty }]);
+  assert.ok(!html.includes('="go"'), "an unescaped quote would close the title attribute early");
+  assert.ok(!html.includes("<img"), "the reason must never reach the DOM as markup");
+  assert.ok(html.includes("&quot;go&quot;"), "the quote belongs in the title, escaped");
+});
+
+test("a multi-line detail is carried as one line's worth of text, newlines and all", () => {
+  const multi = "first line\nsecond line\nthird line";
+  const html = stalledList([{ needs: "", state: "blocked", detail: multi }]);
+  const title = html.match(/title="([^"]*)"/)?.[1];
+  assert.equal(title, multi, "the title keeps the reason exactly as the daemon wrote it");
 });

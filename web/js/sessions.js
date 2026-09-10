@@ -124,7 +124,7 @@ function applyContextWidths(root) {
   }
 }
 
-function rowHtml(s) {
+export function rowHtml(s) {
   const waiting = isWaiting(s);
   const stalled = isStalled(s);
   const classes = ["srow"];
@@ -137,9 +137,17 @@ function rowHtml(s) {
       ? `<span class="sbadge sbadge-stalled">${escapeHtml(t("stalled"))}</span>`
       : "";
 
+  // The reason is clipped to a few lines by the stylesheet, with the whole of
+  // it in title. The daemon writes an incoming message's text into detail
+  // verbatim, so this is a paragraph as often as it is a phrase, and an
+  // unclipped one pushes every session below it off the screen. Clipping in
+  // CSS rather than by substring keeps the cut at the column's real width and
+  // keeps the text itself intact -- spec 3.1 wants detail carried verbatim
+  // because a person has to read it, so it has to stay reachable here rather
+  // than only in the daemon.
   const reason = waiting || stalled ? reasonText(s) : "";
   const reasonHtml = reason
-    ? `<div class="sreason">${escapeHtml(reason)}</div>`
+    ? `<div class="sreason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</div>`
     : "";
 
   const name = s.name || s.short || "";

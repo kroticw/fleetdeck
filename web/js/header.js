@@ -113,10 +113,31 @@ function gauge(label, window_) {
 export function stalledList(stalledSessions) {
   if (stalledSessions.length === 0) return "";
   const reasons = stalledSessions.map((s) => stallReason(s)).filter((reason) => reason !== "");
-  const shown = reasons.slice(0, MAX_STALL_REASONS).map((reason) => escapeHTML(reason));
+  // Each reason is its own box, and each box is clipped to one line by the
+  // stylesheet. The daemon writes the text of an incoming message into detail
+  // verbatim, so a reason is routinely a paragraph rather than a phrase, and
+  // three of those joined into one run of text turn this strip into a wall
+  // that pushes the whole panel down.
+  //
+  // The clipping is CSS, not a substring: the point of cutting is that the
+  // header stays one line wide, which is a question about the width of the
+  // window and the width of the glyphs, and neither is known here. A JS cut at
+  // N characters is either too early on a wide window or too late on a narrow
+  // one, and it also throws the rest away.
+  //
+  // Which is the other half: the full reason goes in title. Spec 3.1 requires
+  // the row to carry detail's text verbatim, and the reason that rule exists
+  // is that a person has to be able to read it -- so the text has to stay
+  // reachable without leaving the panel, not merely be present in a variable.
+  const shown = reasons
+    .slice(0, MAX_STALL_REASONS)
+    .map((reason) => {
+      const escaped = escapeHTML(reason);
+      return `<span class="stall-reason" title="${escaped}">${escaped}</span>`;
+    });
   const rest = reasons.length - shown.length;
-  const tail = rest > 0 ? ` +${rest} more` : "";
-  return `<span class="stall-reasons">${shown.join("; ")}${tail}</span>`;
+  const tail = rest > 0 ? `<span class="stall-more">+${rest} more</span>` : "";
+  return `<span class="stall-reasons">${shown.join("")}${tail}</span>`;
 }
 
 export function renderHeader(root) {
