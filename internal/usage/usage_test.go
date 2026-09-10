@@ -38,7 +38,7 @@ func TestLimitsParsesBothWindows(t *testing.T) {
 
 func TestLimitsCachesWithinTTL(t *testing.T) {
 	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits++
 		w.Write([]byte(body))
 	}))
@@ -56,7 +56,7 @@ func TestLimitsCachesWithinTTL(t *testing.T) {
 }
 
 func TestExpiredTokenIsAnErrorNotZeroes(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"error":{"type":"authentication_error"}}`))
 	}))
 	defer srv.Close()
@@ -75,7 +75,7 @@ func TestMissingTokenIsTypedError(t *testing.T) {
 }
 
 func TestEmptyBodyIsNotSuccess(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
@@ -87,7 +87,7 @@ func TestEmptyBodyIsNotSuccess(t *testing.T) {
 }
 
 func TestMalformedResetsAtIsAnErrorNotZero(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"five_hour":{"utilization":17.4,"resets_at":"invalid"},"seven_day":{"utilization":48.2,"resets_at":"2026-09-13T00:00:00.000Z"}}`))
 	}))
 	defer srv.Close()

@@ -63,7 +63,7 @@ func (f *Fetcher) Limits(ctx context.Context) (Limits, error) {
 	if err != nil {
 		return Limits{}, fmt.Errorf("usage request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var payload struct {
 		Error *struct {
