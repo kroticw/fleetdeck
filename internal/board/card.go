@@ -18,6 +18,8 @@ var (
 	ErrNoCards = errors.New("no cards found")
 	// ErrUnknownField means a write targeted a field the panel does not own.
 	ErrUnknownField = errors.New("field is not writable")
+	// ErrNothingToCommit means Commit found nothing staged for the given file.
+	ErrNothingToCommit = errors.New("nothing to commit")
 
 	frontmatterRe = regexp.MustCompile(`(?s)\A---\r?\n(.*?)\r?\n---\r?\n`)
 	linkRe        = regexp.MustCompile(`\[\[([^\[\]\r\n]+?)\]\]`)
