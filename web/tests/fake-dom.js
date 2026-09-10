@@ -22,6 +22,12 @@ function attributeName(name) {
 }
 
 function matchesSelector(node, selector) {
+  // A comma is a list of selectors, and a node matches if it matches any of
+  // them — the panel asks for its scrolling boxes as ".md-table, pre", one
+  // query for two kinds of box.
+  if (selector.includes(",")) {
+    return selector.split(",").some((one) => matchesSelector(node, one));
+  }
   const parts = SELECTOR.exec(selector.trim());
   if (!parts) throw new Error(`fake-dom: unsupported selector ${selector}`);
   const [, tag, className, attribute, quoted, bare] = parts;
@@ -76,6 +82,12 @@ class FakeNode {
     this.scrollTop = 0;
     this.scrollHeight = 0;
     this.clientHeight = 0;
+    // The same three across, for the scroll indicator: whether there is more
+    // content to the right is a measurement, and a test states the situation by
+    // setting these rather than by laying anything out.
+    this.scrollLeft = 0;
+    this._scrollWidth = 0;
+    this._clientWidth = 0;
     this.selectionStart = 0;
     this.selectionEnd = 0;
 
@@ -89,6 +101,68 @@ class FakeNode {
     this.textWrites = 0;
     this.htmlWrites = 0;
     this.queries = 0;
+  }
+
+  // A node is connected when its chain of parents reaches the document. The
+  // browser is the authority here and it is unforgiving: a node that is not in
+  // the document has no layout at all, so clientWidth and scrollWidth are both
+  // zero and every measurement taken from them is false. A module that measures
+  // before inserting gets a confident, wrong answer — which is exactly the
+  // defect this models, and which this fake could not express while any node
+  // could carry any width.
+  get isConnected() {
+    let node = this;
+    while (node) {
+      if (node.isDocumentRoot) return true;
+      node = node.parentNode;
+    }
+    return false;
+  }
+
+  // Only the horizontal pair is gated. The vertical pair belongs to tests
+  // written before this and describes scroll position rather than layout;
+  // changing what those report is a separate question from this one.
+  get clientWidth() {
+    return this.isConnected ? this._clientWidth : 0;
+  }
+
+  set clientWidth(value) {
+    this._clientWidth = value;
+  }
+
+  get scrollWidth() {
+    return this.isConnected ? this._scrollWidth : 0;
+  }
+
+  set scrollWidth(value) {
+    this._scrollWidth = value;
+  }
+
+  // classList over className, so a module can toggle one class without
+  // knowing what else the node carries -- which is the whole point of using it
+  // in the first place.
+  get classList() {
+    const node = this;
+    const names = () => String(node.className).split(/\s+/).filter(Boolean);
+    const write = (list) => {
+      node.className = list.join(" ");
+    };
+    return {
+      contains: (name) => names().includes(name),
+      add: (name) => {
+        if (!names().includes(name)) write([...names(), name]);
+      },
+      remove: (name) => write(names().filter((n) => n !== name)),
+      toggle: (name, on) => {
+        if (on === undefined) on = !names().includes(name);
+        if (on) {
+          if (!names().includes(name)) write([...names(), name]);
+        } else {
+          write(names().filter((n) => n !== name));
+        }
+        return on;
+      },
+    };
   }
 
   setSelectionRange(start, end) {
@@ -187,6 +261,13 @@ class FakeNode {
 
   querySelectorAll(selector) {
     this.queries += 1;
+    // Recorded with the one fact a count cannot carry: whether the node being
+    // searched was in the page at the time. A module that measures layout has
+    // to do it on a node the browser has laid out, and asking too early is
+    // silent — every width reads zero and the answer is a confident "it fits".
+    // The tree that comes back looks the same either way, so the moment is
+    // logged rather than inferred.
+    this.ownerDocument?.searches?.push({ selector, connected: this.isConnected });
     const found = [];
     const visit = (node) => {
       for (const child of node.children) {
@@ -238,6 +319,14 @@ class FakeSelect extends FakeNode {
 class FakeDocument {
   constructor() {
     this.listeners = new Map();
+    // The document's own root. A test that cares whether a node is in the page
+    // appends to it; one that does not, does not have to.
+    // Every querySelectorAll in the page, in order, each with whether its node
+    // was connected. See FakeNode.querySelectorAll.
+    this.searches = [];
+    this.body = new FakeNode("body");
+    this.body.isDocumentRoot = true;
+    this.body.ownerDocument = this;
   }
 
   // The node focus() last moved to, as document.activeElement.
@@ -271,16 +360,25 @@ class FakeDocument {
 // its document into the next one.
 export function installDOM() {
   const previous = Object.hasOwn(globalThis, "document") ? globalThis.document : undefined;
+  const previousWindow = Object.hasOwn(globalThis, "window") ? globalThis.window : undefined;
   const document = new FakeDocument();
   globalThis.document = document;
+  // A window with nothing on it but events. Resize is a real input to the
+  // panel -- the same content crosses the fits/doesn't-fit boundary with no
+  // new snapshot behind it -- and without a window here that path is untestable.
+  const window = new FakeNode("window");
+  globalThis.window = window;
   return {
     document,
+    window,
     element(tag) {
       return document.createElement(tag);
     },
     restore() {
       if (previous === undefined) delete globalThis.document;
       else globalThis.document = previous;
+      if (previousWindow === undefined) delete globalThis.window;
+      else globalThis.window = previousWindow;
     },
   };
 }

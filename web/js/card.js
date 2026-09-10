@@ -21,6 +21,7 @@
 import { subscribe as storeSubscribe } from "./store.js";
 import { setCardField } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
+import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
@@ -267,6 +268,11 @@ export function renderCard(root, path, onClose, options = {}) {
 
     root.hidden = false;
     root.replaceChildren(...build(latest, card, known, orphan, backlinks));
+    // After the panel is in the page, never while it is being built: a node
+    // outside the document has no layout, so both widths read zero and every
+    // box "fits". Measured there, the mark never appeared at all — and looked
+    // correct, because nothing on screen said it was missing.
+    markScrollablesWithin(root, ".md-table, pre");
     if (focusField) {
       // The control the operator was using has just been replaced by the
       // rebuild. Putting the focus back is the difference between a panel that
@@ -313,6 +319,12 @@ export function renderCard(root, path, onClose, options = {}) {
   };
 
   root.addEventListener("click", onLinkClick);
+
+  // Watched on the panel, which outlives every card drawn into it, rather than
+  // on the body, which is replaced whole on each render: a resize listener per
+  // render would accumulate one per card ever opened, each holding a body that
+  // left the document long ago.
+  watchScrollables(root, ".md-table, pre");
   document.addEventListener("keydown", onKey);
   document.addEventListener("mousedown", onOutside);
   // Wrapped, not passed straight in: subscribe calls its listener with

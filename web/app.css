@@ -995,14 +995,22 @@ main {
   border-radius: var(--radius-sm);
 }
 
-/* .board-scrollable (web/js/board.js's markScrollable) is a real measurement
+/* .is-scrollable (web/js/scrollable.js) is a real measurement
  * -- scrollWidth > clientWidth, re-taken after every render and on resize --
  * not a guess about typical window widths. The styled scrollbar above is
  * still a hover/interaction affordance on most platforms; this is not: a
  * fade on the last ~40px says "more columns past here" in the idle,
  * unscrolled screenshot itself, before any pointer ever reaches the board.
  * It only ever appears when there genuinely is more to reach. */
-.board-scrollable {
+.is-scrollable {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+}
+
+/* The board gets a wider fade than a table or a code block does: it is the
+ * full width of the window, where 24px reads as an edge artefact, while a
+ * table inside a narrow column would lose a whole cell to 40. */
+#board.is-scrollable {
   mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent 100%);
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent 100%);
 }
@@ -1582,8 +1590,13 @@ main {
   text-align: left;
 }
 
+/* A header cell had weight and nothing else: no fill, so on a dark surface the
+ * header row was the same colour as the body and only the border said which
+ * row it was. --surface-hover is a token, so this is one rule for both themes
+ * rather than a colour picked for the one that happened to be on screen. */
 .md-table th {
   font-weight: 600;
+  background: var(--surface-hover);
 }
 
 .md-left {

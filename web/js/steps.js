@@ -17,6 +17,7 @@
 // half a change belongs to.
 
 import { renderMarkdown } from "./markdown.js";
+import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { stripToolNote, unwrapEnvelope } from "./envelope.js";
 
 
@@ -105,6 +106,10 @@ export function fillStep(row, step, classFor) {
 // appending changes the answer. Someone who scrolled up is reading, and taking
 // the screen back makes a conversation longer than one screen unreadable.
 export function syncSteps(container, steps, classFor) {
+  // The container outlives the steps inside it — steps are diffed, not rebuilt
+  // — so the listeners go here, once. watchScrollables is idempotent per
+  // (container, selector), which is what makes calling it on every sync safe.
+  watchScrollables(container, ".md-table, pre");
   const stick = atBottom(container);
   const rows = container.children;
 
@@ -125,6 +130,13 @@ export function syncSteps(container, steps, classFor) {
   while (container.children.length > steps.length) {
     container.children[container.children.length - 1].remove();
   }
+
+  // Once, over the whole container, and only here: a step's body is measured
+  // for scrolling, and a node that is not yet in the page has no layout to
+  // measure — every box would read as fitting. fillStep builds a body and
+  // attaches it afterwards, so measuring there answered about nothing. Walking
+  // the container is also what catches the rows this sync left untouched.
+  markScrollablesWithin(container, ".md-table, pre");
 
   if (stick) container.scrollTop = container.scrollHeight;
 }

@@ -268,3 +268,237 @@ test("an empty cell is a cell, not a gap that shifts the row", () => {
   assert.ok(row.includes("<td></td>"), "an empty cell keeps its place");
 });
 
+// --- paragraphs ---
+//
+// A card's paragraph is wrapped in the source, and every wrapped line was
+// becoming its own block: one paragraph about Xray showed as four. In markdown
+// a single newline continues a paragraph; a blank line starts a new one.
+
+test("a paragraph wrapped across source lines is one paragraph", () => {
+  const html = renderMarkdown("Про Xray отдельно: у XTLS все релизы\nпомечены как prerelease, поэтому\nrelease/latest отдаёт старый.", new Set());
+  assert.equal((html.match(/<p>/g) ?? []).length, 1, "one paragraph, not three");
+  assert.ok(html.includes("релизы помечены"), "the lines are joined by a space, not run together");
+});
+
+test("a blank line still starts a new paragraph", () => {
+  // The control: if everything collapsed into one, this is not parsing, it is
+  // deleting newlines.
+  const html = renderMarkdown("первый абзац\nего продолжение\n\nвторой абзац", new Set());
+  assert.equal((html.match(/<p>/g) ?? []).length, 2, "two paragraphs, split where the blank line is");
+  assert.ok(html.includes("<p>первый абзац его продолжение</p>"));
+  assert.ok(html.includes("<p>второй абзац</p>"));
+});
+
+test("several blank lines are one break, not several empty paragraphs", () => {
+  const html = renderMarkdown("один\n\n\n\nдва", new Set());
+  assert.equal((html.match(/<p>/g) ?? []).length, 2);
+  assert.ok(!/<p>\s*<\/p>/.test(html), "no empty paragraphs");
+});
+
+test("a paragraph ends where another construct begins", () => {
+  const html = renderMarkdown("текст абзаца\n# Заголовок\nещё текст", new Set());
+  assert.ok(html.includes("<p>текст абзаца</p>"), "the heading closes the paragraph before it");
+  assert.ok(/<h2>Заголовок<\/h2>/.test(html));
+  assert.ok(html.includes("<p>ещё текст</p>"));
+});
+
+test("lines inside a fenced block keep their own newlines", () => {
+  const html = renderMarkdown("```\nстрока один\nстрока два\n```", new Set());
+  assert.ok(html.includes("строка один\nстрока два"), "code is not reflowed");
+});
+
+// --- ordered lists ---
+//
+// Bulleted lists already worked — checked by running the renderer, not assumed.
+// Numbered ones did not: "1. Сессии ждут ответа" stayed a paragraph with a digit.
+
+test("a numbered list becomes a list", () => {
+  const html = renderMarkdown("1. Сессии ждут ответа\n2. Теряется контроль", new Set());
+  assert.ok(html.includes("<ol>"), "an ordered list, not paragraphs with digits");
+  assert.equal((html.match(/<li>/g) ?? []).length, 2);
+  assert.ok(!html.includes("1."), "the marker belongs to the list, not to the text");
+});
+
+test("a numbered list may start at a number other than one", () => {
+  // Real: a card numbers a stub as "0." on purpose.
+  const html = renderMarkdown("0. Заготовка в цель не входит\n1. Остальное входит", new Set());
+  assert.ok(/<ol start="0">/.test(html), "the list starts where the author started it");
+});
+
+test("an ordered list ends where its items end", () => {
+  const html = renderMarkdown("1. первый\n2. второй\n\nОбычный текст.", new Set());
+  assert.ok(html.includes("</ol>"), "the list closes");
+  assert.ok(html.includes("<p>Обычный текст.</p>"), "and what follows is not swallowed");
+  assert.ok(html.indexOf("</ol>") < html.indexOf("Обычный текст"));
+});
+
+test("a bulleted list and a numbered list are different lists", () => {
+  const html = renderMarkdown("- маркер\n1. номер", new Set());
+  assert.ok(html.includes("</ul>"), "the bulleted list closes when the numbering starts");
+  assert.ok(html.includes("<ol"), "and the numbered one opens");
+});
+
+test("a bulleted list still works", () => {
+  const html = renderMarkdown("- один\n- два", new Set());
+  assert.equal((html.match(/<li>/g) ?? []).length, 2);
+  assert.ok(html.includes("<ul>"));
+});
+
+// --- the control case, taken from the real board ---
+
+test("a date at the start of a line is not a list item", () => {
+  // Found by grepping the operator's own board: "07.09 в 12:42 Дарья…" is the
+  // only line there that starts with digits and a dot and is not a list. What
+  // separates them is the space after the dot, and that is the whole rule.
+  const html = renderMarkdown("07.09 в 12:42 Дарья перевела тикет из Closed", new Set());
+  assert.ok(!html.includes("<ol"), "a date is not a numbered list");
+  assert.ok(html.includes("07.09 в 12:42"), "and it keeps its digits");
+});
+
+test("a version number at the start of a line is not a list item", () => {
+  const html = renderMarkdown("3.4.3 — версия, до которой обновляем", new Set());
+  assert.ok(!html.includes("<ol"));
+  assert.ok(html.includes("3.4.3"));
+});
+
+test("a number with a dot but no space is not a list item", () => {
+  const html = renderMarkdown("1.Слитно написанное не список", new Set());
+  assert.ok(!html.includes("<ol"));
+});
+
+// --- what the mutation run found my tests could not see ---
+
+test("a bulleted list after a numbered one closes it", () => {
+  // The mirror of the test above. Checking one direction proved nothing about
+  // the other: the code has two branches and only one of them was covered.
+  const html = renderMarkdown("1. номер\n- маркер", new Set());
+  assert.ok(html.includes("</ol>"), "the numbered list closes when the bullet starts");
+  assert.ok(html.indexOf("</ol>") < html.indexOf("<ul>"));
+});
+
+test("a list after a paragraph is a new list", () => {
+  // If the open-list flag is not cleared when the list closes, the second list
+  // never opens: its items land loose between blocks.
+  const html = renderMarkdown("- один\n\nтекст\n\n- два", new Set());
+  assert.equal((html.match(/<ul>/g) ?? []).length, 2, "two lists, both opened");
+  assert.equal((html.match(/<\/ul>/g) ?? []).length, 2, "and both closed");
+});
+
+test("a paragraph before a table stays before it", () => {
+  // A buffered paragraph that is not flushed is not lost — it is printed after
+  // whatever came next, which is worse: the text is on screen, in the wrong
+  // place, and nothing looks broken.
+  // No blank line between them, deliberately: with one, the paragraph is
+  // already closed before the table is even looked at, and the test passes
+  // whatever the table branch does. The first version of this test had one.
+  const html = renderMarkdown("Вводная строка\n| a | b |\n| --- | --- |\n| 1 | 2 |", new Set());
+  assert.ok(html.includes("<p>Вводная строка</p>"));
+  assert.ok(html.indexOf("Вводная строка") < html.indexOf("md-table"), "before the table, not after");
+});
+
+test("a paragraph before a fenced block stays before it", () => {
+  const html = renderMarkdown("Вводная строка\n```\nкод\n```", new Set());
+  assert.ok(html.indexOf("Вводная строка") < html.indexOf("<pre>"), "before the code, not after");
+});
+
+test("paragraphs are separated in the output, not run together", () => {
+  const html = renderMarkdown("абзац один\n\nабзац два", new Set());
+  assert.ok(html.includes("<p>абзац один</p>\n\n<p>абзац два</p>"), "the blank line survives as a break");
+});
+
+// --- an item has two ends too ---
+//
+// Found on the operator's own board, not imagined: cards wrap their list items
+// the way they wrap their prose, and the continuation line carries an indent.
+// Every numbered list in 2026-09-07-obnovlenie-remnawave.md is written this way,
+// and each continuation was closing the list and reopening it at the next item —
+// one list of four items came out as three lists and two stray paragraphs.
+
+test("an indented continuation belongs to the item above it", () => {
+  const html = renderMarkdown("1. Обновить панель 3.3.2 → 3.4.3.\n   Перед этим — бэкап.", new Set());
+  assert.equal((html.match(/<li>/g) ?? []).length, 1, "one item, not an item and a paragraph");
+  assert.equal((html.match(/<ol/g) ?? []).length, 1, "and one list");
+  assert.ok(html.includes("3.4.3. Перед этим"), "joined by a space");
+  assert.ok(!html.includes("<p>"), "the continuation is not a paragraph");
+});
+
+test("a wrapped list keeps all its items in one list", () => {
+  const html = renderMarkdown(
+    "1. **Сначала панель, потом ноды.** Панель сейчас старее нод\n   (3.4.0) — это перекос.\n2. **Ноды по одной.** Порядок: Латвия → Москва →\n   Стокгольм.",
+    new Set(),
+  );
+  assert.equal((html.match(/<ol/g) ?? []).length, 1, "one list, not one per item");
+  assert.equal((html.match(/<li>/g) ?? []).length, 2);
+});
+
+test("bulleted items continue the same way", () => {
+  const html = renderMarkdown("- Нашёл ломающее изменение — остановись и спроси, не\n  импровизируй.", new Set());
+  assert.equal((html.match(/<li>/g) ?? []).length, 1);
+  assert.ok(html.includes("не импровизируй."));
+});
+
+test("an unindented line after an item still ends the list", () => {
+  // The control. Without the indent there is nothing to tell a continuation
+  // from the paragraph that follows a list, and swallowing that paragraph into
+  // the last item would be the same defect facing the other way.
+  const html = renderMarkdown("- пункт\nОбычный текст после списка.", new Set());
+  assert.ok(html.includes("</ul>"), "the list closes");
+  assert.ok(html.includes("<p>Обычный текст после списка.</p>"), "and the text is its own paragraph");
+});
+
+test("markup split across a wrapped item still renders", () => {
+  // A consequence of buffering the item rather than appending rendered halves:
+  // bold that starts on one line and ends on the next is one bold run.
+  const html = renderMarkdown("- **Это прод с живыми\n  пользователями.** Дальше текст.", new Set());
+  assert.ok(html.includes("<strong>Это прод с живыми пользователями.</strong>"));
+});
+
+// --- a continuation has two ends of its own ---
+
+test("an indented bullet is not swallowed into the item above it", () => {
+  // Nested lists are not supported and are not made so here. What must not
+  // happen is worse than not supporting them: the nested items were being
+  // joined into the parent's text, so "- parent / - child / - child2" read as
+  // one line, "parent - child - child2", with the dashes looking like dashes in
+  // a sentence. Unsupported and visible beats absorbed and invisible.
+  const html = renderMarkdown("- parent\n  - child\n  - child2\n- next", new Set());
+  assert.ok(!html.includes("parent - child"), "the nested items are not glued into the parent");
+  assert.ok(html.includes("child"), "and they are still on screen");
+});
+
+test("an indented numbered item is not swallowed either", () => {
+  const html = renderMarkdown("1. one\n   1. sub\n2. two", new Set());
+  assert.ok(!html.includes("one 1. sub"), "the nested item is not glued into the parent");
+  assert.ok(html.includes("sub"));
+});
+
+test("a plain indented line is still a continuation", () => {
+  // The control for both tests above: the rule they narrow must keep working
+  // for the case it was written for.
+  const html = renderMarkdown("- Нашёл ломающее изменение — остановись и спроси, не\n  импровизируй.", new Set());
+  assert.equal((html.match(/<li>/g) ?? []).length, 1);
+  assert.ok(html.includes("не импровизируй."));
+});
+
+test("a huge number is not turned into an exponent in the start attribute", () => {
+  // Number("99999999999999999999999") is 1e+23, and start="1e+23" is not an
+  // integer, so a browser drops the attribute. Nothing dangerous — the pattern
+  // only matches digits — but a value that cannot mean anything should not be
+  // written at all.
+  const html = renderMarkdown("99999999999999999999999. item", new Set());
+  assert.ok(!html.includes("e+"), "no exponent in the markup");
+  assert.ok(html.includes("<li>item</li>"));
+});
+
+test("a thematic break does not glue itself to the line below", () => {
+  // Not rendered as a rule — this renderer has no such construct, and adding
+  // one is not this change. But joining it to the next line turned "---" into a
+  // dash in the middle of a sentence, which is a regression against what the
+  // renderer did before paragraphs were joined at all.
+  const html = renderMarkdown("абзац\n---\ntext", new Set());
+  assert.ok(!html.includes("--- text"), "not joined into the paragraph below");
+  assert.ok(!html.includes("абзац ---"), "nor into the paragraph above");
+  assert.ok(html.includes("<p>text</p>"));
+  assert.ok(html.indexOf("абзац") < html.indexOf("---"), "the paragraph above closes first");
+});
+

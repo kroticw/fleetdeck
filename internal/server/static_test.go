@@ -146,6 +146,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/orchestrator.js":   true,
 		"js/markdown.js":       true,
 		"js/envelope.js":       true,
+		"js/scrollable.js":     true,
 		"js/steps.js":          true,
 		"js/card.js":           true,
 		"js/sections.js":       true,

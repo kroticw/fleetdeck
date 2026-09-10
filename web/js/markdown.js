@@ -42,6 +42,25 @@ function unescapeHTML(text) {
 
 const FENCE = /^(```|~~~)/;
 const BULLET = /^[-*]\s+/;
+
+// A numbered item, and the whole difficulty is telling one from a line that
+// merely opens with digits. The space after the dot is the entire rule, and it
+// was not invented here: grepping the operator's own board for lines starting
+// with digits and a dot found 57, and exactly one of them is not a list item —
+// "07.09 в 12:42 Дарья перевела тикет". What separates it from the rest is that
+// nothing follows its dot but another digit. Requiring the space keeps dates and
+// version numbers as the prose they are.
+//
+// The captured number is the list's starting value: a card that numbers a stub
+// "0." means it, and renumbering from 1 would contradict text that refers to
+// "пункт 0".
+const ORDERED = /^(\d+)\.\s+/;
+
+// A thematic break. It is not rendered as one — that is a construct this
+// renderer does not have — but it does end the paragraph above it, which is
+// what it did before paragraphs were joined at all. Without this, "---" glues
+// itself to the line below and reads as a dash mid-sentence.
+const BREAK = /^\s*([-*_])\1{2,}\s*$/;
 const HEADING = /^(#{1,4})\s+(.*)$/;
 // Matches internal/board's own linkRe, so the panel renders a link exactly where
 // the server extracted one. A narrower pattern here would leave "[[note|alias]]"
@@ -155,8 +174,21 @@ export function renderMarkdown(text, knownCards) {
   const lines = escapeHTML(text).split("\n");
   const out = [];
   let inCode = false;
-  let inList = false;
+  // Which list is open, if any: "ul", "ol", or null. Two kinds mean one has to
+  // close the other — a bulleted line inside a numbered list is a new list, not
+  // another item.
+  let listTag = null;
   let atCodeStart = false;
+  // Lines of the paragraph being accumulated. A paragraph in a card is wrapped
+  // across several source lines, and in markdown a single newline continues it:
+  // rendering each line as its own <p> broke one thought into four blocks with
+  // a gap between each. A blank line, and every other construct, ends it.
+  let para = [];
+  // And the lines of the list item being accumulated, for the same reason: a
+  // card wraps its items exactly as it wraps its prose, and the continuation
+  // line carries an indent. Buffered rather than appended already-rendered,
+  // so bold that opens on one line and closes on the next is one bold run.
+  let item = null;
 
   // Closed onto the last line for the same reason, so a block does not end with
   // a blank line either.
@@ -164,11 +196,47 @@ export function renderMarkdown(text, knownCards) {
     out[out.length - 1] += "</code></pre>";
   };
 
+  const flushItem = () => {
+    if (item === null) return;
+    out.push(`<li>${inline(item.join(" "), known)}</li>`);
+    item = null;
+  };
+
   const closeList = () => {
-    if (inList) {
-      out.push("</ul>");
-      inList = false;
+    flushItem();
+    if (listTag) {
+      out.push(`</${listTag}>`);
+      listTag = null;
     }
+  };
+
+  // Joined with a space, not with nothing: the newline between two wrapped
+  // lines stood for the space the author did not type, and dropping it runs
+  // "релизы" into "помечены".
+  const flushPara = () => {
+    if (para.length === 0) return;
+    out.push(`<p>${inline(para.join(" "), known)}</p>`);
+    para = [];
+  };
+
+  // Every construct below begins by ending whatever was open. Kept together so
+  // that adding a construct cannot forget one of the two.
+  const closeBlocks = () => {
+    flushPara();
+    closeList();
+  };
+
+  // Opens a bulleted list, closing a numbered one first if that is what was
+  // open. A numbered list opens inline below instead: it needs its own start
+  // value, and hiding that behind a shared helper would only hide it.
+  const openBullets = () => {
+    if (listTag === "ul") {
+      flushItem();
+      return;
+    }
+    closeList();
+    out.push("<ul>");
+    listTag = "ul";
   };
 
   const clean = (raw) => (raw.endsWith("\r") ? raw.slice(0, -1) : raw);
@@ -179,7 +247,7 @@ export function renderMarkdown(text, knownCards) {
       if (inCode) {
         closeCode();
       } else {
-        closeList();
+        closeBlocks();
         out.push("<pre><code>");
         atCodeStart = true;
       }
@@ -199,12 +267,47 @@ export function renderMarkdown(text, knownCards) {
       }
       continue;
     }
-    if (BULLET.test(line)) {
-      if (!inList) {
-        out.push("<ul>");
-        inList = true;
+    // An indented line inside an open list continues the item above it. The
+    // indent is the whole rule and it is the item's second end: without one
+    // there is nothing to tell a wrapped item from the paragraph that follows
+    // the list, and swallowing that paragraph would be the same defect
+    // reversed.
+    if (item !== null && /^\s+\S/.test(line)) {
+      const trimmed = line.trim();
+      // …unless the indented line is itself an item. Nested lists are out of
+      // scope, and leaving a nested item where it was is the lesser of the two
+      // wrongs available: absorbed into the parent's text it reads as prose —
+      // "parent - child - child2" — with its markers passing for dashes in a
+      // sentence, and nothing on screen says a list was flattened.
+      if (!BULLET.test(trimmed) && !ORDERED.test(trimmed)) {
+        item.push(trimmed);
+        continue;
       }
-      out.push(`<li>${inline(line.replace(BULLET, ""), known)}</li>`);
+    }
+    if (BULLET.test(line)) {
+      flushPara();
+      openBullets();
+      item = [line.replace(BULLET, "")];
+      continue;
+    }
+    const ordered = line.match(ORDERED);
+    if (ordered) {
+      flushPara();
+      if (listTag === "ol") {
+        flushItem();
+      } else {
+        closeList();
+        // start is written only where it says something: a list beginning at 1
+        // begins where a reader already assumes it does.
+        // A number too large to be exact is written as an exponent, and
+        // start="1e+23" is not an integer — the browser drops it. An attribute
+        // that cannot mean anything is not written.
+        const first = Number(ordered[1]);
+        const explicit = Number.isSafeInteger(first) && first !== 1;
+        out.push(explicit ? `<ol start="${first}">` : "<ol>");
+        listTag = "ol";
+      }
+      item = [line.replace(ORDERED, "")];
       continue;
     }
     // A table is recognised by its first TWO lines, never by one: the header
@@ -214,7 +317,7 @@ export function renderMarkdown(text, knownCards) {
     const header = cellsOf(line);
     const next = i + 1 < lines.length ? clean(lines[i + 1]) : "";
     if (header && TABLE_SEPARATOR.test(next) && (cellsOf(next) ?? []).length === header.length) {
-      closeList();
+      closeBlocks();
       const alignments = alignmentsOf(next);
       const rows = [];
       let j = i + 2;
@@ -231,18 +334,31 @@ export function renderMarkdown(text, knownCards) {
       continue;
     }
 
-    closeList();
     const heading = line.match(HEADING);
     if (heading) {
       // A card's own "# title" is the panel's heading already, so the body's
       // headings start one level down and never collide with it.
+      closeBlocks();
       const level = heading[1].length + 1;
       out.push(`<h${level}>${inline(heading[2], known)}</h${level}>`);
       continue;
     }
-    out.push(line.trim() === "" ? "" : `<p>${inline(line, known)}</p>`);
+    if (BREAK.test(line)) {
+      closeBlocks();
+      out.push(`<p>${inline(line.trim(), known)}</p>`);
+      continue;
+    }
+    if (line.trim() === "") {
+      closeBlocks();
+      // One separator per run of blank lines, and none before the first block:
+      // repeated empty entries would only pad the joined output.
+      if (out.length > 0 && out[out.length - 1] !== "") out.push("");
+      continue;
+    }
+    closeList();
+    para.push(line);
   }
-  closeList();
+  closeBlocks();
   // An unterminated fence closes here rather than leaking an open <pre> into
   // whatever the caller appends after this string.
   if (inCode) closeCode();
