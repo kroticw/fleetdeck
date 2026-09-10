@@ -409,9 +409,9 @@ func TestSessionsWithNoShortIDGetNoEventKeys(t *testing.T) {
 // the silence rule is the one thing left that calls a person, and excluding stalled
 // sessions from it would restore the two-hour silence the panel exists to end.
 func TestStalledSessionSilentPastThresholdStillFires(t *testing.T) {
-	before := stalledView("a")
+	before := stalledView("limited1")
 	before.SilentFor = 10 * time.Minute
-	after := stalledView("a")
+	after := stalledView("limited1")
 	after.SilentFor = 2 * time.Hour
 	prev := Snapshot{At: observedAt, Sessions: []SessionView{before}}
 	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{after}}
@@ -419,7 +419,7 @@ func TestStalledSessionSilentPastThresholdStillFires(t *testing.T) {
 		t.Fatal("fixture must be a stalled session")
 	}
 	fire, _ := Diff(prev, next, 30*time.Minute)
-	if len(fire) != 1 || fire[0].Key != "session:a:silent" {
+	if len(fire) != 1 || fire[0].Key != "session:limited1:silent" {
 		t.Fatalf("a stalled session silent past the threshold must still fire: %+v", fire)
 	}
 }
