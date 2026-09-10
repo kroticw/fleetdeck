@@ -87,6 +87,7 @@ class FakeNode {
     // the second costs the work; neither can be seen by comparing the tree
     // before and after, so they are counted instead.
     this.textWrites = 0;
+    this.htmlWrites = 0;
     this.queries = 0;
   }
 
@@ -114,6 +115,7 @@ class FakeNode {
   }
 
   set innerHTML(value) {
+    this.htmlWrites += 1;
     this._html = String(value);
     this._text = "";
     this.children = [];

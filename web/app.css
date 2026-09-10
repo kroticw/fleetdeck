@@ -1380,3 +1380,33 @@ main {
   padding: 6px;
   resize: vertical;
 }
+
+/* Conversation steps: attribution and rendered body.
+ *
+ * Kept as its own block at the end of the file rather than folded into the
+ * .o-msg rules above, so that a task rewriting this stylesheet has one
+ * self-contained piece to place rather than edits scattered through it.
+ *
+ * A step's body is markdown now, which brings its own elements; only the two
+ * that would otherwise be indistinguishable from the text around them are
+ * styled here. Everything else inherits.
+ */
+
+.o-msg-from {
+  margin-bottom: 4px;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.o-msg-body > :first-child {
+  margin-top: 0;
+}
+
+.o-msg-body > :last-child {
+  margin-bottom: 0;
+}
+
+.o-msg-body pre {
+  overflow-x: auto;
+}
+
