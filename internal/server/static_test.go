@@ -28,9 +28,43 @@ func TestIndexHasContentSecurityPolicy(t *testing.T) {
 	d, _ := testDeps()
 	rec := httptest.NewRecorder()
 	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	want := "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self'; style-src 'self'"
+	want := "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self'; style-src 'self' 'unsafe-inline'"
 	if got := rec.Header().Get("Content-Security-Policy"); got != want {
 		t.Fatalf("want Content-Security-Policy %q, got %q", want, got)
+	}
+}
+
+// TestOnlyStyleSrcIsRelaxed pins the shape of the exception rather than only its
+// text. style-src carries 'unsafe-inline' for xterm.js (see the policy's own
+// comment); the point of writing it down is that the keyword stays in that one
+// directive. A style can corrupt how the page looks. A script can act as the
+// operator, on a page that types into live sessions — and once one directive
+// carries the keyword, adding it to a second one looks like consistency rather
+// than like the change it is. This test is what makes that difference visible.
+func TestOnlyStyleSrcIsRelaxed(t *testing.T) {
+	d, _ := testDeps()
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	policy := rec.Header().Get("Content-Security-Policy")
+
+	for _, directive := range strings.Split(policy, ";") {
+		directive = strings.TrimSpace(directive)
+		name, _, _ := strings.Cut(directive, " ")
+		if !strings.Contains(directive, "'unsafe-inline'") && !strings.Contains(directive, "'unsafe-eval'") {
+			continue
+		}
+		if name != "style-src" {
+			t.Errorf("%s carries an unsafe keyword: %q. Only style-src may, and only for the vendored terminal", name, directive)
+		}
+	}
+
+	// Stated separately from the loop above, which would pass vacuously if a
+	// directive were dropped from the policy altogether.
+	if !strings.Contains(policy, "script-src 'self';") && !strings.HasSuffix(policy, "script-src 'self'") {
+		t.Errorf("script-src must be exactly 'self': %q", policy)
+	}
+	if !strings.HasPrefix(policy, "default-src 'self';") {
+		t.Errorf("default-src must be exactly 'self': %q", policy)
 	}
 }
 
