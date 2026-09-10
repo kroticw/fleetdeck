@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +82,59 @@ func TestScanKeepsGoingPastOneBrokenCard(t *testing.T) {
 	}
 	if len(cards) != 2 {
 		t.Fatalf("both cards must be returned, the broken one included: %d", len(cards))
+	}
+}
+
+func TestParseCardTolerantOfCRLF(t *testing.T) {
+	crlf := strings.ReplaceAll(sample, "\n", "\r\n")
+	c, err := ParseCard(writeCard(t, t.TempDir(), "crlf.md", crlf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ParseError != "" {
+		t.Fatalf("a CRLF card must parse, got ParseError: %q", c.ParseError)
+	}
+	if c.Zone != "planned" || c.Stage != "review" || c.Progress != 80 || c.Session != "abc12345" {
+		t.Fatalf("fields wrong on a CRLF card: %+v", c)
+	}
+}
+
+func TestParseCardIgnoresTitleAndLinksInsideFencedCode(t *testing.T) {
+	body := "```bash\n# fake title\n[[fake-link]]\n```\n\n# Real title\n\nSee [[real-link]].\n"
+	card := "---\nzone: planned\nstage: new\nprogress: 0\nsession: abc12345\nrepo: work/thing\ncreated: 2026-09-09\n---\n\n" + body
+	c, err := ParseCard(writeCard(t, t.TempDir(), "fenced.md", card))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Title != "Real title" {
+		t.Fatalf("title must come from outside the fence, got %q", c.Title)
+	}
+	if len(c.Links) != 1 || c.Links[0] != "real-link" {
+		t.Fatalf("links must come from outside the fence, got %v", c.Links)
+	}
+}
+
+func TestParseCardLinkNeedsClosingBrackets(t *testing.T) {
+	body := "see [[note without a close\n"
+	card := "---\nzone: planned\nstage: new\nprogress: 0\nsession: abc12345\nrepo: work/thing\ncreated: 2026-09-09\n---\n\n" + body
+	c, err := ParseCard(writeCard(t, t.TempDir(), "unclosed.md", card))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Links) != 0 {
+		t.Fatalf("an unclosed [[ must not swallow the rest of the body as a link, got %v", c.Links)
+	}
+}
+
+func TestParseCardLinkTrimsHeadingAndAlias(t *testing.T) {
+	body := "[[note#heading]] and [[note|alias]]\n"
+	card := "---\nzone: planned\nstage: new\nprogress: 0\nsession: abc12345\nrepo: work/thing\ncreated: 2026-09-09\n---\n\n" + body
+	c, err := ParseCard(writeCard(t, t.TempDir(), "trim.md", card))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Links) != 2 || c.Links[0] != "note" || c.Links[1] != "note" {
+		t.Fatalf("both a heading link and an alias link must resolve to the bare note name, got %v", c.Links)
 	}
 }
 
