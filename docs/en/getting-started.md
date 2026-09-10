@@ -51,7 +51,7 @@ After moving the binary, re-run `fleetdeck init` to record the new path, then bo
 
 The panel listens on `http://127.0.0.1:7777` — the loopback interface only, on the port `server.port` sets (see [`configuration.md`](configuration.md)). Load the launch agent to have it running at login, or run `fleetdeck` in a terminal.
 
-There is no web interface yet: a browser pointed at that address gets a 404. What answers today is the API that interface will use — `GET /api/snapshot` for the state of the whole fleet, `GET /ws` for a live stream of it, and the routes that type into a session and move a card. Only pages the panel served itself may call them: a request carrying any other `Origin` is refused with 403, and a request body that is not `application/json` with 415.
+A browser pointed at that address gets the panel itself: the fleet's sessions on the right, the orchestrator column on the left, and a centre column with two sections — the board and, when `docs.paths` names any directories, the documentation under them. The same routes the page uses are callable directly — `GET /api/snapshot` for the state of the whole fleet, `GET /ws` for a live stream of it, `GET /api/docs` and `GET /api/docs/content` for the documentation, and the routes that type into a session and move a card. Only pages the panel served itself may call them: a request carrying any other `Origin` is refused with 403, and a request body that is not `application/json` with 415.
 
 To check that it is up:
 
