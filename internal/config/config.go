@@ -24,10 +24,16 @@ import (
 // the same file at once — the orchestrator pin and a session label, or two
 // session labels for different sessions — and without this each writer
 // reads the same original bytes and each writes back its own version, one
-// silently losing the other's change. There is exactly one process that
-// ever holds this file open for writing (the fleetdeck panel), so a single
-// in-process mutex is the whole fix: this is not a multi-process lock and
-// does not need to be one.
+// silently losing the other's change.
+//
+// This is an in-process mutex and nothing more: it serialises writers
+// within one running fleetdeck, not writers to one config.yaml. Two panels
+// pointed at the same file — one operator running several at once on
+// different ports, which does happen in practice — can still overwrite
+// each other exactly the way a single panel's two concurrent writers used
+// to. Fixing that would need an OS-level file lock (flock or equivalent),
+// which nothing here provides; this mutex only closes the window between
+// goroutines inside one process.
 var fileMu sync.Mutex
 
 // NotifyConfig is never serialised directly either — see Config below.
