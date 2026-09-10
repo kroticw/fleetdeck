@@ -9,6 +9,7 @@ export { atBottom, stepKey, STICK_THRESHOLD_PX } from "./steps.js";
 import { syncSteps as syncStepRows } from "./steps.js";
 import { wireImagePaste } from "./pasteimage.js";
 import { createPending } from "./pending.js";
+import { createColumnWidth } from "./columnwidth.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column and its own input.
@@ -107,6 +108,30 @@ export function renderOrchestrator(root) {
   // has already produced once.
   const pending = createPending();
 
+  // How wide this column is and whether it is folded away. applyWidth is the
+  // only place that touches the column element itself, and it is called at
+  // startup as well as on every change — a state that is only applied when it
+  // changes is a state a reload does not restore.
+  const applyWidth = ({ width: value, folded, canWiden, canNarrow }) => {
+    root.style.setProperty("--o-width", value);
+    // An attribute rather than a class, so the stylesheet says what a folded
+    // column looks like in one place and this module never decides that.
+    if (folded) root.dataset.folded = "1";
+    else delete root.dataset.folded;
+
+    // Disabled, not hidden: a control that disappears at the end of its range
+    // takes its own explanation with it, and a person is left wondering whether
+    // they imagined it.
+    const setEnabled = (selector, enabled) => {
+      const button = root.querySelector(selector);
+      if (button) button.disabled = !enabled;
+    };
+    setEnabled(".o-size-widen", canWiden && !folded);
+    setEnabled(".o-size-narrow", canNarrow && !folded);
+  };
+
+  const width = createColumnWidth(applyWidth);
+
   // Set by the store subscription on every push (including the initial
   // synchronous one) and read by draw() whenever it runs — including the
   // redraws triggered from inside this module itself (a send, a pick), which
@@ -192,8 +217,42 @@ export function renderOrchestrator(root) {
     else parent.appendChild(row);
   };
 
+  // The controls that size the column, and the one that brings it back.
+  //
+  // They live in a strip of their own above the head rather than among the
+  // session's name, the edit pencil and the picker: those are about which
+  // session is pinned, these are about the column itself, and at the narrow end
+  // of the ladder a head holding six controls has room for none of them.
+  //
+  // The unfold button is built here too, and is the reason the strip is the
+  // first child: when the column is folded everything below it is hidden, and
+  // what remains has to be the way back. A control a person cannot see is a
+  // control they do not have — the same rule the edit pencil was fixed for.
+  const buildWidthControls = () => {
+    const strip = el("div", "o-size");
+
+    const button = (className, glyph, label, onClick) => {
+      const b = el("button", className, glyph);
+      b.setAttribute("type", "button");
+      b.setAttribute("aria-label", label);
+      b.setAttribute("title", label);
+      b.addEventListener("click", onClick);
+      return b;
+    };
+
+    strip.append(
+      button("o-size-btn o-size-unfold", "»", t("column_unfold"), () => width.unfold()),
+      button("o-size-btn o-size-narrow", "‹", t("column_narrow"), () => width.narrow()),
+      button("o-size-btn o-size-widen", "›", t("column_widen"), () => width.widen()),
+      button("o-size-btn o-size-fold", "«", t("column_fold"), () => width.fold()),
+    );
+    return strip;
+  };
+
   const buildConversationFrame = () => {
     root.replaceChildren();
+
+    root.appendChild(buildWidthControls());
 
     const head = el("div", "o-head");
     head.append(el("span", "o-name", ""));
@@ -427,6 +486,11 @@ export function renderOrchestrator(root) {
     if (!built) {
       built = true;
       buildConversationFrame();
+      applyWidth(width.state());
+      // After the frame exists, because it is what carries the buttons: the
+      // remembered width has to be on screen from the first paint, not from the
+      // first click. A reload that showed the default for a moment and then
+      // jumped would be its own small defect.
     }
 
     const head = root.querySelector(".o-head");

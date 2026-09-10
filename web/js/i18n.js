@@ -12,6 +12,14 @@ const en = {
   only_orchestrator: "No sessions besides the orchestrator",
   background_task: "background task",
   typed_here: "operator",
+
+  // The controls that size the orchestrator column. "unfold" especially: when
+  // the column is folded it is the only thing left on screen, and a button
+  // reading "column_unfold" would be a column nobody can get back.
+  column_widen: "make the column wider",
+  column_narrow: "make the column narrower",
+  column_fold: "fold the column away",
+  column_unfold: "bring the column back",
   waiting: "Waiting",
   stalled: "Stalled",
   context_unknown: "no transcript yet",
@@ -114,6 +122,11 @@ const ru = {
   only_orchestrator: "Кроме оркестратора сессий нет",
   background_task: "фоновая задача",
   typed_here: "оператор",
+
+  column_widen: "шире",
+  column_narrow: "уже",
+  column_fold: "свернуть колонку",
+  column_unfold: "развернуть колонку",
   waiting: "Ждёт",
   stalled: "Застряла",
   context_unknown: "транскрипта пока нет",

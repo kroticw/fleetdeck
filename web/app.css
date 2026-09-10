@@ -391,9 +391,26 @@ main {
 }
 
 .col-orchestrator {
-  flex: 1 1 25%;
+  /* 25% is what this column was before it could be resized, so a person who
+     never touches the controls sees exactly what they saw. The custom property
+     is set by web/js/columnwidth.js from a ladder of steps; a percentage rather
+     than a pixel width, so the three zones keep their proportions when the
+     window changes. */
+  flex: 1 1 var(--o-width, 25%);
   display: flex;
   flex-direction: column;
+}
+
+/* Folded away: a strip just wide enough for the one control that brings it
+   back. Not `display: none` — a column that vanishes takes the way back with
+   it, and a person is left with two zones and no idea there were three. */
+.col-orchestrator[data-folded="1"] {
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.col-orchestrator[data-folded="1"] > *:not(.o-size) {
+  display: none;
 }
 
 /* Orchestrator column content (web/js/orchestrator.js). The column itself is
@@ -1839,5 +1856,92 @@ main {
   font-size: var(--fs-xs);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* The controls that size the orchestrator column.
+ *
+ * Own block at the end, so a task rewriting this stylesheet moves one piece.
+ *
+ * A strip of its own above the head rather than four more controls among the
+ * session name, the edit pencil and the picker: those say which session is
+ * pinned, these say how much room the column takes, and at the narrow end of
+ * the ladder a head holding six controls has room for none of them.
+ *
+ * They are always visible, never on hover. A control that shows itself only to
+ * a pointer already resting on it does not exist for a person who has not found
+ * it yet — the same rule the edit pencil was fixed for. */
+.o-size {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 4px var(--gap-sm);
+  border-bottom: 1px solid var(--border);
+}
+
+.o-size-btn {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.o-size-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Disabled at the ends of the ladder rather than removed: a control that
+   disappears takes its own explanation with it, and a person is left wondering
+   whether they imagined it. */
+.o-size-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Only one of the four is ever on screen at a time, and which one is the whole
+   difference between a column a person can put aside and a column they lose.
+   Unfolded: the three that size it. Folded: the one that brings it back. */
+.o-size-unfold {
+  display: none;
+}
+
+.col-orchestrator[data-folded="1"] .o-size {
+  justify-content: center;
+  border-bottom: none;
+  padding: var(--gap-sm) 2px;
+}
+
+.col-orchestrator[data-folded="1"] .o-size-unfold {
+  display: block;
+  /* Drawn as a button, not as a glyph left behind.
+   *
+   * The first version was a bare accent-coloured chevron in a 25px strip, and
+   * the screenshot settled it: at that size it reads as decoration, and a
+   * control that does not look like one does not exist for the person who needs
+   * it. It gets the column's accent, a border, a surface of its own and a
+   * target big enough to aim at — this is the only way back to a column that
+   * has been put aside, so it can afford the room. */
+  color: var(--accent-strong);
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  padding: 10px 6px;
+}
+
+.col-orchestrator[data-folded="1"] .o-size-unfold:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-strong);
+}
+
+.col-orchestrator[data-folded="1"] .o-size-narrow,
+.col-orchestrator[data-folded="1"] .o-size-widen,
+.col-orchestrator[data-folded="1"] .o-size-fold {
+  display: none;
 }
 
