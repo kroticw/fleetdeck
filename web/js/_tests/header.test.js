@@ -31,6 +31,8 @@ import {
   alarmHTML,
   usageProblemHTML,
   gauge,
+  isUsageStale,
+  RATE_LIMITS_AGE_WORTH_SHOWING_MS,
 } from "../header.js";
 import { t } from "../i18n.js";
 
@@ -418,4 +420,31 @@ test("a stale reading carries its age, not the reset countdown", () => {
   const html = gauge("5h", { utilization: 40, resetsAt: "2026-01-01T00:00:00Z" }, true, threeMinutesAgo);
   assert.equal(html.includes("3m"), true);
   assert.equal(html.includes(t("last_known")), true);
+});
+
+// --- isUsageStale: the local-file age half of the same flicker fix -------
+//
+// The local rate-limits file (cmd/fleetdeck-status) can go stale with no
+// usageError at all -- no session has ticked its statusline in a while,
+// nothing failed. isUsageStale is what tells the gauges to read calm for
+// that case too, not just the network-error case createUsageErrorTracker
+// already covered.
+
+test("no limits at all is not stale -- gauge-off, not gauge-stale", () => {
+  assert.equal(isUsageStale({}, Date.now()), false);
+});
+
+test("an active usageError makes limits stale regardless of age", () => {
+  const nowMs = Date.now();
+  const snap = { limits: { fetchedAt: new Date(nowMs).toISOString() }, usageError: "boom" };
+  assert.equal(isUsageStale(snap, nowMs), true);
+});
+
+// The control case: same fetchedAt, only the elapsed time differs.
+test("control case: age alone flips stale once past the threshold, with no usageError", () => {
+  const fetchedAt = new Date(0).toISOString();
+  const justUnder = { limits: { fetchedAt } };
+  const justOver = { limits: { fetchedAt } };
+  assert.equal(isUsageStale(justUnder, RATE_LIMITS_AGE_WORTH_SHOWING_MS - 1), false);
+  assert.equal(isUsageStale(justOver, RATE_LIMITS_AGE_WORTH_SHOWING_MS + 1), true);
 });
