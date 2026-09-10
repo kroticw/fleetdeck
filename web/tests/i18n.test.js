@@ -87,6 +87,15 @@ const KEYS = [
   // sent him, so falling through to its own key would print "typed_here" where
   // the point was to be readable at a glance.
   "typed_here",
+
+  // The controls that size the orchestrator column (web/js/orchestrator.js).
+  // The unfold one carries the most weight: when the column is folded it is the
+  // only thing left on screen, and a button reading "column_unfold" is a column
+  // nobody can get back.
+  "column_widen",
+  "column_narrow",
+  "column_fold",
+  "column_unfold",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

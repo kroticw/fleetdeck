@@ -949,6 +949,94 @@ test("a note on a step that has no envelope is stripped too", async () => {
   c.dom.restore();
 });
 
+// --- sizing the column ------------------------------------------------------
+//
+// The ladder and the remembering are pinned in web/tests/columnwidth.test.js.
+// What is pinned here is the wiring: that the controls exist where a person can
+// reach them, that they move the column, and above all that a folded column
+// still shows the one control that brings it back.
+
+const sizeButton = (c, what) => c.root.querySelector(`.o-size-${what}`);
+
+test("the column carries its remembered width from the first paint, not the first click", async () => {
+  const c = await column(structuredClone(PIN));
+
+  // Break it by applying the width only when it changes and this test fails
+  // with nothing set: a reload would show the default and then jump.
+  assert.equal(c.root.style.getPropertyValue("--o-width"), "25%");
+  c.dom.restore();
+});
+
+test("wider and narrower move the column", async () => {
+  const c = await column(structuredClone(PIN));
+
+  fireEvent(sizeButton(c, "widen"), "click");
+  await settle();
+  assert.equal(c.root.style.getPropertyValue("--o-width"), "32%");
+
+  fireEvent(sizeButton(c, "narrow"), "click");
+  fireEvent(sizeButton(c, "narrow"), "click");
+  await settle();
+  assert.equal(c.root.style.getPropertyValue("--o-width"), "20%");
+  c.dom.restore();
+});
+
+test("the ends of the ladder are said by the buttons, not left to be discovered", async () => {
+  const c = await column(structuredClone(PIN));
+
+  for (let i = 0; i < 6; i += 1) fireEvent(sizeButton(c, "widen"), "click");
+  await settle();
+  assert.equal(sizeButton(c, "widen").disabled, true, "the widest step still offers to widen");
+  assert.equal(sizeButton(c, "narrow").disabled, false, "and narrowing is still possible");
+  c.dom.restore();
+});
+
+// The one that matters most. A folded column that hides everything hides the
+// way back with it, and a person is left with two zones and no idea there were
+// three. Break it by hiding the whole column when folded and this test fails.
+test("a folded column still carries the control that brings it back", async () => {
+  const c = await column(structuredClone(PIN));
+
+  fireEvent(sizeButton(c, "fold"), "click");
+  await settle();
+
+  assert.equal(c.root.dataset.folded, "1", "the column was not marked folded");
+  const back = sizeButton(c, "unfold");
+  assert.ok(back, "the way back is not in the page at all");
+  assert.equal(back.disabled, false, "the way back is there but refuses to be pressed");
+  assert.notEqual(back.attributes["aria-label"], undefined, "and it does not say what it does");
+  c.dom.restore();
+});
+
+test("and pressing it gives the column back at the width it had", async () => {
+  const c = await column(structuredClone(PIN));
+  fireEvent(sizeButton(c, "widen"), "click");
+  await settle();
+  const chosen = c.root.style.getPropertyValue("--o-width");
+
+  fireEvent(sizeButton(c, "fold"), "click");
+  await settle();
+  fireEvent(sizeButton(c, "unfold"), "click");
+  await settle();
+
+  assert.equal(c.root.dataset.folded, undefined, "the column stayed folded");
+  assert.equal(c.root.style.getPropertyValue("--o-width"), chosen, "the width was lost by folding");
+  c.dom.restore();
+});
+
+// A folded column cannot be made wider or narrower — there is nothing on screen
+// to widen. Saying so with the controls beats letting a press do nothing.
+test("the sizing controls stand down while the column is folded", async () => {
+  const c = await column(structuredClone(PIN));
+
+  fireEvent(sizeButton(c, "fold"), "click");
+  await settle();
+
+  assert.equal(sizeButton(c, "widen").disabled, true);
+  assert.equal(sizeButton(c, "narrow").disabled, true);
+  c.dom.restore();
+});
+
 // --- a sent message on screen at once ---------------------------------------
 //
 // Measured before any of this was written: from the keystroke to the text

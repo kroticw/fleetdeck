@@ -59,6 +59,8 @@ An image attached to a session is written to `~/.claude/fleetdeck/images/<sessio
 
 The orchestrator column shows the whole conversation with the pinned session: its answers, and what you wrote to it. A message typed while the session was thinking takes its place in the thread at the moment you pressed Enter, not the moment the session got round to reading it. Your own lines are signed "operator" and marked with a bar down the side; a message that arrived from another session is signed with the sender's name and the time; everything else is the session speaking.
 
+Three buttons above the column's title set its width: narrower, wider, and fold away. The width comes from a short ladder of fixed steps, so the three zones keep their proportions when the window changes. A folded column leaves a narrow strip carrying a button that brings it back, at the width it had. Both the width and the folded state are kept in the browser and survive a reload; in a private window, where storage is unavailable, everything still works but the choice does not outlive the page.
+
 What you send appears in the thread at once, before the session has read it, and in the same place the transcript's own copy will take — so nothing shifts when one replaces the other. If the send failed, the line goes off the screen, the text returns to the input box, and the reason appears in a line above it. The session panel does the same.
 
 To check that it is up:

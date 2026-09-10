@@ -72,6 +72,23 @@ class FakeNode {
     this._text = "";
     this._html = null;
 
+    // Inline style, enough of it for a module that sets a custom property and
+    // for a test that wants to read back what was set. Nothing here lays
+    // anything out — a declared width is a statement of intent, and what it
+    // produces on screen is a thing only a browser can answer.
+    const declarations = new Map();
+    this.style = {
+      setProperty(name, value) {
+        declarations.set(name, String(value));
+      },
+      removeProperty(name) {
+        declarations.delete(name);
+      },
+      getPropertyValue(name) {
+        return declarations.get(name) ?? "";
+      },
+    };
+
     // Scrolling and text selection, for the modules whose whole defect was
     // about them: a column that scrolls its thread to the bottom on every
     // redraw is unreadable past one screen, and a textarea rebuilt under the
