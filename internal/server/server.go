@@ -127,6 +127,17 @@ type Deps struct {
 	// (state.SessionView.Label) but rendered nowhere.
 	SetSessionLabel func(sessionID, label string) error
 
+	// ImageDir is where an image attached to a session is written, under a
+	// subdirectory named after that session. It is the panel's own directory,
+	// deliberately outside any repository the operator works in: a file left in
+	// a working tree eventually reaches somebody's commit, and that is not undone
+	// by noticing it later.
+	//
+	// Like BoardDir, an empty value is not a capability the panel merely lacks —
+	// it is the absence of anywhere safe to write, so the route answers 503
+	// rather than choosing a directory on its own.
+	ImageDir string
+
 	// interval overrides the WebSocket's one-second push cadence. It exists for
 	// tests, which cannot afford to wait whole seconds to observe a cadence; zero
 	// means the one second the panel actually uses.
@@ -153,6 +164,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/digest", d.handleDigest)
 	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
 	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
+	mux.HandleFunc("POST /api/sessions/{id}/image", d.handleUploadImage)
 	mux.HandleFunc("GET /ws", d.handleWS)
 	mux.Handle("GET /", staticHandler())
 	return guard(mux)
