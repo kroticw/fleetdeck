@@ -103,6 +103,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/main.js":     true,
 		"js/i18n.js":     true,
 		"js/sessions.js": true,
+		"js/header.js":   true,
 	}
 	got := map[string]bool{}
 	if err := fs.WalkDir(web.FS, ".", func(file string, d fs.DirEntry, err error) error {

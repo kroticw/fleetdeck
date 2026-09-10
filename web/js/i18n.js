@@ -1,6 +1,7 @@
-// Minimal i18n shim for the session list. A sibling task (header) will
-// likely replace or merge this file later — keep it small and self-contained
-// until then, no external dependency on that task's shape.
+// web/js/i18n.js
+// The interface ships two languages. The dictionary is flat on purpose: a
+// missing key must be visible as the key itself (or the English fallback),
+// never as an empty string.
 
 const en = {
   context: "context",
@@ -12,6 +13,13 @@ const en = {
   stalled: "Stalled",
   context_unknown: "no transcript yet",
   silent_unmeasured: "not measured",
+  waiting_count: "waiting for you",
+  stalled_count: "stalled",
+  limit_5h: "5h",
+  limit_7d: "7d",
+  resets_in: "resets in",
+  usage_down: "limits unavailable",
+  offline: "disconnected",
 };
 
 const ru = {
@@ -24,6 +32,13 @@ const ru = {
   stalled: "Застряла",
   context_unknown: "транскрипта пока нет",
   silent_unmeasured: "не измерено",
+  waiting_count: "ждут ответа",
+  stalled_count: "остановились",
+  limit_5h: "5ч",
+  limit_7d: "7д",
+  resets_in: "сброс через",
+  usage_down: "лимиты недоступны",
+  offline: "нет связи",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;
