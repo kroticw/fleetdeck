@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Command fleetdeck-window is a native window around the panel that already
 // runs as a separate, independently-managed process. It never starts, stops
 // or owns that process — it only opens a window pointed at the URL the panel
@@ -21,6 +23,17 @@
 // the one with an actively maintained toolchain) — and because this wrapper
 // is deliberately thin and owns nothing but the window itself, that rewrite
 // touches this one command, never the panel it points at.
+//
+// The //go:build darwin above is load-bearing, not decoration: this project's
+// own CI runs a ubuntu-latest leg too, and webview_go's cgo directives ask
+// for gtk+-3.0 and webkit2gtk-4.0 via pkg-config on Linux -- packages that
+// CI runner does not have installed, and this project has no reason to
+// install, since the panel itself is darwin-only (spec section 1). Without
+// the tag, `go build ./...`/`govulncheck ./...` on that runner tried to
+// compile this package anyway and failed on the missing pkg-config entries;
+// with it, the package has no buildable files at all outside darwin, and the
+// standard toolchain already treats that as "nothing to build here", not an
+// error -- confirmed with GOOS=linux locally, not assumed.
 package main
 
 import (
