@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -333,5 +336,43 @@ func TestARefusedFieldNeverReachesTheCommit(t *testing.T) {
 	}
 	if errors.Is(err, server.ErrFieldWrittenNotCommitted) {
 		t.Fatal("a field that was never written must not claim it was")
+	}
+}
+
+// TestBindFailureNeverLogsSuccess pins the order a startup log line is only
+// allowed to happen in: bind, then log, never the reverse. An operator who
+// starts a second copy of the panel by hand while a launchd-managed one
+// already holds the port must see a bind failure and nothing that looks like
+// a second panel starting — printing the success line before ListenAndServe
+// actually succeeds means a doomed process prints "listening on" and then
+// dies, leaving a log that reads as success followed by an unrelated error
+// right next to a real panel it never touched.
+func TestBindFailureNeverLogsSuccess(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = occupied.Close() }()
+	port := occupied.Addr().(*net.TCPAddr).Port
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.Default()
+	cfg.ServerPort = port
+	cfg.UsageEnabled = false
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	err = run(cfgPath)
+
+	if err == nil {
+		t.Fatal("binding a port already in use must be reported as an error, not a success")
+	}
+	if strings.Contains(logged.String(), "listening on") {
+		t.Fatalf("the success line must never print before a successful bind, got log output: %s", logged.String())
 	}
 }

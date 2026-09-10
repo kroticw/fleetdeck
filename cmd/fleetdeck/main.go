@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -277,8 +278,22 @@ func run(configPath string) error {
 		watchBoard(ctx, cfg.BoardPath, func() { p.refresh(ctx) })
 	}()
 
+	// Bind before announcing anything: a bare fmt.Sprintf("127.0.0.1:%d", ...)
+	// printed ahead of ListenAndServe made a failed start look like a running
+	// panel — the log carried the success line and then an unrelated-looking
+	// bind error, right next to whichever process actually holds the port
+	// (most often this same panel, already started by the launchd agent
+	// fleetdeck init installs). ln.Addr() is used for the log line rather
+	// than the address that was asked for so that server.port: 0 — "let the
+	// OS choose" — reports the port it actually got, not literally "0".
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.ServerPort))
+	if err != nil {
+		stop()
+		wg.Wait()
+		return fmt.Errorf("bind 127.0.0.1:%d: %w (a panel may already be running there)", cfg.ServerPort, err)
+	}
+
 	srv := &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", cfg.ServerPort),
 		Handler:           server.New(deps(ctx, p, dc, collector, cfg, configPath)),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
@@ -286,8 +301,8 @@ func run(configPath string) error {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		log.Printf("fleetdeck %s listening on http://%s", version.String(), srv.Addr)
-		serveErr <- srv.ListenAndServe()
+		log.Printf("fleetdeck %s listening on http://%s", version.String(), ln.Addr())
+		serveErr <- srv.Serve(ln)
 	}()
 
 	select {
