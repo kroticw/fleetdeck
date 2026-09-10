@@ -183,6 +183,17 @@ func setCardField(path, field, value string) error {
 }
 
 func main() {
+	// The subcommand is read before any flag is defined or parsed: `fleetdeck init`
+	// has flags of its own (--board, --force) and none of the panel's, and
+	// flag.Parse would reject them as unknown before init ever ran. Without a
+	// subcommand the panel starts exactly as it always has.
+	if len(os.Args) > 1 && os.Args[1] == "init" {
+		if err := initCommand(os.Args[2:]); err != nil {
+			log.Fatalf("fleetdeck init: %v", err)
+		}
+		return
+	}
+
 	configPath := flag.String("config", defaultConfigPath(), "path to the configuration file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
