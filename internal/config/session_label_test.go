@@ -352,11 +352,6 @@ func TestSetSessionLabelRefusesANewlineEvenWhenItWouldParse(t *testing.T) {
 	}
 }
 
-// TestSetSessionLabelOnAFileWithNoSessionLabelsKeyIsAnError guards the same
-// invariant SetField's own doc comment states: the section must already
-// exist. A config missing it entirely (hand-edited down to something
-// unusual, or from before this feature existed) must fail loudly rather
-// than guess where to create the section.
 // TestConcurrentSetSessionLabelCallsDoNotLoseEachOthersWrite pins the fix
 // for a real review finding: SetSessionLabel is a read-file, compute,
 // atomic-rename cycle with no locking of its own, so two concurrent callers
@@ -450,12 +445,107 @@ func TestConcurrentSetFieldAndSetSessionLabelDoNotLoseEachOthersWrite(t *testing
 	}
 }
 
-func TestSetSessionLabelOnAFileWithNoSessionLabelsKeyIsAnError(t *testing.T) {
+// TestSetSessionLabelCreatesTheSectionWhenTheKeyIsEntirelyMissing is a
+// direct regression test for a real production failure: a config written by
+// `fleetdeck init` before this feature existed has no session_labels key at
+// all, and the first version of this function refused that with "has no
+// session_labels key" — making the whole feature unusable for every
+// operator who set up fleetdeck before the day this shipped, which is the
+// ordinary case for this specific key (see SetSessionLabel's own comment
+// for why session_labels is different from every other key this package
+// writes). This is the first of the three initial shapes SetSessionLabel
+// must handle — key missing entirely, key present with no children (covered
+// above), key present with existing entries (also covered above) — and it
+// is the one that broke in practice, caught by running against a real
+// operator's real config rather than by any fixture, since every fixture up
+// to this point went through Save, which always writes the key.
+func TestSetSessionLabelCreatesTheSectionWhenTheKeyIsEntirelyMissing(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(p, []byte("server:\n  port: 7777\n"), 0o600); err != nil {
+	content := "board:\n    path: \"\"\nserver:\n    port: 7777  # hand-tuned\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetSessionLabel(p, uuidA, "label"); err == nil {
-		t.Fatal("a config with no session_labels key must be refused, not silently given one")
+
+	if err := SetSessionLabel(p, uuidA, "orchestrator"); err != nil {
+		t.Fatalf("SetSessionLabel: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.HasPrefix(got, content) {
+		t.Fatalf("every byte that was already in the file must survive untouched, want prefix:\n%s\ngot:\n%s", content, got)
+	}
+	if !strings.Contains(got, "session_labels:") {
+		t.Fatalf("a new session_labels section must be appended, got:\n%s", got)
+	}
+	if !strings.Contains(got, "# hand-tuned") {
+		t.Fatalf("the existing comment must survive, got:\n%s", got)
+	}
+
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatalf("the written file must still parse: %v", err)
+	}
+	if loaded.SessionLabels[uuidA] != "orchestrator" {
+		t.Fatalf("SessionLabels[uuidA] = %q, want orchestrator", loaded.SessionLabels[uuidA])
+	}
+	if loaded.ServerPort != 7777 {
+		t.Fatalf("an untouched sibling field must survive, got ServerPort=%d", loaded.ServerPort)
+	}
+}
+
+// TestSetSessionLabelCreatesTheSectionEvenWithoutATrailingNewline guards the
+// append path's own edge case: a hand-edited file with no trailing newline
+// must not have its last existing line corrupted by the new section landing
+// directly after it on the same line.
+func TestSetSessionLabelCreatesTheSectionEvenWithoutATrailingNewline(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "server:\n    port: 7777" // deliberately no trailing newline
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetSessionLabel(p, uuidA, "orchestrator"); err != nil {
+		t.Fatalf("SetSessionLabel: %v", err)
+	}
+
+	loaded, err := Load(p)
+	if err != nil {
+		raw, _ := os.ReadFile(p)
+		t.Fatalf("the written file must still parse: %v\ngot:\n%s", err, raw)
+	}
+	if loaded.SessionLabels[uuidA] != "orchestrator" {
+		t.Fatalf("SessionLabels[uuidA] = %q, want orchestrator", loaded.SessionLabels[uuidA])
+	}
+	if loaded.ServerPort != 7777 {
+		t.Fatalf("the line before the missing newline must not be corrupted, got ServerPort=%d", loaded.ServerPort)
+	}
+}
+
+// TestSetSessionLabelEmptyOnAFileWithNoSessionLabelsKeyIsANoOp is removal's
+// own version of TestSetSessionLabelCreatesTheSectionWhenTheKeyIsEntirelyMissing:
+// removing a label from a section that is not even in the file yet is the
+// desired state already holding, not an error and not a reason to create an
+// empty section just to remove nothing from it.
+func TestSetSessionLabelEmptyOnAFileWithNoSessionLabelsKeyIsANoOp(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "server:\n    port: 7777\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetSessionLabel(p, uuidA, ""); err != nil {
+		t.Fatalf("SetSessionLabel: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != content {
+		t.Fatalf("a no-op removal must not change the file at all, before:\n%s\nafter:\n%s", content, raw)
 	}
 }

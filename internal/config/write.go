@@ -267,12 +267,26 @@ const defaultSessionLabelIndent = "    "
 // itself, because — unlike every key SetField knows about — a session's
 // entry is not guaranteed to already be on disk: an operator can label any
 // session, so this is the one surgical writer in this package allowed to
-// insert a new line rather than refuse when the specific key is missing. The
-// session_labels: mapping itself must still already exist, the same
-// "the file has the shape Save gives it" assumption SetField's own doc
-// comment makes — Save always emits the key (see configToFile), so this is
-// not a new assumption, only the same one carried to a nested map instead of
-// a scalar.
+// insert a new line rather than refuse when the specific key is missing.
+//
+// Unlike SetField's own keys, the session_labels: mapping itself is also not
+// guaranteed to exist, and this function does not assume it does the way
+// SetField's own doc comment assumes every dotted key it knows about is
+// already on disk. That assumption holds for every field SetField actually
+// serves (orchestrator.session included) because every one of them has been
+// in the schema since the config file's very first released shape — Save
+// has always emitted them, so any file ever written by any shipped
+// `fleetdeck init` already has them. session_labels is the first top-level
+// key ever added to the schema after that first release, so the ordinary
+// case for it — not a hand-edited oddity — is a config written yesterday,
+// before this feature existed, that simply predates the key. Refusing that
+// as an error would make the feature unusable for every operator who set up
+// fleetdeck before today, which is exactly what a real run against a real
+// config caught. So when session_labels: is missing entirely, a fresh
+// top-level section is appended instead of refused: a new top-level mapping
+// key is valid YAML regardless of what precedes it, so this still never
+// rewrites an existing line, only ever adds new ones after everything that
+// was already there.
 //
 // An empty label means "remove this session's entry" — the caller
 // (internal/server's session-label route) documents the same rule where an
@@ -327,6 +341,30 @@ func SetSessionLabel(path, sessionID, label string) error {
 	return writeFileAtomically(path, out, info.Mode())
 }
 
+// appendNewSessionLabelsSection is reached only when the file has no
+// session_labels key at all — see SetSessionLabel's own comment for why
+// that is the ordinary case for this specific key, not a hand-edited
+// oddity. Falling back to a full config.Save here would destroy exactly
+// the comments this whole package exists to protect, so the section is
+// appended surgically instead: a fresh top-level "session_labels:" mapping
+// is valid YAML regardless of what precedes it, so appending it after
+// everything that is already in the file — with a newline first if the
+// file did not already end in one — never touches an existing line.
+func appendNewSessionLabelsSection(raw []byte, sessionID, label string) ([]byte, error) {
+	scalar, err := yaml.Marshal(label)
+	if err != nil {
+		return nil, fmt.Errorf("encode label: %w", err)
+	}
+	scalarText := strings.TrimRight(string(scalar), "\n")
+
+	content := string(raw)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += "session_labels:\n" + defaultSessionLabelIndent + sessionID + ": " + scalarText + "\n"
+	return []byte(content), nil
+}
+
 // substituteSessionLabel returns the new file content, or (nil, nil) when
 // label is empty and sessionID had no entry to remove — the caller reads a
 // nil, nil-error result as "nothing to do" rather than as an empty file.
@@ -341,7 +379,12 @@ func substituteSessionLabel(raw []byte, sessionID, label string) ([]byte, error)
 		}
 	}
 	if header == -1 {
-		return nil, fmt.Errorf("has no session_labels key")
+		if label == "" {
+			// Removing an entry from a section that is not even there:
+			// the desired state (no label recorded) already holds.
+			return nil, nil
+		}
+		return appendNewSessionLabelsSection(raw, sessionID, label)
 	}
 	flowEmpty := sessionLabelsHeaderFlowEmpty.MatchString(lines[header])
 
