@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -106,6 +108,74 @@ func TestSetSessionLabelAddsASecondEntryUsingTheFirstEntrysIndent(t *testing.T) 
 	}
 	if got.SessionLabels[uuidA] != "first" || got.SessionLabels[uuidB] != "second" {
 		t.Fatalf("want both entries, got %+v", got.SessionLabels)
+	}
+}
+
+// TestSetSessionLabelPreservesACommentOnABareHeaderWhenInsertingTheFirstEntry
+// guards against a real bug caught in review: the first version of the
+// insert path rewrote the "session_labels:" header line unconditionally
+// whenever the section had no children yet, which silently dropped a
+// trailing comment an operator had put on that very line. The header line
+// is not one of the section's children, so none of the child-comment tests
+// above ever exercised it.
+func TestSetSessionLabelPreservesACommentOnABareHeaderWhenInsertingTheFirstEntry(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "session_labels:  # operator names go here\nserver:\n  port: 7777\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetSessionLabel(p, uuidA, "orchestrator"); err != nil {
+		t.Fatalf("SetSessionLabel: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "session_labels:  # operator names go here") {
+		t.Fatalf("the header's own comment must survive the first insert, got:\n%s", got)
+	}
+	if !strings.Contains(got, uuidA+": orchestrator") {
+		t.Fatalf("the entry must actually be written, got:\n%s", got)
+	}
+}
+
+// TestSetSessionLabelPreservesACommentOnAFlowEmptyHeaderWhenInsertingTheFirstEntry
+// is the flow-style sibling of the test above: "session_labels: {}" is what
+// Save itself writes, and this line does need rewriting (to open a block)
+// unlike the bare case — but rewriting it must not drop a comment on the
+// same line either.
+func TestSetSessionLabelPreservesACommentOnAFlowEmptyHeaderWhenInsertingTheFirstEntry(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "session_labels: {}  # operator names go here\nserver:\n  port: 7777\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetSessionLabel(p, uuidA, "orchestrator"); err != nil {
+		t.Fatalf("SetSessionLabel: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "session_labels:  # operator names go here") {
+		t.Fatalf("the header's own comment must survive rewriting from flow to block style, got:\n%s", got)
+	}
+	if !strings.Contains(got, uuidA+": orchestrator") {
+		t.Fatalf("the entry must actually be written, got:\n%s", got)
+	}
+
+	got2, err := Load(p)
+	if err != nil {
+		t.Fatalf("the written file must still parse: %v", err)
+	}
+	if got2.SessionLabels[uuidA] != "orchestrator" {
+		t.Fatalf("SessionLabels[uuidA] = %q, want orchestrator", got2.SessionLabels[uuidA])
 	}
 }
 
@@ -287,6 +357,99 @@ func TestSetSessionLabelRefusesANewlineEvenWhenItWouldParse(t *testing.T) {
 // exist. A config missing it entirely (hand-edited down to something
 // unusual, or from before this feature existed) must fail loudly rather
 // than guess where to create the section.
+// TestConcurrentSetSessionLabelCallsDoNotLoseEachOthersWrite pins the fix
+// for a real review finding: SetSessionLabel is a read-file, compute,
+// atomic-rename cycle with no locking of its own, so two concurrent callers
+// each read the same original bytes and each write back their own version
+// — one silently overwriting the other's change. This route is reachable
+// from two independent sessions' PATCH requests landing at the same time,
+// which is exactly the shape this test drives. Without fileMu this test is
+// flaky rather than reliably red, since Go's own file-write scheduling can
+// happen to serialise two goroutines anyway — run with -count=10 or more
+// while the fix is reverted to see it fail.
+func TestConcurrentSetSessionLabelCallsDoNotLoseEachOthersWrite(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(p, Default()); err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			id := fmt.Sprintf("%08d-0000-0000-0000-000000000000", i)
+			errs[i] = SetSessionLabel(p, id, fmt.Sprintf("label-%d", i))
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("SetSessionLabel #%d: %v", i, err)
+		}
+	}
+
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("the file must still parse after concurrent writes: %v", err)
+	}
+	if len(got.SessionLabels) != n {
+		t.Fatalf("want all %d concurrent labels to survive, got %d: %+v", n, len(got.SessionLabels), got.SessionLabels)
+	}
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("%08d-0000-0000-0000-000000000000", i)
+		want := fmt.Sprintf("label-%d", i)
+		if got.SessionLabels[id] != want {
+			t.Fatalf("SessionLabels[%s] = %q, want %q", id, got.SessionLabels[id], want)
+		}
+	}
+}
+
+// TestConcurrentSetFieldAndSetSessionLabelDoNotLoseEachOthersWrite is the
+// cross-writer half of the same finding: the orchestrator pin (SetField)
+// and a session label (SetSessionLabel) are two independently-triggerable
+// routes writing the same file, and both must survive landing at once.
+func TestConcurrentSetFieldAndSetSessionLabelDoNotLoseEachOthersWrite(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(p, Default()); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var fieldErr, labelErr error
+	go func() {
+		defer wg.Done()
+		fieldErr = SetField(p, "orchestrator.session", "pinned-session")
+	}()
+	go func() {
+		defer wg.Done()
+		labelErr = SetSessionLabel(p, uuidA, "orchestrator")
+	}()
+	wg.Wait()
+
+	if fieldErr != nil {
+		t.Fatalf("SetField: %v", fieldErr)
+	}
+	if labelErr != nil {
+		t.Fatalf("SetSessionLabel: %v", labelErr)
+	}
+
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("the file must still parse after concurrent writes: %v", err)
+	}
+	if got.OrchestratorSession != "pinned-session" {
+		t.Fatalf("OrchestratorSession = %q, want pinned-session (lost to the concurrent label write)", got.OrchestratorSession)
+	}
+	if got.SessionLabels[uuidA] != "orchestrator" {
+		t.Fatalf("SessionLabels[uuidA] = %q, want orchestrator (lost to the concurrent field write)", got.SessionLabels[uuidA])
+	}
+}
+
 func TestSetSessionLabelOnAFileWithNoSessionLabelsKeyIsAnError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(p, []byte("server:\n  port: 7777\n"), 0o600); err != nil {

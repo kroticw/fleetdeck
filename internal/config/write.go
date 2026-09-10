@@ -31,6 +31,9 @@ import (
 // or by a person who therefore already has that shape on disk to edit
 // SetField's way from then on.
 func SetField(path, key, value string) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+
 	if key == "" {
 		return fmt.Errorf("key must not be empty")
 	}
@@ -238,15 +241,18 @@ var sessionLabelsHeader = regexp.MustCompile(`^session_labels:(.*)$`)
 // sessionLabelsHeaderFlowEmpty matches session_labels:'s own line only when
 // it closes itself as an empty flow mapping on the same line — "{}", what
 // Save itself writes for a nil or empty map (verified against Save's actual
-// output, not assumed). A bare "session_labels:" line looks identical
-// whether zero entries or many follow it below, so — unlike the flow form —
-// bareness can only ever be read off the header line's own text; whether the
-// section actually has children is decided separately, by scanning the
-// lines below it (see substituteSessionLabel). Only the flow form needs
-// rewriting before an insert: a block child cannot be appended under a line
-// that already closed itself as an empty flow mapping, while a bare header
-// with a first child appended below it needs no rewrite at all.
-var sessionLabelsHeaderFlowEmpty = regexp.MustCompile(`^session_labels:\s*\{\s*\}\s*$`)
+// output, not assumed) — optionally followed by a trailing comment, which
+// group 1 captures without its leading whitespace. A bare "session_labels:"
+// line looks identical whether zero entries or many follow it below, so —
+// unlike the flow form — bareness can only ever be read off the header
+// line's own text; whether the section actually has children is decided
+// separately, by scanning the lines below it (see substituteSessionLabel).
+// Only the flow form needs rewriting before an insert: a block child cannot
+// be appended under a line that already closed itself as an empty flow
+// mapping, while a bare header with a first child appended below it needs
+// no rewrite at all. The comment group exists so that rewrite can carry a
+// hand-written comment on the "{}" line forward rather than discarding it.
+var sessionLabelsHeaderFlowEmpty = regexp.MustCompile(`^session_labels:\s*\{\s*\}(?:[ \t]+(#.*))?$`)
 
 // defaultSessionLabelIndent is yaml.v3's own indent (verified against Save's
 // actual output, not assumed), used only when session_labels has no existing
@@ -275,6 +281,9 @@ const defaultSessionLabelIndent = "    "
 // remembers. Removing an entry that is not there is a no-op, not an error —
 // the desired state (no label recorded for this session) already holds.
 func SetSessionLabel(path, sessionID, label string) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+
 	if !sessionIDPattern.MatchString(sessionID) {
 		return fmt.Errorf("sessionID must be a session UUID, got %q", sessionID)
 	}
@@ -407,10 +416,24 @@ func substituteSessionLabel(raw []byte, sessionID, label string) ([]byte, error)
 	// yaml.v3's own default, since there is no sibling to copy an indent
 	// from. A non-empty section instead copies an existing sibling's
 	// indentation and is appended at the end of the block.
+	//
+	// The rewrite is gated on flowEmpty specifically, not on empty: a bare
+	// "session_labels:" header with no children yet needs no rewrite at
+	// all, and rewriting it unconditionally (as an earlier version of this
+	// function did) silently dropped any trailing comment the operator had
+	// put on that very line — the header line is not a child of the
+	// section, so it is not one of the lines the child-comment-preserving
+	// logic elsewhere in this function ever looks at.
 	indent := defaultSessionLabelIndent
 	insertAt := end
 	if empty {
-		lines[header] = "session_labels:"
+		if flowEmpty {
+			m := sessionLabelsHeaderFlowEmpty.FindStringSubmatch(lines[header])
+			lines[header] = "session_labels:"
+			if m[1] != "" {
+				lines[header] += "  " + m[1]
+			}
+		}
 		insertAt = header + 1
 	} else {
 		for ln := header + 1; ln < end; ln++ {

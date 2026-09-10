@@ -12,10 +12,23 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// fileMu serialises every read-modify-write-and-atomic-rename cycle this
+// package performs against a configuration file: Save, SetField and
+// SetSessionLabel. Two independently-triggerable HTTP routes can now write
+// the same file at once — the orchestrator pin and a session label, or two
+// session labels for different sessions — and without this each writer
+// reads the same original bytes and each writes back its own version, one
+// silently losing the other's change. There is exactly one process that
+// ever holds this file open for writing (the fleetdeck panel), so a single
+// in-process mutex is the whole fix: this is not a multi-process lock and
+// does not need to be one.
+var fileMu sync.Mutex
 
 // NotifyConfig is never serialised directly either — see Config below.
 type NotifyConfig struct {
@@ -424,6 +437,9 @@ func sweepStaleTempFiles(dir, base string) {
 // holds across a crash or power loss, not only a killed process: without the sync, the
 // rename can reach disk before the data it points to does.
 func Save(path string, c Config) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+
 	if err := validate(c); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}

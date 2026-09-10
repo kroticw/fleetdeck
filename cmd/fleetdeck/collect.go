@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"math"
 	"os"
 	"sync"
@@ -120,11 +121,25 @@ func NewCollector(cfg config.Config, dc *daemon.Client, uf *usage.Fetcher, proje
 }
 
 // Config returns a copy of the collector's current configuration. Safe for
-// concurrent use with SetOrchestratorSession.
+// concurrent use with SetOrchestratorSession and SetSessionLabel.
+//
+// Every field of config.Config used to be a value type, which made "return
+// c.cfg" under RLock a genuinely independent snapshot: copying the struct
+// copied all of it. SessionLabels broke that silently — a map is a
+// reference type, so copying the struct only copies the map header, and the
+// copy still points at the very map SetSessionLabel mutates. Caught by
+// go test -race: a goroutine reading cfg.SessionLabels from a Config() the
+// poll loop's Collect() had just fetched, racing a goroutine calling
+// SetSessionLabel, is a "concurrent map read and map write" fatal error
+// outside of -race, not a panic anything can recover from. Cloning the map
+// here is what makes the rest of this type's "everything is a value copy"
+// contract true again.
 func (c *Collector) Config() config.Config {
 	c.cfgMu.RLock()
 	defer c.cfgMu.RUnlock()
-	return c.cfg
+	cfg := c.cfg
+	cfg.SessionLabels = maps.Clone(cfg.SessionLabels)
+	return cfg
 }
 
 // SetOrchestratorSession updates the pinned orchestrator session id kept in

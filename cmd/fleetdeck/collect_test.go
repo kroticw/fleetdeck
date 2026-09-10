@@ -551,6 +551,67 @@ func TestConcurrentCollectAndSetOrchestratorSessionDoNotRace(t *testing.T) {
 	wg.Wait()
 }
 
+// TestConcurrentEnrichAndSetSessionLabelDoNotRace is
+// TestConcurrentCollectAndSetOrchestratorSessionDoNotRace's own sibling for
+// the map this task added. SessionLabels is a reference type, unlike every
+// other field on config.Config, so a copy of the struct alone does not make
+// an independent snapshot of it — enrich() reading cfg.SessionLabels[id]
+// while SetSessionLabel mutates the live map concurrently is a "concurrent
+// map read and map write" fatal error outside of -race. This caught a real
+// bug: Config() used to return the map by reference before this test (and
+// the fix in Config() itself) existed.
+//
+// This exercises enrich() directly rather than going through Collect(),
+// deliberately: Collect() only ever reaches this map through a session the
+// daemon actually listed, and deadDaemon (every other concurrency test in
+// this file's daemon of choice) always returns zero sessions — enrich's
+// loop body, where the map read lives, would never run at all, and the
+// test would pass whether or not the race existed. Calling enrich with the
+// exact view/labels shapes Collect() itself builds keeps the coverage real
+// without needing a live daemon socket.
+func TestConcurrentEnrichAndSetSessionLabelDoNotRace(t *testing.T) {
+	c := NewCollector(config.Default(), nil, nil, t.TempDir())
+	c.SetSessionLabel(sampleUUID, "seed")
+	views := []state.SessionView{{Session: daemon.Session{Short: "abc12345", SessionID: sampleUUID}}}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			c.enrich(views, c.Config().SessionLabels)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			c.SetSessionLabel(sampleUUID, "x")
+		}
+	}()
+	wg.Wait()
+}
+
+// TestConfigReturnsAnIndependentCopyOfSessionLabels pins the fix directly,
+// without needing -race to observe it: mutating the map SetSessionLabel
+// owns after Config() has already handed one out must never be visible
+// through the earlier snapshot, the same guarantee every other field of
+// config.Config already gives for free by being a value type.
+func TestConfigReturnsAnIndependentCopyOfSessionLabels(t *testing.T) {
+	c := NewCollector(config.Default(), nil, nil, t.TempDir())
+	c.SetSessionLabel(sampleUUID, "first")
+
+	snapshot := c.Config()
+	c.SetSessionLabel(sampleUUID, "second")
+	c.SetSessionLabel("22222222-2222-2222-2222-222222222222", "unrelated")
+
+	if snapshot.SessionLabels[sampleUUID] != "first" {
+		t.Fatalf("a Config() snapshot must not see a later SetSessionLabel, got %+v", snapshot.SessionLabels)
+	}
+	if len(snapshot.SessionLabels) != 1 {
+		t.Fatalf("a Config() snapshot must not grow when a later, unrelated label is set, got %+v", snapshot.SessionLabels)
+	}
+}
+
 // TestASlowUsageEndpointDoesNotStallTheCycle covers the one source that reaches off
 // the machine. Every other source is local and bounded by its own package; a usage
 // request that never answers would otherwise freeze the whole collect cycle, and the

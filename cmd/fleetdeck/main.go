@@ -233,6 +233,9 @@ func setOrchestratorSession(configPath string, collector *Collector, id string) 
 func setSessionLabel(configPath string, collector *Collector, sessionID, label string) error {
 	err := config.SetSessionLabel(configPath, sessionID, label)
 	if errors.Is(err, fs.ErrNotExist) {
+		// next.SessionLabels is collector.Config()'s own clone, not the
+		// live map c.cfg.SessionLabels — mutating it here is safe and
+		// touches nothing another goroutine can also be touching.
 		next := collector.Config()
 		if label == "" {
 			delete(next.SessionLabels, sessionID)
