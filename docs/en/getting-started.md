@@ -24,7 +24,7 @@ The intended flow is to load a launchd agent with `launchctl load` so the panel 
 
 > **Not implemented yet.** This section describes the intended behaviour, not what the current build does. Nothing named here exists in the repository at the time of writing.
 
-The intended address for the panel is `http://127.0.0.1:7777`, matching the `server.port` default described in [`configuration.md`](configuration.md). There is no HTTP server in this codebase yet, so nothing is listening on that address, and there is no web UI to load if something were.
+The intended address for the panel is `http://127.0.0.1:7777`, matching the `server.port` default described in [`configuration.md`](configuration.md). `internal/server` provides the HTTP and WebSocket surface that would answer at that address, but wiring it to a real daemon, board, and config is still someone else's task, and there is no `fleetdeck` binary to start it — so nothing is listening on that address today, and there is no web UI to load if something were.
 
 ## Creating a first card
 

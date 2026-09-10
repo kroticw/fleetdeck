@@ -19,7 +19,7 @@ fleetdeck's answer is a panel that watches the sessions and the board together, 
 This repository is under active development and does not yet do most of what is described below. As of this writing:
 
 - There is no `fleetdeck` server binary. The only binary that exists is `fleetdeck-status`, a small statusline reporter (see "Packages" below).
-- There is no HTTP or WebSocket server, and no web UI. Nothing in this repository listens on a network port yet.
+- `internal/server` provides an HTTP and WebSocket surface for the panel, but wiring it to a real daemon, board, and config is still someone else's task, and there is no `fleetdeck` binary to start it — so nothing in this repository listens on a network port yet, and there is still no web UI.
 - There is no `fleetdeck init` command, because there is no `fleetdeck` binary for such a command to belong to.
 - There is no launchd agent and no `.plist` file anywhere in the repository.
 - There is no release process and nothing published to install from.
@@ -58,17 +58,18 @@ For configuration, see [`docs/en/configuration.md`](docs/en/configuration.md).
 
 ## Packages
 
-- `internal/board` — reads and writes the fleet board: markdown cards with YAML frontmatter. The panel owns exactly two fields, `stage` and `progress`; everything else belongs to the agents. Depends on `github.com/fsnotify/fsnotify` for watching the board directory, in addition to the standard library.
+- `internal/board` — reads and writes the fleet board: markdown cards with YAML frontmatter. The panel owns exactly two fields, `stage` and `progress`; everything else belongs to the agents. Depends on `github.com/fsnotify/fsnotify` for watching the board directory and `gopkg.in/yaml.v3` for the frontmatter, in addition to the standard library.
 - `internal/config` — loads and saves the YAML configuration file described in [`docs/en/configuration.md`](docs/en/configuration.md). A missing file is a set of defaults, not a failure; a malformed file is a failure.
 - `internal/daemon` — a client for the daemon's Unix control socket: discovery, ownership/security checks on the socket and the control key file, and the `ping`, `list`, `reply`, and `attach` (screen read / key send) operations. The full wire protocol it implements is documented in [`docs/protocol/daemon-control-socket.md`](docs/protocol/daemon-control-socket.md) — read that first before changing anything in this package.
 - `internal/notify` — shows macOS banners through `osascript`. The decision to notify belongs to the panel, not the browser: the panel knows the state, and a banner must not depend on whether a browser tab happens to be open.
+- `internal/server` — exposes the panel's snapshot over HTTP and WebSocket and accepts the four writes the panel performs: text into a session, keys into a session, one field of one card, and a statusline reporter's report. It performs no I/O of its own beyond the connection it is answering — every source it needs arrives as a function in a `Deps` struct — which is what makes wiring it to the real daemon, board, and config still someone else's job. Depends on `github.com/coder/websocket`, in addition to the standard library and `internal/board`, `internal/daemon`, and `internal/state`.
 - `internal/state` — holds the snapshot type the panel would render from and the rules for deciding which state transitions are worth a banner. It performs no I/O of its own: every source reaches it as a plain value, so the rules are testable without a daemon, a board directory, or a network.
-- `internal/transcript` — reads Claude Code session transcripts from the tail: locating a session's `.jsonl` file, and an estimate of context-window occupancy for when the statusline reporter is not installed. It is the source for what a session did; it never reports what a session is doing right now.
+- `internal/transcript` — reads Claude Code session transcripts from the tail: locating a session's `.jsonl` file, a digest of its most recent conversational steps, and an estimate of context-window occupancy for when the statusline reporter is not installed. It is the source for what a session did; it never reports what a session is doing right now.
 - `internal/usage` — reads account rate-limit windows from the Anthropic OAuth usage endpoint. The OAuth token is read from the macOS Keychain, sent only to that endpoint, never logged, and never stored.
 - `internal/version` — the build version, injected at link time by `make build`/`make verify-ldflags`; see that package's own tests for how the injection is verified.
 - `cmd/fleetdeck-status` — the statusline reporter. Claude Code runs it for every session: it prints the status line and, best effort, forwards the same data to the local panel over HTTP, which has no other way to get it.
 
-`internal/daemon`, `internal/config`, and `internal/transcript` are standard-library-only (`internal/config` also uses `gopkg.in/yaml.v3`). `internal/board` additionally depends on `fsnotify`. None of these packages know anything about a web server, because none exists yet in this repository.
+`internal/daemon` and `internal/transcript` are standard-library-only. `internal/config` and `internal/board` also depend on `gopkg.in/yaml.v3`, and `internal/board` additionally depends on `fsnotify`. `internal/server` is the one package that knows about a web server: besides the standard library and `internal/board`, `internal/daemon`, and `internal/state`, it depends on `github.com/coder/websocket`.
 
 ## Documentation
 

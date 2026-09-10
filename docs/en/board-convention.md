@@ -76,17 +76,17 @@ One broken card never hides the others: the rest of the board is scanned and rep
 
 The Go code the panel uses to read cards (`internal/board`) and the Python validator script (`plugin/templates/board/scripts/validate_cards.py`) read the same file format, but they do not check the same things. Passing one is not the same as passing the other.
 
-| Check | Go reader (panel) | Validator script |
-| --- | --- | --- |
-| Unknown frontmatter field | ignored | rejected |
-| Required fields present | not checked | required: `zone`, `stage`, `progress`, `created` |
-| `zone` is one of the four allowed values | not checked | enforced |
-| `created` matches `YYYY-MM-DD` | not checked | enforced |
-| `session` matches the hex-character pattern | not checked | enforced |
-| `stage` is one of the five allowed values | enforced | enforced |
-| `progress` is one of the seven allowed values | enforced | enforced |
-| `stage: done` requires `progress: 100`, and vice versa | enforced | enforced |
-| A started stage requires a non-empty `session` | enforced | enforced |
+| Check | Go reader (`ParseCard`) | Go writer (`SetField`) | Validator script |
+| --- | --- | --- | --- |
+| Unknown frontmatter field | ignored | ignored | rejected |
+| Required fields present | not checked | not checked | required: `zone`, `stage`, `progress`, `created` |
+| `zone` is one of the four allowed values | not checked | not checked | enforced |
+| `created` matches `YYYY-MM-DD` | not checked | not checked | enforced |
+| `session` matches the hex-character pattern | not checked | not checked | enforced |
+| `stage` is one of the five allowed values | not checked | enforced | enforced |
+| `progress` is one of the seven allowed values | not checked | enforced | enforced |
+| `stage: done` requires `progress: 100`, and vice versa | not checked | enforced | enforced |
+| A started stage requires a non-empty `session` | not checked | enforced | enforced |
 
 The Go reader is a lenient reader and a surgical writer of two fields; it was not built to be a schema gate. The validator script is the strict gate, and it has to be run on purpose — by a person or by an agent — since nothing in the Go code calls it. A card that the panel reads without complaint can still fail the validator script, and a card that fails the validator script can still be read and have its `stage` or `progress` field updated by the panel without any warning that something else about it is malformed.
 

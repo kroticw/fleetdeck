@@ -40,8 +40,9 @@ type NotifyConfig struct {
 //
 // This method is where that decision is made once for the whole codebase: a consumer of
 // SilenceAfter must call it rather than compare SilenceAfter to zero itself, so the
-// meaning cannot be re-decided differently somewhere else. See README.md's
-// "Configuration" section for the user-facing statement of the same rule.
+// meaning cannot be re-decided differently somewhere else. See
+// docs/en/configuration.md's "What `silence_after: 0` means, and what a
+// negative value does" section for the user-facing statement of the same rule.
 func (n NotifyConfig) SilenceDisabled() bool {
 	return n.SilenceAfter <= 0
 }
