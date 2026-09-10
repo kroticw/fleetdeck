@@ -12,7 +12,10 @@ LDFLAGS  = -X github.com/kroticw/fleetdeck/internal/version.value=$(VERSION)
 # `dist` and the archive verification all work from this one list, so a third command
 # added under cmd/ is built, packaged and checked without editing anything here — and
 # there is no second list to forget it in.
-BIN_NAMES := $(notdir $(patsubst %/,%,$(wildcard cmd/*/)))
+# $(sort) because make 3.81, which is what macOS ships, returns $(wildcard) in
+# directory order rather than sorted: without it the archive members come out in a
+# different order depending on which machine built the release.
+BIN_NAMES := $(sort $(notdir $(patsubst %/,%,$(wildcard cmd/*/))))
 
 ifeq ($(strip $(BIN_NAMES)),)
 $(error no command directories found under cmd/: there is nothing to build)
