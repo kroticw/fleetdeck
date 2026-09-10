@@ -515,12 +515,61 @@ test("digest steps are drawn as text, with the role decided here and not by the 
 
   const drawn = panel.root.querySelectorAll(".s-step");
   assert.equal(drawn.length, 3);
-  // Assigned as text, so markup in a step is characters and never nodes.
-  assert.equal(drawn[1].textContent, "<img src=x onerror=alert(1)>");
-  assert.equal(drawn[1].children.length, 0);
+  // A step's text is rendered by web/js/steps.js now, the same renderer the
+  // orchestrator column uses, so it arrives as markdown rather than as a flat
+  // string. The invariant this test was always about is unchanged and is what
+  // is asserted here: markup inside a step becomes characters, never nodes.
+  const second = drawn[1].querySelector(".step-body");
+  assert.ok(second.innerHTML.includes("&lt;img src=x onerror=alert(1)&gt;"), "shown as the text it is");
+  assert.ok(!second.innerHTML.includes("<img"), "and never as an element");
+  assert.equal(drawn[1].querySelectorAll("img").length, 0);
   // A role the panel does not know is not carried into a class name.
   assert.equal(drawn[2].className, "s-step s-step-other");
   assert.equal(drawn[0].className, "s-step s-step-user");
+});
+
+test("the session panel unwraps an envelope and renders markdown, like the other pane", async () => {
+  // The defect the operator found: this pane drew steps with its own code and
+  // had none of what the orchestrator column had learned. Both draw with the
+  // same renderer now, and this is the test that says so from this side.
+  stubFetch(
+    answer({
+      body: [
+        { role: "user", text: '<agent-message id="m-1" from="06a1f607" at="2026-09-10T15:00:00+05:00">**bold** here</agent-message>' },
+        { role: "assistant", text: "a sentence naming <agent-message> stays whole" },
+      ],
+    }),
+  );
+  const panel = await mount();
+  const drawn = panel.root.querySelectorAll(".s-step");
+
+  const from = drawn[0].querySelector(".step-from");
+  assert.ok(from, "the envelope became an attribution line");
+  assert.equal(from.textContent, "06a1f607 · 2026-09-10T15:00:00+05:00");
+  assert.ok(drawn[0].querySelector(".step-body").innerHTML.includes("<strong>bold</strong>"), "and the body is markdown");
+
+  assert.equal(drawn[1].querySelector(".step-from"), null, "prose that merely names the tag is not an envelope");
+  assert.ok(drawn[1].querySelector(".step-body").innerHTML.includes("&lt;agent-message&gt;"), "and keeps its sentence");
+});
+
+test("an unchanged step is not redrawn when the digest polls again", async () => {
+  // The other half of what this pane was missing: it rebuilt every step on
+  // every poll, which loses a selection and drags the pane to the bottom.
+  const steps = [{ role: "user", text: "first" }, { role: "assistant", text: "second" }];
+  stubFetch(answer({ body: steps }));
+  const panel = await mount();
+
+  const rows = panel.root.querySelectorAll(".s-step");
+  const firstRow = rows[0];
+  const firstBody = firstRow.querySelector(".step-body");
+  const writesBefore = firstBody.htmlWrites;
+
+  await panel.timers.tick();
+
+  const after = panel.root.querySelectorAll(".s-step");
+  assert.equal(after[0], firstRow, "the same node, not an identical replacement");
+  assert.equal(after[0].querySelector(".step-body"), firstBody, "and the same body inside it");
+  assert.equal(firstBody.htmlWrites, writesBefore, "an unchanged step must not be re-rendered");
 });
 
 test("a transcript with no readable steps says so rather than showing nothing", async () => {

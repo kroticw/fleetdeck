@@ -25,6 +25,7 @@
 import { fetchDigest, fetchScreen, sendKeys, sendText } from "./api.js";
 import { get } from "./store.js";
 import { t } from "./i18n.js";
+import { syncSteps } from "./steps.js";
 
 // How many transcript steps the digest asks for, and how often each tab
 // refreshes. The screen is polled faster because it is what a person watches
@@ -273,6 +274,10 @@ export function renderSession(
     disposeTerminal();
   };
 
+  // How a step's row is classed here. The shared renderer owns everything
+  // inside a step; this pane owns what its rows are called.
+  const stepClass = (role) => `s-step s-step-${KNOWN_ROLES.has(role) ? role : "other"}`;
+
   const renderSteps = (steps) => {
     if (steps.length === 0) {
       // The server errors on a transcript it cannot read, so an empty list is
@@ -281,13 +286,17 @@ export function renderSession(
       body.replaceChildren(el("div", "s-empty", t("no_steps")));
       return;
     }
-    body.replaceChildren(
-      ...steps.map((step) => {
-        const role = KNOWN_ROLES.has(step.role) ? step.role : "other";
-        return el("div", `s-step s-step-${role}`, step.text ?? "");
-      }),
-    );
-    body.scrollTop = body.scrollHeight;
+    // Drawn by web/js/steps.js, the same renderer the orchestrator column uses.
+    // Before this, these two panes drew a step with two different pieces of
+    // code, and only one of them had learned markdown, envelope unwrapping and
+    // leaving an unchanged step alone — which is a defect no test on either
+    // side could see.
+    //
+    // A pane that was showing the "no steps" message has that message as its
+    // only child, and it is not a step; clearing it here means syncSteps always
+    // starts from rows it wrote itself.
+    if (body.firstChild && !body.firstChild.dataset?.stepKey) body.replaceChildren();
+    syncSteps(body, steps, stepClass);
   };
 
   // Neither pass catches. A session with no transcript, a route that is not

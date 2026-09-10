@@ -1,6 +1,7 @@
 // web/js/header.js
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
+import { envelopeText } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 
 // Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
@@ -113,7 +114,14 @@ function gauge(label, window_) {
 // reorder these two steps.
 export function stalledList(stalledSessions) {
   if (stalledSessions.length === 0) return "";
-  const reasons = stalledSessions.map((s) => stallReason(s)).filter((reason) => reason !== "");
+  // The envelope comes off here too — the counter showed a whole
+  // `<agent-message id=… from=… to=… at=…>` tag where it meant to show a
+  // reason — but the words inside are still carried verbatim, unrendered, for
+  // the reason spec 3.1 gives: a person decides from them whether they are
+  // being called.
+  const reasons = stalledSessions
+    .map((s) => ({ raw: stallReason(s), shown: envelopeText(stallReason(s)) }))
+    .filter((reason) => reason.shown !== "");
   // Each reason is its own box, and each box is clipped to one line by the
   // stylesheet. The daemon writes the text of an incoming message into detail
   // verbatim, so a reason is routinely a paragraph rather than a phrase, and
@@ -133,8 +141,9 @@ export function stalledList(stalledSessions) {
   const shown = reasons
     .slice(0, MAX_STALL_REASONS)
     .map((reason) => {
-      const escaped = escapeHTML(reason);
-      return `<span class="stall-reason" title="${escaped}">${escaped}</span>`;
+      // The title carries the text exactly as the daemon wrote it, envelope and
+      // all, so stripping the tag never puts anything out of reach.
+      return `<span class="stall-reason" title="${escapeHTML(reason.raw)}">${escapeHTML(reason.shown)}</span>`;
     });
   const rest = reasons.length - shown.length;
   const tail = rest > 0 ? `<span class="stall-more">+${rest} more</span>` : "";

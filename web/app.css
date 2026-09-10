@@ -1421,7 +1421,12 @@ main {
   resize: vertical;
 }
 
-/* Conversation steps: attribution and rendered body.
+/* One transcript step: attribution and rendered body.
+ *
+ * Named for the shared renderer in web/js/steps.js rather than for either pane,
+ * because both panes draw a step with it — the orchestrator column and the
+ * session panel. A pane still owns what its ROW is called; everything inside a
+ * step is these two classes.
  *
  * Kept as its own block at the end of the file rather than folded into the
  * .o-msg rules above, so that a task rewriting this stylesheet has one
@@ -1432,21 +1437,21 @@ main {
  * styled here. Everything else inherits.
  */
 
-.o-msg-from {
+.step-from {
   margin-bottom: 4px;
   font-size: 0.85em;
   opacity: 0.7;
 }
 
-.o-msg-body > :first-child {
+.step-body > :first-child {
   margin-top: 0;
 }
 
-.o-msg-body > :last-child {
+.step-body > :last-child {
   margin-bottom: 0;
 }
 
-.o-msg-body pre {
+.step-body pre {
   overflow-x: auto;
 }
 

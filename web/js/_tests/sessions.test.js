@@ -121,3 +121,24 @@ test("a genuinely empty fleet still says there are no sessions", async () => {
   assert.ok(!root.innerHTML.includes("besides the orchestrator"), "nothing was filtered out here");
   dom.restore();
 });
+
+// --- the envelope comes off here too, but nothing is typeset ---
+
+test("a reason wrapped in an envelope loses the tag and keeps its words", () => {
+  const wrapped = '<agent-message id="m-9" from="06a1f607" at="2026-09-10T15:00:00+05:00">approve the **three** MRs</agent-message>';
+  const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped });
+
+  // The visible text only: the title keeps the envelope on purpose.
+  const shown = html.match(/class="sreason" title="[^"]*">([^<]*)</)?.[1] ?? "";
+  assert.ok(!shown.includes("&lt;agent-message"), "the tag was never the reason");
+  assert.ok(shown.includes("06a1f607"), "who asked is part of the reason");
+  assert.ok(shown.includes("approve the **three** MRs"), "and the words are carried exactly");
+  assert.ok(!shown.includes("<strong>"), "a reason is not typeset: spec 3.1 wants detail verbatim");
+});
+
+test("the title still holds the reason exactly as the daemon wrote it", () => {
+  const wrapped = '<agent-message id="m-9" from="06a1f607" at="t">body</agent-message>';
+  const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped });
+  const title = html.match(/class="sreason" title="([^"]*)"/)?.[1];
+  assert.ok(title.includes("&lt;agent-message"), "stripping the tag must not put it out of reach");
+});

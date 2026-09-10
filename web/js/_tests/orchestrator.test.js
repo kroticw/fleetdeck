@@ -11,7 +11,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel, parseAgentMessage, unwrapStep } from "../orchestrator.js";
+import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel, parseAgentMessage, unwrapEnvelope } from "../orchestrator.js";
 
 test("no snapshot yet resolves to nothing pinned and no sessions", () => {
   const r = resolveOrchestrator(null);
@@ -124,7 +124,7 @@ const NOTIFICATION = [
 ].join("\n");
 
 test("a notification is read as its outcome, its summary and its body", () => {
-  const step = unwrapStep(NOTIFICATION);
+  const step = unwrapEnvelope(NOTIFICATION);
   assert.ok(step, "a notification is a wrapper worth unwrapping");
   assert.ok(step.label.includes("completed"), "the outcome is what a person looks for first");
   assert.ok(step.label.includes('Agent "Implement Task 6" finished'), "and the summary says what it was");
@@ -134,7 +134,7 @@ test("a notification is read as its outcome, its summary and its body", () => {
 test("a notification's identifiers are kept, not thrown away", () => {
   // They are useless to read and the only way to chase a lead afterwards, so
   // they move out of the way rather than out of existence.
-  const step = unwrapStep(NOTIFICATION);
+  const step = unwrapEnvelope(NOTIFICATION);
   assert.ok(step.detail.includes("addce847dd288ca47"), "the task id is still reachable");
   assert.ok(step.detail.includes("tasks/addce847dd288ca47.output"), "and so is the output file");
   assert.ok(!step.label.includes("toolu_01"), "but none of it is in the line a person reads");
@@ -142,7 +142,7 @@ test("a notification's identifiers are kept, not thrown away", () => {
 
 test("a notification with no result still says what happened", () => {
   const noResult = "<task-notification>\n<status>failed</status>\n<summary>Agent died</summary>\n</task-notification>";
-  const step = unwrapStep(noResult);
+  const step = unwrapEnvelope(noResult);
   assert.ok(step.label.includes("failed"));
   assert.ok(step.label.includes("Agent died"));
   assert.equal(step.body, "", "an absent result is absent, not invented");
@@ -152,29 +152,29 @@ test("a sentence that mentions a notification tag is left alone", () => {
   // This is not hypothetical: the fleet talks about these tags, so a step that
   // merely names one has to survive. Swallowing it would hide the very message
   // that explains the tag.
-  assert.equal(unwrapStep("Next to it lie raw <task-notification> and <task-id>, unhandled."), null);
-  assert.equal(unwrapStep("look: <task-notification>"), null, "the tag must open the step");
+  assert.equal(unwrapEnvelope("Next to it lie raw <task-notification> and <task-id>, unhandled."), null);
+  assert.equal(unwrapEnvelope("look: <task-notification>"), null, "the tag must open the step");
   // A whole notification quoted inside a sentence is the sharp case: unwrapping
   // it would keep the quote and throw away the sentence that framed it.
   const quoted = "This is what arrives: <task-notification><status>completed</status><summary>x</summary></task-notification> — pure noise.";
-  assert.equal(unwrapStep(quoted), null, "the tag must OPEN the step, not merely appear in it");
+  assert.equal(unwrapEnvelope(quoted), null, "the tag must OPEN the step, not merely appear in it");
 });
 
 test("a notification with nothing in it is not unwrapped", () => {
-  assert.equal(unwrapStep("<task-notification></task-notification>"), null, "there is nothing to show instead");
-  assert.equal(unwrapStep("<task-notification>\n<task-id>x</task-id>\n</task-notification>"), null,
+  assert.equal(unwrapEnvelope("<task-notification></task-notification>"), null, "there is nothing to show instead");
+  assert.equal(unwrapEnvelope("<task-notification>\n<task-id>x</task-id>\n</task-notification>"), null,
     "identifiers alone say nothing a person can read");
 });
 
 test("unwrapStep still handles the agent-message wrapper it started with", () => {
-  const step = unwrapStep('<agent-message id="m-1" from="06a1f607" at="t">body</agent-message>');
+  const step = unwrapEnvelope('<agent-message id="m-1" from="06a1f607" at="t">body</agent-message>');
   assert.equal(step.label, "06a1f607 · t");
   assert.equal(step.body, "body");
   assert.ok(step.detail.includes("m-1"), "the message id moves to the detail, not the label");
 });
 
 test("unwrapStep leaves a plain step alone", () => {
-  assert.equal(unwrapStep("just a message"), null);
+  assert.equal(unwrapEnvelope("just a message"), null);
 });
 
 test("pickableSessions offers every session that has a short id", () => {
@@ -413,7 +413,7 @@ test("a step that has not changed is not written to at all, so a selection in it
   // Each push changes something this column shows, so the gate lets it through
   // and the thread really is synced — otherwise the gate would be doing this
   // test's work and a broken diff would sail past it.
-  const bodyBefore = firstRow.querySelector(".o-msg-body");
+  const bodyBefore = firstRow.querySelector(".step-body");
   const writesBefore = bodyBefore.htmlWrites;
   for (const tokens of [30, 40]) {
     const moved = structuredClone(PIN);
@@ -422,7 +422,7 @@ test("a step that has not changed is not written to at all, so a selection in it
   }
 
   assert.equal(thread.children[0], firstRow, "the same node, not an identical replacement");
-  assert.equal(firstRow.querySelector(".o-msg-body"), bodyBefore, "and its body is the same node too");
+  assert.equal(firstRow.querySelector(".step-body"), bodyBefore, "and its body is the same node too");
   assert.equal(bodyBefore.htmlWrites, writesBefore, "an unchanged step must not be re-rendered");
   c.dom.restore();
 });
@@ -434,7 +434,7 @@ test("a step whose text did change is written, and only that one", async () => {
   ]);
   const thread = c.root.querySelector(".o-thread");
   const [row0, row1] = thread.children;
-  const writes0 = row0.querySelector(".o-msg-body").htmlWrites;
+  const writes0 = row0.querySelector(".step-body").htmlWrites;
   const key0 = row0.dataset.stepKey;
 
   c.setSteps([{ role: "assistant", text: "first" }, { role: "user", text: "second, edited" }]);
@@ -442,7 +442,7 @@ test("a step whose text did change is written, and only that one", async () => {
   moved.sessions[0].sessionId = "u-1e";
   await c.push(moved);
 
-  assert.equal(row0.querySelector(".o-msg-body").htmlWrites, writes0, "the step that did not change is left alone");
+  assert.equal(row0.querySelector(".step-body").htmlWrites, writes0, "the step that did not change is left alone");
   assert.equal(row0.dataset.stepKey, key0, "and still carries its own key");
   assert.equal(thread.children[1], row1, "the changed step is updated in place, not replaced");
   assert.ok(row1.dataset.stepKey.includes("second, edited"), "and its key now names the new text");
@@ -572,7 +572,7 @@ test("two steps with the same words but different roles are different steps", as
 test("a step's text is rendered as markdown, and cannot bring its own markup", async () => {
   const hostile = "**bold** and <img src=x onerror=alert(1)> and <script>alert(1)</script>";
   const c = await column(structuredClone(PIN), [{ role: "assistant", text: hostile }]);
-  const body = c.root.querySelector(".o-msg-body");
+  const body = c.root.querySelector(".step-body");
   const html = body.innerHTML;
 
   assert.ok(html.includes("<strong>bold</strong>"), "markdown is rendered, which is the point of the change");
@@ -586,20 +586,20 @@ test("an agent-message step shows its sender as text, not as the tag it arrived 
   const wrapped = '<agent-message id="m-1" from="06a1f607" at="2026-09-10T14:43:51+05:00">**two** new things</agent-message>';
   const c = await column(structuredClone(PIN), [{ role: "user", text: wrapped }]);
   const row = c.root.querySelector(".o-msg");
-  const from = row.querySelector(".o-msg-from");
+  const from = row.querySelector(".step-from");
 
   assert.ok(from, "who wrote it is worth keeping");
   assert.equal(from.textContent, "06a1f607 · 2026-09-10T14:43:51+05:00");
   assert.equal(from.children.length, 0, "and it is text, not markup");
-  assert.ok(row.querySelector(".o-msg-body").innerHTML.includes("<strong>two</strong>"), "the body is the message itself");
-  assert.ok(!row.querySelector(".o-msg-body").innerHTML.includes("agent-message"), "the wrapper is gone from the body");
+  assert.ok(row.querySelector(".step-body").innerHTML.includes("<strong>two</strong>"), "the body is the message itself");
+  assert.ok(!row.querySelector(".step-body").innerHTML.includes("agent-message"), "the wrapper is gone from the body");
   c.dom.restore();
 });
 
 test("a sender spelled as markup reaches the DOM as text", async () => {
   const nasty = '<agent-message from="&lt;img src=x onerror=alert(1)&gt;" at="now">body</agent-message>';
   const c = await column(structuredClone(PIN), [{ role: "user", text: nasty }]);
-  const from = c.root.querySelector(".o-msg-from");
+  const from = c.root.querySelector(".step-from");
   assert.equal(from.children.length, 0, "no element was created from the sender");
   assert.ok(from.textContent.includes("img src=x"), "it is a label that reads like a tag, and nothing more");
   c.dom.restore();
@@ -608,15 +608,15 @@ test("a sender spelled as markup reaches the DOM as text", async () => {
 test("a notification step shows its outcome as text and hides its ids in the title", async () => {
   const c = await column(structuredClone(PIN), [{ role: "user", text: NOTIFICATION }]);
   const row = c.root.querySelector(".o-msg");
-  const from = row.querySelector(".o-msg-from");
+  const from = row.querySelector(".step-from");
 
   assert.ok(from.textContent.includes("completed"), "what happened is on the line a person reads");
   assert.equal(from.children.length, 0, "and it is text, not markup");
   assert.ok(from.getAttribute("title").includes("addce847dd288ca47"), "the ids are reachable");
   assert.ok(!from.textContent.includes("toolu_01"), "but not in the way");
-  assert.ok(row.querySelector(".o-msg-body").innerHTML.includes("<strong>Status:</strong>"),
+  assert.ok(row.querySelector(".step-body").innerHTML.includes("<strong>Status:</strong>"),
     "and the result is rendered as the markdown it is");
-  assert.ok(!row.querySelector(".o-msg-body").innerHTML.includes("task-notification"), "the envelope is gone");
+  assert.ok(!row.querySelector(".step-body").innerHTML.includes("task-notification"), "the envelope is gone");
   c.dom.restore();
 });
 
@@ -624,8 +624,8 @@ test("a step that only talks about a notification tag is rendered whole", async 
   const talking = "Next to it lie raw <task-notification> and <task-id>, unhandled.";
   const c = await column(structuredClone(PIN), [{ role: "assistant", text: talking }]);
   const row = c.root.querySelector(".o-msg");
-  assert.equal(row.querySelector(".o-msg-from"), null, "it is not an envelope, so there is nothing to attribute");
-  assert.ok(row.querySelector(".o-msg-body").innerHTML.includes("&lt;task-notification&gt;"),
+  assert.equal(row.querySelector(".step-from"), null, "it is not an envelope, so there is nothing to attribute");
+  assert.ok(row.querySelector(".step-body").innerHTML.includes("&lt;task-notification&gt;"),
     "the sentence survives, tags shown as the text they are");
   c.dom.restore();
 });
