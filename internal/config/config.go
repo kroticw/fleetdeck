@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -175,7 +177,7 @@ func Load(path string) (Config, error) {
 		if errors.Is(err, io.EOF) {
 			return Default(), nil
 		}
-		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
+		return Config{}, fmt.Errorf("parse config %s: %w", path, describeYAMLError(err))
 	}
 
 	// A config file must be a single YAML document. A second document after a "---"
@@ -194,6 +196,40 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid config %s: %w", path, err)
 	}
 	return c, nil
+}
+
+// fieldNotFoundPattern matches yaml.v3's "field <name> not found in type <go type>"
+// message, emitted (via KnownFields(true)) for a configuration key this format does
+// not recognise. The Go struct type it names, tag literals included, is an
+// implementation detail no one hand-editing this YAML file should ever be shown.
+var fieldNotFoundPattern = regexp.MustCompile(`^(line \d+: )?field (\S+) not found in type .*$`)
+
+// describeYAMLError rewrites a *yaml.TypeError's messages in terms of configuration
+// keys, never Go syntax. yaml.v3's own text for an unknown key under KnownFields(true)
+// names the exact Go struct type it tried to decode into, down to the struct tag
+// literal (e.g. `field pathx not found in type struct { Path string "yaml:\"path\"" }`)
+// — this format is hand-edited, so that message is both meaningless and alarming to
+// someone who has never seen this codebase. Every other *yaml.TypeError message (a
+// scalar value of the wrong type, say) already names only a primitive type word (int,
+// bool, string) with no struct or tag syntax in it, so it passes through unchanged. An
+// error that is not a *yaml.TypeError at all (a syntax error, an I/O error) is returned
+// unchanged too — this function only ever narrows what yaml.v3 already reported, never
+// invents a diagnosis on top of it.
+func describeYAMLError(err error) error {
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return err
+	}
+
+	rewritten := make([]string, len(typeErr.Errors))
+	for i, line := range typeErr.Errors {
+		if m := fieldNotFoundPattern.FindStringSubmatch(line); m != nil {
+			rewritten[i] = fmt.Sprintf("%sunknown configuration key %q", m[1], m[2])
+			continue
+		}
+		rewritten[i] = line
+	}
+	return errors.New(strings.Join(rewritten, "\n"))
 }
 
 // validate rejects configuration values that would be silently harmful: an out-of-range

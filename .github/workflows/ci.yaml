@@ -15,6 +15,12 @@ concurrency:
 jobs:
   check:
     strategy:
+      # Without this, the default (true) means one matrix leg failing cancels the
+      # other — a macOS-only failure would cancel the Linux job before it ever ran,
+      # which directly contradicts the comment below: ubuntu-latest exists so a
+      # Linux-only regression does not pass uncaught, and it cannot do that if a
+      # failure on the other leg is allowed to cancel it first.
+      fail-fast: false
       matrix:
         # macos-latest catches macOS-specific regressions this project actually cares
         # about (it's the maintainer's own platform); ubuntu-latest is here because
@@ -47,3 +53,4 @@ jobs:
       - run: make lint
       - run: make test
       - run: make build
+      - run: make verify-ldflags

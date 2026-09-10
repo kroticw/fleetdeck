@@ -201,6 +201,30 @@ func TestLoadUnknownKeyIsError(t *testing.T) {
 	}
 }
 
+// TestLoadUnknownKeyErrorNamesTheKeyNotGoSyntax covers the recommendation that an
+// unknown key's error leaked yaml.v3's own diagnostic verbatim: `field pathx not found
+// in type struct { Path string "yaml:\"path\"" }`. This format is hand-edited by
+// people who have never seen this codebase's Go types; the message must name the
+// offending key and say nothing about the Go struct (or its yaml tag) it failed to
+// decode into.
+func TestLoadUnknownKeyErrorNamesTheKeyNotGoSyntax(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("board:\n  pathx: /x\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("an unrecognised key must be an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `"pathx"`) {
+		t.Fatalf("expected the error to name the offending key %q, got: %v", "pathx", err)
+	}
+	if strings.Contains(msg, "struct {") || strings.Contains(msg, "yaml:\\\"") {
+		t.Fatalf("error leaks Go struct/tag syntax to the user: %v", err)
+	}
+}
+
 func TestLoadFlatLegacyKeysAreRejected(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
 	if err := os.WriteFile(p, []byte("board_path: /x\n"), 0o600); err != nil {

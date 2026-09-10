@@ -65,7 +65,7 @@ response: {"ok": true, "op": "reply"}
 
 Failure codes: `EAUTH` (missing or wrong key), `ENOJOB` (no such session), `ENOREPLY` (session is not accepting replies), `ERESPAWNING` (retry shortly).
 
-`reply` always delivers and submits the text; there is no way to place text in a session's prompt without sending it. A caller asking for unsubmitted text is asking for something the protocol cannot do, and that must be reported as such rather than silently submitting anyway.
+`reply` always delivers and submits the text; there is no way to place text in a session's prompt without sending it. `internal/daemon`'s `Client.SendText` reflects this at the type level — it takes no `submit` parameter — rather than accepting one whose only legal value is `true` and refusing at runtime otherwise.
 
 ### `attach` — the interactive screen and keyboard
 

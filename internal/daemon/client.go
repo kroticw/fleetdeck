@@ -111,10 +111,11 @@ func resolveSocketCandidate(matches []string) (string, error) {
 		return candidate, nil
 	}
 
-	if len(causes) > 0 {
-		return "", errors.Join(append([]error{ErrDaemonUnavailable}, causes...)...)
-	}
-	return "", ErrDaemonUnavailable
+	// Every iteration of the loop above either returned success or appended a cause,
+	// and matches is non-empty (checked above), so causes always holds at least one
+	// entry by the time the loop ends without returning — there is no third outcome
+	// left to handle here.
+	return "", errors.Join(append([]error{ErrDaemonUnavailable}, causes...)...)
 }
 
 // Sentinel causes for a socket-ownership refusal. Wrapping these with %w into the
@@ -160,8 +161,15 @@ var (
 // owned by anyone else, at any level of the chain, is refused outright: see
 // checkSocketOwnershipWalk.
 func checkSocketOwnership(socketPath string) error {
-	uid := os.Getuid()
+	return checkSocketOwnershipUID(socketPath, os.Getuid())
+}
 
+// checkSocketOwnershipUID is checkSocketOwnership with the expected uid taken as a
+// parameter rather than read from os.Getuid(). wantUID is a parameter purely so a test
+// can exercise the socket-file-itself ownership mismatch (errSocketWrongOwner)
+// deterministically, by passing a wantUID that cannot match any real file's owner,
+// without needing a second real user account on the machine running the test.
+func checkSocketOwnershipUID(socketPath string, wantUID int) error {
 	sockStat, err := realLstat(socketPath)
 	if err != nil {
 		return fmt.Errorf("checking socket path %s: %w", socketPath, err)
@@ -177,14 +185,14 @@ func checkSocketOwnership(socketPath string) error {
 	if sockStat.mode&os.ModeSocket == 0 {
 		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketNotASocket)
 	}
-	if sockStat.uid != uid {
+	if sockStat.uid != wantUID {
 		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketWrongOwner)
 	}
 	if sockStat.mode&0o022 != 0 {
 		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketWritableByOthers)
 	}
 
-	return checkSocketOwnershipWalk(socketPath, filepath.Dir(socketPath), uid, realLstat)
+	return checkSocketOwnershipWalk(socketPath, filepath.Dir(socketPath), wantUID, realLstat)
 }
 
 // dirStat is the minimal ownership and mode information checkSocketOwnershipWalk needs
@@ -1215,12 +1223,12 @@ func (c *Client) listSessionsOnce(ctx context.Context) ([]Session, error) {
 	return *resp.Jobs, nil
 }
 
-// SendText sends text into a session via the reply operation.
-func (c *Client) SendText(ctx context.Context, session, text string, submit bool) error {
-	if !submit {
-		return &ErrSubmitNotSupported{}
-	}
-
+// SendText sends text into a session via the reply operation. The `reply` operation
+// (docs/protocol/daemon-control-socket.md section 3) always delivers and submits the
+// text — there is no way to place text in a session's prompt without sending it — so
+// this has exactly one legal calling convention, unlike an earlier version that took a
+// submit bool whose only legal value was true.
+func (c *Client) SendText(ctx context.Context, session, text string) error {
 	err := c.sendTextOnce(ctx, session, text)
 	if isProtoErr(err) {
 		c.invalidateProto()
@@ -1297,7 +1305,9 @@ func trimToRuneBoundary(b []byte) []byte {
 }
 
 // ReadScreen sends an attach request and reads the terminal stream.
-// It returns the raw bytes that follow the JSON header line.
+// It returns the raw bytes that follow the JSON header line in the result's Screen
+// field, alongside Err — see ScreenResult's own comment for why they are bundled in one
+// struct rather than returned as two loose values.
 // tail limits how much of the tail to keep; tail <= 0 keeps everything read, which is
 // itself never more than maxAttachBytes (1 MB) — collectUntilIdleOrClosed enforces that
 // cap regardless of tail. This limit applies identically whether or not the stream ends
@@ -1320,13 +1330,25 @@ func trimToRuneBoundary(b []byte) []byte {
 // Only the separate "resize" operation invokes the session's resize(cols, rows). So
 // passing cols/rows on attach has no side effect on anyone's terminal, and a poller
 // calling ReadScreen on a cadence cannot reshape a user's session.
-func (c *Client) ReadScreen(ctx context.Context, session string, tail int) (string, error) {
+func (c *Client) ReadScreen(ctx context.Context, session string, tail int) ScreenResult {
 	out, err := c.readScreenWithDeadline(ctx, session, tail)
 	if isProtoErr(err) {
 		c.invalidateProto()
 		out, err = c.readScreenWithDeadline(ctx, session, tail)
 	}
-	return out, err
+	return ScreenResult{Screen: out, Err: err}
+}
+
+// ScreenResult is ReadScreen's result. Screen always holds whatever screen content was
+// accumulated, even when Err is a non-nil *ErrKicked carrying the prefix read before the
+// eviction (see ErrKicked's own comment) — bundled in one struct, rather than returned
+// as two loose values, so an idiomatic `if err != nil { return err }` cannot compile
+// against Err alone while silently discarding Screen. A caller that only cares about
+// success can still write `result.Err` and stop there; the field it is dropping is at
+// least visible in the source rather than implicit in a two-value return.
+type ScreenResult struct {
+	Screen string
+	Err    error
 }
 
 // readScreenWithDeadline derives a fresh context for exactly one call to readScreenOnce,
@@ -1433,8 +1455,11 @@ func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (
 	// its own.
 	until, ok := ctx.Deadline()
 	if !ok {
-		// Unreachable via ReadScreen (readScreenWithDeadline always sets one), kept as
-		// a safe fallback for any other caller of this unexported function.
+		// Unreachable via ReadScreen (readScreenWithDeadline always sets one), but
+		// readScreenOnce is unexported and package-internal: a direct call with a
+		// bare context.Background() genuinely reaches this branch — see
+		// TestReadScreenOnceWithNoContextDeadlineFallsBackToScreenDeadline, which is
+		// exactly that other caller.
 		until = time.Now().Add(c.screenDeadline)
 	}
 	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false, until)
@@ -1578,11 +1603,13 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	// session's current turn, or forever. c.screenDeadline is the same field ReadScreen
 	// derives its own ceiling from, so this window and ReadScreen's own cannot silently
 	// drift apart from each other.
-	until, ok := ctx.Deadline()
-	if !ok {
-		// Unreachable: withScreenDeadline above always returns a ctx with a deadline.
-		until = time.Now().Add(c.screenDeadline)
-	}
+	// withScreenDeadline above always returns a ctx with a deadline set, unlike
+	// readScreenOnce's identically-shaped read below (called directly by a test, not
+	// only through ReadScreen, so its own ctx-carries-no-deadline case is genuinely
+	// reachable and kept). Here that case cannot occur — ctx was reassigned to
+	// withScreenDeadline's result a few lines above, unconditionally, inside this same
+	// function — so there is no second, defensive branch to fall back through.
+	until, _ := ctx.Deadline()
 	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true, until)
 
 	if _, detail, kicked := detectKick(data, closed); kicked {

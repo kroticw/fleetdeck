@@ -199,12 +199,6 @@ func (e *ErrUnknown) Error() string {
 	return "unknown error: " + e.Code
 }
 
-type ErrSubmitNotSupported struct{}
-
-func (e *ErrSubmitNotSupported) Error() string {
-	return "the control socket always submits a reply; holding text unsent is not supported"
-}
-
 // ErrKeysNotDelivered indicates that SendKeys's write to the attach connection itself
 // failed, before the daemon can be assumed to have received the key bytes. Unlike a
 // connection that closes normally right after a successful write (which SendKeys treats

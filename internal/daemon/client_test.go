@@ -147,7 +147,9 @@ func TestFixtureParsesViaListSessions(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
@@ -161,6 +163,12 @@ func TestFixtureParsesViaListSessions(t *testing.T) {
 	sessions, err := client.ListSessions(context.Background())
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
 	}
 	if len(sessions) == 0 {
 		t.Fatal("fixture contains no sessions to test with")
@@ -182,7 +190,9 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
@@ -196,6 +206,12 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 	sessions, err := client.ListSessions(context.Background())
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
 	}
 
 	type expect struct{ waiting, stalled bool }
@@ -294,7 +310,9 @@ func TestFixtureDyingFieldParsesViaListSessions(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
@@ -308,6 +326,12 @@ func TestFixtureDyingFieldParsesViaListSessions(t *testing.T) {
 	sessions, err := client.ListSessions(context.Background())
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
 	}
 
 	wantDying := map[string]bool{
@@ -355,7 +379,9 @@ func TestFixtureFirstRecordAllFieldsLiteral(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return line
 		})
@@ -369,6 +395,12 @@ func TestFixtureFirstRecordAllFieldsLiteral(t *testing.T) {
 	sessions, err := client.ListSessions(context.Background())
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
 	}
 
 	var got Session
@@ -613,7 +645,9 @@ func TestTruncatedJSONIsError(t *testing.T) {
 	defer listener.Close()
 
 	var capturedReq map[string]interface{}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
 			if err := json.Unmarshal(req, &capturedReq); err != nil {
 				t.Errorf("unmarshalling captured request: %v", err)
@@ -634,6 +668,12 @@ func TestTruncatedJSONIsError(t *testing.T) {
 	client.proto = 1 // skip the ping, so the one served response answers "list"
 
 	_, err = client.ListSessions(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatal("expected error for truncated JSON, got nil")
 	}
@@ -918,7 +958,9 @@ func TestPingNoProtoField(t *testing.T) {
 	defer listener.Close()
 
 	errChan := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
 			var m map[string]interface{}
 			if err := json.Unmarshal(req, &m); err != nil {
@@ -939,14 +981,54 @@ func TestPingNoProtoField(t *testing.T) {
 
 	client.Ping(context.Background())
 
-	// Wait a bit for goroutine to finish
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 
 	// Check for any errors from the goroutine
 	select {
 	case err := <-errChan:
 		t.Fatalf("error in server: %v", err)
 	default:
+	}
+}
+
+// TestPingReturnsDaemonVersion covers Info.Version: nothing else in this file asserts
+// on it at all, so deleting the line in Ping that populates it from the reply's
+// "version" field leaves every other test green.
+func TestPingReturnsDaemonVersion(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
+			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":7}` + "\n")
+		})
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+
+	info, err := client.Ping(context.Background())
+	if err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
+	if info.Version != "2.1.263" {
+		t.Fatalf("expected Info.Version %q, got %q", "2.1.263", info.Version)
 	}
 }
 
@@ -961,7 +1043,9 @@ func TestPingMissingProtoIsError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263"}` + "\n")
 		})
@@ -972,6 +1056,12 @@ func TestPingMissingProtoIsError(t *testing.T) {
 	})
 
 	info, err := client.Ping(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatalf("expected an error for a ping reply with no proto field, got Info=%+v", info)
 	}
@@ -988,7 +1078,9 @@ func TestPingNonNumberProtoIsError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":"1"}` + "\n")
 		})
@@ -999,6 +1091,12 @@ func TestPingNonNumberProtoIsError(t *testing.T) {
 	})
 
 	info, err := client.Ping(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatalf("expected an error for a non-numeric proto field, got Info=%+v", info)
 	}
@@ -1020,7 +1118,9 @@ func TestPingProtoZeroIsError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":0}` + "\n")
 		})
@@ -1031,6 +1131,12 @@ func TestPingProtoZeroIsError(t *testing.T) {
 	})
 
 	info, err := client.Ping(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatalf("expected an error for proto:0, got Info=%+v", info)
 	}
@@ -1052,7 +1158,9 @@ func TestPingFractionalProtoIsError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":true,"op":"ping","version":"2.1.263","proto":1.9}` + "\n")
 		})
@@ -1063,6 +1171,12 @@ func TestPingFractionalProtoIsError(t *testing.T) {
 	})
 
 	info, err := client.Ping(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatalf("expected an error for a fractional proto:1.9, got Info=%+v", info)
 	}
@@ -1081,7 +1195,9 @@ func TestListSessionsErrorWithoutCodeIsCleanError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false}` + "\n")
 		})
@@ -1093,6 +1209,12 @@ func TestListSessionsErrorWithoutCodeIsCleanError(t *testing.T) {
 	client.proto = 1
 
 	_, err = client.ListSessions(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatal("expected an error for an ok:false reply with no code, got nil")
 	}
@@ -1245,7 +1367,9 @@ func TestErrorCodeEPROTO(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EPROTO","error":"proto mismatch"}` + "\n")
 		})
@@ -1256,6 +1380,12 @@ func TestErrorCodeEPROTO(t *testing.T) {
 	})
 
 	_, err = client.Ping(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	var epErr *ErrProto
 	if !errors.As(err, &epErr) {
 		t.Errorf("expected *ErrProto, got %T: %v", err, err)
@@ -1279,7 +1409,9 @@ func TestErrorCodeEAUTH(t *testing.T) {
 	defer listener.Close()
 
 	var capturedReq map[string]interface{}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
 			if err := json.Unmarshal(req, &capturedReq); err != nil {
 				t.Errorf("unmarshalling captured request: %v", err)
@@ -1293,7 +1425,13 @@ func TestErrorCodeEAUTH(t *testing.T) {
 	})
 	client.proto = 1 // skip the ping, so the one served response answers "reply"
 
-	err = client.SendText(context.Background(), "session123", "hello", true)
+	err = client.SendText(context.Background(), "session123", "hello")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	var eaErr *ErrAuth
 	if !errors.As(err, &eaErr) {
 		t.Errorf("expected *ErrAuth, got %T: %v", err, err)
@@ -1328,7 +1466,9 @@ func TestErrorCodeEPEERUID(t *testing.T) {
 	defer listener.Close()
 
 	var capturedReq map[string]interface{}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
 			if err := json.Unmarshal(req, &capturedReq); err != nil {
 				t.Errorf("unmarshalling captured request: %v", err)
@@ -1343,6 +1483,12 @@ func TestErrorCodeEPEERUID(t *testing.T) {
 	client.proto = 1 // skip the ping, so the one served response answers "list"
 
 	_, err = client.ListSessions(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	var epErr *ErrPeeruid
 	if !errors.As(err, &epErr) {
 		t.Errorf("expected *ErrPeeruid, got %T: %v", err, err)
@@ -1533,7 +1679,9 @@ func TestNoControlKeyLeakedInError(t *testing.T) {
 	defer listener.Close()
 
 	var capturedReq map[string]interface{}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(t *testing.T, req []byte) []byte {
 			if err := json.Unmarshal(req, &capturedReq); err != nil {
 				t.Errorf("unmarshalling captured request: %v", err)
@@ -1548,6 +1696,12 @@ func TestNoControlKeyLeakedInError(t *testing.T) {
 	client.proto = 1 // skip the ping, so the one served response answers the attach
 
 	err = client.SendKeys(context.Background(), "session123", "x")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 
 	// Sanity check that this test actually exercises a path carrying the credential.
 	if auth, _ := capturedReq["auth"].(string); auth != "my-secret-key-12345" {
@@ -1612,7 +1766,7 @@ func TestSendTextRequest(t *testing.T) {
 	})
 	client.proto = 1 // Set proto to avoid ping
 
-	err = client.SendText(context.Background(), "session123", "hello world", true)
+	err = client.SendText(context.Background(), "session123", "hello world")
 	if err != nil {
 		t.Fatalf("SendText failed: %v", err)
 	}
@@ -1651,7 +1805,9 @@ func TestSendTextKeyFunctionFailure(t *testing.T) {
 		mu              sync.Mutex
 		requestReceived bool
 	)
+	accepted := make(chan struct{})
 	go func() {
+		defer close(accepted)
 		conn, _ := listener.Accept()
 		if conn != nil {
 			mu.Lock()
@@ -1669,10 +1825,17 @@ func TestSendTextKeyFunctionFailure(t *testing.T) {
 	// SendText returns ErrNoControlKey before it ever dials, so by the time this call
 	// returns there is nothing left to wait for — a request could only exist if the
 	// code above this comment were wrong, not because of timing.
-	err = client.SendText(context.Background(), "session123", "hello", true)
+	err = client.SendText(context.Background(), "session123", "hello")
 	if !errors.Is(err, ErrNoControlKey) {
 		t.Errorf("expected ErrNoControlKey, got %v", err)
 	}
+
+	// Deterministic, not a race against Accept: closing the listener now forces the
+	// goroutine's Accept call to return immediately — with a real connection if one
+	// had already arrived, or with a plain error if (as expected) none ever did —
+	// rather than this check racing an Accept call that might not have run yet.
+	listener.Close()
+	<-accepted
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1698,7 +1861,9 @@ func TestSendKeysKeyFunctionFailure(t *testing.T) {
 		mu              sync.Mutex
 		requestReceived bool
 	)
+	accepted := make(chan struct{})
 	go func() {
+		defer close(accepted)
 		conn, _ := listener.Accept()
 		if conn != nil {
 			mu.Lock()
@@ -1720,51 +1885,15 @@ func TestSendKeysKeyFunctionFailure(t *testing.T) {
 		t.Errorf("expected ErrNoControlKey, got %v", err)
 	}
 
+	// Deterministic, not a race against Accept — see TestSendTextKeyFunctionFailure's
+	// identical comment.
+	listener.Close()
+	<-accepted
+
 	mu.Lock()
 	defer mu.Unlock()
 	if requestReceived {
 		t.Error("server should not have received any connection at all")
-	}
-}
-
-func TestSendTextSubmitFalse(t *testing.T) {
-	listener, err := net.Listen("unix", tempSocket(t))
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer listener.Close()
-
-	var (
-		mu              sync.Mutex
-		requestReceived bool
-	)
-	go func() {
-		conn, _ := listener.Accept()
-		if conn != nil {
-			mu.Lock()
-			requestReceived = true
-			mu.Unlock()
-			conn.Close()
-		}
-	}()
-
-	client := New(listener.Addr().String(), func() (string, error) {
-		return "key", nil
-	})
-	client.proto = 1
-
-	// SendText returns the unsupported error before it ever dials, so there is
-	// nothing left to wait for by the time this call returns.
-	err = client.SendText(context.Background(), "session123", "hello", false)
-	var submitErr *ErrSubmitNotSupported
-	if !errors.As(err, &submitErr) {
-		t.Errorf("expected *ErrSubmitNotSupported, got %T: %v", err, err)
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if requestReceived {
-		t.Error("server should not have received any request when submit=false")
 	}
 }
 
@@ -1775,7 +1904,9 @@ func TestSendTextErrorENOJOB(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
 		})
@@ -1786,7 +1917,13 @@ func TestSendTextErrorENOJOB(t *testing.T) {
 	})
 	client.proto = 1
 
-	err = client.SendText(context.Background(), "missing", "text", true)
+	err = client.SendText(context.Background(), "missing", "text")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	var nojobErr *ErrNojob
 	if !errors.As(err, &nojobErr) {
 		t.Errorf("expected *ErrNojob, got %T: %v", err, err)
@@ -1825,7 +1962,8 @@ func TestReadScreenReturnsStreamedBytes(t *testing.T) {
 	})
 	client.proto = 1
 
-	output, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	output, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("ReadScreen failed: %v", err)
 	}
@@ -1870,7 +2008,8 @@ func TestReadScreenTailBytes(t *testing.T) {
 	})
 	client.proto = 1
 
-	output, err := client.ReadScreen(context.Background(), "session123", 5)
+	readResult := client.ReadScreen(context.Background(), "session123", 5)
+	output, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("ReadScreen failed: %v", err)
 	}
@@ -1916,7 +2055,7 @@ func TestAttachOmitsAuthWhenKeyFails(t *testing.T) {
 	})
 	client.proto = 1
 
-	_, _ = client.ReadScreen(context.Background(), "session123", 0)
+	_ = client.ReadScreen(context.Background(), "session123", 0)
 
 	<-done
 	select {
@@ -1971,7 +2110,7 @@ func TestReadScreenNeverSendsAuthEvenWhenKeySucceeds(t *testing.T) {
 	})
 	client.proto = 1
 
-	_, _ = client.ReadScreen(context.Background(), "session123", 0)
+	_ = client.ReadScreen(context.Background(), "session123", 0)
 
 	<-done
 	select {
@@ -2099,7 +2238,9 @@ func TestSendKeysAttachRefusedENOJOB(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
 		})
@@ -2111,6 +2252,12 @@ func TestSendKeysAttachRefusedENOJOB(t *testing.T) {
 	client.proto = 1
 
 	err = client.SendKeys(context.Background(), "missing", "x")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	var nojobErr *ErrNojob
 	if !errors.As(err, &nojobErr) {
 		t.Errorf("expected *ErrNojob, got %T: %v", err, err)
@@ -2124,7 +2271,9 @@ func TestSendKeysAttachRefusedEAUTH(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
 		})
@@ -2136,6 +2285,12 @@ func TestSendKeysAttachRefusedEAUTH(t *testing.T) {
 	client.proto = 1
 
 	err = client.SendKeys(context.Background(), "session123", "x")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	var authErr *ErrAuth
 	if !errors.As(err, &authErr) {
 		t.Errorf("expected *ErrAuth, got %T: %v", err, err)
@@ -2149,7 +2304,9 @@ func TestReadScreenAttachRefusedENOJOB(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"ENOJOB","error":"no such session"}` + "\n")
 		})
@@ -2160,7 +2317,14 @@ func TestReadScreenAttachRefusedENOJOB(t *testing.T) {
 	})
 	client.proto = 1
 
-	out, err := client.ReadScreen(context.Background(), "missing", 0)
+	readResult := client.ReadScreen(context.Background(), "missing", 0)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
+	out, err := readResult.Screen, readResult.Err
 	var nojobErr *ErrNojob
 	if !errors.As(err, &nojobErr) {
 		t.Errorf("expected *ErrNojob, got %T: %v", err, err)
@@ -2177,7 +2341,9 @@ func TestReadScreenAttachRefusedEAUTH(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EAUTH","error":"invalid auth"}` + "\n")
 		})
@@ -2188,7 +2354,14 @@ func TestReadScreenAttachRefusedEAUTH(t *testing.T) {
 	})
 	client.proto = 1
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
+	out, err := readResult.Screen, readResult.Err
 	var authErr *ErrAuth
 	if !errors.As(err, &authErr) {
 		t.Errorf("expected *ErrAuth, got %T: %v", err, err)
@@ -2241,27 +2414,24 @@ func TestReadScreenEPROTORetryGetsFreshDeadline(t *testing.T) {
 				// budget, but leaving only a sliver of it unspent by the time this
 				// attempt returns and the retry begins.
 				//
-				// The margins below (screenDeadline 1200ms, this stall 1000ms, leaving
-				// a 200ms sliver, versus the retry's own 500ms stall) are 4x wider than
-				// an earlier version of this test (300ms/250ms/50ms/150ms). That
-				// version passed forty race runs locally but left only ~50ms of
-				// headroom for dial+write+read+scheduler overhead on the first
-				// attempt, and only a ~100ms margin between "long enough to exceed a
-				// wrongly-reused deadline's leftover budget" and "short enough to fit
-				// inside a correctly-fresh one" — tight enough that a loaded CI runner
-				// could flake on scheduling jitter alone, independent of any real
-				// regression. Widening every absolute value by the same factor keeps
-				// the same proportions (so the same bug is still caught) while making
-				// each margin large relative to realistic scheduling jitter.
-				time.Sleep(1000 * time.Millisecond)
+				// The margins below (screenDeadline 3000ms, this stall 2500ms, leaving
+				// a 500ms sliver, versus the retry's own 1000ms stall) are wider still
+				// than an earlier 1200ms/1000ms/200ms/500ms revision, which left only a
+				// 200ms margin between "long enough to exceed a wrongly-reused
+				// deadline's leftover budget" and "short enough to fit inside a
+				// correctly-fresh one" — tight enough that a loaded CI runner could
+				// flake on scheduling jitter alone, independent of any real
+				// regression. These proportions keep catching the same bug while
+				// giving each margin room against realistic scheduling jitter.
+				time.Sleep(2500 * time.Millisecond)
 				conn.Write([]byte(`{"ok":false,"code":"EPROTO"}` + "\n"))
 				conn.Close()
 			default:
 				// Retry's attach: stall longer than the sliver left over from a
-				// reused deadline (200ms), but well inside a fresh, full
-				// screenDeadline (1200ms), before answering with a short,
+				// reused deadline (500ms), but well inside a fresh, full
+				// screenDeadline (3000ms), before answering with a short,
 				// distinctive screen.
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(1000 * time.Millisecond)
 				conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
 				conn.Write([]byte("retry succeeded"))
 				conn.Close()
@@ -2273,10 +2443,11 @@ func TestReadScreenEPROTORetryGetsFreshDeadline(t *testing.T) {
 		return "key", nil
 	})
 	client.proto = 1
-	client.screenDeadline = 1200 * time.Millisecond
+	client.screenDeadline = 3000 * time.Millisecond
 	client.readIdleTimeout = 30 * time.Millisecond
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("expected the retry to succeed with its own fresh deadline, got error: %v", err)
 	}
@@ -2328,10 +2499,15 @@ func TestReadScreenContextDeadlineReturnsPartialBuffer(t *testing.T) {
 	})
 	client.proto = 1
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	// 500ms (widened from an earlier 150ms) against a server writing every 5ms: on a
+	// loaded CI runner, scheduling jitter delaying the very first write could
+	// otherwise race the context deadline and leave output empty for reasons that
+	// have nothing to do with what this test is actually checking.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	output, err := client.ReadScreen(ctx, "session123", 0)
+	readResult := client.ReadScreen(ctx, "session123", 0)
+	output, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("expected nil error for a partial screen on deadline, got %v", err)
 	}
@@ -2411,7 +2587,9 @@ func TestErrorMessageNoControlKey(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false,"code":"EAUTH","error":"auth failed"}` + "\n")
 		})
@@ -2422,7 +2600,13 @@ func TestErrorMessageNoControlKey(t *testing.T) {
 	})
 	client.proto = 1
 
-	err = client.SendText(context.Background(), "session123", "text", true)
+	err = client.SendText(context.Background(), "session123", "text")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatal("expected an error for an EAUTH reply, got nil")
 	}
@@ -2440,7 +2624,9 @@ func TestListSessionsMissingJobsKeyIsError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			// Reply with ok=true but no jobs field at all - malformed response
 			return []byte(`{"ok":true,"op":"list"}` + "\n")
@@ -2453,6 +2639,12 @@ func TestListSessionsMissingJobsKeyIsError(t *testing.T) {
 	client.proto = 1
 
 	sessions, err := client.ListSessions(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Errorf("expected error for missing jobs field, got nil; sessions=%v", sessions)
 	}
@@ -2468,7 +2660,9 @@ func TestListSessionsEmptyJobsArrayIsNotError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			// Reply with ok=true and empty jobs array - valid response
 			return []byte(`{"ok":true,"op":"list","jobs":[]}` + "\n")
@@ -2483,6 +2677,12 @@ func TestListSessionsEmptyJobsArrayIsNotError(t *testing.T) {
 	sessions, err := client.ListSessions(context.Background())
 	if err != nil {
 		t.Errorf("expected nil error for empty jobs array, got: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
 	}
 	if sessions == nil {
 		t.Error("expected empty slice for empty jobs array, got nil")
@@ -2552,7 +2752,7 @@ func TestReadScreenNoCtxDeadlineChattySession(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = client.ReadScreen(context.Background(), "session123", 0)
+		_ = client.ReadScreen(context.Background(), "session123", 0)
 	}()
 
 	select {
@@ -2610,7 +2810,8 @@ func TestReadScreenIdleDetection(t *testing.T) {
 	// This should return quickly (within ~500ms) due to idle detection,
 	// not wait for the full 2-second ceiling
 	start := time.Now()
-	output, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	output, err := readResult.Screen, readResult.Err
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -2668,7 +2869,8 @@ func TestNewNilKeyFuncReadScreenDoesNotPanic(t *testing.T) {
 	// the comment and the actual runtime agree, and this test stays fast.
 	client.screenDeadline = 200 * time.Millisecond
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Errorf("expected ReadScreen to succeed reading without a key, got: %v", err)
 	}
@@ -2681,7 +2883,7 @@ func TestNewNilKeyFuncSendTextReturnsErrNoControlKey(t *testing.T) {
 	client := New("/nonexistent/socket/path", nil)
 	client.proto = 1
 
-	err := client.SendText(context.Background(), "session123", "hello", true)
+	err := client.SendText(context.Background(), "session123", "hello")
 	if !errors.Is(err, ErrNoControlKey) {
 		t.Errorf("expected ErrNoControlKey, got %v", err)
 	}
@@ -2955,6 +3157,80 @@ func TestDialDoesNotReResolveOnDeadContext(t *testing.T) {
 	}
 }
 
+// TestDialReturnsOriginalErrorWhenReResolveItselfFails covers the first of dial's two
+// re-resolve failure branches: when c.resolve itself returns an error, dial must return
+// the *original* dial failure (against the stale path), not the resolve error — the
+// resolve error carries no information about why the socket was unreachable in the
+// first place, and existing tests only ever exercise c.resolve succeeding.
+func TestDialReturnsOriginalErrorWhenReResolveItselfFails(t *testing.T) {
+	deadListener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadPath := deadListener.Addr().String()
+	deadListener.Close() // now dead: nothing is listening, and the socket file is gone
+
+	client := New(deadPath, func() (string, error) { return "key", nil })
+	client.discoverable = true
+	client.resolve = func() (string, error) {
+		return "", errors.New("resolve boom")
+	}
+
+	_, err = client.dial(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !errors.Is(err, ErrDaemonUnavailable) {
+		t.Errorf("expected the original dial failure (ErrDaemonUnavailable) to surface, got %v", err)
+	}
+	if strings.Contains(err.Error(), "resolve boom") {
+		t.Errorf("expected the original dial error, not the resolve error, got %v", err)
+	}
+}
+
+// TestDialReturnsSecondDialErrorWhenReResolvedPathIsAlsoDead covers dial's other
+// re-resolve failure branch: c.resolve succeeds with a new path, but that new path is
+// itself unreachable. dial must report that second failure and must not cache the new
+// path via setSocketPath — caching a path that never actually dialed successfully would
+// make every subsequent call skip re-resolution against a path already known to be dead.
+func TestDialReturnsSecondDialErrorWhenReResolvedPathIsAlsoDead(t *testing.T) {
+	deadListener1, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadPath1 := deadListener1.Addr().String()
+	deadListener1.Close()
+
+	deadListener2, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadPath2 := deadListener2.Addr().String()
+	deadListener2.Close()
+
+	client := New(deadPath1, func() (string, error) { return "key", nil })
+	client.discoverable = true
+	var resolveCalls int32
+	client.resolve = func() (string, error) {
+		atomic.AddInt32(&resolveCalls, 1)
+		return deadPath2, nil
+	}
+
+	_, err = client.dial(context.Background())
+	if err == nil {
+		t.Fatal("expected an error against a re-resolved path that is also dead")
+	}
+	if !errors.Is(err, ErrDaemonUnavailable) {
+		t.Errorf("expected ErrDaemonUnavailable from the second dial attempt, got %v", err)
+	}
+	if got := atomic.LoadInt32(&resolveCalls); got != 1 {
+		t.Errorf("expected resolve to be called exactly once, got %d", got)
+	}
+	if got := client.currentSocketPath(); got != deadPath1 {
+		t.Errorf("expected the socket path to remain unchanged after a failed re-resolved dial, got %q, want %q", got, deadPath1)
+	}
+}
+
 // --- checkSocketOwnership must accept the real production shape, not just the shape
 // t.TempDir() happens to produce ---
 
@@ -3105,6 +3381,198 @@ func TestClientRefusesInsecureSocketDirectory(t *testing.T) {
 	// stays free to change without breaking this test.
 	if !errors.Is(err, errSocketWritableByOthers) {
 		t.Errorf("expected an ownership refusal satisfying errors.Is(err, errSocketWritableByOthers), got: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipUIDRefusesWrongOwnerSocketFile covers errSocketWrongOwner on
+// the socket file itself, as opposed to an ancestor directory: existing tests only ever
+// reached this sentinel through the directory walk. checkSocketOwnershipUID takes the
+// expected uid as a parameter specifically so a mismatch can be produced deterministically
+// (a wantUID no real file can ever have), without needing a second real user account.
+func TestCheckSocketOwnershipUIDRefusesWrongOwnerSocketFile(t *testing.T) {
+	secureDir := shortTempDir(t)
+	sockPath := filepath.Join(secureDir, "control.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	err = checkSocketOwnershipUID(sockPath, os.Getuid()+123456)
+	if err == nil {
+		t.Fatal("expected refusal for a socket file not owned by the expected uid")
+	}
+	if !errors.Is(err, errSocketWrongOwner) {
+		t.Errorf("expected errors.Is(err, errSocketWrongOwner), got: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipUIDRefusesWritableSocketFile covers errSocketWritableByOthers
+// on the socket file itself: the enclosing directory is secure, but the socket file's
+// own mode grants group or other a permission bit. Existing tests only ever reached this
+// sentinel by making an enclosing directory insecure, never the socket file itself.
+func TestCheckSocketOwnershipUIDRefusesWritableSocketFile(t *testing.T) {
+	secureDir := shortTempDir(t)
+	sockPath := filepath.Join(secureDir, "control.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(sockPath, 0o777); err != nil {
+		t.Fatalf("chmod socket: %v", err)
+	}
+
+	err = checkSocketOwnershipUID(sockPath, os.Getuid())
+	if err == nil {
+		t.Fatal("expected refusal for a socket file writable by group or other")
+	}
+	if !errors.Is(err, errSocketWritableByOthers) {
+		t.Errorf("expected errors.Is(err, errSocketWritableByOthers), got: %v", err)
+	}
+}
+
+// --- checkSocketOwnershipWalk: branches only reachable through the injectable lstatFunc ---
+
+// TestCheckSocketOwnershipWalkPropagatesLstatError covers the walk's own lstat failure
+// branch — distinct from every symlink/ownership/mode sentinel below it — reached when
+// the underlying lstat call itself fails (e.g. a path removed mid-walk).
+func TestCheckSocketOwnershipWalkPropagatesLstatError(t *testing.T) {
+	lstat := fakeLstat(map[string]dirStat{})
+
+	err := checkSocketOwnershipWalk("/x/control.sock", "/does/not/exist", os.Getuid(), lstat)
+	if err == nil {
+		t.Fatal("expected the walk to propagate a plain lstat failure")
+	}
+	if errors.Is(err, errSocketSymlink) || errors.Is(err, errSocketWrongOwner) || errors.Is(err, errSocketWritableByOthers) {
+		t.Errorf("expected a plain lstat error, not one of the ownership sentinels: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipWalkRefusesRootOwnedDirMissingStickyBit covers
+// errSocketMissingStickyBit: a root-owned ancestor that is writable by group or other
+// but does not carry the sticky bit is not actually outside a local attacker's control
+// (see stickyBitSatisfiesRootBoundary), unlike /tmp's usual 1777 mode.
+func TestCheckSocketOwnershipWalkRefusesRootOwnedDirMissingStickyBit(t *testing.T) {
+	uid := os.Getuid()
+	lstat := fakeLstat(map[string]dirStat{
+		"/tmp/cc-daemon-x": {uid: 0, mode: 0o777}, // world-writable, no sticky bit
+	})
+
+	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/control.sock", "/tmp/cc-daemon-x", uid, lstat)
+	if err == nil {
+		t.Fatal("expected refusal for a root-owned, world-writable ancestor missing the sticky bit")
+	}
+	if !errors.Is(err, errSocketMissingStickyBit) {
+		t.Errorf("expected errors.Is(err, errSocketMissingStickyBit), got: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipWalkRefusesWrongOwnerAncestor covers errSocketWrongOwner
+// inside the walk itself (an ordinary, non-root, non-symlink ancestor owned by someone
+// else) — distinct from TestCheckSocketOwnershipUIDRefusesWrongOwnerSocketFile, which
+// covers the same sentinel on the socket file, not an ancestor directory.
+func TestCheckSocketOwnershipWalkRefusesWrongOwnerAncestor(t *testing.T) {
+	uid := os.Getuid()
+	lstat := fakeLstat(map[string]dirStat{
+		"/tmp/cc-daemon-x": {uid: uid + 1, mode: 0o700},
+	})
+
+	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/control.sock", "/tmp/cc-daemon-x", uid, lstat)
+	if err == nil {
+		t.Fatal("expected refusal for an ancestor owned by a different, non-root user")
+	}
+	if !errors.Is(err, errSocketWrongOwner) {
+		t.Errorf("expected errors.Is(err, errSocketWrongOwner), got: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipWalkAcceptsFilesystemRootBoundary covers the walk's
+// `parent == path` termination — reached only if the chain of secure, non-root-owned
+// ancestors runs all the way up to the filesystem root without ever meeting a
+// root-owned directory first (every other test drives the walk to a root-owned
+// boundary instead).
+func TestCheckSocketOwnershipWalkAcceptsFilesystemRootBoundary(t *testing.T) {
+	uid := os.Getuid()
+	lstat := fakeLstat(map[string]dirStat{
+		"/x": {uid: uid, mode: 0o700},
+		"/":  {uid: uid, mode: 0o700},
+	})
+
+	err := checkSocketOwnershipWalk("/x/control.sock", "/x", uid, lstat)
+	if err != nil {
+		t.Errorf("expected the walk to accept reaching the filesystem root, got: %v", err)
+	}
+}
+
+// TestCheckSocketOwnershipWalkRefusesTooManyAncestors covers errSocketTooManyAncestors,
+// the 64-ancestor symlink-loop guard: a two-node cycle of root-owned symlinks (root
+// cannot be impersonated, so each hop is individually accepted) that never terminates
+// on its own, forcing the walk to give up rather than loop forever.
+func TestCheckSocketOwnershipWalkRefusesTooManyAncestors(t *testing.T) {
+	uid := os.Getuid()
+	lstat := fakeLstat(map[string]dirStat{
+		"/loop1": {uid: 0, symlink: true, target: "/loop2"},
+		"/loop2": {uid: 0, symlink: true, target: "/loop1"},
+	})
+
+	err := checkSocketOwnershipWalk("/loop1/control.sock", "/loop1", uid, lstat)
+	if err == nil {
+		t.Fatal("expected refusal for a symlink chain that never terminates")
+	}
+	if !errors.Is(err, errSocketTooManyAncestors) {
+		t.Errorf("expected errors.Is(err, errSocketTooManyAncestors), got: %v", err)
+	}
+}
+
+// --- checkKeyDirSecurity: the directory half of checkKeyFileSecurity ---
+
+// TestCheckKeyDirSecurityPropagatesLstatError covers the plain os.Lstat failure branch
+// (e.g. the directory does not exist, or was removed between checking the key file and
+// checking its parent) — distinct from every sentinel below it.
+func TestCheckKeyDirSecurityPropagatesLstatError(t *testing.T) {
+	err := checkKeyDirSecurity(filepath.Join(shortTempDir(t), "does-not-exist"), os.Getuid())
+	if err == nil {
+		t.Fatal("expected a plain error for a missing key directory")
+	}
+	if errors.Is(err, errKeyDirSymlink) || errors.Is(err, errKeyDirWrongOwner) || errors.Is(err, errKeyDirInsecureMode) {
+		t.Errorf("expected a plain lstat error, not one of the sentinels: %v", err)
+	}
+}
+
+// TestCheckKeyDirSecurityRefusesSymlink covers errKeyDirSymlink: unlike
+// checkSocketOwnershipWalk's ancestor chain, ~/.claude/daemon has no legitimate
+// production shape in which it is itself a symlink, so this is refused outright rather
+// than resolved.
+func TestCheckKeyDirSecurityRefusesSymlink(t *testing.T) {
+	base := shortTempDir(t)
+	actualDir := filepath.Join(base, "actual")
+	if err := os.Mkdir(actualDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	linkedDir := filepath.Join(base, "daemon")
+	if err := os.Symlink(actualDir, linkedDir); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	err := checkKeyDirSecurity(linkedDir, os.Getuid())
+	if !errors.Is(err, errKeyDirSymlink) {
+		t.Errorf("expected errors.Is(err, errKeyDirSymlink), got: %v", err)
+	}
+}
+
+// TestCheckKeyDirSecurityRefusesWrongOwner covers errKeyDirWrongOwner directly: wantUID
+// is a parameter precisely so this mismatch can be produced deterministically, the same
+// pattern checkKeyFileSecurity's own wrong-owner test already uses.
+func TestCheckKeyDirSecurityRefusesWrongOwner(t *testing.T) {
+	dir := shortTempDir(t)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	err := checkKeyDirSecurity(dir, os.Getuid()+123456)
+	if !errors.Is(err, errKeyDirWrongOwner) {
+		t.Errorf("expected errors.Is(err, errKeyDirWrongOwner), got: %v", err)
 	}
 }
 
@@ -3259,7 +3727,8 @@ func TestReadScreenDetectsEkicked(t *testing.T) {
 	})
 	client.proto = 1
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	var kicked *ErrKicked
 	if !errors.As(err, &kicked) {
 		t.Fatalf("expected *ErrKicked, got %T: %v", err, err)
@@ -3303,7 +3772,8 @@ func TestReadScreenKickedRespectsTailLimit(t *testing.T) {
 	})
 	client.proto = 1
 
-	out, err := client.ReadScreen(context.Background(), "session123", 5)
+	readResult := client.ReadScreen(context.Background(), "session123", 5)
+	out, err := readResult.Screen, readResult.Err
 	var kicked *ErrKicked
 	if !errors.As(err, &kicked) {
 		t.Fatalf("expected *ErrKicked, got %T: %v", err, err)
@@ -3368,7 +3838,8 @@ func TestReadScreenMidScreenEkickedTextIsNotAKick(t *testing.T) {
 	// never consults at all (see readScreenWithDeadline).
 	client.screenDeadline = 2 * time.Second
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("expected nil error for a screen merely displaying the marker text, got %v", err)
 	}
@@ -3422,7 +3893,8 @@ func TestReadScreenSlowFirstPaintReturnsData(t *testing.T) {
 	// succeed rather than time out before the first byte arrives.
 	client.screenDeadline = 2 * time.Second
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("ReadScreen failed: %v", err)
 	}
@@ -3441,6 +3913,61 @@ func TestReadScreenSlowFirstPaintReturnsData(t *testing.T) {
 // this method can shorten, never one it lets a caller stretch" — this asserts that
 // against the header phase specifically, not just the streaming phase
 // TestReadScreenProductionDefaultsChattySessionReturnsPromptly already covers.
+// TestReadScreenOnceWithNoContextDeadlineFallsBackToScreenDeadline covers
+// readScreenOnce's own "ctx carries no deadline" fallback directly. ReadScreen itself
+// can never reach it (readScreenWithDeadline always sets one first), but readScreenOnce
+// is unexported, package-internal, and documents itself as a safe fallback "for any
+// other caller of this unexported function" — this test is exactly that other caller,
+// calling it with context.Background() to prove the fallback ceiling
+// (time.Now().Add(c.screenDeadline)) actually governs the read rather than blocking
+// forever.
+func TestReadScreenOnceWithNoContextDeadlineFallsBackToScreenDeadline(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		reader := bufio.NewReader(conn)
+		if _, err := reader.ReadString('\n'); err != nil {
+			return
+		}
+		conn.Write([]byte(`{"ok":true,"op":"attach"}` + "\n"))
+		conn.Write([]byte("hello screen"))
+		// Then go silent: readScreenOnce's idle detection (readIdleTimeout below)
+		// must be what ends the read, well inside the screenDeadline-derived ceiling
+		// this test exists to exercise.
+		time.Sleep(2 * time.Second)
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	client.proto = 1
+	client.readIdleTimeout = 50 * time.Millisecond
+	client.screenDeadline = 1 * time.Second
+
+	start := time.Now()
+	out, err := client.readScreenOnce(context.Background(), "session123", 0)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("expected a successful read, got: %v", err)
+	}
+	if out != "hello screen" {
+		t.Errorf("expected %q, got %q", "hello screen", out)
+	}
+	if elapsed >= client.screenDeadline {
+		t.Errorf("expected idle detection (50ms) to end the read well before the 1s fallback ceiling, took %v", elapsed)
+	}
+}
+
 func TestReadScreenHeaderHangHonorsScreenDeadline(t *testing.T) {
 	listener, err := net.Listen("unix", tempSocket(t))
 	if err != nil {
@@ -3475,7 +4002,8 @@ func TestReadScreenHeaderHangHonorsScreenDeadline(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err = client.ReadScreen(ctx, "session123", 0)
+	readResult := client.ReadScreen(ctx, "session123", 0)
+	err = readResult.Err
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -3668,7 +4196,8 @@ func TestReadScreenKickMidStreamNoTrailingNewlineIsDetected(t *testing.T) {
 	})
 	client.proto = 1
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	var kicked *ErrKicked
 	if !errors.As(err, &kicked) {
 		t.Fatalf("expected *ErrKicked, got %T: %v (screen text %q)", err, err, out)
@@ -3792,7 +4321,7 @@ func TestReadScreenProductionDefaultsChattySessionReturnsPromptly(t *testing.T) 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = client.ReadScreen(context.Background(), "session123", 0)
+		_ = client.ReadScreen(context.Background(), "session123", 0)
 	}()
 
 	select {
@@ -3947,6 +4476,152 @@ func TestCollectUntilIdleOrClosedBoundsFirstByteWaitWithNoContextDeadline(t *tes
 	}
 }
 
+// TestCollectUntilIdleOrClosedTruncatesAtRuneBoundaryOnOverflow covers the maxBytes
+// overflow branch that calls trimToRuneBoundary on the trimmed buffer — the only
+// production path where a rune boundary can actually be cut mid-stream, since it is fed
+// whatever the two separate reads below happen to land on, not a boundary chosen by the
+// test. trimToRuneBoundary itself is covered elsewhere as a pure function; this proves
+// the call site that matters is wired up.
+//
+// The euro sign (E2 82 AC, 3 bytes) arrives in one read, "X" arrives in a second: with
+// maxBytes=3, the 4-byte total is trimmed to the last 3 bytes (82 AC 'X'), landing
+// squarely inside the euro sign's continuation bytes. trimToRuneBoundary must strip both
+// of those before "X" is a valid boundary to return from.
+//
+// The connection is never closed: it goes idle instead, so this test's outcome depends
+// only on the two writes and the idle timeout, never on a close racing against them.
+func TestCollectUntilIdleOrClosedTruncatesAtRuneBoundaryOnOverflow(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+
+	go func() {
+		_, _ = serverConn.Write([]byte("€")) // E2 82 AC
+		_, _ = serverConn.Write([]byte("X"))
+		// Then go silent: idle detection, not a close, is what ends the read.
+	}()
+
+	data, closed := collectUntilIdleOrClosed(context.Background(), clientConn, bufio.NewReader(clientConn), 100*time.Millisecond, 3, false, time.Time{})
+
+	if closed {
+		t.Error("expected closed=false: the connection never closed, only went idle")
+	}
+	if string(data) != "X" {
+		t.Errorf("expected the euro sign's continuation bytes to be trimmed, leaving %q, got %q", "X", data)
+	}
+}
+
+// TestCollectUntilIdleOrClosedClampsReadDeadlineToUntil covers `until` clamping the
+// per-read deadline down from a much later one already in effect (here, the idle
+// deadline computed after the first byte arrives) — distinct from the pre-loop
+// firstByteDeadline clamp, which is a different branch covered elsewhere. Without this
+// clamp, a connection that sends one byte and then goes silent for longer than `until`
+// but shorter than idleTimeout would block past `until` entirely, defeating the hard
+// ceiling collectUntilIdleOrClosed's own doc comment promises.
+func TestCollectUntilIdleOrClosedClampsReadDeadlineToUntil(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+
+	go func() {
+		_, _ = serverConn.Write([]byte("x"))
+		// Then go silent for the rest of the test: `until` (150ms) must end the read,
+		// not idleTimeout (2s).
+	}()
+
+	until := time.Now().Add(150 * time.Millisecond)
+	start := time.Now()
+	data, closed := collectUntilIdleOrClosed(context.Background(), clientConn, bufio.NewReader(clientConn), 2*time.Second, 0, true, until)
+	elapsed := time.Since(start)
+
+	if closed {
+		t.Error("expected closed=false: the connection never actually closed, only `until` elapsed")
+	}
+	if string(data) != "x" {
+		t.Errorf("expected the one byte written before `until` fired, got %q", data)
+	}
+	if elapsed >= 2*time.Second {
+		t.Errorf("expected `until` (150ms) to end the read well before the 2s idle timeout, took %v", elapsed)
+	}
+}
+
+// TestWrapNoControlKeyNilCauseYieldsPlainSentinel covers wrapNoControlKey's own
+// documented special case directly: a nil cause must yield the bare ErrNoControlKey
+// value, identical via == (not merely errors.Is), rather than a pointless
+// *errNoControlKeyWithCause wrapper around nothing. No production call site passes nil
+// today (every one guards on err != nil first), so this is the only way to exercise it.
+func TestWrapNoControlKeyNilCauseYieldsPlainSentinel(t *testing.T) {
+	got := wrapNoControlKey(nil)
+	if got != ErrNoControlKey {
+		t.Errorf("expected the exact ErrNoControlKey value for a nil cause, got %v (%T)", got, got)
+	}
+}
+
+// TestControlKeyNoHomeDirIsError covers ControlKey's os.UserHomeDir() failure branch:
+// with $HOME unset, UserHomeDir fails on every platform this package supports, and that
+// failure must still collapse to the same generic ErrNoControlKey as every other cause.
+func TestControlKeyNoHomeDirIsError(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	_, err := ControlKey()
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Fatalf("expected ErrNoControlKey when $HOME is unset, got %v", err)
+	}
+	if err.Error() != ErrNoControlKey.Error() {
+		t.Errorf("user-facing text must stay exactly %q, got %q", ErrNoControlKey.Error(), err.Error())
+	}
+}
+
+// TestControlKeyEmptyFileIsError covers the fifth of the five causes ControlKey's own
+// comment enumerates: a key file that passes every ownership and mode check but holds
+// no key at all (or only whitespace).
+func TestControlKeyEmptyFileIsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.WriteFile(keyPath, []byte("   \n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	_, err := ControlKey()
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Fatalf("expected ErrNoControlKey for a whitespace-only key file, got %v", err)
+	}
+	cause := errors.Unwrap(err)
+	if cause == nil || !strings.Contains(cause.Error(), "empty") {
+		t.Errorf("expected the internal cause to say the file is empty, got %v", cause)
+	}
+}
+
+// TestControlKeyReadFileErrorIsError covers os.ReadFile's own failure branch, reached
+// only after checkKeyFileSecurity has already accepted the path — a directory at
+// control.key's path, correctly owned and moded (0700, same bits checkKeyFileSecurity
+// requires of a key file), passes every security check but fails to read as file
+// content with a deterministic EISDIR, no race required.
+func TestControlKeyReadFileErrorIsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	dir := filepath.Join(tmpDir, ".claude", "daemon")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keyPath := filepath.Join(dir, "control.key")
+	if err := os.Mkdir(keyPath, 0o700); err != nil {
+		t.Fatalf("mkdir control.key: %v", err)
+	}
+
+	_, err := ControlKey()
+	if !errors.Is(err, ErrNoControlKey) {
+		t.Fatalf("expected ErrNoControlKey when the key path is unreadable as a file, got %v", err)
+	}
+}
+
 // TestControlKeyWrapsCauseButKeepsGenericMessage covers the recommendation that
 // ControlKey's user-facing error collapsed every distinct cause into a bare
 // ErrNoControlKey with nothing behind it, making the failure impossible to diagnose.
@@ -3981,8 +4656,13 @@ func TestControlKeyWrapsCauseButKeepsGenericMessage(t *testing.T) {
 	if cause == nil {
 		t.Fatal("expected the internal cause to be reachable via errors.Unwrap")
 	}
-	if !strings.Contains(cause.Error(), "group or other") {
-		t.Errorf("expected the wrapped cause to name the actual reason, got %q", cause.Error())
+	// errors.Is against the exact sentinel, not a substring match: both
+	// errKeyFileInsecureMode's and errKeyDirInsecureMode's text contain "group or
+	// other", so a substring match here would still pass if the two checks were
+	// swapped — this fixture (a 0640 key file inside a secure 0700 directory) must
+	// name the file's own sentinel specifically.
+	if !errors.Is(cause, errKeyFileInsecureMode) {
+		t.Errorf("expected errors.Is(cause, errKeyFileInsecureMode), got %q", cause.Error())
 	}
 }
 
@@ -4014,8 +4694,13 @@ func TestControlKeyRefusesSymlinkWithClearInternalCause(t *testing.T) {
 		t.Fatalf("expected ErrNoControlKey for a symlinked key file, got %v", err)
 	}
 	cause := errors.Unwrap(err)
-	if cause == nil || !strings.Contains(cause.Error(), "symlink") {
-		t.Errorf("expected the wrapped cause to name the symlink explicitly, got %v", cause)
+	// errors.Is against the exact sentinel: errKeyFileSymlink, errKeyDirSymlink and
+	// every socket-side symlink sentinel all contain "symlink" in their text, so a
+	// substring match here would still pass if this check were swapped with any of
+	// those — this fixture (the key file itself is the symlink) must name
+	// errKeyFileSymlink specifically.
+	if cause == nil || !errors.Is(cause, errKeyFileSymlink) {
+		t.Errorf("expected errors.Is(cause, errKeyFileSymlink), got %v", cause)
 	}
 }
 
@@ -4058,7 +4743,8 @@ func TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick(t *testing.T) {
 	})
 	client.proto = 1
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("expected nil error for a screen that merely displayed the marker text before exiting, got %v", err)
 	}
@@ -4101,7 +4787,8 @@ func TestReadScreenLongMultilineTailAfterMarkerIsNotAKick(t *testing.T) {
 	})
 	client.proto = 1
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("expected nil error for a marker followed by a long, multi-line tail, got %v", err)
 	}
@@ -4183,8 +4870,12 @@ func TestCheckSocketOwnershipRefusesSymlinkedSocketPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected refusal for a symlinked socket path")
 	}
-	if !strings.Contains(err.Error(), "symlink") {
-		t.Errorf("expected the refusal to name the symlink explicitly, got: %v", err)
+	// errors.Is against the exact sentinel: this must be errSocketSymlink specifically
+	// (the socket path itself is the symlink), not merely any error whose text happens
+	// to contain "symlink" — a substring match would still pass if this check were
+	// swapped with, say, errSocketMissingStickyBit's ancestor-walk symlink refusal.
+	if !errors.Is(err, errSocketSymlink) {
+		t.Errorf("expected errors.Is(err, errSocketSymlink), got: %v", err)
 	}
 }
 
@@ -4218,8 +4909,10 @@ func TestCheckSocketOwnershipRefusesSymlinkedIntermediateDirectory(t *testing.T)
 	if err == nil {
 		t.Fatal("expected refusal when an enclosing directory in the path is a symlink owned by a non-root user")
 	}
-	if !strings.Contains(err.Error(), "symlink") {
-		t.Errorf("expected the refusal to name the symlink explicitly, got: %v", err)
+	// errors.Is against the exact sentinel — see TestCheckSocketOwnershipRefusesSymlinkedSocketPath
+	// for why a substring match on "symlink" is not enough.
+	if !errors.Is(err, errSocketSymlink) {
+		t.Errorf("expected errors.Is(err, errSocketSymlink), got: %v", err)
 	}
 }
 
@@ -4247,13 +4940,13 @@ func fakeLstat(entries map[string]dirStat) lstatFunc {
 func TestCheckSocketOwnershipWalkAcceptsRootOwnedSymlinkedAncestor(t *testing.T) {
 	uid := os.Getuid()
 	lstat := fakeLstat(map[string]dirStat{
-		"/tmp/cc-daemon-x/b9184055": {uid: uid, mode: 0o700},
-		"/tmp/cc-daemon-x":          {uid: uid, mode: 0o700},
-		"/tmp":                      {uid: 0, symlink: true, target: "private/tmp"},
-		"/private/tmp":              {uid: 0, mode: os.ModeSticky | 0o777},
+		"/tmp/cc-daemon-x/fake-session-dir": {uid: uid, mode: 0o700},
+		"/tmp/cc-daemon-x":                  {uid: uid, mode: 0o700},
+		"/tmp":                              {uid: 0, symlink: true, target: "private/tmp"},
+		"/private/tmp":                      {uid: 0, mode: os.ModeSticky | 0o777},
 	})
 
-	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/b9184055/control.sock", "/tmp/cc-daemon-x/b9184055", uid, lstat)
+	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/fake-session-dir/control.sock", "/tmp/cc-daemon-x/fake-session-dir", uid, lstat)
 	if err != nil {
 		t.Errorf("expected a root-owned symlinked ancestor (/tmp -> /private/tmp) to be accepted, got: %v", err)
 	}
@@ -4266,18 +4959,20 @@ func TestCheckSocketOwnershipWalkAcceptsRootOwnedSymlinkedAncestor(t *testing.T)
 func TestCheckSocketOwnershipWalkRefusesNonRootOwnedSymlinkedAncestor(t *testing.T) {
 	uid := os.Getuid()
 	lstat := fakeLstat(map[string]dirStat{
-		"/tmp/cc-daemon-x/b9184055": {uid: uid, mode: 0o700},
-		"/tmp/cc-daemon-x":          {uid: uid, mode: 0o700},
-		"/tmp":                      {uid: uid + 1, symlink: true, target: "private/tmp"},
-		"/private/tmp":              {uid: 0, mode: os.ModeSticky | 0o777},
+		"/tmp/cc-daemon-x/fake-session-dir": {uid: uid, mode: 0o700},
+		"/tmp/cc-daemon-x":                  {uid: uid, mode: 0o700},
+		"/tmp":                              {uid: uid + 1, symlink: true, target: "private/tmp"},
+		"/private/tmp":                      {uid: 0, mode: os.ModeSticky | 0o777},
 	})
 
-	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/b9184055/control.sock", "/tmp/cc-daemon-x/b9184055", uid, lstat)
+	err := checkSocketOwnershipWalk("/tmp/cc-daemon-x/fake-session-dir/control.sock", "/tmp/cc-daemon-x/fake-session-dir", uid, lstat)
 	if err == nil {
 		t.Fatal("expected a non-root-owned symlinked ancestor to be refused")
 	}
-	if !strings.Contains(err.Error(), "symlink") {
-		t.Errorf("expected the refusal to name the symlink explicitly, got: %v", err)
+	// errors.Is against the exact sentinel — see TestCheckSocketOwnershipRefusesSymlinkedSocketPath
+	// for why a substring match on "symlink" is not enough.
+	if !errors.Is(err, errSocketSymlink) {
+		t.Errorf("expected errors.Is(err, errSocketSymlink), got: %v", err)
 	}
 }
 
@@ -4307,7 +5002,9 @@ func TestPingErrorWithoutCodeIsCleanError(t *testing.T) {
 	}
 	defer listener.Close()
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		serveOnce(t, listener, func(_ *testing.T, _ []byte) []byte {
 			return []byte(`{"ok":false}` + "\n")
 		})
@@ -4318,6 +5015,12 @@ func TestPingErrorWithoutCodeIsCleanError(t *testing.T) {
 	})
 
 	_, err = client.Ping(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server goroutine did not complete: the client likely never connected")
+	}
 	if err == nil {
 		t.Fatal("expected an error for an ok:false ping reply with no code, got nil")
 	}
@@ -4434,9 +5137,14 @@ func TestReadScreenMarkerAtEndWithoutObservedCloseIsNotAKick(t *testing.T) {
 	})
 	client.proto = 1
 	client.readIdleTimeout = 2 * time.Second // long enough that idle never fires first
-	client.screenDeadline = 50 * time.Millisecond
+	// Widened from an earlier 50ms: that left dial+request+header+marker to complete
+	// inside a window thin enough that scheduling jitter on a loaded CI runner could
+	// make the ceiling fire mid-setup instead of after the marker, breaking this test
+	// for a reason unrelated to the residual-risk case it exists to document.
+	client.screenDeadline = 500 * time.Millisecond
 
-	out, err := client.ReadScreen(context.Background(), "session123", 0)
+	readResult := client.ReadScreen(context.Background(), "session123", 0)
+	out, err := readResult.Screen, readResult.Err
 	if err != nil {
 		t.Fatalf("expected nil error (the marker is reported as ordinary content, per the documented residual risk), got %v", err)
 	}
@@ -4621,7 +5329,7 @@ func TestSendTextEPROTORetryDoesNotDoubleDeliverText(t *testing.T) {
 	})
 	client.proto = 5 // stale cached proto, so the first reply is sent immediately
 
-	err = client.SendText(context.Background(), "session123", "hello world", true)
+	err = client.SendText(context.Background(), "session123", "hello world")
 	if err != nil {
 		t.Fatalf("SendText failed: %v", err)
 	}
@@ -4681,16 +5389,6 @@ func TestDaemonErrorCodeMapping(t *testing.T) {
 				t.Errorf("daemonError(%q).Error() = %q, want %q", tc.code, got, tc.wantMsg)
 			}
 		})
-	}
-}
-
-// TestErrSubmitNotSupportedMessage covers ErrSubmitNotSupported.Error(), never called
-// directly by any existing test (only errors.As).
-func TestErrSubmitNotSupportedMessage(t *testing.T) {
-	err := &ErrSubmitNotSupported{}
-	want := "the control socket always submits a reply; holding text unsent is not supported"
-	if got := err.Error(); got != want {
-		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
