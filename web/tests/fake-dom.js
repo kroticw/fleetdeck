@@ -65,6 +65,34 @@ class FakeNode {
     this.listeners = new Map();
     this._text = "";
     this._html = null;
+
+    // Scrolling and text selection, for the modules whose whole defect was
+    // about them: a column that scrolls its thread to the bottom on every
+    // redraw is unreadable past one screen, and a textarea rebuilt under the
+    // cursor loses the caret mid-word. Neither is observable without these,
+    // and neither is laid out here -- a test sets scrollHeight/clientHeight to
+    // describe the situation it means, and reads scrollTop to see what the
+    // module did about it.
+    this.scrollTop = 0;
+    this.scrollHeight = 0;
+    this.clientHeight = 0;
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+
+    // Two counters, because two of the defects these tests exist for are
+    // invisible in the resulting tree: a module that rewrites a node's text
+    // with the same string leaves an identical DOM behind, and one that runs
+    // its whole render for a snapshot that changed nothing leaves an identical
+    // DOM too. In a browser the first drops the selection inside that text and
+    // the second costs the work; neither can be seen by comparing the tree
+    // before and after, so they are counted instead.
+    this.textWrites = 0;
+    this.queries = 0;
+  }
+
+  setSelectionRange(start, end) {
+    this.selectionStart = start;
+    this.selectionEnd = end;
   }
 
   // Setting textContent replaces the children with one text node, and appending
@@ -75,6 +103,7 @@ class FakeNode {
   }
 
   set textContent(value) {
+    this.textWrites += 1;
     this._text = String(value);
     this._html = null;
     this.children = [];
@@ -100,6 +129,25 @@ class FakeNode {
     for (const child of children) this.appendChild(child);
   }
 
+  // insertBefore and remove exist because a column that updates in place has to
+  // put a row back where it belongs and take one away again, rather than
+  // rebuilding the list around it.
+  insertBefore(child, reference) {
+    child.parentNode = this;
+    const at = reference ? this.children.indexOf(reference) : -1;
+    if (at < 0) this.children.push(child);
+    else this.children.splice(at, 0, child);
+    return child;
+  }
+
+  remove() {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const at = parent.children.indexOf(this);
+    if (at >= 0) parent.children.splice(at, 1);
+    this.parentNode = null;
+  }
+
   replaceChildren(...children) {
     for (const child of this.children) child.parentNode = null;
     this.children = [];
@@ -118,6 +166,7 @@ class FakeNode {
 
   focus() {
     this.focused = true;
+    if (this.ownerDocument) this.ownerDocument.activeElement = this;
   }
 
   contains(node) {
@@ -135,6 +184,7 @@ class FakeNode {
   }
 
   querySelectorAll(selector) {
+    this.queries += 1;
     const found = [];
     const visit = (node) => {
       for (const child of node.children) {
@@ -188,8 +238,16 @@ class FakeDocument {
     this.listeners = new Map();
   }
 
+  // The node focus() last moved to, as document.activeElement.
+  activeElement = null;
+
   createElement(tag) {
-    return String(tag).toLowerCase() === "select" ? new FakeSelect(tag) : new FakeNode(tag);
+    const node = String(tag).toLowerCase() === "select" ? new FakeSelect(tag) : new FakeNode(tag);
+    // So focus() can report itself to the document the way a browser does; a
+    // module that asks "is my textarea the active element" is asking the
+    // document, not the node.
+    node.ownerDocument = this;
+    return node;
   }
 
   addEventListener(type, fn) {
