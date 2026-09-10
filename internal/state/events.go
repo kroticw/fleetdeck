@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -10,6 +11,71 @@ type Event struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
 	Text  string `json:"text"`
+}
+
+// sessionRuleOrder is the order the three session rules are reported in, so that a
+// session standing on more than one produces the same list of keys every run.
+var sessionRuleOrder = [...]string{"waiting", "failed", "silent"}
+
+// standingRules reports which of the three session rules s currently satisfies. It is
+// the single place each rule is stated, so fire and clear cannot drift apart: a key is
+// raised when it enters this set and released when it leaves, including by the session
+// disappearing altogether.
+//
+// A Dying session satisfies nothing. Waiting() and Stalled() already exclude one for a
+// stated reason (see their doc comments in internal/daemon): the job is being killed or
+// retired, so nobody has to act on it. The same holds for the other two rules — the
+// operator who kills a session should not then be told it "ended in failure" and, half
+// an hour later, that it "has been silent". Clears are unaffected: a session that was
+// waiting and is now dying has an empty rule set, so its waiting key is released.
+func standingRules(s SessionView, silenceAfter time.Duration) map[string]bool {
+	rules := map[string]bool{}
+	if s.Dying {
+		return rules
+	}
+	if s.Waiting() {
+		rules["waiting"] = true
+	}
+	if s.State == "failed" {
+		rules["failed"] = true
+	}
+	// Note that being Stalled() is no exemption here. Stalled has no banner of its
+	// own because it resolves itself — but spec section 1's recorded case is three
+	// sessions standing for two hours after the limit that stalled them had already
+	// reset. When a stall does not resolve, this rule is the only one left that
+	// calls a person.
+	if silenceAfter > 0 && s.SilentFor >= silenceAfter {
+		rules["silent"] = true
+	}
+	return rules
+}
+
+// sessionRuleSets indexes sessions by short id. A session with an empty Short is left
+// out entirely: every key is built from the short id, so such a session can only
+// produce "session::waiting" — a key that names nobody and that a second short-less
+// session would collide with, silencing one of the two.
+func sessionRuleSets(sessions []SessionView, silenceAfter time.Duration) map[string]map[string]bool {
+	sets := map[string]map[string]bool{}
+	for _, s := range sessions {
+		if s.Short == "" {
+			continue
+		}
+		sets[s.Short] = standingRules(s, silenceAfter)
+	}
+	return sets
+}
+
+// sessionRuleText is the banner body for a rule that has just become true.
+func sessionRuleText(rule string, silenceAfter time.Duration) string {
+	switch rule {
+	case "waiting":
+		return "is waiting for an answer"
+	case "failed":
+		return "ended in failure"
+	case "silent":
+		return fmt.Sprintf("has been silent for over %s", silenceAfter)
+	}
+	return ""
 }
 
 // Diff compares two snapshots and returns the banners to fire and the keys to
@@ -56,46 +122,43 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 		return nil, nil
 	}
 
-	prevSessions := map[string]SessionView{}
-	for _, s := range prev.Sessions {
-		prevSessions[s.Short] = s
-	}
+	prevRules := sessionRuleSets(prev.Sessions, silenceAfter)
+	nextRules := sessionRuleSets(next.Sessions, silenceAfter)
+
 	for _, s := range next.Sessions {
-		was, existed := prevSessions[s.Short]
+		if s.Short == "" {
+			continue
+		}
+		was, now := prevRules[s.Short], nextRules[s.Short]
+		for _, rule := range sessionRuleOrder {
+			key := fmt.Sprintf("session:%s:%s", s.Short, rule)
+			switch {
+			case now[rule] && !was[rule]:
+				fire = append(fire, Event{Key: key, Title: s.Name, Text: sessionRuleText(rule, silenceAfter)})
+			case was[rule] && !now[rule]:
+				cleared = append(cleared, key)
+			}
+		}
+	}
 
-		if s.Waiting() && (!existed || !was.Waiting()) {
-			fire = append(fire, Event{
-				Key:   fmt.Sprintf("session:%s:waiting", s.Short),
-				Title: s.Name,
-				Text:  "is waiting for an answer",
-			})
+	// A session in prev and not in next has ended. Its rules did not become false
+	// one by one — the session simply stopped being observable — but every key it
+	// was standing on must be released all the same, or it stays raised in the
+	// notifier forever and the next session to take that short id is swallowed as
+	// "already reported". Sorted, so two runs over the same pair of snapshots
+	// produce the same list.
+	var ended []string
+	for short := range prevRules {
+		if _, alive := nextRules[short]; !alive {
+			ended = append(ended, short)
 		}
-		if !s.Waiting() && existed && was.Waiting() {
-			cleared = append(cleared, fmt.Sprintf("session:%s:waiting", s.Short))
-		}
-
-		if s.State == "failed" && (!existed || was.State != "failed") {
-			fire = append(fire, Event{
-				Key:   fmt.Sprintf("session:%s:failed", s.Short),
-				Title: s.Name,
-				Text:  "ended in failure",
-			})
-		}
-		if s.State != "failed" && existed && was.State == "failed" {
-			cleared = append(cleared, fmt.Sprintf("session:%s:failed", s.Short))
-		}
-
-		silenceEnabled := silenceAfter > 0
-		crossed := silenceEnabled && s.SilentFor >= silenceAfter && (!existed || was.SilentFor < silenceAfter)
-		if crossed {
-			fire = append(fire, Event{
-				Key:   fmt.Sprintf("session:%s:silent", s.Short),
-				Title: s.Name,
-				Text:  fmt.Sprintf("has been silent for over %s", silenceAfter),
-			})
-		}
-		if silenceEnabled && s.SilentFor < silenceAfter && existed && was.SilentFor >= silenceAfter {
-			cleared = append(cleared, fmt.Sprintf("session:%s:silent", s.Short))
+	}
+	sort.Strings(ended)
+	for _, short := range ended {
+		for _, rule := range sessionRuleOrder {
+			if prevRules[short][rule] {
+				cleared = append(cleared, fmt.Sprintf("session:%s:%s", short, rule))
+			}
 		}
 	}
 

@@ -280,3 +280,146 @@ func TestZeroSilenceThresholdDisablesTheSilenceRule(t *testing.T) {
 		t.Fatalf("a disabled silence rule must not clear anything either: %v", cleared)
 	}
 }
+
+// TestSessionThatDisappearsReleasesItsKeys pins task-9-fix-round-1 item 3: Diff used
+// to walk next only, so a waiting session that ended left session:<short>:waiting
+// standing in the notifier forever, and the same short id reappearing waiting was
+// swallowed as "still waiting" — nobody gets called.
+func TestSessionThatDisappearsReleasesItsKeys(t *testing.T) {
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{waitingView("a")}}
+	next := Snapshot{At: observedAt.Add(time.Second)}
+	fire, cleared := Diff(prev, next, time.Hour)
+	if len(fire) != 0 {
+		t.Fatalf("a session that ended fires nothing of its own: %+v", fire)
+	}
+	if len(cleared) != 1 || cleared[0] != "session:a:waiting" {
+		t.Fatalf("a session that ended must release the key it was standing on: %v", cleared)
+	}
+}
+
+func TestCardThatDisappearsReleasesItsKey(t *testing.T) {
+	prev := Snapshot{At: observedAt, Cards: []board.Card{{Path: "/b/c.md", Stage: "blocked"}}}
+	next := Snapshot{At: observedAt.Add(time.Second)}
+	fire, cleared := Diff(prev, next, time.Hour)
+	if len(fire) != 0 {
+		t.Fatalf("a card that was deleted fires nothing of its own: %+v", fire)
+	}
+	if len(cleared) != 1 || cleared[0] != "card:/b/c.md:blocked" {
+		t.Fatalf("a deleted card must release the key it was standing on: %v", cleared)
+	}
+}
+
+// TestSessionStandingOnTwoRulesReleasesBoth: the keys a vanished session releases are
+// every key it was standing on, not just the first one found.
+func TestSessionStandingOnTwoRulesReleasesBoth(t *testing.T) {
+	loud := waitingView("a")
+	loud.SilentFor = 45 * time.Minute
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{loud}}
+	next := Snapshot{At: observedAt.Add(time.Second)}
+	_, cleared := Diff(prev, next, 30*time.Minute)
+	want := []string{"session:a:waiting", "session:a:silent"}
+	if len(cleared) != len(want) {
+		t.Fatalf("a session standing on two rules must release both: %v", cleared)
+	}
+	for i, w := range want {
+		if cleared[i] != w {
+			t.Fatalf("cleared keys must come out in a fixed order, want %v got %v", want, cleared)
+		}
+	}
+}
+
+// TestCardWithParseErrorIsSkippedByTheStageRules pins item 4: board.Scan reports a
+// card it could not parse as Card{Path, ParseError} with an empty Stage. Read as a
+// stage, a half-written file is "left blocked" and the finished write on the next tick
+// is "entered blocked": one edit, two banners.
+func TestCardWithParseErrorIsSkippedByTheStageRules(t *testing.T) {
+	prev := Snapshot{At: observedAt, Cards: []board.Card{{Path: "/b/c.md", Stage: "blocked"}}}
+	next := Snapshot{At: observedAt.Add(time.Second), Cards: []board.Card{{Path: "/b/c.md", ParseError: "no frontmatter block"}}}
+	fire, cleared := Diff(prev, next, time.Hour)
+	if len(fire) != 0 {
+		t.Fatalf("an unparseable card has no stage to have moved to: %+v", fire)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("an unparseable card has not left its stage, it is only unreadable right now: %v", cleared)
+	}
+}
+
+// TestDyingSessionFiresNothing pins item 5. Waiting() and Stalled() already exclude a
+// Dying session with a stated reason — the job is being killed or retired, so nobody
+// has to act on it. The failed and silent rules never got the same treatment, so
+// killing a session yourself earned "ended in failure" and then "has been silent".
+func TestDyingFailedSessionFiresNothing(t *testing.T) {
+	dying := idleView("a")
+	dying.State = "failed"
+	dying.Dying = true
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("a")}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{dying}}
+	fire, _ := Diff(prev, next, time.Hour)
+	if len(fire) != 0 {
+		t.Fatalf("a session being killed must not report the kill as a failure: %+v", fire)
+	}
+}
+
+func TestDyingSilentSessionFiresNothing(t *testing.T) {
+	dying := idleView("a")
+	dying.SilentFor = 45 * time.Minute
+	dying.Dying = true
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("a")}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{dying}}
+	fire, _ := Diff(prev, next, 30*time.Minute)
+	if len(fire) != 0 {
+		t.Fatalf("a session being retired is not silent, it is over: %+v", fire)
+	}
+}
+
+func TestWaitingSessionThatStartsDyingClearsItsWaitingKey(t *testing.T) {
+	dying := waitingView("a")
+	dying.Dying = true
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{waitingView("a")}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{dying}}
+	fire, cleared := Diff(prev, next, time.Hour)
+	if len(fire) != 0 {
+		t.Fatalf("a dying session fires nothing: %+v", fire)
+	}
+	if len(cleared) != 1 || cleared[0] != "session:a:waiting" {
+		t.Fatalf("nobody has to answer a session being killed, so its waiting key must be released: %v", cleared)
+	}
+}
+
+// TestSessionsWithNoShortIDGetNoEventKeys pins item 6: the event key is built from
+// Short, so two sessions with an empty Short collapse into one map entry and one
+// meaningless key, "session::waiting".
+func TestSessionsWithNoShortIDGetNoEventKeys(t *testing.T) {
+	one := waitingView("")
+	two := waitingView("")
+	two.Name = "the other one"
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("z")}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{idleView("z"), one, two}}
+	fire, cleared := Diff(prev, next, time.Hour)
+	if len(fire) != 0 || len(cleared) != 0 {
+		t.Fatalf("a session with no short id cannot be keyed, so it produces no events: fire=%+v cleared=%v", fire, cleared)
+	}
+}
+
+// TestStalledSessionSilentPastThresholdStillFires pins the silence rule to stalled
+// sessions, not only running ones. Spec section 1's recorded case is exactly this:
+// three sessions stood for two hours after the usage limit that stalled them had
+// already reset, because nobody noticed. Stalled has no banner of its own (see Diff's
+// doc comment) precisely because it resolves itself — but when it does not resolve,
+// the silence rule is the one thing left that calls a person, and excluding stalled
+// sessions from it would restore the two-hour silence the panel exists to end.
+func TestStalledSessionSilentPastThresholdStillFires(t *testing.T) {
+	before := stalledView("a")
+	before.SilentFor = 10 * time.Minute
+	after := stalledView("a")
+	after.SilentFor = 2 * time.Hour
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{before}}
+	next := Snapshot{At: observedAt.Add(time.Second), Sessions: []SessionView{after}}
+	if !after.Stalled() {
+		t.Fatal("fixture must be a stalled session")
+	}
+	fire, _ := Diff(prev, next, 30*time.Minute)
+	if len(fire) != 1 || fire[0].Key != "session:a:silent" {
+		t.Fatalf("a stalled session silent past the threshold must still fire: %+v", fire)
+	}
+}
