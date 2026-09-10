@@ -50,5 +50,6 @@ Durations (`poll_interval`, `silence_after`) must be a duration string such as `
 - `internal/config` — loads and saves the YAML config file described above.
 - `internal/version` — the build version, injected at link time by `make build`/`make verify-ldflags`; see that package's own tests for how the injection is verified.
 - `internal/transcript` — reads Claude Code session transcripts from the tail: locating a session's `.jsonl` file by UUID, a text digest of its recent steps, and an estimate of context-window occupancy for when the statusline reporter is absent.
+- `internal/state` — assembles one `Snapshot` out of the daemon, board, transcript and usage sources (a failed source fills its own error field and leaves the rest of the snapshot untouched), and `Diff`s two snapshots into the notification-worthy transitions defined in the design spec. Depends only on the other `internal/` packages for their types; it performs no I/O and knows nothing about the web server built on top of it.
 
 `internal/daemon`, `internal/config` and `internal/transcript` are standard-library-only (`internal/config` also uses `gopkg.in/yaml.v3`) and know nothing about the web server built on top of them.
