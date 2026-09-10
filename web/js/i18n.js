@@ -31,8 +31,9 @@ const en = {
   pick_orchestrator: "pick the orchestrator session",
   write_to_orchestrator: "write to the orchestrator…",
   session_not_listed: "session is not currently listed by the daemon",
-  back_to_sessions: "back to the session list",
-  unpin_failed: "showing the session list, but the pinned session was not cleared, so a reload will return here",
+  not_pinned: "not pinned",
+  no_orchestrator_thread: "no session is pinned as the orchestrator — pick one above",
+  orchestrator_pin_failed: "the change was not saved — a reload will undo it",
 
   // Card panel (web/js/card.js). Field names are deliberately absent: stage,
   // progress and session are frontmatter keys, they appear in the card file
@@ -101,7 +102,6 @@ const en = {
   // through a dialog.
   edit_label: "edit the name",
   label_save_failed: "the name was not saved",
-  current_orchestrator: "the current orchestrator",
 };
 
 const ru = {
@@ -132,8 +132,9 @@ const ru = {
   pick_orchestrator: "выберите сессию оркестратора",
   write_to_orchestrator: "написать оркестру…",
   session_not_listed: "сессия сейчас не в списке демона",
-  back_to_sessions: "к списку сессий",
-  unpin_failed: "колонка вернулась к списку, но закрепление не снято — после перезагрузки страницы вы снова окажетесь здесь",
+  not_pinned: "не закреплено",
+  no_orchestrator_thread: "оркестратор не закреплён — выберите его выше",
+  orchestrator_pin_failed: "изменение не сохранено — после перезагрузки страницы оно исчезнет",
 
   card_close: "закрыть",
   card_waiting: "ждём первый снимок",
@@ -170,7 +171,6 @@ const ru = {
 
   edit_label: "изменить имя",
   label_save_failed: "имя не сохранено",
-  current_orchestrator: "текущий оркестратор",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;
