@@ -1085,6 +1085,35 @@ test("the notice goes away when the message is sent", async () => {
   c.dom.restore();
 });
 
+// But only when the message actually went. A failed send puts the path back in
+// the box, and the sentence about the permission prompt is true again with it.
+// Break it by clearing the notice before the send instead of after and this
+// test fails with the path in the box and nothing explaining it.
+test("a failed send keeps both the path and the notice", async () => {
+  const c = await column(structuredClone(PIN));
+  const area = c.root.querySelector("textarea");
+
+  area.dispatchEvent(pasteOf({ file: fakeImage() }));
+  await settle();
+  await settle();
+  const withPath = area.value;
+  assert.notEqual(withPath, "", "precondition: the path is in the box");
+
+  const good = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith("/text")) throw new Error("the daemon refused it");
+    return good(url, options);
+  };
+  fireEvent(area, "keydown", { key: "Enter" });
+  await settle();
+  await settle();
+  globalThis.fetch = good;
+
+  assert.equal(area.value, withPath, "the path was lost with the failed send");
+  assert.ok(c.root.querySelector(".o-notice"), "the notice went away while the path it describes stayed");
+  c.dom.restore();
+});
+
 test("a refused upload reports into the send-error row, where a failed send reports", async () => {
   const c = await column(structuredClone(PIN));
   imageFails = "only PNG, JPEG, GIF and WebP images are accepted";

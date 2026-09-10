@@ -250,14 +250,55 @@ export function renderSession(
     if (nameLine.textContent !== name) nameLine.textContent = name;
   };
 
-  // showError writes into a line of its own above the input, rather than
-  // replacing what the tab is showing. Replacing it would throw away the
-  // terminal or the last digest that did arrive, and a transient failure would
-  // cost a person the content they were reading.
-  const showError = (message) => {
+  // What the two message lines are saying, held here rather than only in the
+  // nodes. drawShell builds fresh lines on every tab switch, so a message that
+  // lived only in a node was silently lost by switching to the screen tab to
+  // look at what the session was asking — which is precisely when there is a
+  // message worth keeping.
+  //
+  // The error is two states, not one. A background poll used to clear the same
+  // variable an operator's own failure was written to, and the digest polls
+  // every few seconds: a refused paste or a failed send vanished within one
+  // tick, leaving a person who had just pasted a file with no idea why nothing
+  // happened. Found by comparing this pane against the orchestrator column,
+  // which carries two independent slots for exactly this reason and says so.
+  //
+  // One line rather than two, because the two are never equally urgent — what
+  // the operator just did wins, and a failing background refresh waits behind
+  // it. What matters is that neither can erase the other.
+  let actionError = "";
+  let pollError = "";
+  let noticeText = "";
+
+  // paintError and paintNotice write into a line of their own above the input,
+  // rather than replacing what the tab is showing. Replacing it would throw away
+  // the terminal or the last digest that did arrive, and a transient failure
+  // would cost a person the content they were reading.
+  const paintError = () => {
     if (!errorLine) return;
-    errorLine.textContent = message ?? "";
+    const message = actionError || pollError;
+    errorLine.textContent = message;
     errorLine.hidden = !message;
+  };
+
+  const paintNotice = () => {
+    if (!noticeLine) return;
+    noticeLine.textContent = noticeText;
+    noticeLine.hidden = !noticeText;
+  };
+
+  // What the operator's own action reported — a send, a key, a pasted image.
+  // Cleared only by the next such action.
+  const showError = (message) => {
+    actionError = message ?? "";
+    paintError();
+  };
+
+  // What the background poll reported. Cleared only by that poll succeeding, so
+  // it can neither erase nor be erased by the line above.
+  const showPollError = (message) => {
+    pollError = message ?? "";
+    paintError();
   };
 
   // showNotice is the same idea for something that is not a failure. It has a
@@ -265,9 +306,8 @@ export function renderSession(
   // for permission" is an expected step, and showing it where failures appear
   // would teach the operator to read the error line as noise.
   const showNotice = (message) => {
-    if (!noticeLine) return;
-    noticeLine.textContent = message ?? "";
-    noticeLine.hidden = !message;
+    noticeText = message ?? "";
+    paintNotice();
   };
 
   // formatBytes is only ever given this module's own ceiling, so it needs no
@@ -337,7 +377,7 @@ export function renderSession(
       throw new Error(t("session_not_listed"));
     }
     renderSteps(await fetchDigest(sessionId, DIGEST_LIMIT));
-    showError("");
+    showPollError("");
   };
 
   const ensureTerminal = () => {
@@ -346,7 +386,7 @@ export function renderSession(
     body.replaceChildren(host);
     const made = defaultTerminalFactory(host);
     if (!made) {
-      showError(t("terminal_missing"));
+      showPollError(t("terminal_missing"));
       return null;
     }
     terminal = made;
@@ -365,7 +405,7 @@ export function renderSession(
       term.reset();
       term.write(screen);
     }
-    showError(error);
+    showPollError(error);
   };
 
   const startPolling = () => {
@@ -382,7 +422,7 @@ export function renderSession(
         await pass();
       },
       isDigest ? DIGEST_INTERVAL_MS : SCREEN_INTERVAL_MS,
-      { timers, onError: (err) => showError(err.message) },
+      { timers, onError: (err) => showPollError(err.message) },
     );
     poller.start();
   };
@@ -413,6 +453,11 @@ export function renderSession(
     try {
       await sendText(short, typed.trim());
       showError("");
+      // Only now, and only here. Whatever the last paste had to say, it said it
+      // about a path that has just left the box — but if the send had failed the
+      // path would be back in the box below, and the sentence explaining that
+      // the session is about to ask permission would still be true.
+      showNotice("");
     } catch (err) {
       // The one failure this panel must not have. Losing what somebody typed
       // is worse than any error message, so the text goes back exactly as it
@@ -554,6 +599,14 @@ export function renderSession(
     // an empty node: an empty container still takes the row's gap and leaves the
     // writing area sitting at a different height on each tab.
     root.replaceChildren(...[head, body, errorLine, noticeLine, keys, form].filter(Boolean));
+
+    // The lines above are brand new and empty; what they were saying is held in
+    // state, so it is written back. Without this, switching to the screen tab to
+    // see what a session is actually asking threw away the message that said
+    // why — the same rule this panel already holds for the half-written text in
+    // the box, applied to the two lines beside it.
+    paintError();
+    paintNotice();
   }
 
   drawShell();
