@@ -107,11 +107,23 @@ function contextBarHtml(ctx) {
   const rounded = Math.round(pct);
   const clamped = Math.max(0, Math.min(rounded, 100));
   const level = rounded >= 80 ? "hot" : rounded >= 50 ? "warm" : "cool";
+  // <abbr> rather than <span>: the tilde IS an abbreviation, and marking it as
+  // one is what makes its expansion available to a screen reader instead of
+  // only to a mouse. The tilde stays — it is the honest difference between a
+  // measured value and one estimated from the transcript, and dropping it would
+  // pass an estimate off as a reading.
   const mark = ctx.estimated
-    ? ` <span class="est" title="${escapeHtml(t("estimated"))}">~</span>`
+    ? ` <abbr class="est" title="${escapeHtml(t("estimated"))}">~</abbr>`
     : "";
+  // The label is text in the row, not a tooltip. A bare "56%" beside a session
+  // is honest and unreadable: nothing on screen said what was measured, and a
+  // number whose unit is only reachable by hovering is not reachable for
+  // someone who does not hover. It is the same word the unknown state already
+  // used — which meant the label appeared exactly where there was nothing to
+  // label, and vanished where there was.
   return `
     <div class="ctx ctx-${level}">
+      <span class="ctx-label">${escapeHtml(t("context"))}</span>
       <span class="ctx-track"><i class="ctx-fill" data-pct="${clamped}"></i></span>
       <span class="ctx-pct">${rounded}%${mark}</span>
     </div>`;
@@ -161,8 +173,18 @@ export function rowHtml(s) {
     : "";
 
   const name = s.name || s.short || "";
+  // A button, because it does something. It used to be a <div> with no handler:
+  // a click on it bubbled to the row and opened the SESSION, while its tooltip
+  // showed the path to a CARD. That is worse than unreachable — it promised one
+  // action and performed another, and only because the absence of code was
+  // masked by the parent's behaviour. Nothing in the file said so; only
+  // pressing it did.
+  //
+  // Labelled rather than left as a bare arrow: an arrow says "elsewhere", not
+  // "to this session's card". The full path stays in the title for whoever
+  // needs it; the label is what the rest of us read.
   const cardHtml = s.cardPath
-    ? `<div class="scard" title="${escapeHtml(s.cardPath)}">&#8599;</div>`
+    ? `<button type="button" class="scard" data-card="${escapeHtml(s.cardPath)}" title="${escapeHtml(t("open_card_hint"))}: ${escapeHtml(s.cardPath)}">${escapeHtml(t("open_card"))} &#8599;</button>`
     : "";
 
   const costHtml =
@@ -193,7 +215,9 @@ export function rowHtml(s) {
 // named nothing at all — the specific gap a live run's screenshot found.
 const HEAD = `<div class="slist-head">${escapeHtml(t("sessions_title"))}</div>`;
 
-export function renderSessions(root, onSelect) {
+// onOpenCard is optional: without it the card control is not offered at all,
+// because a control that cannot do what it says is the defect this replaced.
+export function renderSessions(root, onSelect, onOpenCard) {
   subscribe((snap, connected) => {
     // Before the first successful connection, or after a dropped/unparseable
     // frame, snapshot is null and connected is false — render a neutral
@@ -244,6 +268,15 @@ export function renderSessions(root, onSelect) {
 
     for (const el of root.querySelectorAll(".srow")) {
       el.addEventListener("click", () => onSelect(el.dataset.short));
+    }
+    for (const el of root.querySelectorAll(".scard")) {
+      el.addEventListener("click", (event) => {
+        // Stopped here, or the row's own handler runs next and opens the
+        // session — which is precisely what this control used to do by
+        // accident.
+        event.stopPropagation();
+        onOpenCard?.(el.dataset.card);
+      });
     }
   });
 }

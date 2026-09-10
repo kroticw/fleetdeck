@@ -39,7 +39,10 @@ function openSession(short) {
   stopSession = renderSession(sessionPanel, short, closeSession);
 }
 
-renderSessions(document.getElementById("sessions"), openSession);
+// The card control in a session row opens that session's card, through the same
+// panel the board opens. Before this it opened the session instead, because it
+// had no handler of its own and the click reached the row.
+renderSessions(document.getElementById("sessions"), openSession, cardPanel.open);
 renderHeader(document.getElementById("header"));
 renderBoard(document.getElementById("board"), cardPanel.open);
 renderOrchestrator(document.getElementById("orchestrator"));

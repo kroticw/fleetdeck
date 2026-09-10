@@ -142,3 +142,84 @@ test("the title still holds the reason exactly as the daemon wrote it", () => {
   const title = html.match(/class="sreason" title="([^"]*)"/)?.[1];
   assert.ok(title.includes("&lt;agent-message"), "stripping the tag must not put it out of reach");
 });
+
+// --- a number with no unit says nothing ---
+//
+// The right-hand column showed "56%" beside every session with nothing to say
+// what was measured. Checked at the source rather than guessed:
+// internal/transcript/context.go computes Tokens/Window, where Tokens is the
+// last response's cache_read + cache_creation + input tokens and Window is the
+// model's context window. It is context occupancy, and the word for it is
+// already in the dictionary — it was only being shown when there was no value.
+
+test("a context percentage is labelled, so a number is not left to speak for itself", () => {
+  const html = rowHtml({ short: "aa11", name: "n", context: { tokens: 50, window: 100 } });
+  assert.ok(html.includes("50%"), "the value stays");
+  assert.ok(/контекст|context/i.test(html), "and now says what it measures");
+});
+
+test("the label is there whether the value is known or not", () => {
+  // It used to be the other way round: the word appeared only in the state
+  // where there was nothing to label.
+  const known = rowHtml({ short: "aa11", name: "n", context: { tokens: 50, window: 100 } });
+  const unknown = rowHtml({ short: "bb22", name: "n" });
+  assert.ok(/контекст|context/i.test(known));
+  assert.ok(/контекст|context/i.test(unknown));
+});
+
+test("an estimated value keeps its mark and the mark keeps its explanation", () => {
+  const html = rowHtml({ short: "aa11", name: "n", context: { tokens: 50, window: 100, estimated: true } });
+  assert.ok(html.includes("~"), "the tilde says the number was estimated");
+  assert.ok(/title="[^"]*(Оценено|Estimated)/.test(html), "and hovering it says what that means");
+});
+
+test("the percentage is readable without a pointer", () => {
+  // A value reachable only by hovering is not reachable for someone who does
+  // not hover — the number and its label are both plain text in the row.
+  const html = rowHtml({ short: "aa11", name: "n", context: { tokens: 50, window: 100 } });
+  const visible = html.replace(/<[^>]*>/g, " ");
+  assert.ok(/50%/.test(visible));
+  assert.ok(/контекст|context/i.test(visible), "the label is text, not only a tooltip");
+});
+
+// --- the card link promised one thing and did another ---
+//
+// The ↗ was a <div> with no click handler at all: a click on it bubbled to the
+// row and opened the SESSION, while its tooltip showed the path to a CARD. Not
+// merely unreachable from a keyboard — it did something nobody had assigned it,
+// because the absence of code was masked by the parent's behaviour.
+
+test("a session with a card offers a control that says what it opens", () => {
+  const html = rowHtml({ short: "aa11", name: "n", cardPath: "/board/cards/2026-09-10-thing.md" });
+  assert.ok(/<button[^>]*class="[^"]*scard/.test(html), "a control a keyboard can reach");
+  assert.ok(/type="button"/.test(html), "and that does not submit anything");
+  assert.ok(/карточка|card/i.test(html.replace(/<[^>]*>/g, " ")), "labelled, not a bare arrow");
+});
+
+test("the control carries the card it opens, not just a tooltip", () => {
+  const html = rowHtml({ short: "aa11", name: "n", cardPath: "/board/cards/2026-09-10-thing.md" });
+  assert.ok(html.includes('data-card="/board/cards/2026-09-10-thing.md"'), "the path is data the handler can use");
+});
+
+test("a session with no card offers no control", () => {
+  const html = rowHtml({ short: "aa11", name: "n" });
+  assert.ok(!html.includes("scard"), "nothing to open, so nothing to press");
+});
+
+test("a card path cannot break out of the attribute it lands in", () => {
+  const html = rowHtml({ short: "aa11", name: "n", cardPath: '/board/x" onclick="alert(1)' });
+  assert.ok(!html.includes('onclick="alert(1)"'), "a path is data, not markup");
+  assert.ok(html.includes("&quot;"), "the quote is escaped");
+});
+
+// --- pressing the card control: why it is not tested here ---
+//
+// This column builds its rows with one innerHTML write, and the fake DOM stores
+// innerHTML without parsing it (see web/tests/fake-dom.js), so no node inside a
+// row is addressable and no click on one can be fired. What the markup contains
+// is asserted above; that pressing it opens the CARD and not the session is
+// checked against a running panel in a real browser, and the PR records the
+// numbers. Rewriting this column onto nodes would make it testable here, but
+// that is a change to a file two other sessions are working in, not a change
+// this task asked for.
+
