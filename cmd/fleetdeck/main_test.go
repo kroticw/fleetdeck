@@ -380,3 +380,94 @@ func TestBindFailureNeverLogsSuccess(t *testing.T) {
 		t.Fatalf("the success line must never print before a successful bind, got log output: %s", logged.String())
 	}
 }
+
+// TestSetOrchestratorSessionSurgicallyEditsAnExistingFile pins the whole
+// point of routing this write through config.SetField instead of config.Save:
+// a comment the operator wrote by hand must survive a pin change made from
+// the picker.
+func TestSetOrchestratorSessionSurgicallyEditsAnExistingFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "orchestrator:\n" +
+		"  session: old-id  # do not touch by hand\n" +
+		"server:\n" +
+		"  port: 7777\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
+
+	if err := setOrchestratorSession(p, collector, "new-id"); err != nil {
+		t.Fatalf("setOrchestratorSession: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "# do not touch by hand") {
+		t.Fatalf("a hand-written comment must survive a pin change, got:\n%s", got)
+	}
+	if !strings.Contains(got, "session: new-id") {
+		t.Fatalf("the value must actually change, got:\n%s", got)
+	}
+	if collector.Config().OrchestratorSession != "new-id" {
+		t.Fatalf("the collector must report the new pin on its next Collect, got %q", collector.Config().OrchestratorSession)
+	}
+}
+
+// TestSetOrchestratorSessionCreatesAConfigWhenNoneExists covers a panel that
+// has never been through `fleetdeck init`: there is nothing hand-written to
+// lose, so the picker's first pin must still work rather than erroring out
+// because config.SetField has no file to edit.
+func TestSetOrchestratorSessionCreatesAConfigWhenNoneExists(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
+
+	if err := setOrchestratorSession(p, collector, "first-id"); err != nil {
+		t.Fatalf("setOrchestratorSession: %v", err)
+	}
+
+	got, err := config.Load(p)
+	if err != nil {
+		t.Fatalf("a config must have been created and must parse: %v", err)
+	}
+	if got.OrchestratorSession != "first-id" {
+		t.Fatalf("OrchestratorSession = %q, want first-id", got.OrchestratorSession)
+	}
+	if collector.Config().OrchestratorSession != "first-id" {
+		t.Fatal("the collector must report the new pin")
+	}
+}
+
+// TestSetOrchestratorSessionNeverFallsBackToSaveForAnExistingFile guards the
+// one failure config.SetField refuses to paper over: a config file that
+// exists but is missing the section that would hold orchestrator.session
+// (hand-edited down to something unusual). Falling back to config.Save here
+// would rewrite the whole file and destroy exactly the comments this write
+// path exists to protect, so the error must propagate and the file, and the
+// collector's in-memory pin, must be left untouched.
+func TestSetOrchestratorSessionNeverFallsBackToSaveForAnExistingFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	content := "server:\n  port: 7777  # hand-tuned, do not overwrite\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	collector := NewCollector(config.Default(), nil, nil, t.TempDir())
+
+	err := setOrchestratorSession(p, collector, "id")
+	if err == nil {
+		t.Fatal("a config missing the orchestrator section must be an error, not a silent full rewrite")
+	}
+
+	raw, readErr := os.ReadFile(p)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(raw) != content {
+		t.Fatalf("a refused write must leave the file byte for byte as it was, got:\n%s", string(raw))
+	}
+	if collector.Config().OrchestratorSession != "" {
+		t.Fatal("the collector must not report a pin that was never actually persisted")
+	}
+}
