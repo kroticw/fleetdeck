@@ -26,6 +26,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/notify"
 	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
+	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
 	"github.com/kroticw/fleetdeck/internal/version"
 )
@@ -278,7 +279,7 @@ func run(configPath string) error {
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("127.0.0.1:%d", cfg.ServerPort),
-		Handler:           server.New(deps(ctx, p, dc, collector, cfg)),
+		Handler:           server.New(deps(ctx, p, dc, collector, cfg, configPath)),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
@@ -315,7 +316,7 @@ func run(configPath string) error {
 
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
-func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config) server.Deps {
+func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
 	return server.Deps{
 		Snapshot:   p.snapshot,
 		SendText:   func(session, text string) error { return dc.SendText(ctx, session, text) },
@@ -333,5 +334,22 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		// /api/status, the server hands it here, and Collect prefers it over the
 		// transcript estimate.
 		PutStatus: collector.PutStatus,
+
+		Digest: func(sessionID string, limit int) ([]transcript.Step, error) {
+			path, err := transcript.Locate(projectsDir(), sessionID)
+			if err != nil {
+				return nil, err
+			}
+			return transcript.Digest(path, limit)
+		},
+		SetOrchestratorSession: func(id string) error {
+			next := collector.Config()
+			next.OrchestratorSession = id
+			if err := config.Save(configPath, next); err != nil {
+				return err
+			}
+			collector.SetOrchestratorSession(id)
+			return nil
+		},
 	}
 }

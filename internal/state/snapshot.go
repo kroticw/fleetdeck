@@ -65,6 +65,11 @@ type Snapshot struct {
 	BoardError  string    `json:"boardError,omitempty"`
 	UsageError  string    `json:"usageError,omitempty"`
 	At          time.Time `json:"at"`
+
+	// OrchestratorSession is the short session id pinned to the orchestrator
+	// column, copied from configuration by the caller (cmd/fleetdeck's
+	// Collector). Empty means nothing is pinned; the panel then offers a picker.
+	OrchestratorSession string `json:"orchestratorSession,omitempty"`
 }
 
 // Link attaches each session to the card that names it. A card names a

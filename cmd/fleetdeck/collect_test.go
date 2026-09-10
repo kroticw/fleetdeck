@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -446,6 +447,72 @@ func (c *Collector) reportCount() int {
 	c.reportMu.Lock()
 	defer c.reportMu.Unlock()
 	return len(c.reports)
+}
+
+// TestCollectReportsThePinnedOrchestratorSession pins the copy Collect performs
+// from configuration into the snapshot: the orchestrator column reads the pin
+// from the snapshot alone and never reaches into config itself.
+func TestCollectReportsThePinnedOrchestratorSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	cfg.UsageEnabled = false
+	cfg.OrchestratorSession = "abc12345"
+
+	snap := NewCollector(cfg, deadDaemon(t), nil, t.TempDir()).Collect(context.Background())
+
+	if snap.OrchestratorSession != "abc12345" {
+		t.Fatalf("want the configured pin abc12345, got %q", snap.OrchestratorSession)
+	}
+}
+
+// TestSetOrchestratorSessionChangesTheNextCollect pins the write path a
+// concurrent HTTP handler uses: SetOrchestratorSession updates what the next
+// Collect() reports, without needing a fresh Collector.
+func TestSetOrchestratorSessionChangesTheNextCollect(t *testing.T) {
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	cfg.UsageEnabled = false
+
+	c := NewCollector(cfg, deadDaemon(t), nil, t.TempDir())
+	if snap := c.Collect(context.Background()); snap.OrchestratorSession != "" {
+		t.Fatalf("want no pin before SetOrchestratorSession, got %q", snap.OrchestratorSession)
+	}
+
+	c.SetOrchestratorSession("xyz98765")
+
+	snap := c.Collect(context.Background())
+	if snap.OrchestratorSession != "xyz98765" {
+		t.Fatalf("want the newly pinned session xyz98765, got %q", snap.OrchestratorSession)
+	}
+}
+
+// TestConcurrentCollectAndSetOrchestratorSessionDoNotRace exercises exactly the
+// scenario this task introduces: Collect() runs on the poll goroutine while
+// SetOrchestratorSession is called from an HTTP handler goroutine. Without
+// Collector.cfgMu this is a data race on cfg.OrchestratorSession that only
+// `go test -race` reliably surfaces — a plain `go test` run can pass by luck.
+func TestConcurrentCollectAndSetOrchestratorSessionDoNotRace(t *testing.T) {
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	cfg.UsageEnabled = false
+
+	c := NewCollector(cfg, deadDaemon(t), nil, t.TempDir())
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			c.Collect(context.Background())
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			c.SetOrchestratorSession("abc12345")
+		}
+	}()
+	wg.Wait()
 }
 
 // TestASlowUsageEndpointDoesNotStallTheCycle covers the one source that reaches off

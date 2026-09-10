@@ -97,14 +97,16 @@ func TestEmbeddedFSIsNotEmpty(t *testing.T) {
 // the assertion to "contains" instead of "equals".
 func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 	want := map[string]bool{
-		"index.html":     true,
-		"app.css":        true,
-		"js/store.js":    true,
-		"js/main.js":     true,
-		"js/i18n.js":     true,
-		"js/sessions.js": true,
-		"js/header.js":   true,
-		"js/board.js":    true,
+		"index.html":         true,
+		"app.css":            true,
+		"js/store.js":        true,
+		"js/main.js":         true,
+		"js/api.js":          true,
+		"js/i18n.js":         true,
+		"js/sessions.js":     true,
+		"js/header.js":       true,
+		"js/board.js":        true,
+		"js/orchestrator.js": true,
 	}
 	got := map[string]bool{}
 	if err := fs.WalkDir(web.FS, ".", func(file string, d fs.DirEntry, err error) error {
