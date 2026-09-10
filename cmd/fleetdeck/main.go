@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -187,6 +188,34 @@ func setCardField(path, field, value string) error {
 	}
 }
 
+// setOrchestratorSession is server.Deps.SetOrchestratorSession: pin, or
+// given an empty string unpin, the session shown in the orchestrator
+// column, persisting the choice before the running collector reports it.
+//
+// The write goes through config.SetField first, which touches only the one
+// line naming orchestrator.session and leaves every comment and every other
+// byte of a hand-edited config alone. Falling back to a full config.Save
+// happens only when that file does not exist at all — there is nothing
+// hand-written to lose on a config nobody has created yet, and this is the
+// same fallback `fleetdeck init` itself uses to create one in the first
+// place. Any other failure (a config that exists but is missing the section
+// that would hold this key, an unparseable rewrite) is returned as it is,
+// never silently upgraded to a full rewrite that would destroy exactly the
+// comments SetField exists to protect.
+func setOrchestratorSession(configPath string, collector *Collector, id string) error {
+	err := config.SetField(configPath, "orchestrator.session", id)
+	if errors.Is(err, fs.ErrNotExist) {
+		next := collector.Config()
+		next.OrchestratorSession = id
+		err = config.Save(configPath, next)
+	}
+	if err != nil {
+		return err
+	}
+	collector.SetOrchestratorSession(id)
+	return nil
+}
+
 func main() {
 	// The subcommand is read before any flag is defined or parsed: `fleetdeck init`
 	// has flags of its own (--board, --force) and none of the panel's, and
@@ -361,13 +390,7 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 			return transcript.Digest(path, limit)
 		},
 		SetOrchestratorSession: func(id string) error {
-			next := collector.Config()
-			next.OrchestratorSession = id
-			if err := config.Save(configPath, next); err != nil {
-				return err
-			}
-			collector.SetOrchestratorSession(id)
-			return nil
+			return setOrchestratorSession(configPath, collector, id)
 		},
 	}
 }
