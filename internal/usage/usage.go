@@ -36,6 +36,12 @@ type Limits struct {
 	FiveHour  Window    `json:"fiveHour"`
 	SevenDay  Window    `json:"sevenDay"`
 	FetchedAt time.Time `json:"fetchedAt"`
+	// SpendLimit is only ever present behind a Claude apps gateway that sets
+	// a spend limit -- see localfile.go, the only source that can populate
+	// it; the network endpoint this file's own Fetcher calls never reports
+	// it at all. Nothing renders it yet; it is captured because dropping a
+	// window a future task wants would mean recapturing it a second time.
+	SpendLimit *Window `json:"spendLimit,omitempty"`
 }
 
 type Fetcher struct {
