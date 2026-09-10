@@ -111,6 +111,55 @@ func TestSetSessionLabelAddsASecondEntryUsingTheFirstEntrysIndent(t *testing.T) 
 	}
 }
 
+// TestSetSessionLabelDoesNotWorsenAFileAlreadyCorruptedByThePriorBug pins
+// down the actual scope of that fix, which a real operator's file exposed as
+// a real question: the fix is prevention, not repair. A file already shaped
+// exactly the way the earlier bug left one on disk — a stray blank line
+// before an existing entry, and no trailing newline at the file's true end —
+// is not healed by a further write, because this package's writers never
+// touch a byte they were not asked to (the same contract SetField's own doc
+// comment states, which SetSessionLabel shares): reading trailingNewline off
+// the file's own current bytes means preserving whatever is already there,
+// corrupted or not, never inventing a property absent from the file as it
+// stands. What a further write must still guarantee is that it makes nothing
+// WORSE — no second blank line, no entry lost, no further newline drift —
+// which is what this actually asserts. Healing the file already on disk is a
+// one-time job for the operator (or a script), not something every future
+// write is expected to notice and fix.
+func TestSetSessionLabelDoesNotWorsenAFileAlreadyCorruptedByThePriorBug(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	// Exactly the shape the pre-fix bug left behind: a blank line before the
+	// second entry, and the file ending right after it with no newline —
+	// reproduced from a live report, not invented.
+	corrupted := "server:\n    port: 7777\nsession_labels:\n    " + uuidA + ": first\n\n    " + uuidB + ": second"
+	if err := os.WriteFile(p, []byte(corrupted), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	uuidC := "33333333-3333-3333-3333-333333333333"
+	if err := SetSessionLabel(p, uuidC, "third"); err != nil {
+		t.Fatalf("SetSessionLabel: %v", err)
+	}
+
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	want := corrupted + "\n    " + uuidC + ": third"
+	if got != want {
+		t.Fatalf("a further write must not worsen pre-existing corruption\nwant: %q\ngot:  %q", want, got)
+	}
+
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatalf("the written file must still parse despite the pre-existing corruption: %v", err)
+	}
+	if loaded.SessionLabels[uuidA] != "first" || loaded.SessionLabels[uuidB] != "second" || loaded.SessionLabels[uuidC] != "third" {
+		t.Fatalf("all three entries must survive, got %+v", loaded.SessionLabels)
+	}
+}
+
 // TestSetSessionLabelAddsASecondEntryWithNoBlankLineOrLostNewline is a real
 // bug caught live, not in review, against a config where session_labels is
 // the file's last key — an ordinary shape: an operator's config predates the
