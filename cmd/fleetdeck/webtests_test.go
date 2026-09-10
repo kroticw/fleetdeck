@@ -124,6 +124,32 @@ describe("a group", () => {
 		}
 	})
 
+	// node missing must read as a refusal to check, not as an environment problem
+	// to route around. The distinction is not cosmetic: the two messages lead a
+	// person to do different things next, and "command not found" leads them to
+	// work around the check.
+	t.Run("node missing is stated as an unchecked frontend", func(t *testing.T) {
+		root := t.TempDir()
+		writeFixture(t, root, "good.test.js", `
+import test from "node:test";
+import assert from "node:assert/strict";
+test("a", () => { assert.equal(1, 1); });
+`)
+		cmd := exec.Command("sh", scriptPath, root)
+		// A PATH holding the shell utilities the script needs but no node. Building
+		// it from a fixed pair of system directories rather than filtering the real
+		// PATH keeps the case deterministic on a machine where node lives somewhere
+		// unexpected.
+		cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("a run with no node must fail, not report a passing frontend:\n%s", out)
+		}
+		if !strings.Contains(string(out), "unchecked frontend") {
+			t.Fatalf("want the message to say the frontend went unchecked, got:\n%s", out)
+		}
+	})
+
 	t.Run("an empty tree refuses to pass vacuously", func(t *testing.T) {
 		root := t.TempDir()
 		out, err := run(t, root)
