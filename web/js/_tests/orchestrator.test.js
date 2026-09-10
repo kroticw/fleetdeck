@@ -949,6 +949,97 @@ test("a note on a step that has no envelope is stripped too", async () => {
   c.dom.restore();
 });
 
+// --- a sent message on screen at once ---------------------------------------
+//
+// Measured before any of this was written: from the keystroke to the text
+// appearing, the request itself takes about six milliseconds and the rest is
+// waiting for the message to come back out of the transcript through a poll.
+// Meanwhile the box emptied and the thread did not change, which reads as "it
+// did not send".
+//
+// A step's text is markdown assigned as innerHTML, and the stand-in DOM's
+// textContent does not see through that — reading textContent would find
+// nothing for ANY step and report the same "not there" whether this works or
+// not. So the bodies are read, with the server's own step as the control.
+const bodies = (c) => [...c.root.querySelectorAll(".step-body")].map((n) => n.innerHTML).join("\n");
+
+// Drawn while the request is still in flight, which is the property that
+// matters and the only one a test can tell apart from "drawn once the server
+// answered". This column refreshes its digest the moment a send returns, so a
+// fast stubbed request hides the difference entirely: the send is held open
+// here until after the thread has been read.
+//
+// Break it by moving the draw to after the request and this test fails with the
+// message nowhere, because the request has not come back yet.
+test("a message is in the thread while the request is still in flight", async () => {
+  const c = await column(structuredClone(PIN), [{ role: "assistant", text: "готово" }]);
+  assert.match(bodies(c), /готово/, "control: the probe can see a step that is definitely drawn");
+  const area = c.root.querySelector("textarea");
+
+  let release;
+  const held = new Promise((r) => {
+    release = r;
+  });
+  const good = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith("/text")) {
+      await held;
+      return { ok: true, status: 204, json: async () => ({}) };
+    }
+    return good(url, options);
+  };
+
+  area.value = "перезапусти панель";
+  fireEvent(area, "keydown", { key: "Enter" });
+  await settle();
+  await settle();
+
+  assert.match(bodies(c), /перезапусти панель/, "nothing was drawn until the server answered");
+
+  release();
+  await settle();
+  globalThis.fetch = good;
+  c.dom.restore();
+});
+
+test("and it is gone again if the send failed", async () => {
+  const c = await column(structuredClone(PIN), [{ role: "assistant", text: "готово" }]);
+  const area = c.root.querySelector("textarea");
+
+  const good = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith("/text")) throw new Error("the daemon went away");
+    return good(url, options);
+  };
+  area.value = "перезапусти панель";
+  fireEvent(area, "keydown", { key: "Enter" });
+  await settle();
+  await settle();
+  globalThis.fetch = good;
+
+  assert.doesNotMatch(bodies(c), /перезапусти панель/, "a message nobody received was left on screen");
+  assert.equal(area.value, "перезапусти панель", "and the words were lost with it");
+  c.dom.restore();
+});
+
+test("when the poll brings the real one, it is there once", async () => {
+  const c = await column(structuredClone(PIN), [{ role: "assistant", text: "готово" }]);
+  const area = c.root.querySelector("textarea");
+
+  area.value = "перезапусти панель";
+  fireEvent(area, "keydown", { key: "Enter" });
+  await settle();
+  await settle();
+
+  c.setSteps([{ role: "assistant", text: "готово" }, { role: "user", text: "перезапусти панель" }]);
+  await c.push(structuredClone(PIN));
+  await settle();
+
+  const drawn = bodies(c).match(/перезапусти панель/g) ?? [];
+  assert.equal(drawn.length, 1, `the message is on screen ${drawn.length} times`);
+  c.dom.restore();
+});
+
 // --- pasting an image into this column's box ---
 //
 // The mechanics live in pasteimage.js and are pinned in
