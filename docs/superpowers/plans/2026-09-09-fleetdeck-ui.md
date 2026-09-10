@@ -1213,6 +1213,25 @@ func (d Deps) handleDocsList(w http.ResponseWriter, r *http.Request) {
 
 // within reports whether p resolves inside one of the configured roots.
 // Without this check a crafted path would read any file the process can open.
+//
+// ПОПРАВКА, ВНЕСЁННАЯ ПРИ ИСПОЛНЕНИИ. Реализация ниже НЕ ГОДИТСЯ и в мастер
+// не вошла: она сравнивает пути через filepath.Abs и filepath.Rel, то есть
+// лексически, БЕЗ резолва символьных ссылок. Симлинк из каталога документации
+// наружу она пропускает, и файл по нему отдаётся. Проверено подстановкой в
+// готовые тесты: краснеют TestDocsRefusesSymlinkOutOfRoots,
+// TestDocsServesDocumentUnderASymlinkedRoot и
+// TestDocsServesRelativePathInsideARoot — то есть она одновременно отдаёт
+// лишнее и ломает законные пути на macOS, где /var сам является симлинком
+// на /private/var.
+//
+// Правильно так, как этого требует раздел 8 спеки: резолвить symlink'и
+// с ОБЕИХ сторон сравнения (и путь, и корень), переиспользуя resolveExisting
+// из internal/server/cardpath.go — ту же функцию, что защищает правку карточек.
+// Смотреть надо на internal/server/docs.go в мастере, а не на код ниже.
+//
+// Отдельно к листингу выше: filepath.WalkDir не идёт за симлинками каталогов,
+// но симлинк-ФАЙЛ выдаёт, поэтому каждый найденный .md обязан пройти ту же
+// проверку — иначе симлинк наружу попадёт в список и станет битой ссылкой.
 func (d Deps) within(p string) bool {
 	abs, err := filepath.Abs(p)
 	if err != nil {
