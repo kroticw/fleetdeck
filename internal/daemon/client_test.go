@@ -3407,11 +3407,17 @@ func TestCheckSocketOwnershipUIDRefusesWrongOwnerSocketFile(t *testing.T) {
 	}
 }
 
-// TestCheckSocketOwnershipUIDRefusesWritableSocketFile covers errSocketWritableByOthers
-// on the socket file itself: the enclosing directory is secure, but the socket file's
-// own mode grants group or other a permission bit. Existing tests only ever reached this
-// sentinel by making an enclosing directory insecure, never the socket file itself.
-func TestCheckSocketOwnershipUIDRefusesWritableSocketFile(t *testing.T) {
+// TestCheckSocketOwnershipUIDAllowsWritableSocketFile covers branch-review-13's
+// recommendation 4: the socket file's own mode bits are deliberately not checked for
+// group/other writability (only the enclosing directories are — see
+// checkSocketOwnershipUID's own comment on why). Before this, a socket file writable by
+// group or other in an otherwise-secure directory was refused with
+// errSocketWritableByOthers — which meant a daemon started under a permissive umask
+// (e.g. 002, producing srwxrwxr-x) was refused for a mode bit that grants a local
+// attacker nothing beyond what the directory check already covers, and the refusal was
+// hard to diagnose. This asserts the opposite of what this test used to assert: such a
+// socket must now be accepted.
+func TestCheckSocketOwnershipUIDAllowsWritableSocketFile(t *testing.T) {
 	secureDir := shortTempDir(t)
 	sockPath := filepath.Join(secureDir, "control.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -3423,12 +3429,8 @@ func TestCheckSocketOwnershipUIDRefusesWritableSocketFile(t *testing.T) {
 		t.Fatalf("chmod socket: %v", err)
 	}
 
-	err = checkSocketOwnershipUID(sockPath, os.Getuid())
-	if err == nil {
-		t.Fatal("expected refusal for a socket file writable by group or other")
-	}
-	if !errors.Is(err, errSocketWritableByOthers) {
-		t.Errorf("expected errors.Is(err, errSocketWritableByOthers), got: %v", err)
+	if err := checkSocketOwnershipUID(sockPath, os.Getuid()); err != nil {
+		t.Errorf("expected a socket file writable by group or other, in an otherwise-secure directory, to be accepted, got: %v", err)
 	}
 }
 
@@ -4064,6 +4066,63 @@ func TestSendKeysHeaderHangHonorsScreenDeadline(t *testing.T) {
 	margin := client.screenDeadline / 2
 	if elapsed >= client.screenDeadline+margin {
 		t.Errorf("SendKeys took %v against a header that never arrives, expected it to return at its screenDeadline ceiling (%v, +%v margin), not client.defaultDeadline", elapsed, client.screenDeadline, margin)
+	}
+}
+
+// TestSendKeysPingHangHonorsScreenDeadline covers branch-review-13's recommendation 6:
+// readScreenOnce is always called with ctx already shortened to c.screenDeadline by its
+// caller (readScreenWithDeadline shortens ctx before calling it), so ensureProto's own
+// ping — reached on a client's very first call, before any proto number is cached — runs
+// under that same short ceiling on the read path. sendKeysOnce used to call
+// c.ensureProto and c.dial before deriving its own shortened ctx (withScreenDeadline ran
+// only afterwards), so the same first-call ping on the SendKeys path ran under
+// whatever ctx the caller passed in — context.Background() on SendKeys' documented call
+// path, which falls back to c.defaultDeadline (30s in production). A wedged daemon that
+// accepts the ping connection and never answers therefore held SendKeys open for
+// defaultDeadline, not screenDeadline, before the streaming phase's own short window
+// even began — the two functions, built for the same purpose, disagreed on which
+// ceiling governs their shared first phase.
+func TestSendKeysPingHangHonorsScreenDeadline(t *testing.T) {
+	listener, err := net.Listen("unix", tempSocket(t))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+
+	go func() {
+		conn, _ := listener.Accept()
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+		// Read the ping request but never answer it — the daemon is wedged before
+		// ever producing a response, let alone an attach header.
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		<-stop
+	}()
+
+	client := New(listener.Addr().String(), func() (string, error) {
+		return "key", nil
+	})
+	// client.proto is deliberately left at its zero value: this is the first call,
+	// which is exactly the case that forces ensureProto to ping before anything else.
+	client.screenDeadline = 300 * time.Millisecond
+	client.defaultDeadline = 3 * time.Second // stands in for production's 30s
+
+	start := time.Now()
+	err = client.SendKeys(context.Background(), "session123", "x")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error against a daemon that never answers the ping, got nil")
+	}
+	margin := client.screenDeadline / 2
+	if elapsed >= client.screenDeadline+margin {
+		t.Errorf("SendKeys took %v against a ping that never answers, expected it to return at its screenDeadline ceiling (%v, +%v margin), not client.defaultDeadline (%v)", elapsed, client.screenDeadline, margin, client.defaultDeadline)
 	}
 }
 

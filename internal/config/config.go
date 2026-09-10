@@ -26,6 +26,19 @@ type NotifyConfig struct {
 	SilenceAfter time.Duration
 }
 
+// NeverSilences reports whether SilenceAfter is the sentinel value 0. validate rejects a
+// negative SilenceAfter because it is ambiguous — "always silent" and "never silent" are
+// both readings of a negative window, depending on how it is later compared — and 0 is
+// exactly as ambiguous on its own: "silence immediately" and "never silence" are both
+// readings of a zero-length window too. This method is where that ambiguity is resolved,
+// once, for the whole codebase: 0 means never silence, i.e. every occurrence is reported.
+// A future consumer of SilenceAfter must call this rather than comparing SilenceAfter to
+// zero itself, so the decision cannot be re-made differently somewhere else. See
+// README.md's "Configuration" section for the user-facing statement of this rule.
+func (n NotifyConfig) NeverSilences() bool {
+	return n.SilenceAfter == 0
+}
+
 // Config is never serialised directly — Save/Load marshal the nested unexported
 // file type below, so Config carries no yaml tags of its own.
 type Config struct {
@@ -60,11 +73,21 @@ func (d configDuration) MarshalYAML() (interface{}, error) {
 // most likely typo for a duration field — is refused here with a message that says so,
 // rather than surfacing yaml.v3's default "cannot unmarshal !!int ... into
 // time.Duration", which names the Go type involved rather than the fix.
+//
+// This type backs two distinct keys (daemon.poll_interval and notify.silence_after),
+// and UnmarshalYAML is never told which one it is decoding — a duration string
+// error and the catch-all "wrong shape" error below both carry value.Line instead, so
+// the two keys' errors are at least distinguishable from each other, and a
+// multi-line config file gets a real pointer to the offending value rather than the
+// same fixed sentence twice. The invalid-duration-string branch wraps time.ParseDuration's
+// own error directly, rather than re-quoting value.Value itself first: that error already
+// names the value (time.ParseDuration's message is `time: invalid duration "…"`), and
+// quoting it again ahead of that produced the same value twice in one message.
 func (d *configDuration) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode && value.Tag == "!!str" {
 		parsed, err := time.ParseDuration(value.Value)
 		if err != nil {
-			return fmt.Errorf("invalid duration %q: %w", value.Value, err)
+			return fmt.Errorf("line %d: %w", value.Line, err)
 		}
 		*d = configDuration(parsed)
 		return nil
@@ -72,7 +95,7 @@ func (d *configDuration) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode && (value.Tag == "!!int" || value.Tag == "!!float") {
 		return fmt.Errorf("must be a duration string like \"30s\", not a bare number (%s)", value.Value)
 	}
-	return errors.New("must be a duration string like \"30s\"")
+	return fmt.Errorf("line %d: must be a duration string like \"30s\"", value.Line)
 }
 
 // notifyFile represents the nested notify section in the config file.
@@ -204,17 +227,73 @@ func Load(path string) (Config, error) {
 // implementation detail no one hand-editing this YAML file should ever be shown.
 var fieldNotFoundPattern = regexp.MustCompile(`^(line \d+: )?field (\S+) not found in type .*$`)
 
+// cannotUnmarshalPattern matches yaml.v3's "cannot unmarshal <tag> [`value`] into
+// <target>" message, emitted for a value of the wrong shape — a scalar where a mapping
+// was expected, a list where a scalar was expected, and so on. <target> names the exact
+// Go type yaml.v3 tried to decode into: for a nested section of this format that is
+// either an anonymous struct literal with its yaml tag spelled out verbatim (e.g.
+// `struct { Path string "yaml:\"path\"" }`) or one of this package's own private type
+// names (e.g. `config.notifyFile`, `config.file`) — captured as the third group below so
+// targetLeaksGoSyntax can decide whether this particular occurrence needs rewriting.
+var cannotUnmarshalPattern = regexp.MustCompile(`^(line \d+: )?cannot unmarshal (!!\S+)(?: ` + "`[^`]*`" + `)? into (.+)$`)
+
+// targetLeaksGoSyntax reports whether a cannotUnmarshalPattern target names an anonymous
+// Go struct literal or one of this package's own private types, as opposed to a plain
+// built-in type (int, bool, string, []string, ...) backing a leaf field. A built-in type
+// name already reads fine to someone who has never seen this codebase and is left alone;
+// only the two Go-specific shapes need rewriting.
+func targetLeaksGoSyntax(target string) bool {
+	return strings.Contains(target, "struct {") || strings.Contains(target, "config.")
+}
+
+// describeYAMLTag turns a yaml.v3 tag (as it appears in a "cannot unmarshal <tag> ..."
+// message) into the word a person hand-editing this file would use for what they
+// actually wrote, so cannotUnmarshalPattern's rewrite below can say what was found
+// without naming the YAML tag syntax either.
+//
+// !!null and !!map are deliberately absent from this switch: every target this
+// rewrite ever fires for (see targetLeaksGoSyntax) is itself a mapping-shaped Go type
+// — a struct, named or anonymous — and yaml.v3 decodes a null or a mapping into a
+// mapping-shaped target without error, so neither tag can ever reach a "cannot
+// unmarshal" message whose target is one of those two shapes. Handling them here would
+// be an untestable branch asserting a case that cannot occur; the default below covers
+// them, and anything else genuinely unforeseen, honestly instead.
+func describeYAMLTag(tag string) string {
+	switch tag {
+	case "!!str":
+		return "a text value"
+	case "!!seq":
+		return "a list"
+	case "!!int", "!!float":
+		return "a number"
+	case "!!bool":
+		return "a true/false value"
+	default:
+		return "a value of the wrong shape"
+	}
+}
+
 // describeYAMLError rewrites a *yaml.TypeError's messages in terms of configuration
-// keys, never Go syntax. yaml.v3's own text for an unknown key under KnownFields(true)
-// names the exact Go struct type it tried to decode into, down to the struct tag
-// literal (e.g. `field pathx not found in type struct { Path string "yaml:\"path\"" }`)
-// — this format is hand-edited, so that message is both meaningless and alarming to
-// someone who has never seen this codebase. Every other *yaml.TypeError message (a
-// scalar value of the wrong type, say) already names only a primitive type word (int,
-// bool, string) with no struct or tag syntax in it, so it passes through unchanged. An
-// error that is not a *yaml.TypeError at all (a syntax error, an I/O error) is returned
-// unchanged too — this function only ever narrows what yaml.v3 already reported, never
-// invents a diagnosis on top of it.
+// keys, never Go syntax. yaml.v3's own text under KnownFields(true) leaks Go internals
+// in two distinct shapes, handled by the two patterns above:
+//
+//   - an unknown key: `field pathx not found in type struct { Path string
+//     "yaml:\"path\"" }` — the exact anonymous struct type, tag literal included.
+//     fieldNotFoundPattern rewrites this to name the offending key instead.
+//   - a value of the wrong shape: `cannot unmarshal !!str `hello` into struct { Path
+//     string "yaml:\"path\"" }`, or, for a named private type, `cannot unmarshal !!int
+//     `5` into config.notifyFile`. cannotUnmarshalPattern rewrites this — but only when
+//     targetLeaksGoSyntax says the target actually is one of those two shapes — to say
+//     what was expected (a set of configuration keys) and what was found instead (a
+//     text value, a list, a number, ...), naming neither the struct literal nor the
+//     package-qualified type.
+//
+// A cannotUnmarshalPattern match whose target is a plain built-in type (int, bool,
+// string, []string — the type actually backing a leaf field) already reads fine to
+// someone who has never seen this codebase, and is left as-is. An error that is not a
+// *yaml.TypeError at all (a syntax error, an I/O error), or a TypeError line that
+// matches neither pattern, is returned unchanged too — this function only ever narrows
+// what yaml.v3 already reported, never invents a diagnosis on top of it.
 func describeYAMLError(err error) error {
 	var typeErr *yaml.TypeError
 	if !errors.As(err, &typeErr) {
@@ -227,6 +306,10 @@ func describeYAMLError(err error) error {
 			rewritten[i] = fmt.Sprintf("%sunknown configuration key %q", m[1], m[2])
 			continue
 		}
+		if m := cannotUnmarshalPattern.FindStringSubmatch(line); m != nil && targetLeaksGoSyntax(m[3]) {
+			rewritten[i] = fmt.Sprintf("%sexpected a set of configuration keys here, not %s", m[1], describeYAMLTag(m[2]))
+			continue
+		}
 		rewritten[i] = line
 	}
 	return errors.New(strings.Join(rewritten, "\n"))
@@ -236,7 +319,9 @@ func describeYAMLError(err error) error {
 // port, a non-positive poll interval that would spin in a hot loop against the daemon
 // socket, or a negative silence window that means either "always silent" or "never
 // silent" depending on how it is later compared — neither of which is what a negative
-// duration was meant to express.
+// duration was meant to express. Zero is not rejected here: unlike a negative value, it
+// has one defined meaning (see NotifyConfig.NeverSilences) rather than two competing
+// ones, so there is nothing for validate to refuse.
 func validate(c Config) error {
 	if c.ServerPort < 1 || c.ServerPort > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.ServerPort)
@@ -285,6 +370,24 @@ func missingAncestorDirs(dir string) []string {
 	return missing
 }
 
+// sweepStaleTempFiles removes every file directly under dir matching base+".tmp-*" —
+// exactly the pattern os.CreateTemp(dir, base+".tmp-*") below produces. It exists for
+// the one case Save's own deferred removal cannot cover: a process killed between
+// os.CreateTemp and os.Rename in an earlier run leaves that run's temp file behind with
+// no code left running to clean it up. Called once at the start of every Save, so a
+// leftover never survives past the next successful write. Best-effort throughout: a
+// glob or remove failure here must never fail the write this call is nested inside —
+// tidying up an old run's litter is not worth refusing to save the current one over.
+func sweepStaleTempFiles(dir, base string) {
+	matches, err := filepath.Glob(filepath.Join(dir, base+".tmp-*"))
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
+}
+
 // Save writes the config file, creating parent directories as needed.
 //
 // It validates before writing anything, so it can never leave behind a config that
@@ -326,6 +429,16 @@ func Save(path string, c Config) error {
 			return fmt.Errorf("set config dir permissions: %w", err)
 		}
 	}
+
+	// A previous Save's temp file, from a run that died (a hard kill, not a Go-level
+	// error return — the deferred removal below already handles every error-return
+	// path of this function) between os.CreateTemp and os.Rename, would otherwise sit
+	// beside the config forever: nothing else ever visits it again. Sweep any leftover
+	// matching this function's own naming pattern before creating this run's own, so
+	// they cannot accumulate release over release. Best-effort: a sweep failure is not
+	// this write's problem to solve, and must never fail the write it is here to tidy
+	// up around.
+	sweepStaleTempFiles(dir, filepath.Base(path))
 
 	f := configToFile(c)
 	raw, err := yaml.Marshal(f)

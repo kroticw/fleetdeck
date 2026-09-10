@@ -27,10 +27,19 @@ import (
 	"unicode/utf8"
 )
 
-// maxLineBytes bounds a single line read from the daemon (a response, or the attach
-// header). It mirrors the daemon's own request cap of 1MB (see ETOOLARGE) so neither
-// side can be made to buffer an unbounded line.
-const maxLineBytes = 1024 * 1024
+// maxLineBytes bounds how much of a single line — a response, or the attach header —
+// this client will buffer before giving up. It is not modelled on the daemon's own 1MB
+// request cap (see ETOOLARGE): that number bounds what the daemon accepts as input, not
+// what a response can grow to, and `list` is exactly the shape that does not fit that
+// mould — its response grows with the size of the fleet, and each session's `intent`
+// field carries the last prompt submitted to it, which can itself run to kilobytes. A
+// cap sized for a request would make ListSessions fail outright, with no degradation,
+// against a fleet with enough sessions or long enough prompts. This is instead a plain
+// resource bound: buffering more than this many bytes for one line, from either side of
+// the connection, is treated as a malformed or hostile peer rather than a legitimate
+// answer, with enough headroom that an ordinary fleet's `list` response is nowhere near
+// it.
+const maxLineBytes = 16 * 1024 * 1024
 
 // socketGlobBase is the directory SocketPath globs candidates under. It is a
 // package-level var, not a literal inlined at the call site, purely so a test can
@@ -132,9 +141,11 @@ var (
 	errSocketTooManyAncestors = errors.New("too many parent directories to check")
 )
 
-// checkSocketOwnership verifies that the socket file, and every enclosing directory up
-// to (but not including) the first one owned by root, is owned by the current user and
-// is not writable by group or other.
+// checkSocketOwnership verifies that the socket file is owned by the current user, and
+// that it and every enclosing directory up to (but not including) the first one owned
+// by root is not writable by group or other. The "not writable by group or other" half
+// of that applies to the enclosing directories, not to the socket file itself — see the
+// comment beside its own ownership check for why.
 //
 // /tmp is world-writable, so without this check a local attacker could create the
 // daemon's socket directory ahead of the real daemon and have a client hand it the
@@ -188,10 +199,17 @@ func checkSocketOwnershipUID(socketPath string, wantUID int) error {
 	if sockStat.uid != wantUID {
 		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketWrongOwner)
 	}
-	if sockStat.mode&0o022 != 0 {
-		return fmt.Errorf("refusing socket %s: %w", socketPath, errSocketWritableByOthers)
-	}
-
+	// The socket file's own mode bits are deliberately not checked for group/other
+	// writability, unlike the enclosing directories below. Planting or replacing a
+	// directory entry — including this socket file — requires write access to the
+	// directory that contains it, not to the file itself, and that directory's own
+	// mode is exactly what checkSocketOwnershipWalk checks next; a permissive mode on
+	// the socket file in isolation gives a local attacker nothing they could not
+	// already do by controlling the directory. Checking it anyway used to produce a
+	// false refusal that was hard to diagnose: a daemon started under a permissive
+	// umask (e.g. 002) creates the socket as srwxrwxr-x, which is perfectly safe by
+	// the reasoning above but was refused here as "writable by group or other" all the
+	// same.
 	return checkSocketOwnershipWalk(socketPath, filepath.Dir(socketPath), wantUID, realLstat)
 }
 
@@ -733,8 +751,9 @@ func (c *Client) writeRequest(conn net.Conn, req map[string]interface{}) error {
 }
 
 // readBoundedLine reads a single '\n'-terminated line, refusing to buffer more than
-// maxLineBytes before one is found — mirroring the daemon's own 1MB request cap so a
-// malformed or hostile peer cannot make the client hold an unbounded line in memory.
+// maxLineBytes before one is found — see maxLineBytes' own comment for why that bound
+// is sized as buffering headroom rather than a mirror of the daemon's request cap — so
+// a malformed or hostile peer cannot make the client hold an unbounded line in memory.
 func readBoundedLine(reader *bufio.Reader) ([]byte, error) {
 	line := make([]byte, 0, 256)
 	for {
@@ -937,9 +956,11 @@ func detectKick(data []byte, closed bool) (prefix []byte, detail string, kicked 
 // both of this function's callers always pass a non-zero one today.
 //
 // When idleFromStart is false, the idle timer starts only once the first byte has been
-// read, letting ctx's deadline (or until) alone bound the wait for that first byte — a
-// slow first paint (a loaded machine, a large screen buffer) is normal, not idle.
-// ReadScreen wants this. When idleFromStart is true, the idle window is in effect from
+// read. The wait for that first byte is bounded by ctx's own deadline when it has one;
+// when it does not, it is bounded instead by firstByteDeadline (min(now+idleTimeout,
+// until), computed once below) rather than being left unbounded — a slow first paint (a
+// loaded machine, a large screen buffer) is normal, not idle, but it still cannot wait
+// forever. ReadScreen wants this. When idleFromStart is true, the idle window is in effect from
 // the very first call, exactly like an ordinary idle detection with no special-cased
 // "first byte" grace period; SendKeys wants this, since silence for the whole window is
 // itself the expected, successful outcome for most key deliveries (see
@@ -1231,6 +1252,13 @@ func (c *Client) listSessionsOnce(ctx context.Context) ([]Session, error) {
 func (c *Client) SendText(ctx context.Context, session, text string) error {
 	err := c.sendTextOnce(ctx, session, text)
 	if isProtoErr(err) {
+		// Unlike SendKeys' retry (see its own comment), this one cannot double-deliver
+		// the text: sendTextOnce writes the whole request — proto field and text
+		// together — in a single write (see writeRequest), and the daemon checks proto
+		// before it ever executes `reply` (docs/protocol/daemon-control-socket.md
+		// section 2). An EPROTO response therefore always means the text was never
+		// delivered at all, not that it might already be in flight on a separate write
+		// the way SendKeys' key bytes are. Retrying here is safe for that reason.
 		c.invalidateProto()
 		err = c.sendTextOnce(ctx, session, text)
 	}
@@ -1283,9 +1311,13 @@ func (c *Client) sendTextOnce(ctx context.Context, session, text string) error {
 	return nil
 }
 
-// trimToRuneBoundary drops leading bytes that are the tail end of a multi-byte UTF-8
-// sequence whose start was cut off, so a byte-oriented truncation never hands the
-// caller a slice that begins mid-rune.
+// trimToRuneBoundary drops every leading byte that cannot begin a valid UTF-8 rune, so a
+// byte-oriented truncation never hands the caller a slice that begins mid-rune. The
+// leading bytes it drops are usually the tail end of a multi-byte sequence whose start
+// was cut off by whatever truncation produced b, but the check itself does not
+// distinguish that case from any other invalid leading byte: a lone 0x80-0xFF byte from
+// non-UTF-8 PTY output, which was never part of a cut multi-byte rune at all, is
+// stripped exactly the same way.
 //
 // It does NOT reconstruct or otherwise protect a truncated ANSI escape sequence. Cutting
 // off the front of, say, "\x1b[31m" leaves "[31m" — every byte of which is a perfectly
@@ -1531,6 +1563,24 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 		return wrapNoControlKey(err)
 	}
 
+	// Shortened to at most c.screenDeadline from now before anything else runs — see
+	// withScreenDeadline's comment — so this one ceiling governs ensureProto's ping,
+	// dial, the header read below, and collectUntilIdleOrClosed's until parameter
+	// later, not just the last two. Before this, ensureProto and dial ran under ctx
+	// exactly as the caller passed it in, and withScreenDeadline was applied only
+	// afterwards: on a client's first call (no proto cached yet) against a wedged
+	// daemon, ensureProto's own ping could hold this open for up to c.defaultDeadline
+	// (30s in production) — SendKeys' documented context.Background() call path
+	// carries no deadline of its own — before the much shorter window meant to govern
+	// this whole call even began (see TestSendKeysPingHangHonorsScreenDeadline).
+	// readScreenOnce has no equivalent gap: readScreenWithDeadline already shortens
+	// ctx before ever calling it, so ensureProto and dial run under the short ceiling
+	// there too; this brings sendKeysOnce in line with that rather than leaving two
+	// functions built for the same purpose disagreeing on which ceiling governs their
+	// shared first phase.
+	ctx, cancel := c.withScreenDeadline(ctx)
+	defer cancel()
+
 	proto, err := c.ensureProto(ctx)
 	if err != nil {
 		return err
@@ -1542,17 +1592,6 @@ func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
 	}
 	defer func() { _ = conn.Close() }()
 
-	// From here on, everything runs under a ctx shortened to at most c.screenDeadline
-	// from now — see withScreenDeadline's comment. Before this, setDeadline(ctx, conn)
-	// used ctx's own deadline when it had one, or fell back to c.defaultDeadline (30s
-	// in production) on SendKeys' documented context.Background() call path, so the
-	// header read below (readAttachHeader) could hold the connection open for up to 30s
-	// before the much shorter window governing the streaming phase after it even began
-	// (see TestSendKeysHeaderHangHonorsScreenDeadline). Deriving this once and reusing
-	// it for both the header phase and collectUntilIdleOrClosed's until parameter below
-	// keeps the two from drifting apart the way they did here.
-	ctx, cancel := c.withScreenDeadline(ctx)
-	defer cancel()
 	c.setDeadline(ctx, conn)
 
 	req := map[string]interface{}{

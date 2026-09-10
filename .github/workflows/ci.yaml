@@ -50,6 +50,13 @@ jobs:
           version: v2.13.2
           install-mode: goinstall
           install-only: true
+      - run: go mod verify
+      # govulncheck is a CI tool, not a module dependency — installed via `go install`
+      # with an exact pinned version, the same way golangci-lint's version is pinned
+      # above, rather than `@latest`, so a new advisory in a newer govulncheck release
+      # cannot change what this job reports without a deliberate version bump here.
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - run: govulncheck ./...
       - run: make lint
       - run: make test
       - run: make build

@@ -633,3 +633,165 @@ func TestLoadValidPortAndIntervalAreAccepted(t *testing.T) {
 		t.Fatalf("expected poll interval 1s, got %v", got.DaemonPollInterval)
 	}
 }
+
+// TestLoadTypeMismatchErrorNamesNoGoSyntax is branch-review-13's blocker 1:
+// describeYAMLError's own comment claimed every *yaml.TypeError message other than the
+// unknown-key one already named only a primitive type word, so it could pass through
+// unchanged — false for a value of the wrong shape under a nested section, where yaml.v3
+// names either the exact anonymous struct type (tag literal included) or one of this
+// package's own private type names. Each of these four fixtures reaches a different one
+// of those shapes (an anonymous struct via a leaf field, an anonymous struct via a
+// deeper-nested field, the notify section's own named type, and the top-level file type
+// via a non-mapping document) and none of the resulting messages may contain the
+// forbidden fragments TestLoadUnknownKeyErrorNamesTheKeyNotGoSyntax already pins for the
+// unknown-key case.
+func TestLoadTypeMismatchErrorNamesNoGoSyntax(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"leaf field wrong shape", "board: hello\n"},
+		{"nested field wrong shape", "orchestrator: [1, 2]\n"},
+		{"named private type wrong shape", "notify: 5\n"},
+		{"top-level document not a mapping", "- a\n"},
+		{"bool tag", "board: true\n"},
+		{"tag with no dedicated word (default branch)", "board: 2024-01-01\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "c.yaml")
+			if err := os.WriteFile(p, []byte(tc.content), 0o600); err != nil {
+				t.Fatalf("writing fixture: %v", err)
+			}
+			_, err := Load(p)
+			if err == nil {
+				t.Fatal("a value of the wrong shape must be an error")
+			}
+			msg := err.Error()
+			if strings.Contains(msg, "struct {") {
+				t.Errorf("error leaks an anonymous Go struct literal: %v", err)
+			}
+			if strings.Contains(msg, "config.") {
+				t.Errorf("error leaks a package-qualified Go type name: %v", err)
+			}
+			if strings.Contains(msg, `yaml:"`) {
+				t.Errorf("error leaks a raw yaml struct tag: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoadBarePollIntervalListNamesTheLineNotJustTheGenericMessage covers branch-review-13's
+// blocker 2, first half: configDuration.UnmarshalYAML's catch-all branch (anything that is
+// not a scalar at all — a list, here) produced the exact same text,
+// `must be a duration string like "30s"`, for daemon.poll_interval and
+// notify.silence_after alike, with nothing to tell the two apart. The fix carries the
+// YAML node's line number into the message.
+func TestLoadBarePollIntervalListNamesTheLineNotJustTheGenericMessage(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: [1, 2]\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("a list for poll_interval must be rejected")
+	}
+	if !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("expected the error to name line 2, got: %v", err)
+	}
+}
+
+// TestLoadBareSilenceAfterListAndBarePollIntervalListMessagesDiffer is the other half of
+// blocker 2's first defect: two different keys, each given a non-scalar value on a
+// different line, must not produce byte-identical error messages. Both fixtures are
+// written to the same path, one after the other, so the "parse config <path>: " prefix
+// both errors carry is identical too — only the line-specific rewrite this test is
+// actually about is left to make them differ.
+func TestLoadBareSilenceAfterListAndBarePollIntervalListMessagesDiffer(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+
+	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: [1, 2]\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	_, pollErr := Load(p)
+	if pollErr == nil {
+		t.Fatal("a list for poll_interval must be rejected")
+	}
+
+	if err := os.WriteFile(p, []byte("notify:\n\n  silence_after: [1]\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	_, silenceErr := Load(p)
+	if silenceErr == nil {
+		t.Fatal("a list for silence_after must be rejected")
+	}
+
+	if pollErr.Error() == silenceErr.Error() {
+		t.Fatalf("expected the two distinct keys' errors to differ (each names its own line), both were: %v", pollErr)
+	}
+}
+
+// TestLoadInvalidDurationStringDoesNotDuplicateTheValue covers blocker 2's second half:
+// `daemon.poll_interval: "abc"` produced `invalid duration "abc": time: invalid duration
+// "abc"` — the offending value quoted twice in the same message, and no line number
+// anywhere in it.
+func TestLoadInvalidDurationStringDoesNotDuplicateTheValue(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("daemon:\n  poll_interval: \"abc\"\n"), 0o600); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("an invalid duration string must be rejected")
+	}
+	msg := err.Error()
+	if strings.Count(msg, `"abc"`) != 1 {
+		t.Fatalf(`expected the value "abc" to appear exactly once, got: %v`, err)
+	}
+	if !strings.Contains(msg, "line 2") {
+		t.Fatalf("expected the error to name line 2, got: %v", err)
+	}
+}
+
+// TestNeverSilencesTrueForZero and TestNeverSilencesFalseForPositive pin
+// branch-review-13's recommendation 7: notify.silence_after: 0 previously had no defined
+// meaning (validate rejected only negatives) even though it is exactly as ambiguous as a
+// negative value — "silence immediately" or "never silence" are both readings of a zero
+// window. NeverSilences is the one place that decision is made, so a future consumer
+// cannot re-decide it differently by comparing SilenceAfter to zero itself.
+func TestNeverSilencesTrueForZero(t *testing.T) {
+	n := NotifyConfig{SilenceAfter: 0}
+	if !n.NeverSilences() {
+		t.Fatal("a zero silence_after must mean notifications are never silenced")
+	}
+}
+
+func TestNeverSilencesFalseForPositive(t *testing.T) {
+	n := NotifyConfig{SilenceAfter: 30 * time.Minute}
+	if n.NeverSilences() {
+		t.Fatal("a positive silence_after must not report NeverSilences")
+	}
+}
+
+// TestSaveSweepsStaleTempFiles covers branch-review-13's recommendation 8: if the
+// process died between os.CreateTemp and os.Rename in an earlier Save (a hard kill, not
+// a Go-level error return — the defer already covers every error-return path), a
+// config.yaml.tmp-XXXX file is left beside the config forever, since nothing ever visits
+// it again. Save must sweep leftovers matching its own naming pattern before writing a
+// new one.
+func TestSaveSweepsStaleTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	stale := filepath.Join(dir, "config.yaml.tmp-leftover")
+	if err := os.WriteFile(stale, []byte("stale"), 0o600); err != nil {
+		t.Fatalf("writing stale fixture: %v", err)
+	}
+
+	if err := Save(p, Default()); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("expected the stale temp file to be swept by Save, stat error: %v", err)
+	}
+}
