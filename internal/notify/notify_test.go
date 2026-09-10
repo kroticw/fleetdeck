@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestEscapeAppleScriptString(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Basic cases
+		{"hello", "hello"},
+		{"hello world", "hello world"},
+		// Quote escaping
+		{`say "hi"`, `say \"hi\"`},
+		// Backslash escaping
+		{"path\\to\\file", "path\\\\to\\\\file"},
+		// The injection vector: backslash-quote must become escaped-backslash-escaped-quote
+		{"test\\\"", "test\\\\\\\""},
+		// Single backslash
+		{"\\", "\\\\"},
+		// Single quote
+		{"\"", "\\\""},
+	}
+	for _, tt := range tests {
+		got := escapeAppleScriptString(tt.input)
+		if got != tt.expected {
+			t.Errorf("escapeAppleScriptString(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
 func TestFireSendsOncePerKey(t *testing.T) {
 	sent := 0
 	n := New(func(title, text string) error { sent++; return nil })
@@ -31,7 +58,9 @@ func TestFireAgainAfterClear(t *testing.T) {
 
 func TestSendFailureIsReportedAndNotRemembered(t *testing.T) {
 	fail := true
+	sendCount := 0
 	n := New(func(title, text string) error {
+		sendCount++
 		if fail {
 			return errors.New("osascript missing")
 		}
@@ -40,8 +69,14 @@ func TestSendFailureIsReportedAndNotRemembered(t *testing.T) {
 	if err := n.Fire("k", "t", "x"); err == nil {
 		t.Fatal("a failed banner must be reported")
 	}
+	if sendCount != 1 {
+		t.Fatalf("first Fire must call send exactly once, got %d", sendCount)
+	}
 	fail = false
 	if err := n.Fire("k", "t", "x"); err != nil {
 		t.Fatal("a key whose banner failed must be retried, not marked as delivered")
+	}
+	if sendCount != 2 {
+		t.Fatalf("second Fire must call send again (retry), got %d total sends", sendCount)
 	}
 }

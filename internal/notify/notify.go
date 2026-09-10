@@ -46,10 +46,16 @@ func (n *Notifier) Clear(key string) {
 	n.mu.Unlock()
 }
 
+// escapeAppleScriptString escapes a string for use in AppleScript double-quoted strings.
+// It escapes backslashes first, then quotes, to prevent escape-sequence injection.
+func escapeAppleScriptString(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return r.Replace(s)
+}
+
 // OSAScriptSend shows a macOS notification banner.
 func OSAScriptSend(title, text string) error {
-	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `\"`) }
-	script := fmt.Sprintf(`display notification "%s" with title "%s"`, esc(text), esc(title))
+	script := fmt.Sprintf(`display notification "%s" with title "%s"`, escapeAppleScriptString(text), escapeAppleScriptString(title))
 	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
 		return fmt.Errorf("osascript: %s", strings.TrimSpace(string(out)))
 	}
