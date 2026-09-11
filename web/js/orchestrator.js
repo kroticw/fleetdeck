@@ -1,38 +1,41 @@
 import { subscribe, get } from "./store.js";
-import { sendText, setOrchestratorSession, setSessionLabel } from "./api.js";
+import { setOrchestratorSession, setSessionLabel } from "./api.js";
 import { t } from "./i18n.js";
-// Re-exported rather than moved out of sight: these were this module's public
-// surface before the shared one existed, and the tests that pin their behaviour
-// are the same tests. Where a step is drawn now lives in steps.js.
-export { parseAgentMessage, parseTaskNotification, unwrapEnvelope } from "./envelope.js";
-export { atBottom, stepKey, STICK_THRESHOLD_PX } from "./steps.js";
-import { syncSteps as syncStepRows } from "./steps.js";
-import { wireImagePaste } from "./pasteimage.js";
-import { createPending } from "./pending.js";
 import { createColumnWidth, MIN_PIXELS } from "./columnwidth.js";
+import { createLiveTerminal } from "./liveterminal.js";
 
 // The orchestrator is not one session among many: it is the standing place of
-// conversation, so it keeps its own column and its own input.
+// conversation, so it keeps its own column.
+//
+// The column is the orchestrator session's own terminal — the same live
+// terminal the session panel's screen tab draws (web/js/liveterminal.js), held
+// open for as long as the column shows that session. It used to be a feed of
+// the transcript's last steps with a box to type into, polled every three
+// seconds; a person talking to the orchestrator through it saw a digest of the
+// conversation rather than the conversation, and every question the session
+// asked on its own screen — a permission, a choice — was not in the feed at
+// all. The terminal is the session itself: what it shows, it shows as it
+// happens, and what is typed into it reaches the session byte by byte.
+//
+// Three things follow from that and are decided here:
+//   • the column's width is the session's width. The terminal follows its pane
+//     and tells the session every size it settles on, so dragging the column's
+//     edge reshapes the orchestrator session for everyone watching it — the
+//     operator's own terminal included. That is the operator's choice: the
+//     column is where the orchestrator is read;
+//   • the terminal comes back by itself. The column has no tab to reopen, so a
+//     lost connection, a restarting panel or a daemon briefly away is tried
+//     again rather than left on "connection lost";
+//   • a folded column holds no terminal. A column nobody can see is not where
+//     the session is read, and what it attached with would keep the session at
+//     a size nobody is looking at; folding lets it go, unfolding attaches anew.
 //
 // It reads two different session identifiers, and mixing them up is the one
 // mistake that would silently break this module: `short` is the daemon's
-// short id — what `orchestrator.session` in configuration holds, what
-// POST /api/sessions/{short}/text takes — while `sessionId` is the
-// transcript UUID that GET /api/sessions/{sessionId}/digest matches on via
-// transcript.Locate. A SessionView carries both; it has no `.id` field.
-//
-// The conversation is UPDATED, never rebuilt. It used to be assembled with one
-// innerHTML write per draw, and draw ran on every snapshot the daemon pushed
-// (two seconds apart by default) as well as on the three-second digest poll —
-// so the whole column, thread and input included, was thrown away and recreated
-// more than once a second. Three things that a person needs and a rebuild
-// destroys: the scroll position, the selection they made with the mouse, and
-// the caret in the textarea. None of them survives a node being replaced, and
-// no amount of restoring them afterwards is the same thing, because the restore
-// only knows what the code thought to save.
-//
-// So: the frame is built once, the thread's steps are diffed against what is
-// on screen, and a step that has not changed is not touched at all.
+// short id — what `orchestrator.session` in configuration holds and what the
+// terminal attaches to — while `sessionId` is the transcript UUID a label is
+// written against (PATCH /api/sessions/{sessionId}/label). A SessionView
+// carries both; it has no `.id` field.
 
 // resolveOrchestrator is the pure core of "which session, if any, does the
 // pin point at right now" — kept free of get()/DOM so it can be tested
@@ -74,18 +77,14 @@ export function pickerLabel(session) {
 // viewSignature is everything this column actually shows, and nothing else.
 // The daemon pushes a snapshot every couple of seconds and almost none of them
 // change anything here — another session's progress moved, a context percentage
-// somewhere else ticked. Redrawing on those is what made the column feel slow;
-// worse, a redraw is what loses a selection, so an unrelated session's progress
-// bar could wipe the text a person was in the middle of copying.
+// somewhere else ticked. A redraw on those is work for nothing, and the head is
+// where a person may be in the middle of editing a name.
 //
-// The pickable session list is tracked unconditionally now, pinned or not:
-// the dropdown that assigns the orchestrator lives in this column's own head
-// at all times (see renderOrchestrator), not only while nothing is pinned,
-// so a session joining or leaving the fleet has to reach it even mid-
-// conversation. Losing a selection to that is not the risk it used to be —
-// every part draw() touches is diffed in place (setText, syncStepRows, the
-// dropdown's own option-list comparison), so a redraw the list forces is not
-// a rebuild the way the picker's old full-screen replacement was.
+// The pickable session list is tracked unconditionally, pinned or not: the
+// dropdown that assigns the orchestrator lives in this column's own head at all
+// times, so a session joining or leaving the fleet has to reach it. None of it
+// can disturb the terminal: the terminal is reopened only when the session it
+// draws changes, never by a redraw.
 export function viewSignature(snap, connected) {
   const { sessions, short, session } = resolveOrchestrator(snap);
   return JSON.stringify({
@@ -99,15 +98,11 @@ export function viewSignature(snap, connected) {
   });
 }
 
-export function renderOrchestrator(root) {
-  let steps = [];
-
-  // What has been sent and has not come back out of the transcript yet. Shared
-  // with the session panel rather than written twice: the two panes disagreeing
-  // about when a message is on screen is exactly the class of defect this pair
-  // has already produced once.
-  const pending = createPending();
-
+// renderOrchestrator draws the column into `root` and keeps it current. It
+// returns a function that puts it away — the subscription and the terminal
+// with its socket — which the page never needs, since the column lives as
+// long as the page; a test mounting one column after another does.
+export function renderOrchestrator(root, { timers = globalThis } = {}) {
   // How wide this column is and whether it is folded away. applyWidth is the
   // only place that touches the column element itself, and it is called at
   // startup as well as on every change — a state that is only applied when it
@@ -122,6 +117,9 @@ export function renderOrchestrator(root) {
     // told separately, and it is what hides itself when there is no edge to
     // pull.
     if (grip) grip.hidden = folded;
+    // After the attribute: a terminal opened on unfolding measures the pane it
+    // is opened into, and a pane still marked folded has no size to measure.
+    syncTerminal();
   };
 
   // The strip a person grabs to resize the column.
@@ -215,49 +213,42 @@ export function renderOrchestrator(root) {
 
   // Set by the store subscription on every push (including the initial
   // synchronous one) and read by draw() whenever it runs — including the
-  // redraws triggered from inside this module itself (a send, a pick), which
+  // redraws triggered from inside this module itself (a pick, a label), which
   // happen between socket pushes and must still reflect the last known
   // connection state rather than assuming "connected" by default.
   let isConnected = false;
 
-  // Two independent error slots, deliberately not one shared `error`. A
-  // single variable let a successful background digest poll silently erase
-  // the message from a failed send: sendText fails, refreshDigest is kicked
-  // off right after it regardless, and if the transcript itself is still
-  // readable that poll succeeds and blanks the very error the operator needed
-  // to see. sendError covers sendText, the dropdown's own setOrchestratorSession
-  // and the label edit's setSessionLabel — anything the operator directly
-  // triggered — and is cleared only by the next such attempt. digestError
-  // covers the periodic digest poll alone and is cleared only by that poll
-  // succeeding. Neither may clear the other.
-  let sendError = "";
-  let digestError = "";
+  // Two error slots, deliberately not one shared `error`, because they are
+  // cleared by different things and neither may erase the other.
+  //
+  // actionError is what the operator's own last action came to: the dropdown's
+  // setOrchestratorSession, the label edit's setSessionLabel, a key the
+  // terminal could not send. Cleared only by the next such action succeeding.
+  //
+  // streamError is the terminal's connection: ended and why, or being tried
+  // again. Cleared by the terminal itself once it is back, and when the column
+  // lets the terminal go — a sentence about a connection that is no longer
+  // held describes nothing.
+  let actionError = "";
+  let streamError = "";
 
-  // A pasted image is stored, and the path to it goes into the box — but the
-  // session's first read from that directory stops to ask permission, and a
-  // session stopping to ask looks exactly like a session that hung. This slot
-  // is where it says so. Not an error: nothing went wrong, and putting it in
-  // the red row would teach the operator to ignore the red row.
-  let pasteNotice = "";
-
-  // The transcript UUID the digest was last fetched for. A change of pin, or
-  // the pinned session reappearing after being absent, is detected by
-  // comparing against this and triggers an immediate re-fetch instead of
-  // waiting out the 3-second interval.
-  let fetchedFor = null;
+  // The terminal while the column holds one, and the short id of the session
+  // it draws. The terminal is reopened when, and only when, that session
+  // changes — a pin moved, the session left the fleet or came back, the column
+  // was folded or unfolded — because reopening is a fresh attach on the daemon
+  // and a repaint of the whole screen.
+  let live = null;
+  let terminalFor = null;
 
   // Set while the pinned session's own name is being edited in place. draw()
-  // must not touch .o-name while this is true — the same "do not disturb
-  // what is being typed into" rule the textarea already gets for free by
-  // never being replaced, applied here to a node that IS replaced (by the
-  // input) for the duration of the edit.
+  // must not touch .o-name while this is true: it has been replaced by an
+  // input for the duration, and a person is typing into it.
   let editingLabel = false;
 
-  // Whether the conversation frame has been built into root yet. There is
-  // only ever one shape now — the operator's complaint was that a second one
-  // existed (a full-screen session picker duplicating the task list on the
-  // right) — so this is a plain guard against rebuilding it, not a mode to
-  // switch between.
+  // Whether the frame has been built into root yet. There is only ever one
+  // shape — the operator's complaint was that a second one existed (a
+  // full-screen session picker duplicating the task list on the right) — so
+  // this is a plain guard against rebuilding it, not a mode to switch between.
   let built = false;
   let painted = null;
 
@@ -274,17 +265,19 @@ export function renderOrchestrator(root) {
   };
 
   // setText writes only when the text differs. Assigning the same string still
-  // replaces the text node, which drops a selection inside it — the reason this
-  // module diffs at all.
+  // replaces the text node, which drops a selection inside it.
   const setText = (node, text) => {
     if (node && node.textContent !== text) node.textContent = text;
   };
 
   // showRow keeps an optional single-line row (an error, a stale banner) in
   // sync without rebuilding its neighbours: created when first needed, updated
-  // in place while it stays needed, removed when it is not.
+  // in place while it stays needed, removed when it is not. A row is found by
+  // its LAST class, which is the one that names it: both error rows share
+  // .o-error for their look, and finding a row by that would hand one error's
+  // row to the other.
   const showRow = (parent, className, text, before) => {
-    const existing = parent.querySelector(`.${className.split(" ")[0]}`);
+    const existing = parent.querySelector(`.${className.split(" ").pop()}`);
     if (!text) {
       if (existing) existing.remove();
       return;
@@ -296,6 +289,25 @@ export function renderOrchestrator(root) {
     const row = el("div", className, text);
     if (before) parent.insertBefore(row, before);
     else parent.appendChild(row);
+  };
+
+  // What the terminal says about itself for as long as the column holds one:
+  // that it cannot type, and that it is not the size of its pane. Standing
+  // facts, not failures, so they go in the quiet row rather than the red one.
+  const standingNotice = () =>
+    [live?.readOnly ? t("terminal_read_only") : "", live?.unfitted ? t("terminal_not_fitted") : ""]
+      .filter(Boolean)
+      .join("; ");
+
+  // paintRows writes the error and notice rows, and nothing else. The terminal
+  // reports on every key it sends, so this runs far more often than draw() and
+  // must not touch the head or the terminal.
+  const paintRows = () => {
+    if (!built) return;
+    const screen = root.querySelector(".o-screen");
+    showRow(root, "o-error o-error-stream", streamError, screen);
+    showRow(root, "o-error o-error-action", actionError, screen);
+    showRow(root, "o-notice", standingNotice(), screen);
   };
 
   // The controls that size the column, and the one that brings it back.
@@ -333,7 +345,7 @@ export function renderOrchestrator(root) {
     return strip;
   };
 
-  const buildConversationFrame = () => {
+  const buildFrame = () => {
     root.replaceChildren();
 
     root.appendChild(buildWidthControls());
@@ -351,14 +363,13 @@ export function renderOrchestrator(root) {
     editBtn.addEventListener("click", startEditingLabel);
     head.append(editBtn);
 
-    // The one control left for saying which session is the orchestrator: a
-    // plain <select>, not a screen of its own. Choosing an option changes the
-    // pin in place, without ever leaving the conversation already on screen —
-    // the previous picker replaced this whole column with a list of every
-    // session, which was a second, confusable way to do exactly what
-    // clicking a session in the task list on the right already does. Its
-    // own options are synced in draw(), never rebuilt here: this frame is
-    // only ever built once.
+    // The one control for saying which session is the orchestrator: a plain
+    // <select>, not a screen of its own. Choosing an option changes the pin in
+    // place — the previous picker replaced this whole column with a list of
+    // every session, which was a second, confusable way to do exactly what
+    // clicking a session in the task list on the right already does. Its own
+    // options are synced in draw(), never rebuilt here: this frame is only
+    // ever built once.
     const pickSelect = document.createElement("select");
     pickSelect.className = "o-pick-select";
     pickSelect.setAttribute("aria-label", t("pick_orchestrator"));
@@ -367,14 +378,14 @@ export function renderOrchestrator(root) {
       const nextShort = pickSelect.value;
       try {
         await setOrchestratorSession(nextShort);
-        sendError = "";
+        actionError = "";
       } catch (err) {
         // The write failed, so the configuration still names whichever
         // session was actually pinned before — the very next draw() reads
         // that back and sets the select's value to it, reverting the
         // choice on screen without any separate "still really pinned"
         // state to track: the selected option already is the truth.
-        sendError = `${t("orchestrator_pin_failed")}: ${err.message}`;
+        actionError = `${t("orchestrator_pin_failed")}: ${err.message}`;
       }
       draw();
     });
@@ -382,83 +393,10 @@ export function renderOrchestrator(root) {
 
     root.appendChild(head);
 
-    root.appendChild(el("div", "o-thread"));
-
-    const form = el("form", "o-form");
-    const area = document.createElement("textarea");
-    area.setAttribute("rows", "3");
-    area.setAttribute("placeholder", t("write_to_orchestrator"));
-    form.appendChild(area);
-    root.appendChild(form);
-
-    // The textarea is wired once and never replaced, so the draft, the caret
-    // and the focus are simply never lost — there is nothing to restore because
-    // nothing is destroyed. `sendTo` is read at send time rather than captured,
-    // so the same node keeps working when the pin moves to another session.
-    area.addEventListener("keydown", async (e) => {
-      if (e.key !== "Enter" || e.shiftKey) return;
-      e.preventDefault();
-      const text = area.value.trim();
-      if (!text) return;
-      const target = sendTo();
-      if (!target) return;
-      area.value = "";
-      // Drawn before the request goes out, not after it comes back: the wait a
-      // person feels is not the request (about six milliseconds) but the poll
-      // that brings the message back out of the transcript, which was a second
-      // in the common case and ten in the worst one measured.
-      const echo = pending.add(text);
-      draw();
-      try {
-        await sendText(target, text);
-        sendError = "";
-        // Only on success. Whatever the last paste had to say, it said it about
-        // a path that has just left the box — but a failed send puts that path
-        // back, and the sentence explaining that the session is about to ask
-        // permission is true again along with it.
-        pasteNotice = "";
-      } catch (err) {
-        // The message is in nobody's hands, so it comes off the screen and the
-        // words go back where they were. Leaving it drawn would say they
-        // reached the session.
-        pending.drop(echo);
-        sendError = err.message;
-        area.value = text;
-      }
-      await refreshDigest();
-    });
-
-    // Cmd+V puts an image in here too, the same gesture the session panel
-    // takes and through the same module — a second copy of it would start
-    // diverging the day one of the two was fixed.
-    //
-    // `sendTo` is passed as the function it already is, so the session is
-    // resolved at the moment of the paste. This column is exactly the place
-    // that matters: the same textarea is re-pointed at a different session
-    // whenever the pin moves, and a session captured when this frame was built
-    // would keep sending images to whichever session used to be pinned —
-    // quietly, with a path in the box and every appearance of success.
-    //
-    // Nothing is disposed because nothing is rebuilt: this frame is built once
-    // (see `built`), and the textarea outlives every redraw.
-    wireImagePaste(area, sendTo, {
-      onError: (message) => {
-        sendError = message;
-        draw();
-      },
-      onNotice: (message) => {
-        pasteNotice = message;
-        draw();
-      },
-    });
-
-    return { head, thread: root.querySelector(".o-thread"), form, area };
-  };
-
-  // Which session a typed message goes to, resolved at the moment of sending.
-  const sendTo = () => {
-    const { short, session } = resolve();
-    return session ? session.short : short;
+    // Where the terminal goes, or the sentence saying why there is none. The
+    // box itself stays for the life of the column; what is inside it changes
+    // with the session it shows.
+    root.appendChild(el("div", "o-screen"));
   };
 
   // startEditingLabel swaps .o-name for a text input, pre-filled with the
@@ -505,9 +443,9 @@ export function renderOrchestrator(root) {
           // nudge that self-corrects the moment a server snapshot disagrees,
           // never a value this module invents and keeps believing.
           session.label = next;
-          sendError = "";
+          actionError = "";
         } catch (err) {
-          sendError = `${t("label_save_failed")}: ${err.message}`;
+          actionError = `${t("label_save_failed")}: ${err.message}`;
         }
       }
       head.insertBefore(el("span", "o-name", ""), input);
@@ -527,15 +465,9 @@ export function renderOrchestrator(root) {
     input.addEventListener("blur", () => finish(true));
   };
 
-  // How a step's row is classed here. The shared renderer owns everything
-  // inside a step; a pane owns what its rows are called.
-  const stepClass = (role) => `o-msg o-${role}`;
-
   // syncSelectOptions rebuilds the dropdown's <option> children only when the
-  // set actually differs from what is on screen — the same "diff before you
-  // touch it" discipline every other part of draw() follows, so a redraw
-  // this column's own gate lets through cannot disturb an open dropdown a
-  // person happens to be looking at for no reason.
+  // set actually differs from what is on screen, so a redraw cannot disturb an
+  // open dropdown a person happens to be looking at for no reason.
   const syncSelectOptions = (select, wanted) => {
     const have = [...select.options].map((o) => [o.value, o.textContent]);
     if (JSON.stringify(have) === JSON.stringify(wanted)) return;
@@ -549,49 +481,86 @@ export function renderOrchestrator(root) {
     );
   };
 
-  const draw = () => {
-    const { snap, sessions, short, session } = resolve();
-    const pinned = short !== "";
+  const stopTerminal = () => {
+    if (live) live.stop();
+    live = null;
+    terminalFor = null;
+    streamError = "";
+  };
 
-    // A pin change, or the pinned session showing up after being absent,
-    // means the digest on screen belongs to a different session (or none)
-    // and must be refetched rather than left showing someone else's steps.
-    if (pinned && session && session.sessionId !== fetchedFor) {
-      fetchedFor = session.sessionId;
-      refreshDigest();
-    } else if ((!pinned || !session) && fetchedFor !== null) {
-      fetchedFor = null;
-      steps = [];
-      // Nothing is being polled for any more, so a stale poll failure from
-      // the session that just disappeared has nothing left to describe.
-      digestError = "";
+  const openTerminal = (screen, short) => {
+    const host = el("div", "o-term");
+    // Marks the element keys typed into a live session come from, so the rest
+    // of the page leaves them alone — Escape above all, which interrupts a
+    // Claude Code session's turn and must never also close a card (see onKey
+    // in web/js/card.js).
+    host.dataset.terminal = "";
+    screen.replaceChildren(host);
+    live = createLiveTerminal(host, short, {
+      timers,
+      reconnect: true,
+      report: {
+        streamError: (message) => {
+          streamError = message;
+          paintRows();
+        },
+        actionError: (message) => {
+          actionError = message;
+          paintRows();
+        },
+        standing: paintRows,
+      },
+    });
+    terminalFor = short;
+    live.open();
+  };
+
+  // syncTerminal holds a terminal for the session the column shows, and none
+  // when it shows none: nothing pinned, a pin the daemon does not list, or a
+  // column folded away. In the first two cases the box says which, because the
+  // two read the same otherwise and are different facts.
+  const syncTerminal = () => {
+    if (!built) return;
+    const { short, session } = resolve();
+    const wanted = session && !width.state().folded ? session.short : null;
+    const screen = root.querySelector(".o-screen");
+    if (wanted !== terminalFor) {
+      stopTerminal();
+      if (wanted) openTerminal(screen, wanted);
+      else screen.replaceChildren();
     }
+    if (!session) {
+      const message = short ? t("session_not_listed") : t("no_orchestrator_thread");
+      const shown = screen.querySelector(".o-screen-empty");
+      if (shown) setText(shown, message);
+      else screen.replaceChildren(el("div", "o-screen-empty", message));
+    }
+    paintRows();
+  };
+
+  const draw = () => {
+    const { sessions, short, session } = resolve();
 
     if (!built) {
       built = true;
-      buildConversationFrame();
+      buildFrame();
       // The grip before the width: applyWidth tells the grip whether to show
-      // itself, and a grip that does not exist yet cannot be told.
+      // itself, and a grip that does not exist yet cannot be told. The
+      // remembered width has to be on screen from the first paint, not from
+      // the first click — a reload that showed the default for a moment and
+      // then jumped would be its own small defect.
       wireResizeGrip();
       applyWidth(width.state());
-      // After the frame exists, because it is what carries the buttons: the
-      // remembered width has to be on screen from the first paint, not from the
-      // first click. A reload that showed the default for a moment and then
-      // jumped would be its own small defect.
     }
 
     const head = root.querySelector(".o-head");
-    const thread = root.querySelector(".o-thread");
 
     showRow(root, "o-stale", isConnected ? "" : t("offline"), head);
     // Skipped while the name is being edited: .o-name has been replaced by
     // an <input> for the duration, and querying for a span that is not
     // there right now would be a silent no-op anyway — this says why.
     if (!editingLabel) {
-      setText(
-        head.querySelector(".o-name"),
-        session ? session.label || session.name || session.short : t("not_pinned"),
-      );
+      setText(head.querySelector(".o-name"), session ? pickerLabel(session) : t("not_pinned"));
     }
 
     const pct = session ? contextPercent(session.context) : null;
@@ -606,75 +575,37 @@ export function renderOrchestrator(root) {
 
     // The dropdown's options mirror the daemon's own pickable session list;
     // its value mirrors the truth in the snapshot, never a locally-held
-    // choice. A failed write (see buildConversationFrame's change handler)
-    // leaves that truth unchanged, so setting the value from `short` here —
-    // after the failure, same as before it — is what reverts the control to
-    // what is actually pinned, with nothing extra to track.
+    // choice. A failed write (see buildFrame's change handler) leaves that
+    // truth unchanged, so setting the value from `short` here — after the
+    // failure, same as before it — is what reverts the control to what is
+    // actually pinned, with nothing extra to track.
     const select = head.querySelector(".o-pick-select");
     syncSelectOptions(select, [["", t("not_pinned")], ...pickableSessions(sessions).map((s) => [s.short, pickerLabel(s)])]);
     if (select.value !== short) select.value = short;
 
-    showRow(root, "o-error o-error-digest", digestError, thread);
-    showRow(root, "o-error o-error-send", sendError, root.querySelector(".o-form"));
-    // Below the errors and above the box, where the path it is about has just
-    // landed. Its own row rather than a third .o-error variant: it reports
-    // something working as intended, and the red family is for what is not.
-    showRow(root, "o-notice", pasteNotice, root.querySelector(".o-form"));
-
-    // A session with no sessionId — nothing pinned, or the daemon no longer
-    // lists the pinned one — has nothing to write a label against, and
-    // nothing live to type a message into. Disabled rather than hidden, so
-    // each control's place on screen stays stable and its state (not just
-    // its presence) says why a click or a keystroke would do nothing.
+    // A pin with no session behind it — nothing pinned, or the daemon no
+    // longer lists the pinned one — has nothing to write a label against.
+    // Disabled rather than hidden, so the control's place on screen stays
+    // stable and its state (not just its presence) says why a click would do
+    // nothing.
     const editBtn = head.querySelector(".o-name-edit");
     if (editBtn) editBtn.disabled = !session;
-    const area = root.querySelector("textarea");
-    if (area) area.disabled = !session;
 
-    if (!session) {
-      // Two different facts read the same at this point — nothing pinned at
-      // all, or pinned to a session the daemon no longer lists — and the
-      // thread's one row must say which, not paper over the difference.
-      const message = pinned ? t("session_not_listed") : t("no_orchestrator_thread");
-      const cls = pinned ? "o-msg o-dead" : "o-thread-empty";
-      const only = thread.children[0];
-      if (!only || only.className !== cls) {
-        thread.replaceChildren(el("div", cls, message));
-      }
-      return;
-    }
-
-    // merge, not steps: whatever has been sent and has not come back out of the
-    // transcript yet is drawn at the end, where the real one will land. It is
-    // done here rather than at the fetch because a redraw between polls — a
-    // pasted image, a failed send — must show it too.
-    syncStepRows(thread, pending.merge(steps), stepClass);
+    syncTerminal();
   };
 
-  const refreshDigest = async () => {
-    const { session } = resolve();
-    if (!session) return;
-    try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(session.sessionId)}/digest?limit=20`);
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText);
-      steps = await res.json();
-      digestError = "";
-    } catch (err) {
-      steps = [];
-      digestError = err.message;
-    }
-    draw();
-  };
-
-  subscribe((snap, connected) => {
+  const unsubscribe = subscribe((snap, connected) => {
     // The gate: a snapshot that changes nothing this column shows changes
-    // nothing on screen either. Without it every push from the daemon reached
-    // draw(), and every draw could disturb the thread.
+    // nothing on screen either.
     const signature = viewSignature(snap, connected);
     if (signature === painted) return;
     painted = signature;
     isConnected = connected;
     draw();
   });
-  setInterval(refreshDigest, 3000);
+
+  return () => {
+    unsubscribe();
+    stopTerminal();
+  };
 }
