@@ -624,6 +624,10 @@ func TestConfigReturnsAnIndependentCopyOfSessionLabels(t *testing.T) {
 // kind classifyUsageError assigns must survive Collect() into the snapshot
 // unchanged, for each of the three buckets the panel's wording depends on.
 func TestUsageErrorKindReachesTheSnapshot(t *testing.T) {
+	original := localRateLimitsPath
+	localRateLimitsPath = filepath.Join(t.TempDir(), "never-written.json")
+	t.Cleanup(func() { localRateLimitsPath = original })
+
 	cases := []struct {
 		name string
 		body string
@@ -661,6 +665,10 @@ func TestUsageErrorKindReachesTheSnapshot(t *testing.T) {
 // "auth" -- classifyUsageError never sees an HTTP response for this case,
 // so it must not need one.
 func TestUsageErrorKindIsAuthForAMissingToken(t *testing.T) {
+	original := localRateLimitsPath
+	localRateLimitsPath = filepath.Join(t.TempDir(), "never-written.json")
+	t.Cleanup(func() { localRateLimitsPath = original })
+
 	cfg := config.Default()
 	cfg.BoardPath = ""
 	uf := usage.NewFetcher(func() (string, error) { return "", usage.ErrNoToken }, "http://127.0.0.1:1", time.Minute)
@@ -756,6 +764,10 @@ func TestASlowUsageEndpointDoesNotStallTheCycle(t *testing.T) {
 	usageTimeout = 50 * time.Millisecond
 	t.Cleanup(func() { usageTimeout = original })
 
+	originalPath := localRateLimitsPath
+	localRateLimitsPath = filepath.Join(t.TempDir(), "never-written.json")
+	t.Cleanup(func() { localRateLimitsPath = originalPath })
+
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
@@ -790,6 +802,10 @@ func TestASlowUsageEndpointDoesNotStallTheCycle(t *testing.T) {
 // cache on a failed refresh; Collect must actually use that fallback rather than
 // discarding it whenever err != nil, or the fix in the fetcher does nothing here.
 func TestATransientUsageFailureKeepsTheLastKnownLimits(t *testing.T) {
+	originalPath := localRateLimitsPath
+	localRateLimitsPath = filepath.Join(t.TempDir(), "never-written.json")
+	t.Cleanup(func() { localRateLimitsPath = originalPath })
+
 	fail := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if fail {
