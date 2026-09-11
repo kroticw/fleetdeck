@@ -75,14 +75,17 @@ const TABLE_ROW = /^\s*\|(.*)\|\s*$/;
 // bars in it; this line under it is what says otherwise.
 const TABLE_SEPARATOR = /^\s*\|[\s:|-]*-[\s:|-]*\|\s*$/;
 
-const WIKILINK = /\[\[([^[\]\r\n]+?)\]\]/g;
+// Exported with linkParts below for web/js/terminallinks.js, which finds the
+// links a session prints into a live terminal: one rule for what a link is,
+// wherever it is read.
+export const WIKILINK = /\[\[([^[\]\r\n]+?)\]\]/g;
 const CODE_SPAN = /`([^`]+)`/g;
 const BOLD = /\*\*([^*]+)\*\*/g;
 
 // linkParts splits a wiki link's inner text the way internal/board's
 // trimLinkTarget does: everything up to the first "#" or "|" is the note name.
 // What follows a "|" is the alias, which is what the reader should see.
-function linkParts(inner) {
+export function linkParts(inner) {
   const cut = inner.search(/[#|]/);
   const target = (cut < 0 ? inner : inner.slice(0, cut)).trim();
   const pipe = inner.indexOf("|");
