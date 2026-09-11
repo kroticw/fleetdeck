@@ -16,42 +16,50 @@ go install github.com/kroticw/fleetdeck/cmd/fleetdeck@latest
 go install github.com/kroticw/fleetdeck/cmd/fleetdeck-status@latest
 ```
 
-A third way exists for the one case those two do not cover: something outside this repository that references a fixed path directly, rather than wherever a build happened to land — a launch agent's `ProgramArguments`, or Claude Code's `statusLine.command` composed with another statusline tool. `make install` builds both binaries fresh and writes them to `INSTALLDIR` (default `~/.local/bin`), replacing whatever already sits there under those two names and printing each binary's own sha256 so the replacement is verifiable rather than assumed.
+`make window-app` builds the fleetdeck app, `bin/fleetdeck.app`: a native window around the panel, with the panel itself inside the bundle beside the window. The app starts the panel on its own — see [The app and the panel](#the-app-and-the-panel). Open it from Finder, or with `open bin/fleetdeck.app`.
+
+A third way exists for the one case those two do not cover: something outside this repository that references a fixed path directly, rather than wherever a build happened to land — Claude Code's `statusLine.command` composed with another statusline tool, for one. `make install` builds both binaries fresh and writes them to `INSTALLDIR` (default `~/.local/bin`), replacing whatever already sits there under those two names and printing each binary's own sha256 so the replacement is verifiable rather than assumed.
 
 ## Running `fleetdeck init`
 
-`fleetdeck init` sets up four things and prints one line per step, including the steps it refused and why:
+`fleetdeck init` sets up three things and prints one line per step, including the steps it refused and why:
 
 - **The configuration file**, `~/.config/fleetdeck/config.yaml`, is written only when there is no file there. An existing configuration is read and left exactly as it is, comments included — it is hand-written YAML, and rewriting it from a struct would drop every comment and every ordering its author chose. The output says `(kept)` when that happens.
 - **The board directory** comes from the configuration. On a machine with neither a configuration nor a `--board` flag the board is `~/fleetdeck/board`, and that path is what the newly created configuration records. A board directory that is absent or empty gets a `cards` subdirectory created under it with one example card written inside — the panel reads cards from `<board.path>/cards/`, not from the board directory itself, and an empty board is an error to the panel indistinguishable from a broken one. A directory that already holds files is left untouched, `cards` subdirectory included.
 - **The statusline** is wired by setting `statusLine` in `~/.claude/settings.json` — that one key, with every other setting left alone. Two things stop this step. A `statusLine` that already runs something else is refused unless you pass `--force`, since replacing a statusline you configured yourself is not this command's decision. A `fleetdeck-status` that is not next to the `fleetdeck` binary is refused outright: writing a path that does not work would break the status line of every Claude Code session on the machine.
-- **The launch agent** is written to `~/Library/LaunchAgents/dev.fleetdeck.panel.plist`, with its log in `~/Library/Logs/fleetdeck.log`. An agent file at that path that this command did not write is refused unless you pass `--force`.
+
+Earlier versions of `init` also wrote a launch agent that started the panel at login. The app starts the panel now, and an agent left in place would start a second one at every login. When `init` finds an agent an earlier `init` wrote, it says so and prints the two commands that remove it; it runs neither — see [The app and the panel](#the-app-and-the-panel).
 
 A refused step does not stop the others, and the command exits non-zero when anything was skipped, naming what it found and what it would have written. Running `init` a second time changes no file: every step reports `(kept)`.
 
 Two cases end in a refusal rather than an edit, both for the same reason — `init` does not rewrite a configuration file it did not create. A configuration that names no `board.path` is left for you to fill in; a `--board` pointing somewhere other than the configured board is refused rather than silently ignored.
 
-## Loading the launch agent
+## The app and the panel
 
-`init` writes the agent and does not load it. Starting a program at every login is a change to your machine, and it is yours to make. The command is printed at the end of `init`'s output:
+The fleetdeck app starts the panel itself. When it opens, it looks at the panel's address. A panel that already answers there — started from a terminal, or left running by an earlier window — is shown as it is. When nothing answers, the app starts the panel it carries, sends both of the panel's output streams to `~/Library/Logs/fleetdeck.log`, and opens it as soon as it answers.
+
+While the app is open, a panel it started that stops is started again. One that stops within ten seconds of starting is not: a panel that dies at once dies at once again. The window then says the panel did not start, shows the last lines of its log, and has a button to start it again. The same page appears when the panel runs but does not answer at the address the app looks at within a third of a second — most often a `server.port` in the configuration other than 7777; the window's `--url` flag must then name the same port.
+
+Closing the window, or quitting the app, leaves the panel running: notifications keep coming, and opening the app again finds everything as it was. To stop the panel, stop the process that listens on its port:
 
 ```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
+kill $(lsof -t -iTCP:7777 -sTCP:LISTEN)
 ```
 
-`gui/$(id -u)` is your own GUI domain — the agent runs as you, in your login session. `bootstrap` and `bootout` are the current subcommands; `launchctl load` and `unload` still work but are listed under legacy subcommands in `man launchctl`.
+A panel that cannot take its port says what holds it: another fleetdeck panel, by its commit and the path of its binary; something that is not fleetdeck; or something that took the connection and did not answer within a second.
 
-The agent runs the `fleetdeck` binary from wherever it was when `init` ran, starts it at login, restarts it if it exits, and sends both its output streams to `~/Library/Logs/fleetdeck.log`. To undo it:
+A launch agent written by an earlier `init` would start a second panel at every login, before the app does. Remove it with the two commands `init` prints:
 
 ```bash
 launchctl bootout gui/$(id -u)/dev.fleetdeck.panel
+rm ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
 ```
 
-After moving the binary, re-run `fleetdeck init` to record the new path, then bootout and bootstrap the agent again.
+`bootout` is the current spelling; `launchctl unload` still works but is listed under legacy subcommands in `man launchctl`.
 
 ## Opening the panel
 
-The panel listens on `http://127.0.0.1:7777` — the loopback interface only, on the port `server.port` sets (see [`configuration.md`](configuration.md)). Load the launch agent to have it running at login, or run `fleetdeck` in a terminal.
+The panel listens on `http://127.0.0.1:7777` — the loopback interface only, on the port `server.port` sets (see [`configuration.md`](configuration.md)). Open the fleetdeck app to have it started for you, or run `fleetdeck` in a terminal.
 
 A browser pointed at that address gets the panel. The routes the page uses are callable directly too — `GET /api/snapshot` for the state of the whole fleet, `GET /ws` for a live stream of it, `GET /api/sessions/{id}/pty` for a live two-way terminal on one session (a WebSocket whose geometry is given as `?cols=&rows=`), `GET /api/docs` and `GET /api/docs/content` for the directories `docs.paths` names, `POST /api/sessions/{id}/image` to attach an image, and the routes that type into a session and move a card. Only pages the panel served itself may call them: a request carrying any other `Origin` is refused with 403, and a request body that is not `application/json` with 415. The terminal socket carries no request body, so it has a check of its own in place of the second one: its first message must be the panel's terminal token, which `GET /api/terminal-token` hands to the panel's own page and, carrying no CORS headers, to no page on any other origin. The token is new with every start of the panel, and the page reads it again for every terminal it opens.
 
