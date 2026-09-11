@@ -5,6 +5,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/fleet"
 )
 
 // Event is a change worth a banner (spec section 6).
@@ -285,7 +288,45 @@ func Diff(prev, next Snapshot, silenceAfter time.Duration) (fire []Event, cleare
 	sort.Strings(deleted)
 	cleared = append(cleared, deleted...)
 
+	nameFleets(fire, next)
 	return fire, cleared
+}
+
+// nameFleets puts the fleet an event comes from in front of its title, on a
+// panel with more than one fleet: a banner arrives whichever fleet a tab
+// shows, and "ship it: card moved to review" does not say which board to
+// look at. A card's fleet is the one whose board holds it; a session's are
+// the fleets claiming it, and a session no fleet claims keeps its title as it
+// is. With one fleet every title stays as it was. Keys are not touched: they
+// are the notifier's contract.
+func nameFleets(events []Event, next Snapshot) {
+	if len(next.Boards) < 2 {
+		return
+	}
+	fleets := make([]fleet.Fleet, len(next.Boards))
+	cards := map[string][]board.Card{}
+	cardFleet := map[string]string{}
+	for i, b := range next.Boards {
+		fleets[i] = b.Fleet
+		cards[b.Fleet.Name] = b.Cards
+		for _, c := range b.Cards {
+			cardFleet[c.Path] = b.Fleet.Name
+		}
+	}
+	claims := fleet.Claims(fleets, cards)
+	for i, e := range events {
+		var names []string
+		if e.Path != "" {
+			if name, ok := cardFleet[e.Path]; ok {
+				names = []string{name}
+			}
+		} else {
+			names = claims[e.Short]
+		}
+		if len(names) > 0 {
+			events[i].Title = strings.Join(names, ", ") + ": " + e.Title
+		}
+	}
 }
 
 // notifiableStage reports whether a stage is one of the two the spec's fourth rule
