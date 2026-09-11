@@ -4,6 +4,7 @@ import { t } from "./i18n.js";
 import { ORCHESTRATOR_KEYS } from "./columnwidth.js";
 import { mountColumnResize } from "./columnresize.js";
 import { createLiveTerminal } from "./liveterminal.js";
+import { FONT_KEYS } from "./terminalfont.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column.
@@ -405,6 +406,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
       timers,
       reconnect: true,
       links,
+      fontKey: FONT_KEYS.orchestrator,
       report: {
         streamError: (message) => {
           streamError = message;

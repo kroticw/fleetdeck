@@ -109,6 +109,11 @@ const en = {
   terminal_reconnecting: "reconnecting by itself…",
   terminal_link_lost: "the terminal lost its connection",
   terminal_token_stale: "the panel did not accept this terminal's token",
+  // The size shown over a terminal whose type changed size: "13 px · session
+  // 76 × 25". It names the session because that is what changed for everyone
+  // watching it, not only the picture here.
+  terminal_font_session: "session",
+  terminal_font_limit: "the limit",
 
   // Attaching an image to a session (web/js/session.js, web/js/imagefile.js).
   // Both refusals are worded as what the panel will accept rather than as what
@@ -236,6 +241,8 @@ const ru = {
   terminal_reconnecting: "переподключаюсь сам…",
   terminal_link_lost: "терминал потерял связь",
   terminal_token_stale: "пульт не принял токен этого терминала",
+  terminal_font_session: "сессия",
+  terminal_font_limit: "предел",
 
   image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
   image_too_large: "эта картинка слишком велика, чтобы её прикрепить",

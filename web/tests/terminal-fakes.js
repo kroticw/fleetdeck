@@ -78,6 +78,10 @@ export function installTerminal({ cols = 80, rows = 24 } = {}) {
       // The handler a caller hands attachCustomWheelEventHandler, which the
       // real terminal runs first on every wheel event it receives.
       this.wheelHandler = null;
+      // The handler a caller hands attachCustomKeyEventHandler, which the real
+      // terminal runs first on every key event; returning false keeps the key
+      // from becoming input.
+      this.keyHandler = null;
       // The real terminal's own element, with .xterm-screen inside it. A
       // case that needs one gives it one.
       this.element = null;
@@ -85,6 +89,9 @@ export function installTerminal({ cols = 80, rows = 24 } = {}) {
     }
     attachCustomWheelEventHandler(fn) {
       this.wheelHandler = fn;
+    }
+    attachCustomKeyEventHandler(fn) {
+      this.keyHandler = fn;
     }
     registerLinkProvider(provider) {
       (this.linkProviders ??= []).push(provider);
@@ -127,7 +134,9 @@ export function installTerminal({ cols = 80, rows = 24 } = {}) {
 // web/vendor/addon-fit.js puts the real one. `pane` is the size the real addon
 // would measure the terminal's element at: "own" answers with the terminal's
 // current size, so every test that is not about fitting sees no change; null is
-// a pane with nothing to measure yet, which the real addon answers with nothing.
+// a pane with nothing to measure yet, which the real addon answers with nothing;
+// a function is handed the terminal and answers for it, which is how a case
+// makes the size depend on the terminal's font, as the real addon's does.
 export function installFit(pane = "own") {
   const made = [];
   globalThis.FitAddon = {
@@ -146,6 +155,7 @@ export function installFit(pane = "own") {
         // A pane with `hidden` set is one that stopped having a layout — a
         // folded column — after the terminal was opened into it.
         if (!this.terminal?.host || pane === null || pane?.hidden) return undefined;
+        if (typeof pane === "function") return pane(this.terminal);
         return pane === "own" ? { cols: this.terminal.cols, rows: this.terminal.rows } : { ...pane };
       }
       fit() {

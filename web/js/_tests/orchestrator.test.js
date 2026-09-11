@@ -834,6 +834,40 @@ test("the edge goes away while the column is folded, and comes back with it", as
   assert.equal(grip(c).hidden, false, "the edge did not come back with the column");
 });
 
+// The column's terminal keeps the size of its type under the column's own key,
+// written as a literal for the reason the width test above gives: once an
+// operator has chosen a size, this is the entry holding it. The screen tab's
+// entry is set too, so reading the wrong one shows.
+test("the column's terminal is the size remembered for the column, and Cmd+= changes that one", async () => {
+  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
+  const map = new Map([
+    ["fleetdeck-terminal-font-orchestrator", "16"],
+    ["fleetdeck-terminal-font-screen", "10"],
+  ]);
+  globalThis.localStorage = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+
+  try {
+    const c = await column(structuredClone(PIN));
+    const terminal = c.terminals.at(-1);
+    assert.equal(terminal.options.fontSize, 16, "the column's terminal did not start at the column's size");
+
+    let prevented = false;
+    const passed = terminal.keyHandler({ type: "keydown", key: "=", metaKey: true, preventDefault: () => (prevented = true) });
+
+    assert.equal(passed, false);
+    assert.equal(prevented, true);
+    assert.equal(map.get("fleetdeck-terminal-font-orchestrator"), "17");
+    assert.equal(map.get("fleetdeck-terminal-font-screen"), "10", "the column's key changed the screen tab's size");
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
 // Last on purpose: closing the socket leaves the real store in its reconnect
 // backoff, and every case in this file shares that one store.
 test("the disconnected marker shows even with nothing pinned, once the socket drops", async () => {

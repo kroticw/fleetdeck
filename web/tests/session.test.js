@@ -1404,3 +1404,39 @@ test("the screen tab's terminal is given the page's links", async () => {
 
   assert.equal(terminals.at(-1).linkProviders?.length, 1, "the screen tab's terminal links nothing");
 });
+
+// The screen tab keeps the size of its type under its own key, not the
+// orchestrator column's: the two are different widths, and what a bigger type
+// costs is columns. The column's entry is set too, so reading it shows.
+test("the screen tab's terminal is the size remembered for the screen tab, and Cmd+- changes that one", async () => {
+  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
+  const map = new Map([
+    ["fleetdeck-terminal-font-orchestrator", "20"],
+    ["fleetdeck-terminal-font-screen", "14"],
+  ]);
+  globalThis.localStorage = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+
+  try {
+    const terminals = installTerminal();
+    stubFetch(answer({ body: [] }));
+    const panel = await mount();
+    await panel.openScreenTab();
+    const terminal = terminals.at(-1);
+    assert.equal(terminal.options.fontSize, 14, "the screen tab's terminal did not start at the screen tab's size");
+
+    let prevented = false;
+    const passed = terminal.keyHandler({ type: "keydown", key: "-", metaKey: true, preventDefault: () => (prevented = true) });
+
+    assert.equal(passed, false);
+    assert.equal(prevented, true);
+    assert.equal(map.get("fleetdeck-terminal-font-screen"), "13");
+    assert.equal(map.get("fleetdeck-terminal-font-orchestrator"), "20", "the screen tab's key changed the column's size");
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});

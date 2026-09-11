@@ -59,7 +59,7 @@ DISTDIR  ?= dist
 # project (spec section 1), so this is the whole list, not a default subset.
 DIST_ARCHES ?= arm64 amd64
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist window-app install
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist window-app install icon
 
 # Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
 # see BUILD_BIN_NAMES above.
@@ -200,10 +200,18 @@ WINDOW_LDFLAGS = $(LDFLAGS) \
 window-app:
 	@rm -rf "$(BINDIR)/fleetdeck.app"
 	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/MacOS"
+	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/Resources"
 	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
+	@cp cmd/fleetdeck-window/icon.icns "$(BINDIR)/fleetdeck.app/Contents/Resources/icon.icns"
 	go build -ldflags "$(WINDOW_LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
 	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
 	@echo "window-app: $(BINDIR)/fleetdeck.app (open it, or: open $(BINDIR)/fleetdeck.app)"
+
+# icon rebuilds cmd/fleetdeck-window/icon.icns from icon-source.svg. A human tool,
+# not part of window-app/dist/CI -- see scripts/build-icon.sh's own comment for why:
+# it needs rsvg-convert, which this machine has and CI's runners do not.
+icon:
+	@scripts/build-icon.sh
 
 # INSTALLDIR is where `make install` puts fleetdeck and fleetdeck-status: a
 # fixed, stable path something outside this repository points at directly --

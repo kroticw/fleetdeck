@@ -31,6 +31,7 @@ import { createPending } from "./pending.js";
 import { wireImagePaste } from "./pasteimage.js";
 import { pageStorage } from "./buildcheck.js";
 import { createLiveTerminal } from "./liveterminal.js";
+import { FONT_KEYS } from "./terminalfont.js";
 
 // How many transcript steps the digest asks for, and how often it refreshes.
 // The digest is polled: it only changes when a session speaks.
@@ -404,6 +405,7 @@ export function renderSession(
     live = createLiveTerminal(host, short, {
       timers,
       links,
+      fontKey: FONT_KEYS.screen,
       report: {
         streamError: showPollError,
         actionError: showError,
