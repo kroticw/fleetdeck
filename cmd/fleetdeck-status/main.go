@@ -175,23 +175,36 @@ func writeRateLimits(in statusInput, path string) error {
 // fields at all is the ordinary, unremarkable case (not a subscriber, or
 // Claude Code has not attached rate_limits yet) and is never traced,
 // whichever of the two causes above also applies.
+//
+// The trace itself goes through usage.AppendTraceOnce, not a plain append,
+// on every branch below -- including the success path, where the current
+// cause (if any) is "" -- rather than only when something is wrong: a live
+// machine with the path left unconfigured wrote 68 identical lines in
+// seventeen minutes before this existed, and AppendTraceOnce's whole
+// purpose is recognizing "still the same cause" and "the cause just
+// resolved" without a fresh line for either.
 func writeRateLimitsTo(path, tracePath string, in statusInput) error {
 	haveAny := in.RateLimits.FiveHour != nil || in.RateLimits.SevenDay != nil || in.RateLimits.SpendLimit != nil
 	if path == "" {
+		issue := ""
 		if haveAny {
-			_ = usage.AppendTrace(tracePath, "rate_limits present on stdin but no -rate-limits-path (or statusline.rate_limits_path in config.yaml) is configured; nothing captured")
+			issue = "rate_limits present on stdin but no -rate-limits-path (or statusline.rate_limits_path in config.yaml) is configured; nothing captured"
 		}
+		_ = usage.AppendTraceOnce(tracePath, issue)
 		return nil
 	}
 	if in.RateLimits.FiveHour == nil || in.RateLimits.SevenDay == nil {
+		issue := ""
 		if haveAny {
-			_ = usage.AppendTrace(tracePath, fmt.Sprintf(
+			issue = fmt.Sprintf(
 				"rate_limits present but incomplete for the local file's required pair: five_hour=%t seven_day=%t spend_limit=%t",
 				in.RateLimits.FiveHour != nil, in.RateLimits.SevenDay != nil, in.RateLimits.SpendLimit != nil,
-			))
+			)
 		}
+		_ = usage.AppendTraceOnce(tracePath, issue)
 		return nil
 	}
+	_ = usage.AppendTraceOnce(tracePath, "") // a full pair with a real path resolves any open streak
 	l := usage.Limits{
 		FiveHour: usage.Window{
 			Utilization: in.RateLimits.FiveHour.UsedPercentage,
