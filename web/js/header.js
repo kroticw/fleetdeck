@@ -4,7 +4,7 @@ import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 import { brandHTML, hasUnsentText } from "./buildcheck.js";
-import { UPDATE_BINDING, PROGRESS_FUNCTION, initialState, onPress, onProgress, updateHTML } from "./update.js";
+import { UPDATE_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
 
 // Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
 // Keep both lists and both functions in sync with that file if it ever
@@ -397,9 +397,11 @@ export function renderHeader(root) {
   // The update button exists only where the window gave the page something to
   // run an update with. Its state lives here, outside the render below, and
   // it is repainted on its own -- on a press, on each report from the window,
-  // and once a second while an update runs -- because the header's render
-  // follows snapshots, and during an update the panel sending them is the
-  // thing being replaced.
+  // and every UPDATE_REPAINT_MS while an update runs -- because the header's
+  // render follows snapshots, and during an update the panel sending them is
+  // the thing being replaced. A repaint once a second showed a wait's time up
+  // to a second after it passed two seconds (found on a live page, not in the
+  // unit tests, which take the time as an argument).
   const hostUpdate = typeof window[UPDATE_BINDING] === "function" ? () => window[UPDATE_BINDING]() : null;
   let update = initialState();
   const paintUpdate = () => {
@@ -413,7 +415,7 @@ export function renderHeader(root) {
     };
     setInterval(() => {
       if (update.phase === "running") paintUpdate();
-    }, 1000);
+    }, UPDATE_REPAINT_MS);
   }
 
   root.addEventListener("click", (event) => {

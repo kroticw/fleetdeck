@@ -19,6 +19,9 @@ import { t } from "./i18n.js";
 export const UPDATE_BINDING = "fleetdeckUpdate";
 export const PROGRESS_FUNCTION = "fleetdeckUpdateProgress";
 export const WAIT_SHOWN_AFTER_MS = 2000;
+// How often a running update is repainted: the time of a wait appears no
+// later than this after it passes WAIT_SHOWN_AFTER_MS.
+export const UPDATE_REPAINT_MS = 250;
 
 // phase: idle | confirm | running | done | current | busy | failed
 export function initialState() {
