@@ -348,6 +348,38 @@ func TestInitHonoursTheWorkspaceFlagOnAFreshHome(t *testing.T) {
 	}
 }
 
+// A configuration naming a board that could not be made would be a panel
+// pointed at nothing — and init, which does not rewrite a configuration it
+// finds, would then refuse the corrected path on the next run. So the board
+// comes first, and no configuration is written without one.
+func TestInitWritesNoConfigurationWhenTheBoardCannotBeMade(t *testing.T) {
+	home := t.TempDir()
+	blocker := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := runInit(initEnv{home: home, binary: fakeInstall(t, true), workspace: filepath.Join(blocker, "ws"), out: &out})
+	if err == nil {
+		t.Fatalf("a workspace under a file cannot be made:\n%s", out.String())
+	}
+	cfgPath := filepath.Join(home, ".config", "fleetdeck", "config.yaml")
+	if _, statErr := os.Stat(cfgPath); !os.IsNotExist(statErr) {
+		t.Fatalf("a configuration was written for a board that does not exist:\n%s", out.String())
+	}
+
+	// The corrected path then goes through as on a fresh machine.
+	good := filepath.Join(t.TempDir(), "ws")
+	out.Reset()
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), workspace: good, out: &out}); err != nil {
+		t.Fatalf("the corrected path must be accepted: %v\n%s", err, out.String())
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil || cfg.BoardPath != filepath.Join(good, "board") {
+		t.Fatalf("config board path = %q (%v), want the corrected workspace's board", cfg.BoardPath, err)
+	}
+}
+
 func TestInitRefusesWorkspaceAndBoardTogether(t *testing.T) {
 	home := t.TempDir()
 	err := runInit(initEnv{

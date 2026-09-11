@@ -70,6 +70,10 @@ type initEnv struct {
 	workspace string
 	// board is the --board flag: a board directory with no workspace around it.
 	board string
+	// config is the configuration file to create or keep; empty is
+	// ~/.config/fleetdeck/config.yaml under home. The panel's setup passes the
+	// file the panel itself reads, which a -config flag may have moved.
+	config string
 	// force allows the statusline step to replace a statusline the operator
 	// configured themselves.
 	force bool
@@ -134,9 +138,19 @@ func runInit(env initEnv) error {
 // that the permissions step lets agents into whatever the board step settled
 // on, and has nothing to allow when that step was refused.
 func initSteps(env initEnv) []initStep {
-	cfgPath := filepath.Join(env.home, ".config", "fleetdeck", "config.yaml")
-	cfg, cfgCreated, cfgStep := ensureConfig(cfgPath, env)
-	boardStep, allow := ensureBoard(cfgPath, cfg, cfgCreated, cfgStep.err, env)
+	cfgPath := env.config
+	if cfgPath == "" {
+		cfgPath = filepath.Join(env.home, ".config", "fleetdeck", "config.yaml")
+	}
+	cfg, cfgNew, cfgStep := ensureConfig(cfgPath, env)
+	boardStep, allow := ensureBoard(cfgPath, cfg, cfgNew, cfgStep.err, env)
+	if cfgNew && cfgStep.err == nil {
+		// Written only now, and only over a board that exists: a configuration
+		// naming a board that could not be made points the panel at nothing, and
+		// init — which never rewrites a configuration it finds — would then
+		// refuse the corrected path on the next run.
+		cfgStep = saveNewConfig(cfgPath, cfg, boardStep.err)
+	}
 	return []initStep{
 		cfgStep,
 		boardStep,
@@ -145,10 +159,28 @@ func initSteps(env initEnv) []initStep {
 	}
 }
 
-// ensureConfig loads the configuration init will work from, and writes one only
-// when there is no file at all. An existing file is read and left byte for byte
-// as it is: it is hand-written YAML, and marshalling a struct back over it drops
-// every comment and every ordering its author chose.
+// saveNewConfig writes the configuration ensureConfig planned, unless the board
+// it names could not be made.
+func saveNewConfig(path string, cfg config.Config, boardErr error) initStep {
+	s := initStep{name: "config"}
+	if boardErr != nil {
+		s.err = fmt.Errorf("%s not written: the board it would name could not be made", path)
+		return s
+	}
+	if err := config.Save(path, cfg); err != nil {
+		s.err = err
+		return s
+	}
+	s.note = fmt.Sprintf("%s (created, board: %s)", path, cfg.BoardPath)
+	return s
+}
+
+// ensureConfig loads the configuration init will work from, or — when there is
+// no file at all — plans the one it will write, and says which: isNew. The new
+// file is written by saveNewConfig once the board exists. An existing file is
+// read and left byte for byte as it is: it is hand-written YAML, and
+// marshalling a struct back over it drops every comment and every ordering its
+// author chose.
 func ensureConfig(path string, env initEnv) (config.Config, bool, initStep) {
 	s := initStep{name: "config"}
 
@@ -177,11 +209,6 @@ func ensureConfig(path string, env initEnv) (config.Config, bool, initStep) {
 	if layout.root != "" {
 		cfg.DocsPaths = []string{workspace.DocsDir(layout.root)}
 	}
-	if err := config.Save(path, cfg); err != nil {
-		s.err = err
-		return config.Config{}, false, s
-	}
-	s.note = fmt.Sprintf("%s (created, board: %s)", path, cfg.BoardPath)
 	return cfg, true, s
 }
 
