@@ -97,6 +97,12 @@ func TestValidateRefusesBrokenFleets(t *testing.T) {
 	}
 }
 
+func TestAnEmptyListIsNamedAsSuchAndNotAsAFleet(t *testing.T) {
+	if got, want := Validate(nil).Error(), "no fleet is configured"; got != want {
+		t.Fatalf("Validate(nil) = %q, want %q", got, want)
+	}
+}
+
 func TestDescribeNamesPositionsTheCallersWay(t *testing.T) {
 	fleets := twoFleets()
 	fleets[1].Name = "obsidian"

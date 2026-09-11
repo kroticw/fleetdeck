@@ -45,9 +45,7 @@ const fallbackName = "main"
 // Validate would refuse: a configuration that loaded before fleets existed
 // must not start failing over the name of a folder nobody chose as a name.
 func DefaultName(boardPath string) string {
-	if boardPath == "" {
-		return fallbackName
-	}
+	// An empty path cleans to ".", whose parent is "." too.
 	parent := filepath.Base(filepath.Dir(filepath.Clean(boardPath)))
 	if parent == string(filepath.Separator) || parent == "." || validateName(parent) != "" {
 		return fallbackName
