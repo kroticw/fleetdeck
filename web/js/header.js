@@ -3,7 +3,8 @@ import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
-import { brandHTML } from "./buildcheck.js";
+import { brandHTML, hasUnsentText } from "./buildcheck.js";
+import { UPDATE_BINDING, PROGRESS_FUNCTION, initialState, onPress, onProgress, updateHTML } from "./update.js";
 
 // Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
 // Keep both lists and both functions in sync with that file if it ever
@@ -393,7 +394,36 @@ export function renderHeader(root) {
   // second), so a listener on the button itself would need re-attaching on
   // every one of those — the same reasoning board.js's own delegated click
   // handler documents.
+  // The update button exists only where the window gave the page something to
+  // run an update with. Its state lives here, outside the render below, and
+  // it is repainted on its own -- on a press, on each report from the window,
+  // and once a second while an update runs -- because the header's render
+  // follows snapshots, and during an update the panel sending them is the
+  // thing being replaced.
+  const hostUpdate = typeof window[UPDATE_BINDING] === "function" ? () => window[UPDATE_BINDING]() : null;
+  let update = initialState();
+  const paintUpdate = () => {
+    const el = root.querySelector(".update-control");
+    if (el) el.outerHTML = updateHTML(update, Date.now());
+  };
+  if (hostUpdate) {
+    window[PROGRESS_FUNCTION] = (report) => {
+      update = onProgress(update, report ?? {}, Date.now());
+      paintUpdate();
+    };
+    setInterval(() => {
+      if (update.phase === "running") paintUpdate();
+    }, 1000);
+  }
+
   root.addEventListener("click", (event) => {
+    if (hostUpdate && event.target.closest(".update-button")) {
+      const pressed = onPress(update, { unsent: hasUnsentText(document), now: Date.now() });
+      update = pressed.state;
+      paintUpdate();
+      if (pressed.start) hostUpdate();
+      return;
+    }
     const button = event.target.closest(".theme-toggle");
     if (!button) return;
     button.textContent = t(themeLabelKey(cycleTheme()));
@@ -412,6 +442,7 @@ export function renderHeader(root) {
     root.innerHTML = `
       ${brandHTML(snap.build)}
       ${themeButtonHTML()}
+      ${hostUpdate ? updateHTML(update, nowMs) : ""}
       <div class="limits">
         ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour, usageStale, snap.limits.fetchedAt) : gauge(t("limit_5h"), null)}
         ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay, usageStale, snap.limits.fetchedAt) : gauge(t("limit_7d"), null)}
