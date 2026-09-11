@@ -239,6 +239,25 @@ test("the terminal's size note sits over the terminal, takes no room and no clic
   }
 });
 
+// Found live on the screen tab: for the moment between a bigger type and the
+// refit, the terminal is wider and taller than its element. The screen tab's
+// body scrolls, so it grew scrollbars, the refit measured the room the
+// scrollbars left, the scrollbars went away, and the pane refitted again: two
+// resizes of the session for one step, and a note showing the first, wrong
+// size. The terminal's element keeps what spills out of it to itself, as the
+// orchestrator column's always has.
+test("a terminal's element keeps a terminal bigger than itself from scrolling what it sits in", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector) => {
+    const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
+    assert.ok(match, `${selector} has no rule in web/app.css`);
+    return match[2];
+  };
+  for (const selector of ["\\.o-term", "\\.session-panel \\.s-term"]) {
+    assert.match(body(selector), /overflow:\s*hidden/, `${selector} lets a terminal bigger than itself scroll its parent`);
+  }
+});
+
 // The mark on the operator's own messages is the whole of the distinction
 // between their words and an agent's, in both themes. One pane draws steps now:
 // the orchestrator column is a terminal, and the session panel's digest tab is

@@ -1534,6 +1534,12 @@ main {
   height: 100%;
   /* So the size note (.term-size) is placed over this terminal. */
   position: relative;
+  /* For the moment between a bigger type and the refit the terminal is larger
+   * than this element. Spilling into .s-body, which scrolls, gave it
+   * scrollbars; the refit measured the room they left, they went away, and
+   * the pane refitted again — two resizes of the session for one step (found
+   * live). Kept here instead, as .o-term keeps it in the column. */
+  overflow: hidden;
 }
 
 /* web/vendor/xterm.css hardcodes .xterm-viewport's background to #000 — a
