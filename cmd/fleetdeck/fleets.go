@@ -82,9 +82,9 @@ func pinOrchestrator(configPath string, collector *Collector, name, id string) e
 	if err := config.SetFleetOrchestrator(configPath, name, id); err != nil {
 		return err
 	}
-	if !collector.SetFleetOrchestrator(name, id) {
-		return fmt.Errorf("fleet %q is in the configuration file but not in the running panel", name)
-	}
+	// Found: name was resolved from the fleets the panel started with, which
+	// are the collector's.
+	collector.SetFleetOrchestrator(name, id)
 	return nil
 }
 

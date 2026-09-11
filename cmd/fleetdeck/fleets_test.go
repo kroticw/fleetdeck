@@ -150,6 +150,33 @@ func TestEachFleetHasItsOwnBoardDocsAndWizard(t *testing.T) {
 	}
 }
 
+func TestAFleetsWizardPinsThatFleet(t *testing.T) {
+	// The last step of an appointment: B's wizard pins B's orchestrator and
+	// leaves the first fleet's where it was.
+	cfgPath, _, c, _ := twoFleetPanel(t, "")
+	b := fleetAppointer(runOpts{configPath: cfgPath}, c.Config().FleetList()[1], deadDaemon(t), c)
+	if err := b.Pin("cafe0005"); err != nil {
+		t.Fatalf("B's wizard pin: %v", err)
+	}
+	onDisk, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := onDisk.FleetList(); got[0].Orchestrator != "a0000001" || got[1].Orchestrator != "cafe0005" {
+		t.Fatalf("after B's wizard pinned: %+v", got)
+	}
+}
+
+func TestVetPinLeavesItsArgumentAlone(t *testing.T) {
+	_, cfg, _, _ := twoFleetPanel(t, "")
+	if err := vetPin(cfg, "B", "cafe0006"); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.FleetList()[1].Orchestrator; got != "b0000001" {
+		t.Fatalf("vetPin wrote the pin it was asked about into its caller's configuration: %q", got)
+	}
+}
+
 func TestAFleetsWizardRefusesAnotherFleetsOrchestrator(t *testing.T) {
 	cfgPath, cfg, c, roots := twoFleetPanel(t, `{"short":"a0000001"},{"short":"b0000001"}`)
 	resolve := newFleets(runOpts{configPath: cfgPath}, cfg, fakeDaemon(t, `{"short":"a0000001"},{"short":"b0000001"}`), c)
