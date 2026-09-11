@@ -24,6 +24,8 @@ import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { setSessionLabel } from "./api.js";
 import { createStalledTracker } from "./header.js";
+import { SESSIONS_KEYS } from "./columnwidth.js";
+import { mountColumnResize } from "./columnresize.js";
 
 // Closed vocabulary of "no person needed" needs strings, copied verbatim
 // (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
@@ -248,9 +250,39 @@ export function rowHtml(s, stalledNow) {
 // named nothing at all — the specific gap a live run's screenshot found.
 const HEAD = `<div class="slist-head">${escapeHtml(t("sessions_title"))}</div>`;
 
+// The same fold/unfold strip as the orchestrator column's own — same
+// classes (web/app.css's .col-size rules act on them for whichever column
+// carries them), same glyphs, same i18n keys. Built as markup rather than as
+// DOM nodes the way orchestrator.js builds its own: this column's entire
+// content is markup, replaced wholesale on every snapshot (see setBody in
+// renderSessions), and a node parked here would be destroyed the moment the
+// next snapshot arrived, folded or not — innerHTML replaces every child, not
+// only the ones a caller put there. The drag grip that resizes this column
+// is real DOM regardless, and is the literal same code the orchestrator's
+// own grip runs: see web/js/columnresize.js's own note.
+function sizeControlsHtml() {
+  const unfoldLabel = escapeHtml(t("column_unfold"));
+  const foldLabel = escapeHtml(t("column_fold"));
+  return `<div class="col-size">
+    <button type="button" class="col-size-btn col-size-unfold" aria-label="${unfoldLabel}" title="${unfoldLabel}">»</button>
+    <button type="button" class="col-size-btn col-size-fold" aria-label="${foldLabel}" title="${foldLabel}">«</button>
+  </div>`;
+}
+
 // onOpenCard is optional: without it the card control is not offered at all,
 // because a control that cannot do what it says is the defect this replaced.
-export function renderSessions(root, onSelect, onOpenCard) {
+// `now` defaults to the real clock; a test overrides it to prove the tracker
+// keeps counting BLOCKED_SETTLE_MS while this column is folded, which real
+// elapsed time cannot practically stand in for.
+//
+// Returns the resize handle (see web/js/columnresize.js) — main.js has no
+// use for it, but a test does: this column's whole content is a markup
+// string, and the fold/unfold buttons inside it are unaddressable to
+// web/tests/fake-dom.js (its innerHTML is stored, never parsed — see its
+// own header comment), so a test drives the fold/unfold the buttons would
+// otherwise trigger by calling resize.width.fold()/.unfold() directly, the
+// same call a click makes in a real browser.
+export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = {}) {
   // Set while one row's name is being edited in place. This column, unlike
   // the orchestrator's, rebuilds its whole innerHTML on every snapshot — so
   // the only way an <input> mid-edit survives a push arriving under the
@@ -272,6 +304,33 @@ export function renderSessions(root, onSelect, onOpenCard) {
   // a third file, which the two-instance shape avoids.
   const stalledTracker = createStalledTracker();
 
+  // The same resize/fold mechanism as the orchestrator column's own
+  // (web/js/columnresize.js), reading and writing its own storage entries
+  // (SESSIONS_KEYS, not ORCHESTRATOR_KEYS) so folding or resizing this
+  // column never touches the orchestrator's remembered state, or the other
+  // way round. One instance for the column's lifetime, like stalledTracker
+  // above: width and fold are state that persists across snapshots, not
+  // something a single render may rebuild.
+  //
+  // render() is unconditional below — every snapshot reaches it regardless
+  // of whether this column is currently folded, the same as it always was.
+  // Folding is purely what web/app.css does with a [data-folded] attribute
+  // on `root` once painted here; it never gates render() itself, so
+  // stalledTracker.update() keeps running, and settling, while the column is
+  // folded. A version that skipped rendering — and so skipped feeding the
+  // tracker — while folded would silently stop the clock on a flag-only
+  // stall the moment the column was put aside, and restart it from zero on
+  // unfold: the exact header-says-X/row-says-Y mismatch this file's own
+  // stalledNow was built to end, reappearing between two points in time
+  // instead of between two places on screen. See sessions.test.js for the
+  // mutation that proves it.
+  const resize = mountColumnResize(root, SESSIONS_KEYS);
+  // Painted once, now: root has no content yet, but width/folded are root's
+  // own style and dataset, untouched by every render() below rewriting its
+  // children — the same reason the orchestrator column paints once at its
+  // own first build rather than on every draw().
+  resize.paint();
+
   // Shown once, on the next render after a save fails — a silent
   // console.error would never reach the operator, who does not have
   // devtools open, and this column has no other error slot a per-row write
@@ -279,17 +338,29 @@ export function renderSessions(root, onSelect, onOpenCard) {
   // later, successful edit does not leave a stale failure on screen.
   let labelError = "";
 
+  // setBody is the one place root.innerHTML is written. The fold/unfold
+  // strip goes first in every state (matching the orchestrator's own: it is
+  // the one control that must stay reachable however the rest of the column
+  // reads) and its buttons are rewired every time, the same as every other
+  // interactive element in this column — see the querySelectorAll loops
+  // below, which do the same for rows, the card link and the edit pencil.
+  const setBody = (bodyHtml) => {
+    root.innerHTML = sizeControlsHtml() + bodyHtml;
+    root.querySelector(".col-size-unfold")?.addEventListener("click", () => resize.width.unfold());
+    root.querySelector(".col-size-fold")?.addEventListener("click", () => resize.width.fold());
+  };
+
   const render = (snap, connected) => {
     // Before the first successful connection, or after a dropped/unparseable
     // frame, snapshot is null and connected is false — render a neutral
     // connecting state rather than dereferencing a snapshot that isn't there.
     if (!snap || !connected) {
-      root.innerHTML = `${HEAD}<div class="sempty">${escapeHtml(t("connecting"))}</div>`;
+      setBody(`${HEAD}<div class="sempty">${escapeHtml(t("connecting"))}</div>`);
       return;
     }
 
     if (snap.daemonError) {
-      root.innerHTML = `${HEAD}<div class="sempty sempty-error">${escapeHtml(t("daemon_down"))}</div>`;
+      setBody(`${HEAD}<div class="sempty sempty-error">${escapeHtml(t("daemon_down"))}</div>`);
       return;
     }
 
@@ -310,7 +381,7 @@ export function renderSessions(root, onSelect, onOpenCard) {
       // sessions" are different facts, and a person reading an empty column
       // needs to know which one they are looking at.
       const message = all.length === 0 ? t("no_sessions") : t("only_orchestrator");
-      root.innerHTML = `${HEAD}<div class="sempty">${escapeHtml(message)}</div>`;
+      setBody(`${HEAD}<div class="sempty">${escapeHtml(message)}</div>`);
       return;
     }
 
@@ -330,7 +401,7 @@ export function renderSessions(root, onSelect, onOpenCard) {
     // for the same session, and excluding the pinned orchestrator session
     // here (it is never rendered as a row in this column) would only cost
     // that one session's own tracked state for no benefit.
-    const stalledNow = new Set(stalledTracker.update(all, Date.now()).map((s) => s.short));
+    const stalledNow = new Set(stalledTracker.update(all, now()).map((s) => s.short));
 
     const errorHtml = labelError ? `<div class="sname-edit-error">${escapeHtml(labelError)}</div>` : "";
     labelError = ""; // shown once; a later render must not keep repeating it
@@ -339,8 +410,7 @@ export function renderSessions(root, onSelect, onOpenCard) {
     // would then receive the row's numeric index -- truthy for every row
     // but the first, badging almost the whole list as Stalled regardless of
     // stalledNow. The arrow below is required, not stylistic.
-    root.innerHTML =
-      HEAD + errorHtml + ordered.map((s) => rowHtml(s, stalledNow.has(s.short))).join("");
+    setBody(HEAD + errorHtml + ordered.map((s) => rowHtml(s, stalledNow.has(s.short))).join(""));
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
@@ -430,4 +500,6 @@ export function renderSessions(root, onSelect, onOpenCard) {
     if (editingShort !== null) return;
     render(snap, connected);
   });
+
+  return resize;
 }
