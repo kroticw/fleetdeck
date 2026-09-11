@@ -8,7 +8,30 @@
 // chosen and liked before this existed) rather than this command's own
 // plain render.
 //
-// This is a command-line value on purpose, not an environment variable:
+// --rate-limits-path (or statusline.rate_limits_path in config.yaml, same
+// precedence as --wrap) names where the rate-limit windows Claude Code puts
+// on stdin get written for the panel to read. When neither is given,
+// NOTHING IS WRITTEN ANYWHERE -- there is deliberately no fallback default
+// path. There used to be one (usage.LocalFilePath()'s own default), and it
+// caused two real incidents in one evening: a hand-run invocation, made
+// purely to inspect the command's stdout, silently wrote synthetic test
+// numbers into the operator's actual `~/.config/fleetdeck/rate_limits.json`
+// -- once while the local panel daemon did not yet read that file at all,
+// and once while it did, live, on a two-second poll, almost certainly
+// serving the fabricated numbers to whatever was reading the real panel for
+// about twenty seconds. No reliable way exists to tell "Claude Code invoked
+// this" apart from "a person or script invoked this to look at the output"
+// -- both present as a piped, non-terminal stdin and a captured, non-terminal
+// stdout, and a realistic test payload (built specifically to make a
+// verification check honest) is indistinguishable from a real one by
+// content. So the fix is not detection; it is removing the default itself.
+// A payload that does carry rate_limits data while no path is configured
+// leaves a line in the trace log (see internal/usage's own AppendTrace) --
+// visible rather than a silent no-op, so upgrading this binary without also
+// updating the configured path is a fact someone can find, not a value that
+// quietly stops moving with nothing on record to say why.
+//
+// Both are command-line values on purpose, not environment variables:
 // Claude Code (including from inside Claude.app, whose processes do not
 // inherit the operator's shell PATH or its environment at all) runs the
 // exact string in settings.json's statusLine.command directly, so a value
@@ -16,7 +39,7 @@
 // fail silently, with the status line just going quiet, rather than with
 // an error naming why.
 //
-// That pass-through always happens first, and nothing after it -- the
+// The stdout pass-through always happens first, and nothing after it -- the
 // local-file write, the report to the panel -- may affect what was already
 // printed: a broken half on our side must never cost the operator their
 // status line.
@@ -122,18 +145,14 @@ func runWrapped(wrapCmd string, stdin []byte) ([]byte, error) {
 }
 
 // writeRateLimits records the rate-limit windows Claude Code already put on
-// stdin to the file usage.ReadLocal reads first -- see
-// internal/usage/localfile.go for why this is the primary source and the
-// network endpoint (internal/usage.Fetcher) only the fallback. Both windows
-// must be present: the rest of this codebase already assumes five_hour and
-// seven_day arrive together (usage.Fetcher's own network path enforces the
-// same rule), and writing one without the other would put a value nothing
-// downstream expects into a file every session's collect cycle reads.
-func writeRateLimits(in statusInput) error {
-	path := usage.LocalFilePath()
-	if override := os.Getenv("FLEETDECK_RATE_LIMITS_PATH"); override != "" {
-		path = override
-	}
+// stdin to path -- see internal/usage/localfile.go for why the file this
+// writes to (when configured at all) is the panel's primary source, ahead of
+// the network endpoint (internal/usage.Fetcher) as a fallback. path is
+// resolveRateLimitsPath's result: empty means nothing is configured, and
+// this treats that as "touch nothing the panel reads or displays" rather
+// than as an error -- see this package's own doc comment for why there is
+// no fallback default here.
+func writeRateLimits(in statusInput, path string) error {
 	tracePath := usage.TracePath()
 	if override := os.Getenv("FLEETDECK_RATE_LIMITS_TRACE_PATH"); override != "" {
 		tracePath = override
@@ -144,17 +163,28 @@ func writeRateLimits(in statusInput) error {
 // writeRateLimitsTo is writeRateLimits with both paths pulled out, purely so
 // a test can point them at its own temp files instead of the real machine's.
 //
-// A payload that carries some rate_limits data but not the required pair is
-// not silently discarded: the schema drifting (a field renamed, moved, or
-// dropped) would otherwise look identical to "no session has ticked its
-// statusline in a while" -- exactly the wrong-cause failure this whole task
-// exists to stop repeating (spec: the sign-in-vs-rate-limit bug). A payload
-// with none of the three fields at all is the ordinary, unremarkable case
-// (not a subscriber, or Claude Code has not attached rate_limits yet) and is
-// not traced.
+// Both windows must be present to write the file at all: the rest of this
+// codebase already assumes five_hour and seven_day arrive together
+// (usage.Fetcher's own network path enforces the same rule), and writing
+// one without the other would put a value nothing downstream expects into a
+// file every session's collect cycle reads. Neither an empty path nor an
+// incomplete pair is silently discarded, though, for the same underlying
+// reason: a value that stops updating for either cause must leave something
+// a person can find, not read identically to "no session has ticked its
+// statusline in a while". A payload with none of the three rate_limits
+// fields at all is the ordinary, unremarkable case (not a subscriber, or
+// Claude Code has not attached rate_limits yet) and is never traced,
+// whichever of the two causes above also applies.
 func writeRateLimitsTo(path, tracePath string, in statusInput) error {
+	haveAny := in.RateLimits.FiveHour != nil || in.RateLimits.SevenDay != nil || in.RateLimits.SpendLimit != nil
+	if path == "" {
+		if haveAny {
+			_ = usage.AppendTrace(tracePath, "rate_limits present on stdin but no -rate-limits-path (or statusline.rate_limits_path in config.yaml) is configured; nothing captured")
+		}
+		return nil
+	}
 	if in.RateLimits.FiveHour == nil || in.RateLimits.SevenDay == nil {
-		if in.RateLimits.FiveHour != nil || in.RateLimits.SevenDay != nil || in.RateLimits.SpendLimit != nil {
+		if haveAny {
 			_ = usage.AppendTrace(tracePath, fmt.Sprintf(
 				"rate_limits present but incomplete for the local file's required pair: five_hour=%t seven_day=%t spend_limit=%t",
 				in.RateLimits.FiveHour != nil, in.RateLimits.SevenDay != nil, in.RateLimits.SpendLimit != nil,
@@ -218,9 +248,28 @@ func resolveWrapCmd(flagValue, configPath string) string {
 	return cfg.StatuslineWrap
 }
 
+// resolveRateLimitsPath is resolveWrapCmd's own precedence rule, applied to
+// where captured rate-limit windows get written: the flag wins when given;
+// config.yaml's statusline.rate_limits_path is read only when the flag is
+// empty; and when neither is given, the result is empty -- meaning nothing
+// is written at all, never a fallback to some other default. See this
+// package's own doc comment for why that default existing at all is what
+// caused two real incidents in one evening.
+func resolveRateLimitsPath(flagValue, configPath string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return ""
+	}
+	return cfg.StatuslineRateLimitsPath
+}
+
 func main() {
 	wrapFlag := flag.String("wrap", "", "statusline command to pass stdin through to and print unchanged")
-	configPath := flag.String("config", config.DefaultPath(), "path to the configuration file, read only when -wrap is not given")
+	ratePathFlag := flag.String("rate-limits-path", "", "path to write captured rate-limit windows to; nothing is written when this and statusline.rate_limits_path in config.yaml are both empty")
+	configPath := flag.String("config", config.DefaultPath(), "path to the configuration file, read only when -wrap or -rate-limits-path is not given")
 	flag.Parse()
 
 	raw, err := io.ReadAll(os.Stdin)
@@ -231,6 +280,7 @@ func main() {
 
 	in, parseErr := parse(raw)
 	wrapCmd := resolveWrapCmd(*wrapFlag, *configPath)
+	ratePath := resolveRateLimitsPath(*ratePathFlag, *configPath)
 	// A write failure here means the operator's terminal is gone -- nothing
 	// downstream in this process can do anything about that.
 	_, _ = os.Stdout.Write(statusLineOutput(raw, in, parseErr, wrapCmd, runWrapped))
@@ -247,5 +297,5 @@ func main() {
 	}
 	// A panel that is down must never cost the user their status line.
 	_ = report(endpoint, in)
-	_ = writeRateLimits(in)
+	_ = writeRateLimits(in, ratePath)
 }
