@@ -359,7 +359,10 @@ func TestTwoKeepersAtOnceEndWithOnePanelAndNoFailure(t *testing.T) {
 	}
 }
 
-// The panel outlives the window: when the keeper stops, its panel does not.
+// The keeper stopping is not the window going: the window's panel goes by
+// itself when the window's process has ended (cmd/fleetdeck, owner.go), and a
+// keeper that stopped it on the way out would also stop it on any other way
+// its context ends.
 func TestTheKeeperLeavesItsPanelRunningWhenItStops(t *testing.T) {
 	addr := freeAddr(t)
 	r := run(t, newKeeper(t, "listen", addr))

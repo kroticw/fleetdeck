@@ -23,11 +23,12 @@ import (
 const helperEnv = "FLEETDECK_SUPERVISOR_HELPER"
 
 // ownerEnv carries the PID of the test process that started a stand-in. The
-// stand-ins are panels, and a panel is made to outlive whatever started it
-// (Setsid) -- which is exactly what kept them running after a test binary was
-// killed by its -timeout, when no t.Cleanup runs: 19 of them were found on the
-// operator's machine, left by mutation runs, an hour old. A stand-in whose
-// test process is gone now exits by itself.
+// stand-ins are started as panels are, in a session of their own (Setsid), so
+// nothing that ends a test binary reaches them -- which is exactly what kept
+// them running after a test binary was killed by its -timeout, when no
+// t.Cleanup runs: 19 of them were found on the operator's machine, left by
+// mutation runs, an hour old. A stand-in whose test process is gone now exits
+// by itself, as a real panel does when its window is gone.
 const ownerEnv = "FLEETDECK_SUPERVISOR_HELPER_OWNER"
 
 // helperEnvFor is the environment a stand-in of kind is started with.
