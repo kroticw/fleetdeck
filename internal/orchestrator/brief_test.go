@@ -145,6 +145,26 @@ func TestWriteBriefRefusesAFileItDidNotWrite(t *testing.T) {
 	}
 }
 
+// A file that cannot be read cannot be shown to be fleetdeck's, so it is not
+// replaced either.
+func TestWriteBriefRefusesAFileItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file whatever its mode")
+	}
+	path := filepath.Join(t.TempDir(), "orchestrator.md")
+	if err := os.WriteFile(path, []byte("# mine\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteBrief(path, []byte(marker+"\nbrief\n")); err == nil {
+		t.Fatal("replaced a file it could not read")
+	}
+	_ = os.Chmod(path, 0o600)
+	got, _ := os.ReadFile(path)
+	if string(got) != "# mine\n" {
+		t.Errorf("the unreadable file was changed to %q", got)
+	}
+}
+
 // A documentation directory that is not there is reported, not made: the
 // wizard writes one file into a directory the configuration names, and
 // creating directories is setup's business.

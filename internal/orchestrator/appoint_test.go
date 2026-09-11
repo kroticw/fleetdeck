@@ -232,6 +232,41 @@ func TestAppointRefusesARequestThatIsNotOneOfTheTwo(t *testing.T) {
 	}
 }
 
+// A panel with no board has nowhere to put the brief and nothing for an
+// orchestrator to keep; neither path does anything.
+func TestAppointWithoutABoardDoesNothing(t *testing.T) {
+	for _, req := range []Request{{New: true}, {Session: "22222222"}} {
+		f := &fleet{startShort: "0a1b2c3d", sessions: []daemon.Session{{Short: "22222222"}}}
+		_, err := appointer(f, Paths{Docs: []string{t.TempDir()}}).Appoint(context.Background(), req)
+		if !errors.Is(err, ErrNoBoard) {
+			t.Errorf("%+v: err = %v, want ErrNoBoard", req, err)
+		}
+		if len(f.calls) != 0 {
+			t.Errorf("%+v: still did %v", req, f.calls)
+		}
+	}
+}
+
+// A session that has just started can refuse input for longer than an
+// existing one is given: it is still coming up. It is given StartWait, not
+// SendWait.
+func TestAppointGivesANewSessionLongerToTakeTheMessage(t *testing.T) {
+	refusals := make([]error, 40)
+	for i := range refusals {
+		refusals[i] = &daemon.ErrStarting{}
+	}
+	f := &fleet{startShort: "0a1b2c3d", sendErrs: refusals}
+	a := appointer(f, workspace(t))
+	a.Poll, a.SendWait, a.StartWait = time.Millisecond, 5*time.Millisecond, 5*time.Second
+	res, err := a.Appoint(context.Background(), Request{New: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("a session still starting was given up on: %+v", res.Steps)
+	}
+}
+
 // A panel that cannot start sessions (a stand given no claude of its own)
 // refuses the new-session path before it writes anything.
 func TestAppointWithoutStartRefusesANewSession(t *testing.T) {

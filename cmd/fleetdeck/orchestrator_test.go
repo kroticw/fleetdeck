@@ -8,10 +8,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
@@ -235,6 +237,43 @@ func TestAPanelAppointsBothWaysThroughItsDaemonAndConfiguration(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(docs, "orchestrator.md")); err != nil {
 		t.Errorf("no brief in the docs: %v", err)
+	}
+}
+
+// checkStandClaude is only as good as main's calling it with what the command
+// line actually said. The binary itself is asked: both refusals end it before
+// it listens, with the reason.
+func TestThePanelRefusesAStandClaudeItWouldNotHonour(t *testing.T) {
+	r := newPanelRig(t)
+	// The first case gives no -stand-socket, so a panel that failed to refuse
+	// would find the machine's real daemon. It must at least raise no banner
+	// on the screen of whoever runs this.
+	cfg, err := config.Load(r.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Notify = config.NotifyConfig{}
+	quiet := filepath.Join(t.TempDir(), "quiet.yaml")
+	if err := config.Save(quiet, cfg); err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][]string{
+		"without a stand": {"-config", quiet, "-stand-claude", "/nowhere/claude"},
+		"given empty":     {"-config", quiet, "-stand-socket", r.noDaemon, "-stand-claude="},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cmd := exec.CommandContext(ctx, r.bin, args...)
+		cmd.Env = append(os.Environ(), "HOME="+r.home)
+		out, err := cmd.CombinedOutput()
+		timedOut := ctx.Err() != nil
+		cancel()
+		if timedOut {
+			t.Errorf("%s: the panel started instead of refusing", name)
+			continue
+		}
+		if err == nil || !strings.Contains(string(out), "-stand-claude") {
+			t.Errorf("%s: err = %v, output %q; want a refusal naming -stand-claude", name, err, out)
+		}
 	}
 }
 

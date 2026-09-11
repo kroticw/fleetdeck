@@ -17,11 +17,17 @@ func TestParseShortReadsTheBackgroundedLine(t *testing.T) {
 	if got := ParseShort(bgOutput); got != "0a1b2c3d" {
 		t.Errorf("ParseShort = %q, want 0a1b2c3d", got)
 	}
+	// The id only where the colours are: nothing but stripping them finds it.
+	if got := ParseShort("\x1b[32mbackgrounded\x1b[39m · \x1b[1m0a1b2c3d\x1b[22m · orchestrator\n"); got != "0a1b2c3d" {
+		t.Errorf("ParseShort through colours = %q, want 0a1b2c3d", got)
+	}
 	for _, out := range []string{
 		"",
 		"Error: not logged in\n",
-		// A hex word elsewhere in the output is not the session.
+		// A hex word elsewhere in the output is not the session, before the
+		// backgrounded line or after it.
 		"deadbeef\nbackgrounded · nothing here\n",
+		"backgrounded · nothing here\nrequest 0123abcd refused\n",
 	} {
 		if got := ParseShort(out); got != "" {
 			t.Errorf("ParseShort(%q) = %q, want nothing", out, got)

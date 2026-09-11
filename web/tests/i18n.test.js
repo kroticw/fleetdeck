@@ -219,6 +219,16 @@ test("a missing key renders as the key, never as nothing", async () => {
   }
 });
 
+// The orchestrator wizard asks the panel for the working order in this code, so
+// a Russian page must say "ru": otherwise the person reads the wizard in Russian
+// and the session is sent the English file.
+test("the page's language code follows the dictionary it speaks", async () => {
+  for (const [language, code] of [["ru-RU", "ru"], ["ru", "ru"], ["en-GB", "en"], ["de-DE", "en"]]) {
+    const { langCode } = await loadWith(language);
+    assert.equal(langCode, code, `${language} speaks ${code}`);
+  }
+});
+
 test("every key the panels ask for is in both dictionaries", () => {
   const en = dictionary("en");
   const ru = dictionary("ru");

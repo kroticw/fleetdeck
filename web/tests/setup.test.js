@@ -262,6 +262,8 @@ test("wizard: every running session is listed with what it is busy with", async 
 
 test("wizard: no warning and no button for an existing session until one is chosen", async () => {
   await wizard();
+  assert.equal(root.querySelector("button.wizard-open").hidden, true, "nothing is appointed yet");
+  assert.equal(root.querySelector("p.wizard-unavailable").hidden, true, "this panel can start sessions");
   assert.equal(root.querySelector("div.wizard-warning").hidden, true);
   assert.equal(root.querySelector("button.wizard-appoint").hidden, true);
 });
@@ -313,6 +315,7 @@ test("wizard: appointing an existing session sends its short id and the page's l
   assert.equal(root.querySelectorAll("li.setup-step").length, 3);
   assert.equal(root.querySelector("p.setup-status").textContent, t("wizard_done"));
   assert.equal(reloaded, 0, "the outcome stays on screen until the person opens the panel");
+  assert.equal(root.querySelector("button.wizard-open").hidden, false, "the way on is shown once appointed");
   fireEvent(root.querySelector("button.wizard-open"), "click");
   assert.equal(reloaded, 1);
 });
@@ -329,7 +332,9 @@ test("wizard: a panel that cannot start sessions says why and offers only the ex
   await wizard(FLEET, { ...PREVIEW, canStart: false });
   const create = root.querySelector("button.wizard-create");
   assert.equal(create.disabled, true);
-  assert.ok(root.querySelector("section.wizard-new").textContent.includes(t("wizard_new_unavailable")));
+  const why = root.querySelector("p.wizard-unavailable");
+  assert.equal(why.hidden, false);
+  assert.equal(why.textContent, t("wizard_new_unavailable"));
   fireEvent(create, "click");
   await settle();
   assert.equal(posts().length, 0);
@@ -368,6 +373,7 @@ test("wizard: while one appointment runs, neither button sends a second", async 
   await wizard();
   fireEvent(root.querySelector("button.wizard-create"), "click");
   await settle();
+  assert.equal(root.querySelector("button.wizard-create").disabled, true, "the running appointment shows on its button");
   fireEvent(root.querySelector("button.wizard-create"), "click");
   fireEvent(sessionButton("22222222"), "click");
   fireEvent(root.querySelector("button.wizard-appoint"), "click");
@@ -406,6 +412,20 @@ test("wizard: the list follows the fleet, and a chosen session that leaves takes
   assert.equal(sessionButton("22222222"), null);
   assert.equal(root.querySelector("button.wizard-appoint").hidden, true);
   assert.equal(root.querySelector("div.wizard-warning").hidden, true);
+});
+
+test("wizard: a chosen session that left and came back has to be chosen again", async () => {
+  let tick;
+  await wizard(FLEET, PREVIEW, { every: (fn) => ((tick = fn), () => {}) });
+  fireEvent(sessionButton("22222222"), "click");
+  routes["GET /api/snapshot"] = reply(200, { sessions: [FLEET.sessions[1]] });
+  tick();
+  await settle();
+  routes["GET /api/snapshot"] = reply(200, FLEET);
+  tick();
+  await settle();
+  assert.ok(!sessionButton("22222222").className.includes("wizard-session-chosen"));
+  assert.equal(root.querySelector("button.wizard-appoint").hidden, true);
 });
 
 test("wizard: a chosen session that stays stays chosen when the list is refreshed", async () => {
