@@ -387,3 +387,306 @@ test("a terminal given no links links nothing", async () => {
   const { terminal } = await linked(null);
   assert.equal(terminal.linkProviders?.length ?? 0, 0);
 });
+
+// --- the size of the type -------------------------------------------------------
+//
+// Cmd with = / + / - / 0 inside the terminal changes how big its type is. A
+// bigger type in the same pane is fewer columns, and the columns are the
+// session's, shared with everyone watching it — the operator's own Terminal.app
+// included. So a step goes the way a pane that changed size goes: the terminal
+// is refitted and the session is told once the keys stop, and the new size is
+// shown over the terminal, so it is never changed without a word.
+
+// The fit addon measures the pane in cells, and a cell is as big as the type:
+// a 600 × 400 px pane, a cell 0.6 of the font size wide and 1.2 of it tall.
+const PANE_PX = { width: 600, height: 400 };
+const fitByFont = (terminal) => ({
+  cols: Math.floor(PANE_PX.width / (terminal.options.fontSize * 0.6)),
+  rows: Math.floor(PANE_PX.height / (terminal.options.fontSize * 1.2)),
+});
+
+function storage(initial = {}) {
+  const map = new Map(Object.entries(initial));
+  return {
+    getItem: (k) => (map.has(String(k)) ? map.get(String(k)) : null),
+    setItem: (k, v) => map.set(String(k), String(v)),
+    removeItem: (k) => map.delete(String(k)),
+    map,
+  };
+}
+
+const sentResizes = (socket) =>
+  socket.sent
+    .filter((data) => typeof data === "string")
+    .map((data) => JSON.parse(data))
+    .filter((msg) => msg.type === "resize");
+
+// A key event as xterm hands it to a custom key handler.
+function keyEvent(over) {
+  return {
+    type: "keydown",
+    key: "",
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    ...over,
+  };
+}
+
+// A terminal drawn where the orchestrator column draws one, attached, with
+// storage holding `stored`.
+async function sized(stored = {}, { fontKey = "fleetdeck-terminal-font-orchestrator" } = {}) {
+  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
+  const store = storage(stored);
+  globalThis.localStorage = store;
+  const terminals = installTerminal();
+  installFit(fitByFont);
+  const timers = fakeTimers();
+  const host = dom.element("div");
+  dom.document.body.appendChild(host);
+  const live = createLiveTerminal(host, "sess-1", { timers, fontKey });
+  live.open();
+  await settle();
+  ready(sockets[0]);
+  const terminal = terminals[0];
+  const press = (over) => {
+    const event = keyEvent({ metaKey: true, ...over });
+    const passed = terminal.keyHandler(event);
+    return { passed, prevented: event.defaultPrevented };
+  };
+  const badge = () => host.querySelector(".term-size");
+  const restore = () => {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  };
+  return { live, terminal, terminals, timers, host, store, press, badge, restore, socket: sockets[0] };
+}
+
+test("a terminal starts at the size remembered for its place, and attaches at the columns that size leaves", async () => {
+  const s = await sized({ "fleetdeck-terminal-font-orchestrator": "15", "fleetdeck-terminal-font-screen": "10" });
+  try {
+    assert.equal(s.terminal.options.fontSize, 15);
+    const url = new URL(s.socket.url);
+    assert.equal(url.searchParams.get("cols"), "66", "600 px of 9 px cells");
+    assert.equal(url.searchParams.get("rows"), "22", "400 px of 18 px cells");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a first run, and a terminal with no place to remember, start at 12 px", async () => {
+  const s = await sized({ "fleetdeck-terminal-font-orchestrator": "20" }, { fontKey: null });
+  try {
+    assert.equal(s.terminal.options.fontSize, 12);
+    assert.equal(new URL(s.socket.url).searchParams.get("cols"), "83");
+  } finally {
+    s.restore();
+  }
+});
+
+test("Cmd+= makes the type bigger, remembers it, and is not typed into the session", async () => {
+  const s = await sized();
+  try {
+    const { passed, prevented } = s.press({ key: "=" });
+
+    assert.equal(passed, false, "xterm was let to handle Cmd+= itself");
+    assert.equal(prevented, true, "the page was let to zoom on Cmd+=");
+    assert.equal(s.terminal.options.fontSize, 13);
+    assert.equal(s.store.map.get("fleetdeck-terminal-font-orchestrator"), "13");
+    assert.equal(s.socket.sent.filter((d) => typeof d !== "string").length, 0, "the key went to the session as bytes");
+  } finally {
+    s.restore();
+  }
+});
+
+test("the session is told the new size once the keys stop, however many were pressed", async () => {
+  const s = await sized();
+  try {
+    s.press({ key: "=" });
+    s.press({ key: "=" });
+    s.press({ key: "+", shiftKey: true });
+    assert.deepEqual(sentResizes(s.socket), [], "the session was reshaped while the keys were still going");
+    assert.equal(s.timers.count(), 1, "one settle timer, however many keys");
+
+    await s.timers.tick();
+
+    assert.equal(s.terminal.options.fontSize, 15);
+    assert.equal(s.terminal.cols, 66, "the terminal was not refitted to the bigger type");
+    assert.deepEqual(sentResizes(s.socket), [{ type: "resize", cols: 66, rows: 22 }]);
+  } finally {
+    s.restore();
+  }
+});
+
+test("Cmd+- makes it smaller, and the session gets the columns that frees", async () => {
+  const s = await sized();
+  try {
+    s.press({ key: "-" });
+    await s.timers.tick();
+
+    assert.equal(s.terminal.options.fontSize, 11);
+    assert.equal(s.store.map.get("fleetdeck-terminal-font-orchestrator"), "11");
+    assert.deepEqual(sentResizes(s.socket), [{ type: "resize", cols: 90, rows: 30 }]);
+  } finally {
+    s.restore();
+  }
+});
+
+test("the new size is shown over the terminal, then goes away by itself", async () => {
+  const s = await sized();
+  try {
+    s.press({ key: "=" });
+    await s.timers.tick(); // the terminal follows the type
+
+    const badge = s.badge();
+    assert.ok(badge, "nothing on screen said the session changed size");
+    assert.equal(badge.hidden, false);
+    assert.equal(badge.textContent, `13 px · ${t("terminal_font_session")} 76 × 25`);
+
+    await s.timers.tick(); // and the note's own time runs out
+    assert.equal(s.badge().hidden, true, "the size stayed over the terminal for good");
+  } finally {
+    s.restore();
+  }
+});
+
+test("at either end of the range a step changes nothing, and says that it is the end", async () => {
+  for (const [stored, key, cols, rows] of [
+    ["24", "=", 41, 13],
+    ["9", "-", 111, 37],
+  ]) {
+    const s = await sized({ "fleetdeck-terminal-font-orchestrator": stored });
+    try {
+      const { passed, prevented } = s.press({ key });
+      assert.equal(passed, false, `at ${stored} px the key went on to xterm`);
+      assert.equal(prevented, true, `at ${stored} px the key went on to the page`);
+      await s.timers.tick();
+
+      assert.equal(s.terminal.options.fontSize, Number(stored));
+      assert.deepEqual(sentResizes(s.socket), [], `a step past ${stored} px reshaped the session`);
+      assert.equal(s.badge()?.textContent, `${stored} px (${t("terminal_font_limit")}) · ${t("terminal_font_session")} ${cols} × ${rows}`);
+    } finally {
+      s.restore();
+    }
+  }
+});
+
+test("Cmd+0 puts the type back to 12 px and forgets the choice", async () => {
+  const s = await sized({ "fleetdeck-terminal-font-orchestrator": "18" });
+  try {
+    s.press({ key: "0" });
+    await s.timers.tick();
+
+    assert.equal(s.terminal.options.fontSize, 12);
+    assert.equal(s.store.map.has("fleetdeck-terminal-font-orchestrator"), false);
+    assert.deepEqual(sentResizes(s.socket), [{ type: "resize", cols: 83, rows: 27 }]);
+  } finally {
+    s.restore();
+  }
+});
+
+// Found live: thirteen Cmd+= from 12 px, faster than the terminal settles. The
+// last one hits the end while the steps before it are still waiting to be
+// fitted, so saying so at once shows the columns 12 px left, and the note the
+// settled steps then put up loses the word that says why the last key did
+// nothing.
+test("a step past the end while the steps before it are still settling says the end, with the settled size", async () => {
+  const s = await sized({ "fleetdeck-terminal-font-orchestrator": "23" });
+  try {
+    s.press({ key: "=" }); // 23 → 24, waiting to be fitted
+    s.press({ key: "=" }); // past the end
+    assert.equal(s.badge(), null, "the note went up with the columns of a size that is not on screen any more");
+
+    await s.timers.tick();
+
+    assert.equal(s.terminal.options.fontSize, 24);
+    assert.deepEqual(sentResizes(s.socket), [{ type: "resize", cols: 41, rows: 13 }]);
+    assert.equal(s.badge()?.textContent, `24 px (${t("terminal_font_limit")}) · ${t("terminal_font_session")} 41 × 13`);
+  } finally {
+    s.restore();
+  }
+});
+
+test("a step that moves again after the end is no longer the end", async () => {
+  const s = await sized({ "fleetdeck-terminal-font-orchestrator": "23" });
+  try {
+    s.press({ key: "=" });
+    s.press({ key: "=" }); // past the end
+    s.press({ key: "-" }); // and back
+    await s.timers.tick();
+
+    assert.equal(s.terminal.options.fontSize, 23);
+    assert.equal(s.badge()?.textContent, `23 px · ${t("terminal_font_session")} 43 × 14`);
+  } finally {
+    s.restore();
+  }
+});
+
+test("Cmd+0 at 12 px changes nothing and does not call 12 px a limit", async () => {
+  const s = await sized();
+  try {
+    const { passed } = s.press({ key: "0" });
+    assert.equal(passed, false);
+    await s.timers.tick();
+
+    assert.deepEqual(sentResizes(s.socket), []);
+    assert.equal(s.badge()?.textContent, `12 px · ${t("terminal_font_session")} 83 × 27`);
+  } finally {
+    s.restore();
+  }
+});
+
+test("every other key is left to the terminal", async () => {
+  const s = await sized();
+  try {
+    for (const over of [{ key: "=", metaKey: false }, { key: "a" }, { key: "=", ctrlKey: true }, { type: "keyup", key: "=" }]) {
+      const { passed, prevented } = s.press(over);
+      assert.equal(passed, true, `${JSON.stringify(over)} was taken from the terminal`);
+      assert.equal(prevented, false);
+    }
+    await s.timers.tick();
+    assert.equal(s.terminal.options.fontSize, 12);
+    assert.equal(s.badge(), null);
+  } finally {
+    s.restore();
+  }
+});
+
+test("a size chosen before a reload is the size the terminal comes back at", async () => {
+  const s = await sized();
+  try {
+    s.press({ key: "=" });
+    s.press({ key: "=" });
+    s.live.stop();
+
+    s.live.open();
+    await settle();
+
+    assert.equal(s.terminals.length, 2, "the terminal was not built again");
+    assert.equal(s.terminals[1].options.fontSize, 14);
+    assert.equal(new URL(sockets[1].url).searchParams.get("cols"), "71");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a stopped terminal leaves no size note and no timer behind", async () => {
+  const s = await sized();
+  try {
+    s.press({ key: "=" });
+    await s.timers.tick();
+    assert.ok(s.badge());
+
+    s.live.stop();
+
+    assert.equal(s.timers.count(), 0, "the note's timer outlived the terminal");
+    assert.equal(s.badge(), null, "the note outlived the terminal");
+  } finally {
+    s.restore();
+  }
+});

@@ -216,6 +216,29 @@ test("the orchestrator's terminal takes the room the head leaves, and is painted
   assert.ok(selectors.has("#orchestrator .xterm-viewport"), "the column's terminal keeps xterm's black viewport");
 });
 
+// The size shown after the type changes (web/js/liveterminal.js's showSize) is
+// put over the terminal, inside the element the terminal was opened into. It
+// has to stay out of the layout — a note that takes room makes the pane smaller
+// and the session narrower, the very thing it is there to report — and it has
+// to be placed against that element, not against whatever positioned ancestor
+// happens to be further up.
+test("the terminal's size note sits over the terminal, takes no room and no clicks", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector) => {
+    const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
+    assert.ok(match, `${selector} has no rule in web/app.css`);
+    return match[2];
+  };
+
+  const note = body("\\.term-size");
+  assert.match(note, /position:\s*absolute/, ".term-size takes room in the pane");
+  assert.match(note, /pointer-events:\s*none/, ".term-size catches clicks meant for the terminal");
+  assert.match(note, /z-index:\s*\d+/, ".term-size can end up under xterm's own layers");
+  for (const selector of ["\\.o-term", "\\.session-panel \\.s-term"]) {
+    assert.match(body(selector), /position:\s*relative/, `${selector} does not place the note over its own terminal`);
+  }
+});
+
 // The mark on the operator's own messages is the whole of the distinction
 // between their words and an agent's, in both themes. One pane draws steps now:
 // the orchestrator column is a terminal, and the session panel's digest tab is

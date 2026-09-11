@@ -586,6 +586,30 @@ main {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  /* So the size note (.term-size) is placed over this terminal. */
+  position: relative;
+}
+
+/* The size a terminal's type and its session have, shown for a moment after
+ * Cmd with = / - / 0 changes the type (web/js/liveterminal.js, showSize). Over
+ * the terminal rather than in a row beside it: a row that comes and goes makes
+ * the pane shorter and taller, and every change of the pane resizes the
+ * session. Above xterm's own layers, and transparent to the pointer, so a
+ * click meant for the terminal still reaches it. */
+.term-size {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 20;
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 2px 8px var(--shadow);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 /* Nothing pinned, or a pin the daemon does not list: quiet, because neither
@@ -1508,6 +1532,8 @@ main {
 
 .session-panel .s-term {
   height: 100%;
+  /* So the size note (.term-size) is placed over this terminal. */
+  position: relative;
 }
 
 /* web/vendor/xterm.css hardcodes .xterm-viewport's background to #000 — a
