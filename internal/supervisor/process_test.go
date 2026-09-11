@@ -21,6 +21,9 @@ import (
 // panel that a fake could not show.
 const helperEnv = "FLEETDECK_SUPERVISOR_HELPER"
 
+// termNotice is what the stand-in prints to its log when SIGTERM reaches it.
+const termNotice = "helper: SIGTERM, leaving"
+
 func TestMain(m *testing.M) {
 	if mode := os.Getenv(helperEnv); mode != "" {
 		runHelper(mode)
@@ -33,7 +36,17 @@ func runHelper(mode string) {
 	kind, addr, _ := strings.Cut(mode, "@")
 	if kind == "ignore-term" {
 		signal.Ignore(syscall.SIGTERM)
+	} else {
+		term := make(chan os.Signal, 1)
+		signal.Notify(term, syscall.SIGTERM)
+		go func() {
+			<-term
+			fmt.Println(termNotice)
+			os.Exit(0)
+		}()
 	}
+	fmt.Println("helper stdout: listening on " + addr)
+	fmt.Fprintln(os.Stderr, "helper stderr: listening on "+addr)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		os.Exit(3)
@@ -56,8 +69,13 @@ func freeAddr(t *testing.T) string {
 
 func startHelper(t *testing.T, kind string) (*Panel, string) {
 	t.Helper()
+	return startHelperLogging(t, kind, filepath.Join(t.TempDir(), "panel.log"))
+}
+
+func startHelperLogging(t *testing.T, kind, logPath string) (*Panel, string) {
+	t.Helper()
 	addr := freeAddr(t)
-	p, err := StartPanel(os.Args[0], nil, append(os.Environ(), helperEnv+"="+kind+"@"+addr), filepath.Join(t.TempDir(), "panel.log"))
+	p, err := StartPanel(os.Args[0], nil, append(os.Environ(), helperEnv+"="+kind+"@"+addr), logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,15 +88,32 @@ func startHelper(t *testing.T, kind string) (*Panel, string) {
 	return p, addr
 }
 
-func TestAStartedPanelAnswers(t *testing.T) {
-	_, addr := startHelper(t, "listen")
-	resp, err := http.Get("http://" + addr + "/")
+// The log is where anyone looks when a panel did not come up: both of its
+// streams go there, and a restart adds to it rather than wiping what the
+// previous panel said before it died. (That a started panel answers at all
+// is checked by every test here, in startHelper.)
+func TestAStartedPanelWritesBothStreamsToItsLog(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "logs", "panel.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const earlier = "an earlier panel's last words\n"
+	if err := os.WriteFile(logPath, []byte(earlier), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, addr := startHelperLogging(t, "listen", logPath)
+	if err := p.Stop(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d", resp.StatusCode)
+	log := string(data)
+	for _, want := range []string{earlier, "helper stdout: listening on " + addr, "helper stderr: listening on " + addr} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the log lacks %q; it holds:\n%s", want, log)
+		}
 	}
 }
 
@@ -115,6 +150,26 @@ func TestStoppingAPanelFreesItsPort(t *testing.T) {
 	}
 	if err := syscall.Kill(p.PID, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("the process is still there after Stop: %v", err)
+	}
+}
+
+// Stop asks first. SIGKILL gives the panel no chance to say goodbye to the
+// daemon or finish a write; a Stop that only ever waited and then killed
+// would still free the port, and every other test here would pass -- found
+// by mutation. The sign is the stand-in's own words in its log: nothing but
+// SIGTERM reaching it puts them there.
+func TestStopAsksThePanelToLeaveBeforeKillingIt(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "panel.log")
+	p, _ := startHelperLogging(t, "listen", logPath)
+	if err := p.Stop(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), termNotice) {
+		t.Fatalf("the panel never got SIGTERM; its log holds:\n%s", data)
 	}
 }
 

@@ -219,4 +219,7 @@ func TestRefusalsSayWhatIsWrong(t *testing.T) {
 	if !strings.Contains((&DirtyError{Files: []string{"a.go"}}).Error(), "a.go") {
 		t.Error("the dirty refusal does not name the file")
 	}
+	if !strings.Contains((&DivergedError{Ahead: 7}).Error(), "7 commit") {
+		t.Error("the diverged refusal does not say how many commits are the tree's own")
+	}
 }
