@@ -78,12 +78,27 @@ function answer({ status = 200, body, statusText = "" } = {}) {
   };
 }
 
+// The terminal token the panel reads before every socket it opens. Those reads
+// are kept out of `calls`, which the tests about the panel's own requests count,
+// and answered with TOKEN unless a test says otherwise.
+const TOKEN = "token-for-this-test-panel";
+let tokenCalls = [];
+let tokenAnswer = () => answer({ body: { token: TOKEN } });
+
 function stubFetch(respond) {
   globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith("/api/terminal-token")) {
+      tokenCalls.push({ url, init });
+      return tokenAnswer();
+    }
     calls.push({ url, init });
     return typeof respond === "function" ? respond(url, init) : respond;
   };
 }
+
+// What went into a socket as keystrokes. The token goes first, as text; typed
+// keys are binary.
+const keystrokes = (socket) => socket.sent.filter((data) => typeof data !== "string");
 
 // The terminal the panel finds on the global object, which is where
 // web/vendor/xterm.js puts the real one.
@@ -231,6 +246,8 @@ let realFit;
 beforeEach(() => {
   dom = installDOM();
   calls = [];
+  tokenCalls = [];
+  tokenAnswer = () => answer({ body: { token: TOKEN } });
   realFetch = globalThis.fetch;
   realTerminal = Object.hasOwn(globalThis, "Terminal") ? globalThis.Terminal : undefined;
   realSocket = Object.hasOwn(globalThis, "WebSocket") ? globalThis.WebSocket : undefined;
@@ -505,6 +522,107 @@ test("the socket goes to this session's terminal route and asks for the terminal
   assert.equal(sockets[0].binaryType, "arraybuffer", "terminal bytes are read as bytes, not as a Blob");
 });
 
+// The bridge attaches to nothing until the socket proves the panel's token
+// (internal/server/pty.go). The token goes inside the socket, first; in the URL
+// it would land in logs and history.
+test("the socket's first frame is the token, and the token is nowhere in its URL", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  assert.equal(tokenCalls.length, 1, "the token was read before the socket was opened");
+  assert.equal(sockets.length, 1);
+  assert.equal(sockets[0].url.includes(TOKEN), false, "the token is in the socket's URL");
+  assert.equal(sockets[0].sent.length, 0, "nothing is sent before the socket is open");
+
+  sockets[0].serverOpen();
+  assert.equal(typeof sockets[0].sent[0], "string", "the token is a text frame, not keystrokes");
+  assert.deepEqual(JSON.parse(sockets[0].sent[0]), { type: "auth", token: TOKEN });
+});
+
+// The token lives as long as the panel's process. Read once per page, it would
+// be refused by every terminal opened after the panel restarted.
+test("every socket reads the token afresh", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  sockets[0].serverOpen();
+
+  tokenAnswer = () => answer({ body: { token: "the-restarted-panel's-token" } });
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  await panel.openScreenTab();
+  sockets[1].serverOpen();
+
+  assert.equal(tokenCalls.length, 2);
+  assert.equal(JSON.parse(sockets[1].sent[0]).token, "the-restarted-panel's-token");
+});
+
+// A socket the panel let go of while it was still connecting has nothing to
+// prove to anyone: the token is not handed to a connection no panel owns.
+test("a socket let go of before it opened never sends the token", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  const old = sockets[0];
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+
+  old.readyState = 1;
+  old.onopen?.({});
+  assert.equal(old.sent.length, 0, "the token went into a socket the panel had already closed");
+});
+
+test("a token the panel will not hand over is said on screen, and no socket is opened", async () => {
+  installTerminal();
+  tokenAnswer = () => answer({ status: 503, body: { error: "this panel is not wired to a terminal token" } });
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  assert.equal(sockets.length, 0, "a socket with nothing to prove would only be refused");
+  assert.ok(panel.errorText().includes(t("terminal_token_unavailable")), panel.errorText());
+  assert.ok(panel.errorText().includes("not wired to a terminal token"), "and in the panel's own words");
+});
+
+// Reading the token takes a round trip, and the operator can leave the tab — or
+// leave and come back — inside it. A token that arrives for a tab nobody is on
+// any more must open nothing: that socket would attach, reshape the session,
+// and belong to no panel.
+test("a token that arrives after its tab was left opens nothing", async () => {
+  installTerminal();
+  const pending = [];
+  tokenAnswer = () => new Promise((resolve) => pending.push(resolve));
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+
+  await panel.openScreenTab();
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  await panel.openScreenTab();
+  assert.equal(pending.length, 2, "one read per opening");
+
+  pending[0](answer({ body: { token: "first" } }));
+  await settle();
+  assert.equal(sockets.length, 0, "the first opening's token opened a socket for a tab that was left");
+
+  pending[1](answer({ body: { token: "second" } }));
+  await settle();
+  assert.equal(sockets.length, 1, "the tab that is open gets its socket");
+
+  panel.stop();
+  tokenAnswer = () => new Promise((resolve) => pending.push(resolve));
+  const other = await mount();
+  await other.openScreenTab();
+  other.stop();
+  pending[2](answer({ body: { token: "third" } }));
+  await settle();
+  assert.equal(sockets.length, 1, "a stopped panel opened a socket");
+});
+
 // Attaching sets the session's size for everyone watching it, so the size the
 // socket asks for has to be the pane's, measured before the socket exists —
 // resizing after the attach would reshape the session twice.
@@ -615,9 +733,10 @@ test("what the operator types into the terminal goes into the socket as bytes", 
 
   terminals[0].type("ls -la\r");
 
-  assert.equal(sockets[0].sent.length, 1);
-  assert.equal(typeof sockets[0].sent[0], "object", "a keystroke is a binary frame; text frames are control messages");
-  assert.equal(asText(sockets[0].sent[0]), "ls -la\r");
+  const typed = sockets[0].sent.slice(1);
+  assert.equal(typed.length, 1, "one frame after the token");
+  assert.equal(typeof typed[0], "object", "a keystroke is a binary frame; text frames are control messages");
+  assert.equal(asText(typed[0]), "ls -la\r");
 });
 
 test("every key button sends its escape sequence into the socket, and nothing through POST .../keys", async () => {
@@ -654,7 +773,7 @@ test("a terminal that cannot type says so as soon as it opens, and typing sends 
 
   terminals[0].type("x");
   await panel.click("[data-key=enter]");
-  assert.equal(sockets[0].sent.length, 0, "nothing went into a session through a terminal without a key");
+  assert.equal(keystrokes(sockets[0]).length, 0, "nothing went into a session through a terminal without a key");
   assert.equal(panel.errorText(), t("terminal_read_only"), "and the refusal is on screen");
 });
 
@@ -665,7 +784,7 @@ test("a key pressed before the terminal is connected is refused where it can be 
   await panel.openScreenTab();
 
   await panel.click("[data-key=enter]");
-  assert.equal(sockets[0].sent.length, 0);
+  assert.equal(sockets[0].sent.length, 0, "not even the token: the socket never opened");
   assert.equal(panel.errorText(), t("terminal_not_connected"));
 });
 
@@ -688,6 +807,7 @@ test("a stream that ends says why, for every way it can end", async () => {
     // session ending, and one nobody could explain is neither.
     [4002, "", t("terminal_stream_dropped")],
     [4003, "", t("terminal_stream_unexplained")],
+    [4403, "the terminal token was refused", t("terminal_token_refused")],
     [4404, "no such session", t("terminal_no_session")],
     [4401, "", t("terminal_key_refused")],
     [4503, "", t("terminal_daemon_unavailable")],

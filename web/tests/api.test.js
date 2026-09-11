@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, sendText, sendKeys, fetchDigest, fetchScreen } from "../js/api.js";
+import { setCardField, sendText, sendKeys, fetchDigest, fetchScreen, fetchTerminalToken } from "../js/api.js";
 
 let calls = [];
 let realFetch;
@@ -176,4 +176,26 @@ test("a screen read that failed keeps the bytes that did arrive", async () => {
   );
 
   assert.deepEqual(await fetchScreen("abc123"), { screen: "half a line", error: "attach evicted" });
+});
+
+// The token a terminal socket presents first. Read fresh for every socket, and
+// never from a cache: after the panel restarts, a cached answer is a token the
+// new process refuses.
+test("the terminal token is read fresh, past every cache", async () => {
+  stubFetch(answer({ status: 200, body: { token: "abc123" } }));
+  assert.equal(await fetchTerminalToken(), "abc123");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/terminal-token");
+  assert.equal(calls[0].init?.cache, "no-store");
+});
+
+test("a token that cannot be had throws words, never an empty token", async () => {
+  stubFetch(answer({ status: 503, body: { error: "this panel is not wired to a terminal token" } }));
+  await assert.rejects(fetchTerminalToken(), /not wired to a terminal token/);
+
+  stubFetch(answer({ status: 200, body: { token: "" } }));
+  await assert.rejects(fetchTerminalToken(), /token/);
+
+  stubFetch(answer({ status: 200, body: [] }));
+  await assert.rejects(fetchTerminalToken(), /token/);
 });

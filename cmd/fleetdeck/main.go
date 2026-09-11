@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -442,6 +443,10 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 			}
 			return listedAlive(sessions, session), nil
 		},
+		// New with every process and kept nowhere else: the page asks for it each time
+		// it opens a terminal, so a restart — which ends every open terminal anyway —
+		// is all it takes to replace it. rand.Text carries at least 128 random bits.
+		TerminalToken: rand.Text(),
 
 		SetCardField: setCardField,
 		// Without this the server has nothing to confine a card write to and answers

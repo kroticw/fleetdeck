@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -49,6 +50,7 @@ const (
 	statusStreamEndUnexplained websocket.StatusCode = 4003 // the stream ended and the daemon could not be asked why
 	statusBadControl           websocket.StatusCode = 4400 // a text frame the bridge does not accept
 	statusKeyRefused           websocket.StatusCode = 4401 // the daemon refused the control key
+	statusTokenRefused         websocket.StatusCode = 4403 // the socket did not present the panel's terminal token
 	statusNoSuchSession        websocket.StatusCode = 4404 // no session by that id
 	statusDaemonUnavailable    websocket.StatusCode = 4503 // no daemon to attach through, or to ask
 )
@@ -83,11 +85,18 @@ const maxCloseReason = 123
 //
 // Unlike /ws, this socket writes into a live session. The browser sends no preflight
 // for a WebSocket handshake, so the JSON content-type half of guard does not reach
-// it: terminalAllowed is the whole defence, and is kept in one named place so a
-// second line can be added there without touching the rest of the route.
+// it. Two independent checks stand in its place: terminalAllowed, the Origin rule,
+// before the upgrade; and authenticateTerminal, the panel's token as the socket's
+// first message, after it and before anything is attached. The second exists
+// because the first checks an origin's host and not its port — a page served by
+// any other local server passes it — while that page cannot read the token.
 func (d Deps) handlePTY(w http.ResponseWriter, r *http.Request) {
 	if d.Attach == nil {
 		unavailable(w, "a daemon")
+		return
+	}
+	if d.TerminalToken == "" {
+		unavailable(w, "a terminal token")
 		return
 	}
 	if !terminalAllowed(r) {
@@ -112,9 +121,13 @@ func (d Deps) handlePTY(w http.ResponseWriter, r *http.Request) {
 	// A paste arrives as one message; this is the same ceiling an HTTP body has.
 	conn.SetReadLimit(maxBodyBytes)
 
-	// Attaching happens after the upgrade, not before: a refused handshake reaches a
-	// page's script as a bare 1006 with no reason at all, while a close frame carries
-	// a code and a reason the panel can show.
+	// The token is checked, and attaching happens, after the upgrade rather than
+	// before: a refused handshake reaches a page's script as a bare 1006 with no
+	// reason at all, while a close frame carries a code and a reason the panel can
+	// show.
+	if !d.authenticateTerminal(r.Context(), conn) {
+		return
+	}
 	openCtx, cancelOpen := context.WithTimeout(r.Context(), ptyOpenTimeout)
 	term, err := d.Attach(openCtx, r.PathValue("id"), cols, rows)
 	cancelOpen()
@@ -147,10 +160,71 @@ func (d Deps) handlePTY(w http.ResponseWriter, r *http.Request) {
 	<-streamDone
 }
 
-// terminalAllowed decides whether a request may open a terminal socket. Today that
-// is the origin rule every route shares; a second, independent check belongs here.
+// terminalAllowed decides whether a request may upgrade to a terminal socket: the
+// origin rule every route shares. It sees only the handshake, which is why the
+// token is not checked here but in authenticateTerminal, on the socket itself —
+// in the URL it would be written into logs and browser history, and in a
+// subprotocol header an unanswered offer makes the browser drop the connection
+// with a bare 1006.
 func terminalAllowed(r *http.Request) bool {
 	return originAllowed(r)
+}
+
+// terminalAuthWait is how long an upgraded terminal socket may take to send the
+// token. It is the server's readHeaderTimeout (cmd/fleetdeck), on purpose: that is
+// already how long any local process may hold a connection that says nothing, so
+// a socket waiting this long for its token is no new exposure — it attaches to
+// nothing until the token arrives. The page sends the token the moment the socket
+// opens, having fetched it beforehand, so only a stalled page comes near this.
+const terminalAuthWait = 10 * time.Second
+
+// authenticateTerminal reads the socket's first message and reports whether it
+// is {"type":"auth","token":<the panel's token>}. Anything else — another frame,
+// the wrong token, nothing in time — closes the socket with statusTokenRefused and
+// a reason the panel shows; the reason never repeats what was sent.
+func (d Deps) authenticateTerminal(ctx context.Context, conn *websocket.Conn) bool {
+	wait := d.terminalAuthTimeout
+	if wait == 0 {
+		wait = terminalAuthWait
+	}
+	// A timer that closes the socket rather than a deadline on the read: the
+	// websocket library tears a connection down without a close frame when a
+	// read's context expires, and a silent socket is owed the same visible
+	// refusal as a wrong token.
+	late := time.AfterFunc(wait, func() {
+		closeWith(conn, statusTokenRefused, "no terminal token arrived in time")
+	})
+	typ, data, err := conn.Read(ctx)
+	if !late.Stop() || err != nil {
+		return false
+	}
+	var msg struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if typ != websocket.MessageText || json.Unmarshal(data, &msg) != nil || msg.Type != "auth" {
+		closeWith(conn, statusTokenRefused, "the first message must be the terminal token")
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(msg.Token), []byte(d.TerminalToken)) != 1 {
+		closeWith(conn, statusTokenRefused, "the terminal token was refused")
+		return false
+	}
+	return true
+}
+
+// handleTerminalToken hands the panel's own page the token its terminal sockets
+// present. It carries no CORS headers, and must not: a browser shows the body of
+// a cross-origin response to the page that asked only when the server opts in, so
+// a page on any other origin — another local port included — gets nothing it can
+// read. no-store keeps it out of every cache between here and that page.
+func (d Deps) handleTerminalToken(w http.ResponseWriter, _ *http.Request) {
+	if d.TerminalToken == "" {
+		unavailable(w, "a terminal token")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]string{"token": d.TerminalToken})
 }
 
 func terminalGeometry(q url.Values) (cols, rows int, err error) {

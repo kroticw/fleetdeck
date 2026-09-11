@@ -23,7 +23,7 @@
 // terminal constructor are read from the global object, which is where the
 // browser puts them and where a test can put its own.
 
-import { fetchDigest, sendText } from "./api.js";
+import { fetchDigest, fetchTerminalToken, sendText } from "./api.js";
 import { get } from "./store.js";
 import { t } from "./i18n.js";
 import { syncSteps } from "./steps.js";
@@ -53,6 +53,7 @@ const STREAM_ENDINGS = {
   4001: "terminal_kicked",
   4002: "terminal_stream_dropped",
   4003: "terminal_stream_unexplained",
+  4403: "terminal_token_refused",
   4404: "terminal_no_session",
   4401: "terminal_key_refused",
   4503: "terminal_daemon_unavailable",
@@ -278,6 +279,11 @@ export function renderSession(
   let socket = null;
   let writable = false;
   let typing = null;
+  // Which opening of the screen tab is current. Opening reads the token first,
+  // which takes a round trip; closing, or opening again, inside it moves this on,
+  // and the opening that was waiting finds it has been superseded and opens
+  // nothing.
+  let opening = 0;
   let body = null;
   let errorLine = null;
   let noticeLine = null;
@@ -409,6 +415,7 @@ export function renderSession(
   // reports a close the page asked for exactly like one it did not, and the
   // panel leaving a tab is not a lost connection.
   const closeStream = () => {
+    opening += 1;
     if (typing) typing.dispose();
     typing = null;
     readOnly = false;
@@ -416,6 +423,7 @@ export function renderSession(
     const ws = socket;
     socket = null;
     writable = false;
+    ws.onopen = null;
     ws.onmessage = null;
     ws.onclose = null;
     try {
@@ -553,7 +561,12 @@ export function renderSession(
   // openStream is the screen tab's whole life: one socket for as long as the tab
   // is open. It is never reopened by itself — see closeMessage and the note at
   // the top of this file — and coming back to the tab is what reconnects.
-  const openStream = () => {
+  //
+  // The socket must prove the panel's terminal token before the bridge attaches
+  // to anything (internal/server/pty.go), so the token is read first, fresh for
+  // this socket (see fetchTerminalToken), and sent as the first message the
+  // moment the socket opens.
+  const openStream = async () => {
     const term = ensureTerminal();
     if (!term) return; // the library is missing; ensureTerminal already said so
     const Socket = globalThis.WebSocket;
@@ -561,6 +574,15 @@ export function renderSession(
       showPollError(t("terminal_missing"));
       return;
     }
+    const mine = ++opening;
+    let token;
+    try {
+      token = await fetchTerminalToken();
+    } catch (err) {
+      if (mine === opening) showPollError(`${t("terminal_token_unavailable")}: ${err.message}`);
+      return;
+    }
+    if (mine !== opening) return;
     // The terminal's own size — fitted to the pane by ensureTerminal — because
     // attaching at it sets the size of the session for everyone watching it.
     const cols = term.cols || 80;
@@ -568,6 +590,10 @@ export function renderSession(
     const ws = new Socket(socketURL(`/api/sessions/${encodeURIComponent(short)}/pty?cols=${cols}&rows=${rows}`));
     ws.binaryType = "arraybuffer";
     socket = ws;
+    ws.onopen = () => {
+      if (socket !== ws) return;
+      ws.send(JSON.stringify({ type: "auth", token }));
+    };
     ws.onmessage = (event) => {
       if (socket !== ws) return;
       if (typeof event.data === "string") {
@@ -592,7 +618,7 @@ export function renderSession(
 
   const startPolling = () => {
     if (tab === "screen") {
-      openStream();
+      void openStream();
       return;
     }
     poller = createPoller(

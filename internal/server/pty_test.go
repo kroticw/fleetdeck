@@ -78,6 +78,9 @@ type attachCall struct {
 	cols, rows int
 }
 
+// testToken is the terminal token every bridge under test is wired with.
+const testToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
 // ptyDeps wires one fake terminal (or one attach error) into the router and
 // records every attach the bridge asks for.
 func ptyDeps(term *fakeTerminal, attachErr error) (Deps, <-chan attachCall) {
@@ -90,10 +93,24 @@ func ptyDeps(term *fakeTerminal, attachErr error) (Deps, <-chan attachCall) {
 			}
 			return term, nil
 		},
+		TerminalToken: testToken,
 	}, calls
 }
 
+// dialPTY opens a terminal socket the way the panel does: the connection, then the
+// token as its first message.
 func dialPTY(t *testing.T, url string, header http.Header) (*websocket.Conn, *http.Response, error) {
+	t.Helper()
+	conn, resp, err := dialPTYRaw(t, url, header)
+	if err != nil {
+		return conn, resp, err
+	}
+	sendAuth(t, conn, testToken)
+	return conn, resp, nil
+}
+
+// dialPTYRaw opens a terminal socket and sends nothing on it.
+func dialPTYRaw(t *testing.T, url string, header http.Header) (*websocket.Conn, *http.Response, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -102,6 +119,14 @@ func dialPTY(t *testing.T, url string, header http.Header) (*websocket.Conn, *ht
 		t.Cleanup(func() { _ = conn.CloseNow() })
 	}
 	return conn, resp, err
+}
+
+func sendAuth(t *testing.T, conn *websocket.Conn, token string) {
+	t.Helper()
+	msg, _ := json.Marshal(map[string]string{"type": "auth", "token": token})
+	if err := conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+		t.Fatalf("send the token: %v", err)
+	}
 }
 
 func readControl(t *testing.T, conn *websocket.Conn) map[string]any {

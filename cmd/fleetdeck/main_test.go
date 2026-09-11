@@ -616,3 +616,17 @@ func TestListedAliveCountsOnlyAPresentSessionThatIsNotDying(t *testing.T) {
 		}
 	}
 }
+
+// The terminal token is what a page must show before the bridge attaches to a
+// session. An empty one leaves the terminal refusing every socket, and a fixed
+// one would be the same secret on every machine running this binary.
+func TestDepsWiresARandomTerminalToken(t *testing.T) {
+	a := deps(context.Background(), nil, nil, nil, config.Config{}, "").TerminalToken
+	b := deps(context.Background(), nil, nil, nil, config.Config{}, "").TerminalToken
+	if len(a) < 26 || len(b) < 26 {
+		t.Fatalf("tokens %q and %q: want at least 128 bits of randomness each", a, b)
+	}
+	if a == b {
+		t.Errorf("two panels got the same token %q", a)
+	}
+}

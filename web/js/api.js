@@ -217,3 +217,27 @@ export async function fetchScreen(sessionId) {
   }
   return { screen, error: messageFor(response, body) };
 }
+
+// fetchTerminalToken reads the token a terminal socket must send as its first
+// message (internal/server/pty.go, authenticateTerminal).
+//
+// Once per socket, never once per page: the token lives exactly as long as the
+// panel's process, so a page that kept the one it read at load would be refused
+// by every terminal it opened after the panel restarted, until somebody thought
+// to reload the page. no-store for the same reason — a cached answer is an old
+// process's token.
+//
+// It throws rather than returning an empty token: a socket opened with nothing
+// to prove is refused anyway, and saying why here is clearer than a refusal
+// from the other end.
+export async function fetchTerminalToken() {
+  const response = await fetch("/api/terminal-token", { cache: "no-store" });
+  if (!response.ok) {
+    throw await refusal(response);
+  }
+  const body = await readJSON(response);
+  if (typeof body?.token !== "string" || body.token === "") {
+    throw new Error("the panel answered without a terminal token");
+  }
+  return body.token;
+}
