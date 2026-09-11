@@ -369,11 +369,31 @@ test("a needs-based stall fires immediately, at age zero, in both the header and
 // that the stalled tracker keeps counting while the column is folded — see
 // the last test in this section.
 
-test("the session list has a resize grip, next to it rather than inside it", async () => {
+// This column sits at the window's RIGHT edge, so its resize edge has to be
+// on its own left — the side facing the centre — which in the DOM means
+// immediately BEFORE root, not after it. Placed after (the orchestrator
+// column's own side, and the defect the operator actually reported: "no
+// resize handle found") it ends up pinned against the window's outer edge,
+// past the last column, with nothing beyond it to drag against.
+test("the session list has a resize grip on its own left, toward the centre — not pinned against the window's edge", async () => {
   const { root } = await list({ sessions: [] });
-  const grip = root.parentElement?.children.find((n) => String(n.className).includes("col-grip"));
+  const main = root.parentElement;
+  const grip = main?.children.find((n) => String(n.className).includes("col-grip"));
   assert.ok(grip, "no resize handle was created at all");
-  assert.equal(grip.parentNode, root.parentElement, "the handle was put inside the column");
+  assert.equal(main.children.indexOf(grip), main.children.indexOf(root) - 1, "the grip is not immediately before the column, toward the centre");
+  assert.notEqual(main.children.indexOf(grip), main.children.length - 1, "the grip ended up pinned against the window's outer edge");
+});
+
+// The mirror of the orchestrator column's own equivalent test: this column
+// folds away to the RIGHT (toward its own edge), so its fold arrow points
+// right, and unfolding brings it back left, toward the centre — the
+// opposite of the orchestrator's, and a bare existence check cannot tell
+// the two apart.
+test("the session list's controls sit on its right-hand side, with arrows pointing the right column's own way", async () => {
+  const { root } = await list({ sessions: [] });
+  assert.match(root.innerHTML, /class="col-size col-size-right"/, "the strip is not marked as a right column's");
+  assert.match(root.innerHTML, /class="col-size-btn col-size-fold"[^>]*>»</, "folding away must point toward this column's own edge, not the centre");
+  assert.match(root.innerHTML, /class="col-size-btn col-size-unfold"[^>]*>«</, "coming back must point toward the centre");
 });
 
 test("the session list carries its own remembered width from the first paint", async () => {

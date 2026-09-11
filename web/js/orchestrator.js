@@ -113,7 +113,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
   // the order syncTerminal needs: a terminal opened on unfolding measures
   // the pane it is opened into, and a pane still marked folded has no size
   // to measure.
-  const resize = mountColumnResize(root, ORCHESTRATOR_KEYS, () => syncTerminal());
+  const resize = mountColumnResize(root, ORCHESTRATOR_KEYS, { side: "left", onChange: () => syncTerminal() });
   const width = resize.width;
 
   // Set by the store subscription on every push (including the initial
@@ -227,7 +227,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
   // what remains has to be the way back. A control a person cannot see is a
   // control they do not have — the same rule the edit pencil was fixed for.
   const buildWidthControls = () => {
-    const strip = el("div", "col-size");
+    const strip = el("div", "col-size col-size-left");
 
     const button = (className, glyph, label, onClick) => {
       const b = el("button", className, glyph);

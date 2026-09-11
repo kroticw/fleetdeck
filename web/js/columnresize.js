@@ -19,9 +19,45 @@
 // own rendering already uses, sharing the class names and i18n keys rather
 // than the construction: web/app.css's rules act on the class names alone
 // and do not care which way a node carrying them came to exist.
+//
+// `side` is the one thing that is NOT the same between columns, because a
+// column anchored to the window's left edge and one anchored to its right
+// edge are mirror images of each other, not two instances of the same
+// shape: which edge stays put while the other moves, which way the drag
+// handle's pixels are measured, and which way "away" points are all
+// reversed. This module takes `side` as a parameter of the one mechanism
+// rather than becoming two mechanisms — the operator's own words, after
+// the session list first reused the orchestrator's controls unmirrored and
+// every one of them pointed and sat the wrong way.
 
 import { t } from "./i18n.js";
 import { createColumnWidth, MIN_PIXELS } from "./columnwidth.js";
+
+// widthPercentFrom is the pure arithmetic behind a drag: given where the
+// pointer is and where the track and the column's own edges are, the
+// percentage width that keeps the column's edge anchored to its own side of
+// the window fixed while the edge under the pointer follows it.
+//
+// Pulled out of the pointermove handler and exported so the direction for
+// each side can be proven with plain numbers in a test — this project's
+// test harness has no real layout engine behind it (see
+// web/tests/fake-dom.js's own header), so `getBoundingClientRect` inside a
+// test returns nothing meaningful and the sign of this formula was, until
+// now, answerable only by a browser. A left column's LEFT edge is the one
+// anchored to the window, so its width is measured from that edge to the
+// pointer — moving the pointer right widens it. A right column's RIGHT edge
+// is anchored instead, so its width is measured from the pointer to THAT
+// edge — moving the pointer LEFT widens it. Getting this sign wrong is
+// silent: the grip drags, the column resizes, and it resizes backwards.
+export function widthPercentFrom({ side, clientX, mainWidth, rootLeft, rootRight }) {
+  if (mainWidth <= 0) return null;
+  const pixels = side === "right" ? rootRight - clientX : clientX - rootLeft;
+  // The pixel floor as well as the percentage one. On a narrow window a
+  // percentage floor is a handful of pixels — "not zero" and useless — so
+  // the two are applied together and the stricter one wins.
+  const floored = Math.max(MIN_PIXELS, pixels);
+  return (floored / mainWidth) * 100;
+}
 
 // applyColumnState is what every column does with its own width/folded
 // state once columnwidth.js decides it: the state a browser is told to
@@ -54,8 +90,17 @@ function applyColumnState(root, grip, state, onChange) {
  * content. Nothing else in the page looks for this element; if a caller
  * stops calling this, the grip stops existing, and the column simply loses
  * its handle rather than half of something staying behind.
+ *
+ * `side` decides which edge of `root` the grip sits at, not only the sign
+ * of the drag math above: a left column's resizable edge faces the centre,
+ * i.e. is the edge AFTER it in `main`; a right column's faces the centre
+ * from the other direction, i.e. is the edge BEFORE it. Put the grip at the
+ * wrong one and it ends up pinned against the outer edge of the window,
+ * where a person still finds it in the DOM but has nothing to grab it
+ * against — this is exactly the defect the operator reported ("no resize
+ * handle") before this parameter existed.
  */
-export function mountColumnGrip(root, width) {
+export function mountColumnGrip(root, width, { side = "left" } = {}) {
   const main = root.parentElement;
   if (!main) return null;
 
@@ -65,7 +110,8 @@ export function mountColumnGrip(root, width) {
   grip.setAttribute("aria-orientation", "vertical");
   grip.setAttribute("aria-label", t("column_drag"));
   grip.setAttribute("title", t("column_drag"));
-  main.insertBefore(grip, root.nextSibling);
+  if (side === "right") main.insertBefore(grip, root);
+  else main.insertBefore(grip, root.nextSibling);
 
   // A drag that never ends is the classic failure here: the pointer is
   // released over another window, no "up" arrives, and the interface stays
@@ -76,16 +122,15 @@ export function mountColumnGrip(root, width) {
   let dragging = false;
 
   const widthFrom = (clientX) => {
-    const bounds = main.getBoundingClientRect();
-    const available = bounds.width;
-    if (available <= 0) return null;
-    // Where the column's right edge would be if it followed the pointer.
-    const pixels = clientX - root.getBoundingClientRect().left;
-    // The pixel floor as well as the percentage one. On a narrow window a
-    // percentage floor is a handful of pixels — "not zero" and useless — so
-    // the two are applied together and the stricter one wins.
-    const floored = Math.max(MIN_PIXELS, pixels);
-    return (floored / available) * 100;
+    const mainBounds = main.getBoundingClientRect();
+    const rootBounds = root.getBoundingClientRect();
+    return widthPercentFrom({
+      side,
+      clientX,
+      mainWidth: mainBounds.width,
+      rootLeft: rootBounds.left,
+      rootRight: rootBounds.right,
+    });
   };
 
   const finish = (event) => {
@@ -132,9 +177,12 @@ export function mountColumnGrip(root, width) {
  * mountColumnResize is the whole device for one column: columnwidth.js's
  * state, the grip that drags it, and applying both to `root`. `keys` picks
  * which column's storage this instance reads and writes (see
- * columnwidth.js's ORCHESTRATOR_KEYS/SESSIONS_KEYS); `onChange` runs after
- * the DOM already matches the new state, for side effects beyond the
- * column's own box.
+ * columnwidth.js's ORCHESTRATOR_KEYS/SESSIONS_KEYS); `side` — `"left"`
+ * (the default, and the orchestrator column's own — unchanged behaviour)
+ * or `"right"` — picks which edge of the window this column is anchored to,
+ * deciding the grip's position and drag direction (see mountColumnGrip and
+ * widthPercentFrom above); `onChange` runs after the DOM already matches
+ * the new state, for side effects beyond the column's own box.
  *
  * Returns `width` — the columnwidth.js handle, for a caller whose own
  * fold/unfold buttons call `.fold()`/`.unfold()` directly and whose other
@@ -144,9 +192,9 @@ export function mountColumnGrip(root, width) {
  * folded attribute are meant to act on, since a column folded before it has
  * content to hide has nothing for `data-folded` to hide.
  */
-export function mountColumnResize(root, keys, onChange = () => {}) {
+export function mountColumnResize(root, keys, { side = "left", onChange = () => {} } = {}) {
   let grip = null;
   const width = createColumnWidth((state) => applyColumnState(root, grip, state, onChange), keys);
-  grip = mountColumnGrip(root, width);
+  grip = mountColumnGrip(root, width, { side });
   return { width, paint: () => applyColumnState(root, grip, width.state(), onChange) };
 }

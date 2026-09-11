@@ -252,20 +252,32 @@ const HEAD = `<div class="slist-head">${escapeHtml(t("sessions_title"))}</div>`;
 
 // The same fold/unfold strip as the orchestrator column's own — same
 // classes (web/app.css's .col-size rules act on them for whichever column
-// carries them), same glyphs, same i18n keys. Built as markup rather than as
-// DOM nodes the way orchestrator.js builds its own: this column's entire
-// content is markup, replaced wholesale on every snapshot (see setBody in
-// renderSessions), and a node parked here would be destroyed the moment the
-// next snapshot arrived, folded or not — innerHTML replaces every child, not
-// only the ones a caller put there. The drag grip that resizes this column
-// is real DOM regardless, and is the literal same code the orchestrator's
-// own grip runs: see web/js/columnresize.js's own note.
+// carries them), same i18n keys, same mechanism — mirrored, not copied: this
+// column sits at the window's RIGHT edge, not the left, so the strip carries
+// col-size-right instead of col-size-left (puts the controls on this
+// column's own left, toward the centre, not pinned against the window's
+// outer edge) and the glyphs are swapped from the orchestrator's own —
+// folding this column sends it right, toward its own edge, so that arrow
+// points right; unfolding brings it back left, toward the centre. Getting
+// either backwards is exactly the defect the operator found when this
+// column first reused the orchestrator's controls unmirrored: an arrow
+// pointing the wrong way, and a strip pinned against the window's edge
+// instead of reachable from the centre.
+//
+// Built as markup rather than as DOM nodes the way orchestrator.js builds
+// its own: this column's entire content is markup, replaced wholesale on
+// every snapshot (see setBody in renderSessions), and a node parked here
+// would be destroyed the moment the next snapshot arrived, folded or not —
+// innerHTML replaces every child, not only the ones a caller put there. The
+// drag grip that resizes this column is real DOM regardless, and is the
+// literal same code the orchestrator's own grip runs, given side: "right":
+// see web/js/columnresize.js's own note.
 function sizeControlsHtml() {
   const unfoldLabel = escapeHtml(t("column_unfold"));
   const foldLabel = escapeHtml(t("column_fold"));
-  return `<div class="col-size">
-    <button type="button" class="col-size-btn col-size-unfold" aria-label="${unfoldLabel}" title="${unfoldLabel}">»</button>
-    <button type="button" class="col-size-btn col-size-fold" aria-label="${foldLabel}" title="${foldLabel}">«</button>
+  return `<div class="col-size col-size-right">
+    <button type="button" class="col-size-btn col-size-unfold" aria-label="${unfoldLabel}" title="${unfoldLabel}">«</button>
+    <button type="button" class="col-size-btn col-size-fold" aria-label="${foldLabel}" title="${foldLabel}">»</button>
   </div>`;
 }
 
@@ -324,7 +336,7 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
   // stalledNow was built to end, reappearing between two points in time
   // instead of between two places on screen. See sessions.test.js for the
   // mutation that proves it.
-  const resize = mountColumnResize(root, SESSIONS_KEYS);
+  const resize = mountColumnResize(root, SESSIONS_KEYS, { side: "right" });
   // Painted once, now: root has no content yet, but width/folded are root's
   // own style and dataset, untouched by every render() below rewriting its
   // children — the same reason the orchestrator column paints once at its
