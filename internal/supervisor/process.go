@@ -21,6 +21,17 @@ import (
 type Panel struct {
 	PID  int
 	done chan struct{}
+	err  error // how the process ended; set before done is closed
+}
+
+// Exited is closed when the panel process has ended.
+func (p *Panel) Exited() <-chan struct{} { return p.done }
+
+// Err is how the panel process ended, as exec reports it: "exit status 3",
+// "signal: killed". It waits for the process to end.
+func (p *Panel) Err() error {
+	<-p.done
+	return p.err
 }
 
 // StartPanel starts the panel binary in a session of its own.
@@ -52,7 +63,7 @@ func StartPanel(bin string, args, env []string, logPath string) (*Panel, error) 
 	_ = log.Close()
 	p := &Panel{PID: cmd.Process.Pid, done: make(chan struct{})}
 	go func() {
-		_ = cmd.Wait()
+		p.err = cmd.Wait()
 		close(p.done)
 	}()
 	return p, nil

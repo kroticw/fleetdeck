@@ -24,6 +24,9 @@ const helperEnv = "FLEETDECK_SUPERVISOR_HELPER"
 // termNotice is what the stand-in prints to its log when SIGTERM reaches it.
 const termNotice = "helper: SIGTERM, leaving"
 
+// crashNotice is the last thing the "crash" stand-in says before it dies.
+const crashNotice = "helper: config is broken, giving up"
+
 func TestMain(m *testing.M) {
 	if mode := os.Getenv(helperEnv); mode != "" {
 		runHelper(mode)
@@ -44,6 +47,16 @@ func runHelper(mode string) {
 			fmt.Println(termNotice)
 			os.Exit(0)
 		}()
+	}
+	switch kind {
+	case "crash":
+		// A panel that dies before it ever listens: a broken config, a bad build.
+		fmt.Fprintln(os.Stderr, crashNotice)
+		os.Exit(3)
+	case "silent":
+		// A panel that runs but never answers where it is looked for -- a port
+		// in its configuration other than the one the window asks.
+		select {}
 	}
 	fmt.Println("helper stdout: listening on " + addr)
 	fmt.Fprintln(os.Stderr, "helper stderr: listening on "+addr)
