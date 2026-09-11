@@ -147,8 +147,12 @@ func parseCounts(s string) (ahead, behind int, err error) {
 	return ahead, behind, nil
 }
 
+// git runs one git command in the tree. --no-pager on every call, whatever
+// the environment says: the old rebuild script hung on less when a person
+// ran it, because git starts a pager whenever its output is a terminal, and
+// never when a program runs it -- so whoever writes the code never sees it.
 func (t *Tree) git(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, t.Git, append([]string{"-C", t.Dir}, args...)...)
+	cmd := exec.CommandContext(ctx, t.Git, append([]string{"--no-pager", "-C", t.Dir}, args...)...)
 	cmd.Env = t.Env
 	out, err := cmd.Output()
 	if err != nil {

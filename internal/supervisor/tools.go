@@ -94,15 +94,17 @@ func FileExists(path string) bool {
 //
 // Git is told never to ask anything. An app has no terminal to ask in, and a
 // credential prompt with nowhere to appear is an update that hangs forever.
+// For the same reason no pager: a recipe that calls git log with a terminal
+// attached would otherwise stop in less and wait for a key.
 func BuildEnv(tools Tools, base []string) []string {
-	env := make([]string, 0, len(base)+3)
+	env := make([]string, 0, len(base)+5)
 	var path string
 	for _, kv := range base {
 		k, v, _ := strings.Cut(kv, "=")
 		switch k {
 		case "PATH":
 			path = v
-		case "GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND":
+		case "GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND", "GIT_PAGER", "PAGER":
 			// Replaced below.
 		default:
 			env = append(env, kv)
@@ -121,6 +123,8 @@ func BuildEnv(tools Tools, base []string) []string {
 		"PATH="+strings.Join(dirs, ":"),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+		"GIT_PAGER=cat",
+		"PAGER=cat",
 	)
 	return env
 }
