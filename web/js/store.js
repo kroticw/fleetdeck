@@ -97,11 +97,34 @@ function open() {
   current.onerror = () => current.close();
 }
 
+// A page the browser keeps in its back/forward cache keeps its sockets open:
+// measured on a stand, a switch to another fleet left the page of the fleet
+// left alive in Chrome's cache, its terminals still attached to that fleet's
+// sessions. The page therefore lets go of its socket when it is hidden, with
+// no reconnect — the terminals do the same (liveterminal.js) — and a page the
+// cache brings back reloads, so it is opened afresh rather than resumed on
+// sockets it no longer has.
+function releaseWhenHidden() {
+  globalThis.addEventListener?.("pagehide", () => {
+    const current = socket;
+    socket = null;
+    if (!current) return;
+    current.onmessage = null;
+    current.onclose = null;
+    current.onerror = null;
+    current.close();
+  });
+  globalThis.addEventListener?.("pageshow", (event) => {
+    if (event.persisted) location.reload();
+  });
+}
+
 export function connect() {
   // Re-entrant by construction otherwise: connect() is exported and every
   // module imports it. A second call must be a no-op, or two independent
   // sockets end up pushing into the same store.
   if (started) return;
   started = true;
+  releaseWhenHidden();
   open();
 }

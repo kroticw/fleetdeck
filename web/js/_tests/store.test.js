@@ -266,6 +266,45 @@ test("the socket scheme follows the page: ws from http, wss from https", async (
   assert.equal(sockets[0].url, "wss://panel.example/ws");
 });
 
+// A page in the browser's back/forward cache keeps its sockets open (measured
+// on a stand, see liveterminal.js). The snapshot socket lets go when the page
+// is hidden and does not come back by itself; a page restored from the cache
+// reloads, so it never shows a fleet it left from a socket that went quiet.
+function pageEvents() {
+  const page = new EventTarget();
+  globalThis.addEventListener = page.addEventListener.bind(page);
+  return page;
+}
+
+function pageshow(persisted) {
+  const e = new Event("pageshow");
+  e.persisted = persisted;
+  return e;
+}
+
+test("a hidden page lets go of the snapshot socket and does not reconnect", async () => {
+  const page = pageEvents();
+  const store = await freshStore("pagehide");
+  store.connect();
+  page.dispatchEvent(new Event("pagehide"));
+  assert.equal(sockets[0].closed, true, "the snapshot socket stayed open on a hidden page");
+  assert.equal(timers.length, 0, "a hidden page scheduled a reconnect");
+  delete globalThis.addEventListener;
+});
+
+test("a page restored from the back/forward cache reloads, and only that page", async () => {
+  const page = pageEvents();
+  let reloads = 0;
+  const store = await freshStore("pageshow");
+  globalThis.location.reload = () => (reloads += 1);
+  store.connect();
+  page.dispatchEvent(pageshow(false));
+  assert.equal(reloads, 0, "an ordinary first show reloaded the page");
+  page.dispatchEvent(pageshow(true));
+  assert.equal(reloads, 1);
+  delete globalThis.addEventListener;
+});
+
 test("the socket asks for the fleet the tab's address names", async () => {
   const store = await freshStore("fleet", { search: "?fleet=%D0%BE%D1%81%D0%BD%D0%BE%D0%B2%D0%BD%D0%BE%D0%B9" });
   store.connect();

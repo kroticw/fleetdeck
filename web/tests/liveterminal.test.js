@@ -176,6 +176,46 @@ test("stopping leaves no attempt armed", async () => {
   assert.equal(sockets.length, 1, "a stopped terminal opened a socket");
 });
 
+// A page the browser keeps in its back/forward cache keeps its sockets open —
+// measured on a stand: switching fleets left both terminals of the fleet left
+// attached, Chrome restoring that page later as "BackForwardCacheRestore". A
+// terminal nobody can see must not keep a session's size, so it lets go when
+// the page is hidden, and does not try to come back on its own.
+test("a hidden page lets go of its terminal and does not try again", async () => {
+  const page = new EventTarget();
+  const terminals = installTerminal();
+  const timers = fakeTimers();
+  const host = dom.element("div");
+  dom.document.body.appendChild(host);
+  const live = createLiveTerminal(host, "sess-1", { timers, reconnect: true, page });
+  live.open();
+  await settle();
+  ready(sockets[0]);
+  page.dispatchEvent(new Event("pagehide"));
+  assert.deepEqual(sockets[0].closedWith, { code: 1000, reason: "panel closed" });
+  assert.equal(timers.count(), 0, "a hidden page's terminal armed a reconnect");
+  assert.equal(terminals.length, 1);
+});
+
+test("a stopped terminal no longer listens for the page being hidden", async () => {
+  // A page open for hours opens and stops many terminals; each one left
+  // listening would be one more closure the page keeps for nothing.
+  const listening = new Set();
+  const page = {
+    addEventListener: (type, fn) => listening.add(`${type}:${fn.name || "anonymous"}`) && (page.fn = fn),
+    removeEventListener: (type, fn) => fn === page.fn && listening.delete(`${type}:${fn.name || "anonymous"}`),
+  };
+  installTerminal();
+  const host = dom.element("div");
+  dom.document.body.appendChild(host);
+  const live = createLiveTerminal(host, "sess-1", { timers: fakeTimers(), page });
+  live.open();
+  await settle();
+  assert.equal(listening.size, 1, "an open terminal listens for the page being hidden");
+  live.stop();
+  assert.equal(listening.size, 0, "a stopped terminal still listens");
+});
+
 test("a terminal that does not reconnect leaves a lost connection lost", async () => {
   const run = await start({ reconnect: false });
   ready(sockets[0]);
