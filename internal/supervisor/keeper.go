@@ -90,12 +90,42 @@ type Keeper struct {
 	// OnEvent is called from Run's goroutine.
 	OnEvent func(Event)
 
-	once  sync.Once
-	retry chan struct{}
+	once      sync.Once
+	retry     chan struct{}
+	restartTo chan string
+	binMu     sync.Mutex
 }
 
 func (k *Keeper) init() {
-	k.once.Do(func() { k.retry = make(chan struct{}, 1) })
+	k.once.Do(func() {
+		k.retry = make(chan struct{}, 1)
+		k.restartTo = make(chan string, 1)
+	})
+}
+
+// Restart asks the keeper to stop its panel and start it again from bin. It
+// takes effect while the keeper's own panel answers, and is not counted as
+// the panel dying: an update restarts the panel from the canonical path once
+// the new bundle is there, so the panel reports where it really runs from.
+func (k *Keeper) Restart(bin string) {
+	k.init()
+	select {
+	case <-k.restartTo:
+	default:
+	}
+	k.restartTo <- bin
+}
+
+func (k *Keeper) bin() string {
+	k.binMu.Lock()
+	defer k.binMu.Unlock()
+	return k.Bin
+}
+
+func (k *Keeper) setBin(bin string) {
+	k.binMu.Lock()
+	defer k.binMu.Unlock()
+	k.Bin = bin
 }
 
 // Retry asks a keeper that has reported Failed to try again.
@@ -153,7 +183,7 @@ func (k *Keeper) waitUntilGone(ctx context.Context) {
 // runOwn starts the keeper's panel and stays with it until it exits. It
 // reports false when the keeper should stop and wait for Retry.
 func (k *Keeper) runOwn(ctx context.Context) bool {
-	p, err := StartPanel(k.Bin, k.Args, k.Env, k.LogPath)
+	p, err := StartPanel(k.bin(), k.Args, k.Env, k.LogPath)
 	if err != nil {
 		k.fail(err, "")
 		return false
@@ -187,6 +217,10 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 	k.emit(Event{State: Answering, Ours: true, PID: p.PID})
 	select {
 	case <-ctx.Done():
+		return true
+	case bin := <-k.restartTo:
+		k.setBin(bin)
+		_ = p.Stop(stopGrace)
 		return true
 	case <-p.Exited():
 		return k.afterExit(ctx, p, started, true)

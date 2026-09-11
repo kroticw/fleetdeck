@@ -58,6 +58,8 @@ func runHelper(mode string) {
 		// in its configuration other than the one the window asks.
 		select {}
 	}
+	exe, _ := os.Executable()
+	fmt.Println("helper exe: " + exe)
 	fmt.Println("helper stdout: listening on " + addr)
 	fmt.Fprintln(os.Stderr, "helper stderr: listening on "+addr)
 	ln, err := net.Listen("tcp", addr)
