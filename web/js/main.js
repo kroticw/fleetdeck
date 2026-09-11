@@ -7,7 +7,7 @@ import { createCardPanel } from "./card.js";
 import { createSections } from "./sections.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
-import { renderBuildBanner } from "./buildcheck.js";
+import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
 import { t } from "./i18n.js";
 
 subscribe((snap, connected) => {
@@ -24,11 +24,17 @@ const cardPanel = createCardPanel(document.getElementById("card-panel"));
 // stays open for hours, so a leak here is not academic.
 let stopSession = null;
 
+// Which session is open is written down as it changes, so a reload -- the
+// window reloads the page by itself when the panel under it is replaced --
+// opens it again instead of closing it under the operator. See buildcheck.js.
+const storage = pageStorage();
+
 function closeSession() {
   if (stopSession) stopSession();
   stopSession = null;
   sessionPanel.hidden = true;
   sessionPanel.replaceChildren();
+  rememberOpenSession(storage, "");
 }
 
 function openSession(short) {
@@ -38,6 +44,7 @@ function openSession(short) {
   // be up, or they cover each other in whichever order they happened to open.
   cardPanel.close();
   stopSession = renderSession(sessionPanel, short, closeSession);
+  rememberOpenSession(storage, short);
 }
 
 // The card control in a session row opens that session's card, through the same
@@ -73,3 +80,9 @@ createSections(document.getElementById("tabs"), [
 ]);
 
 connect();
+
+// The session that was open when this page was last loaded, reopened once.
+// Nothing above opens or closes a session while the module loads, so the
+// stored value is still the one the previous page left.
+const reopen = takeOpenSession(storage);
+if (reopen) openSession(reopen);
