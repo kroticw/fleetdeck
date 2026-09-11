@@ -21,18 +21,6 @@ const (
 	// human types in one go while still being small enough that a runaway client
 	// cannot make the panel buffer anything interesting.
 	maxBodyBytes = 1 << 20
-
-	// defaultTailBytes is how much of a session's terminal is returned when the
-	// request does not ask. It is a byte count, not a line count: the daemon's
-	// attach stream is raw bytes. 64 KiB comfortably holds a full 80x24 screen
-	// even when most of it is escape sequences.
-	defaultTailBytes = 64 << 10
-
-	// maxTailBytes caps what a request may ask for. It matches the 1 MB ceiling
-	// the daemon client enforces on an attach read regardless of tail, so asking
-	// for more is not refused — it is simply clamped to what the daemon could
-	// ever return anyway.
-	maxTailBytes = 1 << 20
 )
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -139,71 +127,6 @@ func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (d Deps) handleSendKeys(w http.ResponseWriter, r *http.Request) {
-	if d.SendKeys == nil {
-		unavailable(w, "a daemon")
-		return
-	}
-	var body struct {
-		Keys string `json:"keys"`
-	}
-	if !decodeBody(w, r, &body) {
-		return
-	}
-	if err := d.SendKeys(r.PathValue("id"), body.Keys); err != nil {
-		fail(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (d Deps) handleScreen(w http.ResponseWriter, r *http.Request) {
-	if d.ReadScreen == nil {
-		unavailable(w, "a daemon")
-		return
-	}
-	tail, err := parseTail(r.URL.Query().Get("tail"))
-	if err != nil {
-		fail(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	res := d.ReadScreen(r.PathValue("id"), tail)
-	if res.Err != nil {
-		// The partial screen goes out with the error rather than being dropped:
-		// an attach that ends in an eviction still carries everything read before
-		// it, and that prefix is often the very output the operator was looking
-		// at. Both fields are always present so a client never has to guess.
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error":  res.Err.Error(),
-			"screen": res.Screen,
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"screen": res.Screen})
-}
-
-// parseTail turns the ?tail= parameter into a byte count. An absent parameter
-// takes the default; a non-numeric or negative one is refused outright rather
-// than silently becoming something else; anything above the maximum is clamped.
-// Zero is legal and means "no limit of ours", leaving the daemon's own cap the
-// only ceiling.
-func parseTail(raw string) (int, error) {
-	if raw == "" {
-		return defaultTailBytes, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("tail must be a number of bytes, got %q", raw)
-	}
-	if n < 0 {
-		return 0, fmt.Errorf("tail must not be negative, got %d", n)
-	}
-	if n > maxTailBytes {
-		return maxTailBytes, nil
-	}
-	return n, nil
 }
 
 func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {

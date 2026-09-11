@@ -24,7 +24,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode/utf8"
 )
 
 // maxLineBytes bounds how much of a single line — a response, or the attach header —
@@ -510,7 +509,8 @@ func keyFileModeIsSecure(mode os.FileMode) bool {
 
 // stubKeyFunc is substituted for a nil key function passed to New, so every call site
 // that needs a key gets a clean ErrNoControlKey instead of a nil-pointer panic. Reading
-// (ListSessions, Ping, ReadScreen) never needs a key at all, so it is unaffected.
+// (ListSessions, Ping, and an attach that only reads) never needs a key at all, so it is
+// unaffected.
 func stubKeyFunc() (string, error) {
 	return "", ErrNoControlKey
 }
@@ -524,19 +524,7 @@ type Client struct {
 	keyFunc         func() (string, error)
 	protoMu         sync.Mutex    // guards proto; the client is shared between a poller and request handlers
 	proto           int           // cached protocol number from ping
-	readIdleTimeout time.Duration // idle timeout for ReadScreen (default 300ms)
 	defaultDeadline time.Duration // default deadline when context carries none (default 30s)
-
-	// screenDeadline is the ceiling ReadScreen derives its own context deadline from,
-	// when the caller's context carries none. It is deliberately its own field, not
-	// defaultDeadline: defaultDeadline is sized for request/response operations
-	// (ping, list, reply) where 30s is a sensible worst case, but ReadScreen's stream
-	// never ends on its own for a working session (a redrawing spinner keeps it from
-	// ever going idle), so running it to a 30s ceiling means every poll of a busy
-	// session blocks for 30 seconds against a poll_interval whose own default is 2s. A
-	// field, rather than a constant, lets tests shorten it without touching
-	// defaultDeadline and thereby changing what request/response calls are measuring.
-	screenDeadline time.Duration // default 2s
 }
 
 // New creates a daemon client bound to an explicit socket path for its whole lifetime.
@@ -554,9 +542,7 @@ func New(socketPath string, key func() (string, error)) *Client {
 	return &Client{
 		socketPath:      socketPath,
 		keyFunc:         key,
-		readIdleTimeout: 300 * time.Millisecond,
 		defaultDeadline: 30 * time.Second,
-		screenDeadline:  2 * time.Second,
 	}
 }
 
@@ -587,57 +573,10 @@ func Discover(key func() (string, error)) *Client {
 	return c
 }
 
-// attachResizesSessionToCols and attachResizesSessionToRows are the terminal geometry every attach this client opens asks
-// for. The name is the warning: on this daemon, asking is resizing.
-//
-// What the daemon does with it, measured against CLI 2.1.263 by reading the session's
-// own tty device (`stty -a < /dev/ttysNNN`) rather than the frames it sends, because a
-// frame is rendered per attacher and says nothing about the PTY behind it:
-//
-//   - a freshly created background session runs at 200x50;
-//   - one ReadScreen at 80x24 leaves the session's PTY at 80x24;
-//   - a viewer that stays attached at 190x45 puts it at 190x45, and every other
-//     attacher's stream turns 190 columns wide at that moment;
-//   - when an attacher disconnects, the daemon restores the size from whoever is still
-//     attached; with nobody left, the last size stays.
-//
-// So the panel polling this once a second makes a watched session's width flap: with a
-// 190-column viewer attached, eight seconds of polling produced nine 190→80→190
-// transitions, against zero over the same span with the polling stopped.
-//
-// The field is required, and zero is not a way to opt out. An attach sent without
-// cols/rows, or with zeros, is answered
-// {"ok":false,"error":"malformed request: Invalid input","code":"EUNKNOWN"} and no
-// screen comes back at all.
-//
-// Nor can a client send the size the session already has: the daemon reports it
-// nowhere. It is absent from a `list` record (see the field list in
-// docs/protocol/daemon-control-socket.md section 4), and a successful attach header
-// carries, in full:
-//
-//	{"ok":true,"op":"attach","decModes":[1000,1002,1003,1006,2004,2031,1004],
-//	 "via":"spare","booting":false,"tempo":"active","state":"running",
-//	 "cached":false,"stale":false,"workerCliVersion":"2.1.263"}
-//
-// Which leaves the value below tied to something else: 80x24 is also what the panel's
-// own xterm.js is built with (web/js/session.js, no cols/rows and no fit addon, so the
-// library's own 80x24 default stands). The two are one pair. The screen tab looks
-// correct today because the panel shrinks the session to the width of its own
-// terminal, so changing this number alone does not remove a defect — it trades a
-// resized session for an unreadable one: a 190-column frame drawn into an 80-column
-// xterm loses its header, splits one horizontal rule into four, and wraps the end of
-// the status line onto the start of the next. Whatever moves this must move the
-// browser's terminal in the same change.
-const (
-	attachResizesSessionToCols = 80
-	attachResizesSessionToRows = 24
-)
-
 // dialTimeout bounds the connect(2) call itself, independently of whatever deadline
 // (if any) ctx carries. context.Background() is the documented call path for
-// ListSessions, SendText, SendKeys and Ping — only ReadScreen derives a context
-// deadline of its own — so a Dialer with no Timeout of its own left the connect phase
-// completely unbounded on every one of those paths: a daemon that is alive but not
+// ListSessions, SendText and Ping, so a Dialer with no Timeout of its own left the
+// connect phase completely unbounded on every one of those paths: a daemon that is alive but not
 // accepting connections (a full backlog, a wedged process) can make connect(2) on an
 // AF_UNIX socket block indefinitely, and nothing could break a caller's goroutine out
 // of that. resolveSocketCandidate already dials its liveness probes with
@@ -861,16 +800,10 @@ func readAttachHeader(reader *bufio.Reader) error {
 // the daemon otherwise dropped it. See docs/protocol/daemon-control-socket.md section 8.
 const ekickedPrefix = "EKICKED:"
 
-// maxAttachBytes bounds how much of an attach stream either path (screen-reading or
-// key-sending) accumulates before trimming from the front. It is shared so both build
-// on the same ceiling instead of drifting apart.
-const maxAttachBytes = 1024 * 1024
-
 // kickSearchWindow bounds how far back from the end of the accumulated stream
 // findKickOpener scans for the kick marker's last occurrence. This is a PERFORMANCE
-// bound on scanning up to maxAttachBytes (1MB), not a correctness condition: it exists
-// only so bytes.LastIndex does not walk a megabyte backwards on every ReadScreen or
-// SendKeys call, on every poll tick, for every session.
+// bound, not a correctness condition: it exists only so bytes.LastIndex does not walk
+// a whole read chunk (up to attachReadChunk) backwards on every read of a held attach.
 //
 // It contributes nothing to correctness because maxKickReasonBytes's length check
 // already excludes everything this bound would: a marker at offset pos leaves a
@@ -879,27 +812,24 @@ const maxAttachBytes = 1024 * 1024
 // maxKickReasonBytes+len(ekickedPrefix) (264) is smaller than kickSearchWindow (512),
 // any position this window would exclude (further than 512 bytes from the end) is
 // already further than 264 bytes from the end, and so is already rejected by the
-// length check regardless of whether the search ever looks there. Coverage confirms
-// this directly: the `len(data) > kickSearchWindow` branch below never executes across
-// the whole test suite, and per this argument it cannot change the outcome if it did —
-// removing the bound entirely (searching the full buffer every time) was verified to
-// leave every test, including the whole daemon package, passing identically. An
-// earlier version of this comment, and of docs/protocol/daemon-control-socket.md
+// length check regardless of whether the search ever looks there. An earlier version
+// of this comment, and of docs/protocol/daemon-control-socket.md
 // section 8, claimed this window was a third, independently necessary correctness
 // condition alongside "connection closed" and "reason looks like a reason" — that
 // claim was false, demonstrated false by the argument above, and has been removed;
-// the real rule has two conditions, not three (see detectKick).
+// the real rule has two conditions, not three (see parseKickedMarker).
 const kickSearchWindow = 512
 
 // maxKickReasonBytes bounds how long the text following the marker may be and still
 // pass as the daemon's own short, human-readable reason. See the second condition in
-// detectKick's comment.
+// parseKickedMarker's comment.
 const maxKickReasonBytes = 256
 
 // findKickOpener returns the offset of the kick marker's last occurrence within
 // kickSearchWindow bytes of the end of data, or -1 if there is none there. The window
 // is a performance bound only (see kickSearchWindow's comment) — it never changes the
-// answer detectKick ultimately reaches, only how much of data must be scanned to reach it.
+// answer parseKickedMarker ultimately reaches, only how much of data must be scanned to
+// reach it.
 func findKickOpener(data []byte) int {
 	start := 0
 	if len(data) > kickSearchWindow {
@@ -912,11 +842,36 @@ func findKickOpener(data []byte) int {
 	return start + rel
 }
 
-// parseKickedMarker reports whether data contains the daemon's kick marker (see
-// findKickOpener) followed by text that looks like a real reason rather than a screen
-// (see detectKick's second condition). On success it returns the prefix — everything
-// before the marker, i.e. the screen accumulated up to that point — and the reason
-// text, trimmed of surrounding whitespace.
+// parseKickedMarker decides, once an attach connection has closed, whether it was
+// kicked, given the bytes still held back when it closed. On a real kick it returns the
+// prefix — everything before the marker, the screen accumulated up to that point — and
+// the reason text, trimmed of surrounding whitespace.
+//
+// Per docs/protocol/daemon-control-socket.md section 8, detection must never fire on the
+// marker's mere presence, or even on its *last occurrence* alone — only on it being the
+// *last thing sent*, immediately before a close. Two conditions are required together;
+// each is individually insufficient:
+//
+//  1. The connection actually closed. This condition is the caller's: Attachment.Read
+//     calls this only when a read fails. A live session's attach stays open indefinitely
+//     and may display the literal marker text as part of its own screen (see
+//     TestAttachMarkerOnAnOpenStreamIsNotAKickUntilItCloses and
+//     TestAttachMarkerShownOnScreenIsNotHeldBack). Without it, any screen containing the
+//     text at all would be misreported as a kick.
+//  2. What follows the marker's last occurrence is short and contains no newline. The
+//     daemon's real reason text is the last thing it sends, flush against whatever PTY
+//     bytes were already in flight — never anchored to offset 0 or a line boundary, so
+//     anchoring the search there would miss it (TestAttachKickFlushAgainstTheScreenIsFound).
+//     A screen that merely *displays* the marker almost always has more rendered content
+//     after it, typically containing at least one newline, or is simply too long to be a
+//     reason (TestAttachMarkerShownOnScreenIsNotAKick, TestAttachLongTextAfterTheMarkerIsNotAKick).
+//
+// The held attach applies condition 2 twice: kickHoldback while the stream is open,
+// deciding what to hold back, and this function at the close, on what was held. So
+// through Attach, what reaches this function has always passed kickHoldback first, and
+// neither copy can be seen failing there while the other stands. Each is pinned on its
+// own (TestParseKickedMarkerRules,
+// TestKickHoldbackHoldsACompleteMarkerOnlyWhileItCouldBeAReason).
 func parseKickedMarker(data []byte) (prefix []byte, detail string, kicked bool) {
 	pos := findKickOpener(data)
 	if pos < 0 {
@@ -932,187 +887,6 @@ func parseKickedMarker(data []byte) (prefix []byte, detail string, kicked bool) 
 		return nil, "", false
 	}
 	return data[:pos], strings.TrimSpace(string(rest)), true
-}
-
-// detectKick decides whether an attach stream was actually kicked, given the bytes
-// accumulated and whether the connection was observed to close (as opposed to going
-// idle or hitting a deadline). On a real kick it also returns prefix, the screen
-// accumulated before the marker, so a caller need not discard it.
-//
-// Per docs/protocol/daemon-control-socket.md section 8, detection must never fire on the
-// marker's mere presence, or even on its *last occurrence* alone — only on it being the
-// *last thing sent*, immediately before a close. Two conditions are required together;
-// each is individually insufficient:
-//
-//  1. The connection actually closed. An ordinary, live, polled session's attach
-//     connection stays open indefinitely (it only closes on an actual kick or the
-//     session exiting), and may happen to display the literal marker text as part of
-//     its own screen content — see TestReadScreenMidScreenEkickedTextIsNotAKick. Without
-//     this, any screen containing the text at all would be misreported as a kick.
-//  2. What follows the marker's last occurrence is short and contains no newline (see
-//     parseKickedMarker). The daemon's real reason text is the last thing it sends,
-//     flush against whatever PTY bytes were already in flight — never anchored to
-//     offset 0 or a line boundary, so anchoring the search there would miss it. A
-//     screen that merely *displays* the marker almost always has more rendered content
-//     after it, typically containing at least one newline, or is simply too long to be
-//     a reason — see TestReadScreenGrepDisplayingMarkerThenExitIsNotAKick, where the
-//     last occurrence of "EKICKED:" is immediately followed by " marker\n$ exit\n".
-//
-// A bounded search window (kickSearchWindow) is applied when locating the marker's
-// last occurrence, purely to avoid scanning up to maxAttachBytes (1MB) on every call —
-// see its own comment for why this changes nothing about which streams condition 2
-// accepts or rejects. An earlier version of this comment, and of the protocol
-// document, described the window as a third, independently necessary condition; it
-// is not, and is not treated as one here.
-//
-// Condition 1 has a deliberate, accepted residual risk: it requires closed to have been
-// observed, not merely a marker sitting at the very end of an idle or deadline-truncated
-// buffer. If the daemon writes the marker and closes the connection, but the EOF that
-// close produces is not read before ReadScreen's own ceiling (screenDeadline, 2s by
-// default) fires, collectUntilIdleOrClosed reports closed == false and this function
-// declines to call it a kick — the marker's bytes are then returned as ordinary screen
-// content instead of ErrKicked. This is deliberately not fixed by treating an
-// end-of-buffer marker as sufficient on its own, because that reintroduces exactly the
-// failure mode condition 2 exists to rule out (a screen that merely displays the
-// marker and then goes idle for an unrelated reason). The risk is accepted because the
-// daemon writes the marker immediately before closing — the two arrive in close
-// succession on the wire — so a close that is not observed within a multi-second
-// ceiling is expected to be rare; see TestReadScreenMarkerAtEndWithoutObservedCloseIsNotAKick
-// for the documented, tested behaviour in that case.
-func detectKick(data []byte, closed bool) (prefix []byte, detail string, kicked bool) {
-	if !closed {
-		return nil, "", false
-	}
-	return parseKickedMarker(data)
-}
-
-// collectUntilIdleOrClosed reads from reader into an accumulating buffer until: the
-// connection is observed to close (a non-timeout read error), the stream has gone idle
-// for idleTimeout with no new bytes, ctx's deadline is reached, or until is reached. The
-// buffer is capped at maxBytes, trimming from the front (never splitting a UTF-8 rune)
-// on overflow.
-//
-// until is a hard ceiling on the whole call, independent of ctx and of idleTimeout: it
-// is checked directly, not derived from lastReadTime, so it cannot be pushed back by a
-// session that keeps printing more often than idleTimeout. Without it, a chatty session
-// (one that redraws faster than idleTimeout) resets the sliding idle deadline on every
-// byte and, when ctx carries no deadline of its own (context.Background(), SendKeys'
-// documented call path), nothing ever ends the loop — the call blocks for as long as the
-// session keeps talking, or forever. A zero until means no such ceiling is in effect;
-// both of this function's callers always pass a non-zero one today.
-//
-// When idleFromStart is false, the idle timer starts only once the first byte has been
-// read. The wait for that first byte is bounded by ctx's own deadline when it has one;
-// when it does not, it is bounded instead by firstByteDeadline (min(now+idleTimeout,
-// until), computed once below) rather than being left unbounded — a slow first paint (a
-// loaded machine, a large screen buffer) is normal, not idle, but it still cannot wait
-// forever. ReadScreen wants this. When idleFromStart is true, the idle window is in effect from
-// the very first call, exactly like an ordinary idle detection with no special-cased
-// "first byte" grace period; SendKeys wants this, since silence for the whole window is
-// itself the expected, successful outcome for most key deliveries (see
-// docs/protocol/daemon-control-socket.md section 3, under `attach`: there is no
-// per-delivery acknowledgement).
-//
-// Both ReadScreen and SendKeys build their kick detection on this one routine (paired
-// with detectKick) so they cannot drift apart on what counts as "the connection closing"
-// or "the marker arrived" — a marker or a close split across two reads is caught either
-// way, since data accumulates across calls to this function. They share the same
-// until-based hard ceiling for the same reason: a bound that lives in only one of two
-// otherwise-identical call paths is a bound the other path does not actually have.
-func collectUntilIdleOrClosed(ctx context.Context, conn net.Conn, reader *bufio.Reader, idleTimeout time.Duration, maxBytes int, idleFromStart bool, until time.Time) (data []byte, closed bool) {
-	lastReadTime := time.Now()
-	gotFirstByte := idleFromStart
-	ctxDeadline, hasCtxDeadline := ctx.Deadline()
-	hasUntil := !until.IsZero()
-
-	// firstByteDeadline bounds the wait for the very first byte when neither a context
-	// deadline nor the idle window is yet in effect (only reachable when idleFromStart
-	// is false and ctx carries no deadline). It is computed once, here, rather than as
-	// time.Now().Add(idleTimeout) inside the loop: recomputing it from "now" on every
-	// iteration pushed the deadline forward by another idleTimeout each time a read
-	// timed out, so the loop never actually reached it — contradicting the "bounded
-	// wait" this is meant to provide and looping forever against a silent connection.
-	firstByteDeadline := lastReadTime.Add(idleTimeout)
-	if hasUntil && until.Before(firstByteDeadline) {
-		firstByteDeadline = until
-	}
-
-	buf := make([]byte, 4096)
-	for {
-		if ctx.Err() != nil {
-			return data, false
-		}
-		// until is checked directly against the clock, not folded into lastReadTime-
-		// relative math, precisely so a stream of incoming bytes can never push it back
-		// — see this function's own doc comment above.
-		if hasUntil && !time.Now().Before(until) {
-			return data, false
-		}
-
-		var readDeadline time.Time
-		if hasCtxDeadline {
-			readDeadline = ctxDeadline
-		}
-		if gotFirstByte {
-			idleDeadline := lastReadTime.Add(idleTimeout)
-			if readDeadline.IsZero() || idleDeadline.Before(readDeadline) {
-				readDeadline = idleDeadline
-			}
-		}
-		if readDeadline.IsZero() {
-			// Neither a context deadline nor an idle window is in effect yet (only
-			// reachable when idleFromStart is false and ctx carries no deadline). Use
-			// the fixed firstByteDeadline computed once above, rather than a fresh
-			// time.Now().Add(idleTimeout) — see its comment for why that recomputation
-			// never actually bounded anything.
-			readDeadline = firstByteDeadline
-		}
-		if hasUntil && until.Before(readDeadline) {
-			readDeadline = until
-		}
-		if err := conn.SetReadDeadline(readDeadline); err != nil {
-			return data, false
-		}
-
-		n, err := reader.Read(buf)
-		if n > 0 {
-			gotFirstByte = true
-			lastReadTime = time.Now()
-			data = append(data, buf[:n]...)
-			if maxBytes > 0 && len(data) > maxBytes {
-				data = trimToRuneBoundary(data[len(data)-maxBytes:])
-			}
-		}
-
-		if err != nil {
-			// errors.As, not a plain err.(net.Error) type assertion: the latter only
-			// works today because bufio.Reader.Read happens to return the transport
-			// error unwrapped. A wrapped timeout error would fall straight into the
-			// "connection closed" branch below and, combined with the kick detection
-			// this feeds, turn an ordinary timeout into a false kick.
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				if gotFirstByte {
-					if time.Since(lastReadTime) >= idleTimeout {
-						return data, false
-					}
-					continue
-				}
-				// Still waiting for the first byte. hasCtxDeadline == true would have
-				// made readDeadline the context's own deadline above, and ctx.Err()
-				// catches that at the top of the next iteration; here, with no context
-				// deadline, firstByteDeadline is the only thing bounding this wait, so
-				// it must be checked explicitly.
-				if !hasCtxDeadline && !time.Now().Before(firstByteDeadline) {
-					return data, false
-				}
-				continue
-			}
-			// A real error (EOF, connection reset, etc.) means the daemon closed the
-			// connection.
-			return data, true
-		}
-	}
 }
 
 // daemonError converts a daemon error response into a typed error.
@@ -1298,13 +1072,12 @@ func (c *Client) listSessionsOnce(ctx context.Context) ([]Session, error) {
 func (c *Client) SendText(ctx context.Context, session, text string) error {
 	err := c.sendTextOnce(ctx, session, text)
 	if isProtoErr(err) {
-		// Unlike SendKeys' retry (see its own comment), this one cannot double-deliver
-		// the text: sendTextOnce writes the whole request — proto field and text
-		// together — in a single write (see writeRequest), and the daemon checks proto
-		// before it ever executes `reply` (docs/protocol/daemon-control-socket.md
-		// section 2). An EPROTO response therefore always means the text was never
-		// delivered at all, not that it might already be in flight on a separate write
-		// the way SendKeys' key bytes are. Retrying here is safe for that reason.
+		// This retry cannot double-deliver the text: sendTextOnce writes the whole
+		// request — proto field and text together — in a single write (see
+		// writeRequest), and the daemon checks proto before it ever executes `reply`
+		// (docs/protocol/daemon-control-socket.md section 2). An EPROTO response
+		// therefore always means the text was never delivered at all. Retrying here is
+		// safe for that reason.
 		c.invalidateProto()
 		err = c.sendTextOnce(ctx, session, text)
 	}
@@ -1354,363 +1127,5 @@ func (c *Client) sendTextOnce(ctx context.Context, session, text string) error {
 		return daemonError(resp)
 	}
 
-	return nil
-}
-
-// trimToRuneBoundary drops every leading byte that cannot begin a valid UTF-8 rune, so a
-// byte-oriented truncation never hands the caller a slice that begins mid-rune. The
-// leading bytes it drops are usually the tail end of a multi-byte sequence whose start
-// was cut off by whatever truncation produced b, but the check itself does not
-// distinguish that case from any other invalid leading byte: a lone 0x80-0xFF byte from
-// non-UTF-8 PTY output, which was never part of a cut multi-byte rune at all, is
-// stripped exactly the same way.
-//
-// It does NOT reconstruct or otherwise protect a truncated ANSI escape sequence. Cutting
-// off the front of, say, "\x1b[31m" leaves "[31m" — every byte of which is a perfectly
-// valid, ordinary rune, so this function has no reason to touch it — and it will render
-// as the literal text "[31m" rather than a colour change. Fixing that would require
-// parsing escape sequences, which this function deliberately does not attempt: it only
-// protects rune boundaries, nothing more.
-func trimToRuneBoundary(b []byte) []byte {
-	for len(b) > 0 {
-		r, size := utf8.DecodeRune(b)
-		if r != utf8.RuneError || size != 1 {
-			break
-		}
-		b = b[1:]
-	}
-	return b
-}
-
-// ReadScreen sends an attach request and reads the terminal stream.
-// It returns the raw bytes that follow the JSON header line in the result's Screen
-// field, alongside Err — see ScreenResult's own comment for why they are bundled in one
-// struct rather than returned as two loose values.
-// tail limits how much of the tail to keep; tail <= 0 keeps everything read, which is
-// itself never more than maxAttachBytes (1 MB) — collectUntilIdleOrClosed enforces that
-// cap regardless of tail. This limit applies identically whether or not the stream ends
-// in a kick (see ErrKicked): a caller that asked for the last few bytes gets the last
-// few bytes of the accumulated prefix either way, not the whole thing.
-//
-// A longer deadline on ctx is not honoured past c.screenDeadline (2s by default):
-// readScreenWithDeadline always shortens ctx's deadline to at most c.screenDeadline
-// from now, whether ctx carried no deadline of its own or a longer one, and that same
-// shortened deadline governs both the attach header read and the streaming
-// idle-detection loop that follows it (see readScreenWithDeadline's own comment). A
-// caller passing a 30-second context to read a continuously-printing session, or to a
-// daemon that never answers at all, still gets back in about 2 seconds, not 30 — this
-// is intentional, but it means ctx's deadline is a ceiling this method can shorten,
-// never one it lets a caller stretch.
-//
-// The geometry this attach asks for is attachResizesSessionToCols/Rows — read their comment
-// before changing anything about the size of what comes back. Asking is resizing:
-// the size travels into the session's real PTY and every other viewer of that
-// session sees it.
-func (c *Client) ReadScreen(ctx context.Context, session string, tail int) ScreenResult {
-	out, err := c.readScreenWithDeadline(ctx, session, tail)
-	if isProtoErr(err) {
-		c.invalidateProto()
-		out, err = c.readScreenWithDeadline(ctx, session, tail)
-	}
-	return ScreenResult{Screen: out, Err: err}
-}
-
-// ScreenResult is ReadScreen's result. Screen always holds whatever screen content was
-// accumulated, even when Err is a non-nil *ErrKicked carrying the prefix read before the
-// eviction (see ErrKicked's own comment) — bundled in one struct, rather than returned
-// as two loose values, so an idiomatic `if err != nil { return err }` cannot compile
-// against Err alone while silently discarding Screen. A caller that only cares about
-// success can still write `result.Err` and stop there; the field it is dropping is at
-// least visible in the source rather than implicit in a two-value return.
-type ScreenResult struct {
-	Screen string
-	Err    error
-}
-
-// readScreenWithDeadline derives a fresh context for exactly one call to readScreenOnce,
-// whose deadline is at most c.screenDeadline from now — shortening ctx's own deadline
-// when it has one and is further out, and supplying one outright when it has none. It
-// is factored out of ReadScreen precisely so an EPROTO retry gets a full budget of its
-// own: the previous shape derived the deadline once, before the first attempt, and
-// reused that same context for the retry — leaving it with whatever time happened to
-// remain after the first attempt's own dial-and-response, sometimes almost none.
-//
-// This one ceiling is the shared boundary between the two phases readScreenOnce runs in
-// sequence — reading the attach header (readAttachHeader, via c.setDeadline) and then
-// reading the streamed bytes that follow (collectUntilIdleOrClosed, whose own until
-// parameter readScreenOnce derives from this same ctx.Deadline()) — precisely so a
-// change that bounds one phase cannot silently leave the other riding whatever ctx the
-// caller happened to pass in. Before this, only the streaming phase was bounded by
-// c.screenDeadline when ctx carried its own (longer) deadline; the header phase used
-// ctx's deadline unshortened, so a caller's five-minute context let a daemon that
-// accepts the connection and never writes the header hold ReadScreen open for five
-// minutes (see TestReadScreenHeaderHangHonorsScreenDeadline).
-//
-// The read loop below (inside readScreenOnce, via collectUntilIdleOrClosed) races this
-// absolute deadline against the idle timeout. context.Background() is the documented
-// call path for a session poller, so ctx.Deadline() is typically absent and this
-// derivation shortens nothing in that case, only supplies the ceiling. This uses
-// c.screenDeadline, not c.defaultDeadline: a chatty session (a redrawing spinner, say)
-// never goes idle, so the idle timeout never fires and this derived deadline is what
-// actually ends the read. defaultDeadline's 30s is sized for request/response
-// operations, not for bounding a stream read on every poll tick.
-func (c *Client) readScreenWithDeadline(ctx context.Context, session string, tail int) (string, error) {
-	ctx, cancel := c.withScreenDeadline(ctx)
-	defer cancel()
-	return c.readScreenOnce(ctx, session, tail)
-}
-
-// withScreenDeadline returns a context whose deadline is at most c.screenDeadline from
-// now, shortening ctx's own deadline when it has one that is further out, and supplying
-// c.screenDeadline outright when it has none. This is the one ceiling ReadScreen and
-// SendKeys each derive once and then share between their attach-header phase and their
-// streaming phase — see readScreenWithDeadline's own comment for why a single, shared
-// ceiling matters: a bound computed separately for each phase is a bound a future
-// change can add to one and forget on the other.
-func (c *Client) withScreenDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
-	ceiling := time.Now().Add(c.screenDeadline)
-	if d, ok := ctx.Deadline(); ok && d.Before(ceiling) {
-		ceiling = d
-	}
-	return context.WithDeadline(ctx, ceiling)
-}
-
-func (c *Client) readScreenOnce(ctx context.Context, session string, tail int) (string, error) {
-	proto, err := c.ensureProto(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = conn.Close() }()
-
-	c.setDeadline(ctx, conn)
-
-	// Reading never needs a key (docs/protocol/daemon-control-socket.md section 3:
-	// auth is optional for attach, and the daemon rejects only a *wrong* key, never a
-	// missing one). Deliberately never fetch or send one here: a stale control.key —
-	// wrong, rotated, whatever — would otherwise make the daemon reject with EAUTH an
-	// attach that would have succeeded fine with no auth field at all, breaking a read
-	// path that has no actual need for a credential.
-	req := map[string]interface{}{
-		"proto": proto,
-		"op":    "attach",
-		"short": session,
-		"cols":  attachResizesSessionToCols,
-		"rows":  attachResizesSessionToRows,
-	}
-
-	if err := c.writeRequest(conn, req); err != nil {
-		return "", err
-	}
-
-	// Read the JSON header line; a refused attach (EAUTH, ENOJOB, ...) must surface
-	// as a typed error rather than an empty screen.
-	reader := bufio.NewReader(conn)
-	if err := readAttachHeader(reader); err != nil {
-		return "", err
-	}
-
-	// Read the streamed bytes with idle detection. The daemon keeps the attach
-	// connection open for an ordinary, live session, so this needs to detect when the
-	// stream goes idle (no data for c.readIdleTimeout, counted from the first byte
-	// received — see collectUntilIdleOrClosed) and return promptly, not wait for the
-	// full context deadline; a session that prints continuously (a spinner, say) never
-	// goes idle, so the explicit ceiling below is what ends the read in that case, and
-	// what has been accumulated by then is a real, valid partial screen.
-	//
-	// The ceiling passed here is ctx's own deadline, not a fresh time.Now().Add(c.screen
-	// Deadline()) computed at this point: readScreenWithDeadline already set ctx's
-	// deadline to exactly that ceiling before the header phase above ran, so reading it
-	// back is the same instant the header read was already bounded by, not a second,
-	// independently-computed one that could drift from it. See withScreenDeadline's
-	// comment for why the two phases must share one ceiling rather than each deriving
-	// its own.
-	until, ok := ctx.Deadline()
-	if !ok {
-		// Unreachable via ReadScreen (readScreenWithDeadline always sets one), but
-		// readScreenOnce is unexported and package-internal: a direct call with a
-		// bare context.Background() genuinely reaches this branch — see
-		// TestReadScreenOnceWithNoContextDeadlineFallsBackToScreenDeadline, which is
-		// exactly that other caller.
-		until = time.Now().Add(c.screenDeadline)
-	}
-	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, false, until)
-
-	// The kick marker means this attach connection was evicted (see detectKick's
-	// comment for the two-condition rule, and
-	// docs/protocol/daemon-control-socket.md section 8). A real kick is a normal event —
-	// someone attached by hand and took over — so the screen accumulated before the
-	// marker is still returned alongside the typed error, rather than thrown away: the
-	// caller loses nothing it would otherwise have had. It is still subject to the same
-	// tail limit as the ordinary path below — the caller asked for the last tail bytes
-	// either way, and a kick is common enough (see docs/protocol/daemon-control-socket.md
-	// section 8) that skipping the limit here could hand back up to the full
-	// maxAttachBytes instead of what was actually requested.
-	if prefix, detail, kicked := detectKick(data, closed); kicked {
-		return string(applyTail(prefix, tail)), &ErrKicked{Detail: detail}
-	}
-
-	return string(applyTail(data, tail)), nil
-}
-
-// applyTail trims data to at most the last tail bytes, without splitting a UTF-8 rune.
-// tail <= 0 means keep everything data already holds — which is itself never more than
-// maxAttachBytes, a limit collectUntilIdleOrClosed enforces regardless of tail.
-func applyTail(data []byte, tail int) []byte {
-	if tail > 0 && len(data) > tail {
-		return trimToRuneBoundary(data[len(data)-tail:])
-	}
-	return data
-}
-
-// SendKeys sends key bytes via an attach connection. This is a write into a live
-// session's terminal, exactly like SendText: it requires a control key and returns
-// ErrNoControlKey before dialling when none is available, rather than silently
-// degrading to some read-only behaviour.
-//
-// Like ReadScreen, the attach-header phase and the streaming phase that follows it
-// share one ceiling of at most c.screenDeadline from now, derived once inside
-// sendKeysOnce (see withScreenDeadline) rather than each phase computing, or
-// inheriting, its own — ctx's own deadline, when it has one, is shortened the same way.
-//
-// SendKeys must never be retried blindly by a caller. The attach protocol offers no
-// per-delivery acknowledgement (see sendKeysOnce), so even the errors it returns do not
-// always mean "nothing happened": a write failure ([ErrKeysNotDelivered]) can still have
-// delivered a partial prefix of the keys to the daemon before failing. A caller that
-// retries on any non-nil error risks typing into the session a second time.
-func (c *Client) SendKeys(ctx context.Context, session, keys string) error {
-	err := c.sendKeysOnce(ctx, session, keys)
-	if isProtoErr(err) {
-		// EPROTO always surfaces at (or before) the attach header, strictly before
-		// any key bytes are written, so retrying here never double-delivers keys. Each
-		// call to sendKeysOnce derives its own screenDeadline-based ceiling from ctx
-		// (see withScreenDeadline), so this retry gets a full budget of its own rather
-		// than whatever remained of the first attempt's.
-		c.invalidateProto()
-		err = c.sendKeysOnce(ctx, session, keys)
-	}
-	return err
-}
-
-func (c *Client) sendKeysOnce(ctx context.Context, session, keys string) error {
-	// Get the control key first, before making any network calls. SendKeys types into
-	// a live session's PTY exactly like SendText types into its prompt; both are
-	// writes, and both must be refused the same way when no key is available, rather
-	// than silently attaching with no auth and relying on the daemon's peer-uid check
-	// alone.
-	key, err := c.keyFunc()
-	if err != nil {
-		return wrapNoControlKey(err)
-	}
-
-	// Shortened to at most c.screenDeadline from now before anything else runs — see
-	// withScreenDeadline's comment — so this one ceiling governs ensureProto's ping,
-	// dial, the header read below, and collectUntilIdleOrClosed's until parameter
-	// later, not just the last two. Before this, ensureProto and dial ran under ctx
-	// exactly as the caller passed it in, and withScreenDeadline was applied only
-	// afterwards: on a client's first call (no proto cached yet) against a wedged
-	// daemon, ensureProto's own ping could hold this open for up to c.defaultDeadline
-	// (30s in production) — SendKeys' documented context.Background() call path
-	// carries no deadline of its own — before the much shorter window meant to govern
-	// this whole call even began (see TestSendKeysPingHangHonorsScreenDeadline).
-	// readScreenOnce has no equivalent gap: readScreenWithDeadline already shortens
-	// ctx before ever calling it, so ensureProto and dial run under the short ceiling
-	// there too; this brings sendKeysOnce in line with that rather than leaving two
-	// functions built for the same purpose disagreeing on which ceiling governs their
-	// shared first phase.
-	ctx, cancel := c.withScreenDeadline(ctx)
-	defer cancel()
-
-	proto, err := c.ensureProto(ctx)
-	if err != nil {
-		return err
-	}
-
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close() }()
-
-	c.setDeadline(ctx, conn)
-
-	req := map[string]interface{}{
-		"proto": proto,
-		"op":    "attach",
-		"short": session,
-		"cols":  attachResizesSessionToCols,
-		"rows":  attachResizesSessionToRows,
-		"auth":  key,
-	}
-
-	if err := c.writeRequest(conn, req); err != nil {
-		return err
-	}
-
-	// Read the JSON header line; a refused attach must not look like delivered input.
-	reader := bufio.NewReader(conn)
-	if err := readAttachHeader(reader); err != nil {
-		return err
-	}
-
-	// Write the key bytes. A failure here means delivery could not be confirmed at
-	// all — not that nothing happened: a stream socket write can fail after writing a
-	// partial prefix of its argument, so the daemon may already have received some of
-	// the keys. Report it distinctly from a post-write close (below), which is a
-	// confirmed delivery.
-	if _, err := conn.Write([]byte(keys)); err != nil {
-		return &ErrKeysNotDelivered{Err: err}
-	}
-
-	// The attach protocol has no per-delivery acknowledgement past the header:
-	// verified against the daemon's own attach handler (CLI 2.1.263) — once the
-	// header is accepted, the connection's incoming bytes are wired straight into
-	// the session's PTY writer with no reply message of any kind. The only signal
-	// observable from here is the connection closing, which happens if another
-	// attacher kicks this one or the session exits — not a per-key acknowledgement.
-	// Give the daemon a brief window to produce that signal, accumulating across
-	// reads with the same routine ReadScreen uses (see collectUntilIdleOrClosed) so a
-	// kick marker split across two reads, or arriving after a chunk of ordinary PTY
-	// bytes, is never missed the way a single fixed-size read would miss it.
-	//
-	// The window's ceiling is ctx's own deadline — the same c.screenDeadline-based one
-	// withScreenDeadline set above and that already governed the header read — not a
-	// second, independently computed time.Now().Add(c.screenDeadline) that could drift
-	// from it. Without a ceiling at all here, a session that keeps printing more often
-	// than c.readIdleTimeout resets collectUntilIdleOrClosed's sliding idle deadline on
-	// every byte, and this would never return: it would block for the whole of the
-	// session's current turn, or forever. c.screenDeadline is the same field ReadScreen
-	// derives its own ceiling from, so this window and ReadScreen's own cannot silently
-	// drift apart from each other.
-	// withScreenDeadline above always returns a ctx with a deadline set, unlike
-	// readScreenOnce's identically-shaped read below (called directly by a test, not
-	// only through ReadScreen, so its own ctx-carries-no-deadline case is genuinely
-	// reachable and kept). Here that case cannot occur — ctx was reassigned to
-	// withScreenDeadline's result a few lines above, unconditionally, inside this same
-	// function — so there is no second, defensive branch to fall back through.
-	until, _ := ctx.Deadline()
-	data, closed := collectUntilIdleOrClosed(ctx, conn, reader, c.readIdleTimeout, maxAttachBytes, true, until)
-
-	if _, detail, kicked := detectKick(data, closed); kicked {
-		// The keys were written to the connection, but a kick observed right after
-		// means another attacher may have taken over before (or as) the daemon
-		// applied them — unlike a plain close with no marker, this is a signal worth
-		// surfacing distinctly rather than folding into "success". SendKeys has no use
-		// for the accumulated prefix (there is no screen to hand back on this path).
-		return &ErrKicked{Detail: detail}
-	}
-
-	// Either silence within the window (the best confirmation this protocol offers for
-	// an ordinary delivery), or the connection closing with no kick marker present.
-	// The write above already succeeded, so the keys are known to have reached the
-	// daemon; the connection closing now — because the session finished its turn, or
-	// another attacher took over, both of which can happen as a direct consequence of
-	// the very keys just delivered — is a normal outcome, not a delivery failure.
-	// Reporting it as an error here would invite a retry at a higher layer, and a
-	// retry means typing into a live session twice.
 	return nil
 }

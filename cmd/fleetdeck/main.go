@@ -428,10 +428,8 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 // is a function internal/server calls and none of them reaches back here.
 func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
 	return server.Deps{
-		Snapshot:   p.snapshot,
-		SendText:   func(session, text string) error { return dc.SendText(ctx, session, text) },
-		SendKeys:   func(session, keys string) error { return dc.SendKeys(ctx, session, keys) },
-		ReadScreen: func(session string, tail int) daemon.ScreenResult { return dc.ReadScreen(ctx, session, tail) },
+		Snapshot: p.snapshot,
+		SendText: func(session, text string) error { return dc.SendText(ctx, session, text) },
 		// Returned through a local, not directly: a nil *daemon.Attachment put straight
 		// into the interface would be a non-nil Terminal holding nothing.
 		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {

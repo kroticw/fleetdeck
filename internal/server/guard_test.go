@@ -41,9 +41,7 @@ func TestAForeignOriginIsRefusedOnEveryRoute(t *testing.T) {
 		request func() *http.Request
 	}{
 		{"snapshot", func() *http.Request { return httptest.NewRequest(http.MethodGet, "/api/snapshot", nil) }},
-		{"screen", func() *http.Request { return httptest.NewRequest(http.MethodGet, "/api/sessions/a/screen", nil) }},
 		{"text", func() *http.Request { return jsonRequest(http.MethodPost, "/api/sessions/a/text", `{"text":"hi"}`) }},
-		{"keys", func() *http.Request { return jsonRequest(http.MethodPost, "/api/sessions/a/keys", `{"keys":"x"}`) }},
 		{"cards", func() *http.Request {
 			return jsonRequest(http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"done"}`)
 		}},

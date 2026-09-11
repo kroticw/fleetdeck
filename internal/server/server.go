@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
-	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 )
@@ -58,14 +57,6 @@ type Deps struct {
 	// parameter because the daemon's reply operation has no such option — see
 	// daemon.Client.SendText.
 	SendText func(session, text string) error
-
-	// SendKeys writes raw key bytes into a session's terminal.
-	SendKeys func(session, keys string) error
-
-	// ReadScreen reads the tail of a session's terminal. It returns
-	// daemon.ScreenResult rather than (string, error) so a failed read cannot
-	// silently discard the bytes it did collect.
-	ReadScreen func(session string, tail int) daemon.ScreenResult
 
 	// SetCardField writes one field of one card, and records it in the board's git
 	// history if the caller wired it to do so. The server does not decide which
@@ -214,8 +205,6 @@ func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
 	mux.HandleFunc("POST /api/sessions/{id}/text", d.handleSendText)
-	mux.HandleFunc("POST /api/sessions/{id}/keys", d.handleSendKeys)
-	mux.HandleFunc("GET /api/sessions/{id}/screen", d.handleScreen)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("GET /api/docs", d.handleDocsList)
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)

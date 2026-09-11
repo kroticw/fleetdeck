@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, sendText, sendKeys, fetchDigest, fetchScreen, fetchTerminalToken } from "../js/api.js";
+import { setCardField, sendText, fetchDigest, fetchTerminalToken } from "../js/api.js";
 
 let calls = [];
 let realFetch;
@@ -116,9 +116,8 @@ test("sending text posts JSON and says it submits", async () => {
 
 test("a session id is escaped into the path", async () => {
   stubFetch(answer({ status: 204 }));
-  await sendKeys("a/b c", "escape");
-  assert.equal(calls[0].url, "/api/sessions/a%2Fb%20c/keys");
-  assert.deepEqual(JSON.parse(calls[0].init.body), { keys: "escape" });
+  await sendText("a/b c", "hi");
+  assert.equal(calls[0].url, "/api/sessions/a%2Fb%20c/text");
 });
 
 test("a refused session write throws", async () => {
@@ -126,9 +125,9 @@ test("a refused session write throws", async () => {
   await assert.rejects(() => sendText("a1b2c3", "hello"), { message: "daemon: EAUTH" });
 });
 
-// The two reads. They are here rather than in the snapshot because a transcript
-// digest and a terminal screen are too large to push to every tab once a second
-// and are wanted only while somebody has a session open.
+// The digest is read here rather than taken from the snapshot because it is too
+// large to push to every tab once a second and is wanted only while somebody has
+// a session open.
 
 test("a digest asks for the limit it was given and comes back as steps", async () => {
   const steps = [{ role: "user", text: "go" }, { role: "assistant", text: "done" }];
@@ -155,27 +154,6 @@ test("a refusal whose body is not JSON still produces words, not undefined", asy
     assert.equal(err.message, "Not Found");
     return true;
   });
-});
-
-test("a screen read sends no tail: the byte count belongs to the server", async () => {
-  // tail is a byte count, not a line count. A number picked here would be a
-  // second copy of one the server already holds, free to drift — and one chosen
-  // as though it counted lines would truncate the screen to a fragment.
-  stubFetch(answer({ status: 200, body: { screen: "$ " } }));
-
-  assert.deepEqual(await fetchScreen("abc123"), { screen: "$ ", error: "" });
-  assert.equal(calls[0].url, "/api/sessions/abc123/screen");
-});
-
-test("a screen read that failed keeps the bytes that did arrive", async () => {
-  // handleScreen sends both fields on a failure on purpose: the output read
-  // before the attach broke is often the very output being looked at. Throwing
-  // it away would be the panel discarding what the server took care to send.
-  stubFetch(
-    answer({ status: 502, statusText: "Bad Gateway", body: { error: "attach evicted", screen: "half a line" } }),
-  );
-
-  assert.deepEqual(await fetchScreen("abc123"), { screen: "half a line", error: "attach evicted" });
 });
 
 // The token a terminal socket presents first. Read fresh for every socket, and
