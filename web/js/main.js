@@ -7,6 +7,7 @@ import { createCardPanel } from "./card.js";
 import { createSections } from "./sections.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
+import { renderBuildBanner } from "./buildcheck.js";
 import { t } from "./i18n.js";
 
 subscribe((snap, connected) => {
@@ -44,6 +45,7 @@ function openSession(short) {
 // had no handler of its own and the click reached the row.
 renderSessions(document.getElementById("sessions"), openSession, cardPanel.open);
 renderHeader(document.getElementById("header"));
+renderBuildBanner(document.getElementById("build-banner"), subscribe);
 renderBoard(document.getElementById("board"), cardPanel.open);
 renderOrchestrator(document.getElementById("orchestrator"));
 
