@@ -16,6 +16,8 @@ go install github.com/kroticw/fleetdeck/cmd/fleetdeck@latest
 go install github.com/kroticw/fleetdeck/cmd/fleetdeck-status@latest
 ```
 
+A third way exists for the one case those two do not cover: something outside this repository that references a fixed path directly, rather than wherever a build happened to land — a launch agent's `ProgramArguments`, or Claude Code's `statusLine.command` composed with another statusline tool. `make install` builds both binaries fresh and writes them to `INSTALLDIR` (default `~/.local/bin`), replacing whatever already sits there under those two names and printing each binary's own sha256 so the replacement is verifiable rather than assumed.
+
 ## Running `fleetdeck init`
 
 `fleetdeck init` sets up four things and prints one line per step, including the steps it refused and why:
