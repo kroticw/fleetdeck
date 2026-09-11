@@ -17,11 +17,14 @@ import (
 )
 
 // twoFleetPanel is a configuration file with two fleets made the way init
-// makes them — workspaces with git boards — and a collector over it.
+// makes them — workspaces with git boards — and a collector over it. A card
+// started on either board is committed, so git gets a home of its own: an
+// identity, and neither the machine's configuration nor its signing key.
 //
 //	A: top-level, orchestrator a0000001      B: listed, orchestrator b0000001
 func twoFleetPanel(t *testing.T, jobs string) (cfgPath string, cfg config.Config, c *Collector, roots [2]string) {
 	t.Helper()
+	isolateHome(t)
 	dir := t.TempDir()
 	for i, name := range []string{"A", "B"} {
 		roots[i] = filepath.Join(dir, name)
