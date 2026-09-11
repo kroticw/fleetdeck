@@ -416,6 +416,46 @@ body {
   color: var(--text);
 }
 
+/* The update button, only in the fleetdeck window (web/js/update.js): the
+ * same weight as the theme toggle, with the step it is on as quiet text
+ * beside it, and a failure worded the way usage problems are. */
+.update-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.update-button {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.update-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.update-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.update-status {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.update-status.update-problem {
+  color: var(--text);
+  font-weight: 600;
+}
+
 main {
   flex: 1;
   display: flex;

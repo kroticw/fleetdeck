@@ -96,6 +96,7 @@ func runHelper(mode string) {
 	}
 	exe, _ := os.Executable()
 	fmt.Printf("helper ppid: %d\n", os.Getppid())
+	fmt.Println("helper exe: " + exe)
 	fmt.Println("helper stdout: listening on " + addr)
 	fmt.Fprintln(os.Stderr, "helper stderr: listening on "+addr)
 	ln, err := net.Listen("tcp", addr)
@@ -105,9 +106,15 @@ func runHelper(mode string) {
 	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/snapshot" {
 			// What a real panel's snapshot carries, as far as telling a panel
-			// from any other program goes -- and whose window it says it is.
+			// from any other program goes -- whose window it says it is, and
+			// its revision, which a built stand-in finds in a file its build
+			// put beside it.
 			owner, _ := strconv.Atoi(os.Getenv(reportOwnerEnv))
-			fmt.Fprintf(w, `{"build":{"web":"stand-in","executable":%q,"owner":%d}}`, exe, owner)
+			rev := ""
+			if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "revision")); err == nil {
+				rev = strings.TrimSpace(string(b))
+			}
+			fmt.Fprintf(w, `{"build":{"web":"stand-in","executable":%q,"owner":%d,"revision":%q}}`, exe, owner, rev)
 			return
 		}
 		fmt.Fprint(w, "panel")

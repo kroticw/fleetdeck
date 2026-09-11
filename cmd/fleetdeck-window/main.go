@@ -66,6 +66,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 
 	webview "github.com/webview/webview_go"
 
@@ -101,6 +103,8 @@ func reloadBinding(dispatch func(func()), navigate func(string), url string) fun
 
 func main() {
 	url := flag.String("url", defaultURL, "URL the panel answers on")
+	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
+	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	flag.Parse()
 
 	exe, err := os.Executable()
@@ -129,7 +133,7 @@ func main() {
 	installMenu()
 	installCloseToHide(w.Window())
 
-	scr := &screen{url: *url, logPath: logPath}
+	scr := &screen{url: *url, logPath: logPath, takingOver: *handover != ""}
 	keeper := &supervisor.Keeper{
 		URL:  *url,
 		Bin:  panelBinary(exe),
@@ -143,8 +147,16 @@ func main() {
 		MinUptime:    launchdThrottle,
 		Poll:         takenPanelPoll,
 	}
+	// A takeover watches the keeper's events too, while it runs.
+	var takeoverEvents atomic.Pointer[chan supervisor.Event]
 	keeper.OnEvent = func(e supervisor.Event) {
 		log.Printf("fleetdeck-window: panel %s", describeEvent(e))
+		if ch := takeoverEvents.Load(); ch != nil {
+			select {
+			case *ch <- e:
+			default:
+			}
+		}
 		w.Dispatch(func() {
 			navigate, page := scr.on(e)
 			switch {
@@ -155,6 +167,7 @@ func main() {
 			}
 		})
 	}
+	kept := &keeperRun{k: keeper}
 
 	// Bound before the first navigation, so the page finds them from its very
 	// first load.
@@ -164,23 +177,147 @@ func main() {
 	if err := w.Bind(startBindingName, keeper.Retry); err != nil {
 		log.Printf("fleetdeck-window: the failure page will not be able to start the panel again: %v", err)
 	}
+	if why := updateUnavailable(treeDir, exe); why != "" {
+		log.Printf("fleetdeck-window: no update button: %s", why)
+	} else {
+		canonical := canonicalBundle(exe, *toldCanonical)
+		var updating atomic.Bool
+		if err := w.Bind(updateBindingName, func() {
+			// The page takes no second press either, and the update itself holds
+			// a lock for a second window or a terminal; this is the third guard,
+			// for this window's own binding.
+			if !updating.CompareAndSwap(false, true) {
+				return
+			}
+			go func() {
+				defer updating.Store(false)
+				runUpdate(w, *url, canonical, kept)
+			}()
+		}); err != nil {
+			log.Printf("fleetdeck-window: the update button will not work: %v", err)
+		}
+	}
 
 	// The window's own ground until the keeper's first word, which comes within
 	// one look at the URL.
 	w.SetHtml(blankPage)
-	ctx, cancel := context.WithCancel(context.Background())
-	kept := make(chan struct{})
-	go func() {
-		keeper.Run(ctx)
-		close(kept)
-	}()
+	if *handover != "" {
+		events := make(chan supervisor.Event, 16)
+		takeoverEvents.Store(&events)
+		tk := &supervisor.Takeover{
+			URL:         *url,
+			Handover:    supervisor.Handover{Path: *handover},
+			Staged:      bundleOf(exe),
+			Canonical:   *toldCanonical,
+			Revision:    ownRevision(),
+			Keeper:      keeper,
+			StartKeeper: kept.start,
+			Events:      events,
+		}
+		go func() {
+			err := tk.Run(context.Background())
+			takeoverEvents.Store(nil)
+			if err != nil {
+				// The old window resumes the panel it had; this one goes.
+				log.Printf("fleetdeck-window: taking the panel over failed: %v", err)
+				kept.stop()
+				w.Dispatch(w.Terminate)
+			}
+		}()
+	} else {
+		kept.start()
+	}
 
 	w.Run()
 	// The keeper stops here; the panel goes by itself once this process has
 	// ended, having watched it. Waiting for the keeper keeps it from
 	// dispatching onto a window already destroyed.
-	cancel()
-	<-kept
+	kept.stop()
+}
+
+// runUpdate is one press of the update button: supervisor.Update, with each
+// step handed to the page, and the window quitting once the new one has taken
+// over.
+func runUpdate(w webview.WebView, url, canonical string, kept *keeperRun) {
+	say := func(p supervisor.Progress) {
+		w.Dispatch(func() { w.Eval(progressScript(p)) })
+	}
+	tools, err := supervisor.FindTools(supervisor.Tools{Git: gitPath, Go: goPath, Make: makePath}, supervisor.FileExists)
+	if err != nil {
+		say(resultProgress(err))
+		return
+	}
+	lockPath, err := supervisor.LockPath(treeDir)
+	if err != nil {
+		say(resultProgress(err))
+		return
+	}
+	var last string
+	u := &supervisor.Update{
+		Tree: &supervisor.Tree{
+			Dir: treeDir, Remote: updateRemote, Branch: updateBranch,
+			Git: tools.Git, Env: supervisor.BuildEnv(tools, os.Environ()),
+		},
+		Tools:           tools,
+		Env:             os.Environ(),
+		Canonical:       canonical,
+		Running:         ownRevision(),
+		LockPath:        lockPath,
+		HandoverTimeout: handoverTimeout,
+		Launch:          launchNewWindow(url),
+		Pause:           kept.stop,
+		Resume:          kept.start,
+		Progress: func(p supervisor.Progress) {
+			last = p.Step
+			log.Printf("fleetdeck-window: update %s %s", p.Step, p.Detail)
+			say(p)
+		},
+	}
+	if err := u.Run(context.Background()); err != nil {
+		log.Printf("fleetdeck-window: update: %v", err)
+		say(resultProgress(err))
+		return
+	}
+	if last == "done" {
+		// The new window has the panel and the canonical path; this one, and
+		// the bundle it ran from, are the previous version.
+		w.Dispatch(w.Terminate)
+	}
+}
+
+// keeperRun starts and stops the keeper's Run: an update pauses it while the
+// new window takes the panel over, and resumes it when that fails.
+type keeperRun struct {
+	k      *supervisor.Keeper
+	mu     sync.Mutex
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (r *keeperRun) start() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	r.cancel, r.done = cancel, done
+	go func() {
+		r.k.Run(ctx)
+		close(done)
+	}()
+}
+
+func (r *keeperRun) stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cancel == nil {
+		return
+	}
+	r.cancel()
+	<-r.done
+	r.cancel = nil
 }
 
 func describeEvent(e supervisor.Event) string {

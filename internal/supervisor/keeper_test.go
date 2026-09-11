@@ -247,6 +247,40 @@ func TestTheKeeperRestartsAPanelThatDiesAfterItsMinimumUptime(t *testing.T) {
 	}
 }
 
+// After an update swaps the new bundle into place, the new window restarts
+// its panel from the canonical path, so the panel reports where it really
+// runs from. That restart is asked for, and is not taken for a panel that
+// died too soon -- MinUptime here is a minute.
+func TestTheKeeperRestartsItsPanelFromANewPathWhenAsked(t *testing.T) {
+	addr := freeAddr(t)
+	moved := filepath.Join(t.TempDir(), "fleetdeck")
+	self, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moved, self, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := newKeeper(t, "listen", addr)
+	k.MinUptime = time.Minute
+	r := run(t, k)
+	r.expect(t, Starting, 5*time.Second)
+	first := r.expect(t, Answering, 10*time.Second)
+
+	k.Restart(moved)
+	again := r.expect(t, Starting, 10*time.Second)
+	if again.PID == first.PID {
+		t.Fatalf("Starting pid %d, the panel that was asked to restart", again.PID)
+	}
+	if up := r.expect(t, Answering, 10*time.Second); !up.Ours || up.PID != again.PID {
+		t.Fatalf("Answering %+v, want the restarted panel", up)
+	}
+	data, _ := os.ReadFile(k.LogPath)
+	if !strings.Contains(string(data), "helper exe: "+moved) {
+		t.Fatalf("the restarted panel did not run from %s; the log holds:\n%s", moved, data)
+	}
+}
+
 // ... and, again as launchd does, a panel that dies soon after starting is not
 // started over and over: the keeper stops, says why, and waits to be asked.
 func TestTheKeeperGivesUpOnAPanelThatDiesTooSoonAndWaitsToBeAsked(t *testing.T) {

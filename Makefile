@@ -186,13 +186,24 @@ run: build
 # bundle built and run locally (this target does both) never picks up the
 # com.apple.quarantine attribute Gatekeeper acts on, so none is needed for that case.
 # If this bundle is ever downloaded instead of built locally, it will.
+#
+# The window is told, at build time, the tree it was built from and the tools
+# that built it: its update button brings that tree forward and runs this very
+# target again, from an app started from the Dock, where there is no PATH to
+# find them by (see internal/supervisor). Single quotes around each value, so
+# a path with a space in it stays one value.
+WINDOW_LDFLAGS = $(LDFLAGS) \
+	-X 'main.treeDir=$(CURDIR)' \
+	-X 'main.gitPath=$(shell command -v git)' \
+	-X 'main.goPath=$(shell go env GOROOT)/bin/go' \
+	-X 'main.makePath=$(shell command -v make)'
 window-app:
 	@rm -rf "$(BINDIR)/fleetdeck.app"
 	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/MacOS"
 	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/Resources"
 	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
 	@cp cmd/fleetdeck-window/icon.icns "$(BINDIR)/fleetdeck.app/Contents/Resources/icon.icns"
-	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
+	go build -ldflags "$(WINDOW_LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
 	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
 	@echo "window-app: $(BINDIR)/fleetdeck.app (open it, or: open $(BINDIR)/fleetdeck.app)"
 
