@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
@@ -18,6 +19,13 @@ const panelBinaryName = "fleetdeck"
 
 func panelBinary(windowExecutable string) string {
 	return filepath.Join(filepath.Dir(windowExecutable), panelBinaryName)
+}
+
+// panelArgs tells the panel which window it belongs to: the panel refuses to
+// start unless that window is its parent, and goes when it is gone
+// (cmd/fleetdeck, owner.go).
+func panelArgs(window int) []string {
+	return []string{"--owner-pid", strconv.Itoa(window)}
 }
 
 // How long a panel the window started has to answer: the worst of ten
@@ -45,7 +53,7 @@ const (
 const launchdThrottle = 10 * time.Second
 
 // takenPanelPoll is how often a panel the window did not start -- one from a
-// launch agent, a terminal, a window that has since quit -- is checked for
+// launch agent, a terminal, another window still running -- is checked for
 // being gone.
 const takenPanelPoll = 2 * time.Second
 
@@ -85,6 +93,11 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 			return false, ""
 		}
 		return false, startingPage(s.url)
+	case supervisor.Replacing:
+		// Covers the panel's page too: that page belongs to the panel being
+		// stopped, and it would only go offline under the person.
+		s.showingPanel = false
+		return false, replacingPage(e.Detail)
 	case supervisor.Failed:
 		s.showingPanel = false
 		return false, failedPage(s.url, e, s.logPath)
@@ -151,6 +164,25 @@ func startingPage(url string) string {
 </script>
 </body>
 </html>`, pageStyle, html.EscapeString(url), waitShownAfter.Milliseconds())
+}
+
+// replacingPage is shown while a panel an earlier window left behind is being
+// stopped, for the window to start its own. whose says why it is replaced.
+func replacingPage(whose string) string {
+	return fmt.Sprintf(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fleetdeck</title>
+%s
+</head>
+<body>
+<main>
+  <h1>Заменяю панель</h1>
+  <p>На месте панели отвечала панель, оставленная прежним окном: %s. Окно останавливает её и запускает свою.</p>
+</main>
+</body>
+</html>`, pageStyle, html.EscapeString(whose))
 }
 
 // failedPage says why the panel is not there, with what the panel itself last
