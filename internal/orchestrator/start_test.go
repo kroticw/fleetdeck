@@ -122,4 +122,13 @@ func TestFindClaudeLooksAtPathThenTheInstallPlaces(t *testing.T) {
 	if got, _ := FindClaude(t.TempDir(), notFound, []string{extra}); got != extra {
 		t.Errorf("FindClaude with an extra place = %q, want %q", got, extra)
 	}
+
+	// A directory that happens to be called claude is not a claude.
+	dirHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dirHome, ".local", "bin", "claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := FindClaude(dirHome, notFound, []string{extra}); got != extra {
+		t.Errorf("FindClaude past a directory named claude = %q, want %q", got, extra)
+	}
 }
