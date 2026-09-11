@@ -300,6 +300,7 @@ func main() {
 	standSocket := flag.String("stand-socket", "", "fixed daemon control-socket path for an isolated test stand: given, this panel connects ONLY to this socket and never discovers the real fleet daemon (see internal/daemon.New); required for a panel run anywhere a live fleet daemon might otherwise be found")
 	ownerPID := flag.Int("owner-pid", 0, "the fleetdeck window that started this panel, as its parent: the panel stops when that process is gone")
 	port := flag.Int("port", 0, "port to listen on instead of server.port; for a test stand, which must not take the operator's port even before it has a configuration")
+	standClaude := flag.String("stand-claude", "", "the claude an isolated test stand starts sessions with; only with -stand-socket, and without it a stand starts no sessions at all, because a real claude reaches the real fleet daemon whatever socket the panel reads")
 	flag.Parse()
 
 	// -stand-socket is the one flag whose mere presence changes what this
@@ -308,13 +309,19 @@ func main() {
 	// as "flag not given" and fall through to discovering the real daemon —
 	// see checkStandSocket and daemonClient's own docs for why that
 	// fallback does not otherwise exist as code to reach.
-	standSocketGiven := false
+	standSocketGiven, standClaudeGiven := false, false
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "stand-socket" {
+		switch f.Name {
+		case "stand-socket":
 			standSocketGiven = true
+		case "stand-claude":
+			standClaudeGiven = true
 		}
 	})
 	if err := checkStandSocket(standSocketGiven, *standSocket); err != nil {
+		log.Fatalf("fleetdeck: %v", err)
+	}
+	if err := checkStandClaude(standSocketGiven, standClaudeGiven, *standClaude); err != nil {
 		log.Fatalf("fleetdeck: %v", err)
 	}
 
@@ -323,7 +330,7 @@ func main() {
 		return
 	}
 
-	if err := runWith(runOpts{configPath: *configPath, standSocket: *standSocket, owner: *ownerPID, port: *port}); err != nil {
+	if err := runWith(runOpts{configPath: *configPath, standSocket: *standSocket, standClaude: *standClaude, owner: *ownerPID, port: *port}); err != nil {
 		log.Fatalf("fleetdeck: %v", err)
 	}
 }
@@ -373,6 +380,9 @@ func run(configPath, standSocket string, owner int) error {
 // runOpts is what the command line hands the panel.
 type runOpts struct {
 	configPath, standSocket string
+	// standClaude is the claude a stand starts sessions with; see
+	// sessionStarter.
+	standClaude string
 	// owner is the window that started the panel, or 0.
 	owner int
 	// port, when not 0, is listened on instead of server.port. A panel with no
@@ -497,6 +507,8 @@ func serve(parent context.Context, o runOpts) error {
 	}()
 
 	d := deps(ctx, p, dc, collector, cfg, o.configPath)
+	a := appointer(o, cfg, dc, collector)
+	d.OrchestratorPreview, d.Appoint = a.Preview, a.Appoint
 	if d.Build != nil {
 		// Which window this panel belongs to, for a window that finds it answering.
 		d.Build.Owner = o.owner
