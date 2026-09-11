@@ -38,7 +38,10 @@ type updateRig struct {
 	progress  []Progress
 	mu        sync.Mutex
 	newKind   string // the stand-in kind the new window's panel runs as
-	takeover  error
+	// expect, when set, is the build the new window believes it is, in place
+	// of what its bundle says.
+	expect   string
+	takeover error
 }
 
 func newUpdateRig(t *testing.T) *updateRig {
@@ -108,6 +111,9 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 	rev, err := os.ReadFile(filepath.Join(filepath.Dir(PanelIn(staged)), "revision"))
 	if err != nil {
 		return nil, err
+	}
+	if r.expect != "" {
+		rev = []byte(r.expect)
 	}
 	events := make(chan Event, 16)
 	k := &Keeper{
@@ -248,6 +254,25 @@ func TestAFailedHandoverLeavesTheOldBundleAndPanel(t *testing.T) {
 		if s == "handover:swapped" || s == "done" {
 			t.Fatalf("steps %v: a failed handover swapped or finished", r.steps())
 		}
+	}
+}
+
+// A new panel that answers, but with another build than the new window is,
+// is not the proof the swap waits for: the canonical bundle stays, the staged
+// panel is stopped, and the old one answers again.
+func TestANewPanelOfAnotherBuildIsNotSwappedIn(t *testing.T) {
+	r := newUpdateRig(t)
+	r.expect = "a-build-that-was-not-built"
+
+	err := r.update("old").Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "a-build-that-was-not-built") {
+		t.Fatalf("update: %v; want the mismatch named", err)
+	}
+	if got := revisionIn(t, r.canonical); got != "old" {
+		t.Fatalf("the canonical bundle is %q, want the old one", got)
+	}
+	if !waitRevision(r.url, "old", 10*time.Second) {
+		t.Fatal("the old panel does not answer again: the staged one was left holding the port")
 	}
 }
 
