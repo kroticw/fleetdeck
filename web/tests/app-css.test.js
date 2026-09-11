@@ -165,22 +165,19 @@ test("the resize edge is painted and says which way it moves", () => {
   assert.match(body("\\.col-orchestrator"), /min-width:\s*\d+px/, "the column lost its pixel floor");
 });
 
-// A message row must be sized by the thread, never by its own content.
+// The orchestrator column is a terminal now, and a terminal is sized by what it
+// measures: the fit addon reads the width and height of the terminal's parent,
+// .o-term, and divides them into cells. Two ways that goes wrong without a
+// browser noticing anything. A padding on .o-term is counted as room the
+// terminal does not have, so its last column or row is cut. And a box that does
+// not take the height the head leaves — no flex: 1, or no min-height: 0 to let
+// it shrink — hands the addon a height of its content, which for a terminal not
+// yet drawn is nothing.
 //
-// The operator reported a message "cut on both sides". One declaration did all
-// of it: align-self: flex-end on a user row. In a column flex container that
-// replaces "stretch to the container" with "size to your content", and a <pre>
-// that does not wrap has a min-content width of its longest line — so a message
-// carrying a table of numbers grew to 553px inside a 390px thread. The
-// right-hand cut followed from the width; the left-hand one was not scrolling
-// at all, which is why nothing could be scrolled back: flex-end pins the
-// oversized row's right edge to the container and pushes the excess out of the
-// start side, so the row began at -161px, outside the window.
-//
-// Nothing here can see a browser. What it can do is keep the declaration from
-// coming back and keep the two floors that make the row's width the thread's
-// business, which is what the live measurement then confirms.
-test("a message row is sized by the thread, not by the longest line inside it", () => {
+// The third is the colour. xterm.css paints the viewport black, which in the
+// light theme is a black rectangle in a light column: the defect the session
+// panel was fixed for once, and the column needs the same override.
+test("the orchestrator's terminal takes the room the head leaves, and is painted by the theme", () => {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const body = (selector) => {
     const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
@@ -188,30 +185,26 @@ test("a message row is sized by the thread, not by the longest line inside it", 
     return match[2];
   };
 
-  const row = body("\\.o-msg");
-  assert.match(row, /min-width:\s*0/, ".o-msg lost its min-width floor");
-  assert.match(row, /max-width:\s*100%/, ".o-msg lost its max-width ceiling");
-
-  // The one that caused it. A row that opts out of stretching is a row sized by
-  // its widest child, which is the defect however the rest is spelled.
-  for (const selector of ["\\.o-msg", "\\.o-msg\\.o-user"]) {
-    assert.doesNotMatch(
-      body(selector),
-      /align-self/,
-      `${selector} declares align-self again — a message row must be stretched by the thread`,
-    );
+  for (const selector of ["\\.o-screen", "\\.o-term"]) {
+    assert.match(body(selector), /flex:\s*1\b/, `${selector} does not take the room the head leaves`);
+    assert.match(body(selector), /min-height:\s*0/, `${selector} cannot shrink below its content`);
   }
+  assert.doesNotMatch(body("\\.o-term"), /padding/, ".o-term has a padding the fit addon counts as room");
+
+  const { topLevel } = scan(css);
+  const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));
+  assert.ok(selectors.has("#orchestrator .xterm-viewport"), "the column's terminal keeps xterm's black viewport");
 });
 
 // The mark on the operator's own messages is the whole of the distinction
-// between his words and an agent's, in both panes and in both themes.
-test("the operator's own messages are marked in both panes, in colours that follow the theme", () => {
+// between their words and an agent's, in both themes. One pane draws steps now:
+// the orchestrator column is a terminal, and the session panel's digest tab is
+// what is left of the feed.
+test("the operator's own messages are marked, in colours that follow the theme", () => {
   const { topLevel } = scan(css);
   const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));
 
-  // Both panes, because a distinction that exists in one of them is a
-  // distinction a person cannot rely on.
-  for (const selector of [".step-typed", '.o-msg[data-typed="1"]', '.session-panel .s-step[data-typed="1"]']) {
+  for (const selector of [".step-typed", '.session-panel .s-step[data-typed="1"]']) {
     assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
   }
 
@@ -221,7 +214,7 @@ test("the operator's own messages are marked in both panes, in colours that foll
   // replaces failed. Every colour must be a token, so it changes with the theme
   // rather than being chosen for one of them.
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  for (const selector of [".step-typed", '\\.o-msg\\[data-typed="1"\\]', '\\.session-panel \\.s-step\\[data-typed="1"\\]']) {
+  for (const selector of [".step-typed", '\\.session-panel \\.s-step\\[data-typed="1"\\]']) {
     const block = new RegExp(`${selector.replace(/^\.step-typed$/, "\\.step-typed")}\\s*\\{([^}]*)\\}`).exec(stripped);
     assert.ok(block, `${selector} has no rule body to check`);
     assert.ok(

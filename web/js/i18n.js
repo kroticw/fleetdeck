@@ -38,7 +38,6 @@ const en = {
   card_broken: "unreadable card",
   session_dead: "session is dead",
   pick_orchestrator: "pick the orchestrator session",
-  write_to_orchestrator: "write to the orchestrator…",
   session_not_listed: "session is not currently listed by the daemon",
   not_pinned: "not pinned",
   no_orchestrator_thread: "no session is pinned as the orchestrator — pick one above",
@@ -88,9 +87,12 @@ const en = {
   no_steps: "no readable steps yet",
   terminal_missing: "the terminal library did not load",
 
-  // The live terminal on the screen tab (web/js/session.js). Each ending is
-  // named apart, because each asks something different of the operator: wait,
-  // look elsewhere, fix the key, start the daemon, or simply reopen the tab.
+  // The live terminal (web/js/liveterminal.js), on the session panel's screen
+  // tab and in the orchestrator column. Each ending is named apart, because each
+  // asks something different of the operator: wait, look elsewhere, fix the
+  // key, start the daemon, or simply reopen the tab. The column reconnects by
+  // itself and has no tab to reopen, so what it says while it tries again ends
+  // in terminal_reconnecting instead of in that advice.
   terminal_not_connected: "the terminal is not connected yet",
   terminal_read_only: "this terminal only shows the session: the control key is unavailable, so typing is off",
   terminal_not_fitted: "the terminal could not measure this pane, so it is drawn at its default size — and the session runs at that size too",
@@ -104,6 +106,9 @@ const en = {
   terminal_key_refused: "the daemon refused the control key",
   terminal_daemon_unavailable: "the daemon is not running",
   terminal_connection_lost: "the terminal connection was lost — reopen the tab to reconnect",
+  terminal_reconnecting: "reconnecting by itself…",
+  terminal_link_lost: "the terminal lost its connection",
+  terminal_token_stale: "the panel did not accept this terminal's token",
 
   // Attaching an image to a session (web/js/session.js, web/js/imagefile.js).
   // Both refusals are worded as what the panel will accept rather than as what
@@ -173,7 +178,6 @@ const ru = {
   card_broken: "карточка не разбирается",
   session_dead: "сессия мертва",
   pick_orchestrator: "выберите сессию оркестратора",
-  write_to_orchestrator: "написать оркестру…",
   session_not_listed: "сессия сейчас не в списке демона",
   not_pinned: "не закреплено",
   no_orchestrator_thread: "оркестратор не закреплён — выберите его выше",
@@ -215,6 +219,9 @@ const ru = {
   terminal_key_refused: "демон отверг ключ управления",
   terminal_daemon_unavailable: "демон не запущен",
   terminal_connection_lost: "связь с терминалом потеряна — откройте вкладку заново, чтобы переподключиться",
+  terminal_reconnecting: "переподключаюсь сам…",
+  terminal_link_lost: "терминал потерял связь",
+  terminal_token_stale: "пульт не принял токен этого терминала",
 
   image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
   image_too_large: "эта картинка слишком велика, чтобы её прикрепить",

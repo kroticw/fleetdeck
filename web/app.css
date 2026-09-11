@@ -519,13 +519,14 @@ main {
   word-break: break-word;
 }
 
-/* .o-error-send (a failed send or picker choice) and .o-error-digest (a
- * failed background digest poll) are independent states shown at once when
- * both apply — the send error must never be mistaken for, or hidden behind,
- * a transient poll failure. The digest one is visually quieter: it is a
- * background refresh retried automatically every few seconds, not something
- * the operator needs to act on the way a failed send does. */
-.o-error-digest {
+/* .o-error-action (a picker choice, a label or a key that did not go
+ * through) and .o-error-stream (the terminal's connection, ended or being
+ * tried again) are independent states shown at once when both apply — what
+ * the operator did must never be mistaken for, or hidden behind, a
+ * connection that is coming back by itself. The stream one is visually
+ * quieter: the terminal retries it on its own, and there is nothing for the
+ * operator to act on the way there is for a choice that was not saved. */
+.o-error-stream {
   background: color-mix(in srgb, var(--attn) 14%, var(--surface));
   border-color: color-mix(in srgb, var(--attn) 35%, var(--border));
   opacity: 0.9;
@@ -534,9 +535,9 @@ main {
 /* .o-stale marks the whole column as showing a snapshot the socket is no
  * longer confirming as live (store.js: "a stale board that looks live is
  * worse than an empty one that says it is stale"). It stays visible above
- * whatever branch draw() rendered rather than replacing it, since the last
- * known conversation and a working textarea (sendText is a plain fetch, not
- * tied to the socket) both remain genuinely useful while reconnecting. */
+ * whatever draw() rendered rather than replacing it, since the terminal
+ * holds a socket of its own and stays genuinely useful while the snapshot
+ * socket reconnects. */
 .o-stale {
   flex: none;
   margin: var(--gap) var(--gap) 0;
@@ -548,92 +549,31 @@ main {
   text-align: center;
 }
 
-.o-thread {
+/* Where the orchestrator's terminal goes (web/js/orchestrator.js), or the
+ * sentence saying why there is none. The padding is here and not on .o-term
+ * because the fit addon measures the terminal's parent — .o-term — and a
+ * padding on it would be counted as room the terminal does not have. */
+.o-screen {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: var(--gap);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  padding: 4px;
 }
 
-.o-msg {
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-hover);
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: var(--fs-sm);
-  /* A row is stretched to the thread by align-items, and this says so a second
-   * time on purpose. A flex item that stops being stretched falls back to
-   * sizing by its own content, and a <pre> that does not wrap has a min-content
-   * width of its longest line — which is how a message full of numbers came to
-   * be 553px wide inside a 390px thread. Measured; see the block below. */
-  min-width: 0;
-  max-width: 100%;
+.o-term {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.o-msg.o-user {
-  /* No align-self here, deliberately.
-   *
-   * It used to say `flex-end`, and that one declaration was the whole of a
-   * defect the operator reported as "the message is cut on BOTH sides". In a
-   * column flex container align-self replaces "stretch to the container" with
-   * "size to your content", so a message carrying a table of numbers grew to
-   * its longest line: 553px inside a 390px thread, 163px wider than its parent
-   * and the only box in the chain that was.
-   *
-   * The right-hand cut followed from the width. The left-hand one was not
-   * scrolling at all, which is why nothing could be scrolled back: flex-end
-   * pins the oversized row's RIGHT edge to the container and pushes the excess
-   * out of the START side, so the row began at -161px, outside the window,
-   * with no scroll container extending that way.
-   *
-   * It also cost nothing to remove. Measured before this was written, a user
-   * row and an answer were both 374px wide whenever the text wrapped at all —
-   * flex-end does nothing visible to anything longer than one line. What tells
-   * a person's own words from an agent's is the signature and the bar down the
-   * side, not which edge the bubble touches.
-   *
-   * With the row stretched again the <pre> inside is the one that overflows,
-   * which is what its own `overflow-x: auto` and the scroll indicator are for. */
-  background: color-mix(in srgb, var(--accent) 20%, var(--surface-hover));
-}
-
-.o-msg.o-dead {
-  opacity: 0.7;
-  font-style: italic;
-}
-
-/* .o-thread-empty is the other reason the thread can have nothing to show:
- * unlike .o-msg.o-dead (a pin the daemon no longer lists), nothing is pinned
- * at all yet. Sharing .o-msg.o-dead's own quiet, non-alarming treatment
- * rather than inventing a second one — the two are different facts but the
- * same kind of "nothing to act on here" moment. */
-.o-thread-empty {
-  opacity: 0.7;
-  font-style: italic;
-}
-
-.o-form {
-  flex: none;
+/* Nothing pinned, or a pin the daemon does not list: quiet, because neither
+ * is a failure, and different words for the two because they are different
+ * facts. */
+.o-screen-empty {
   padding: var(--gap);
-  border-top: 1px solid var(--border);
-}
-
-.o-form textarea {
-  width: 100%;
-  resize: vertical;
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 6px;
-  box-sizing: border-box;
+  opacity: 0.7;
+  font-style: italic;
 }
 
 .col-center {
@@ -1559,7 +1499,8 @@ main {
  * rule is only the DOM chrome underneath and around that canvas. Together
  * they are what stop the terminal from being a solid black rectangle inside
  * an otherwise light panel — the specific defect a live run surfaced. */
-#session-panel .xterm-viewport {
+#session-panel .xterm-viewport,
+#orchestrator .xterm-viewport {
   background-color: var(--surface);
 }
 
@@ -1593,14 +1534,13 @@ main {
 
 /* One transcript step: attribution and rendered body.
  *
- * Named for the shared renderer in web/js/steps.js rather than for either pane,
- * because both panes draw a step with it — the orchestrator column and the
- * session panel. A pane still owns what its ROW is called; everything inside a
- * step is these two classes.
+ * Named for the shared renderer in web/js/steps.js rather than for the pane
+ * that draws a step with it — the session panel's digest tab. A pane owns what
+ * its ROW is called; everything inside a step is these two classes.
  *
- * Kept as its own block at the end of the file rather than folded into the
- * .o-msg rules above, so that a task rewriting this stylesheet has one
- * self-contained piece to place rather than edits scattered through it.
+ * Kept as its own block at the end of the file, so that a task rewriting this
+ * stylesheet has one self-contained piece to place rather than edits scattered
+ * through it.
  *
  * A step's body is markdown now, which brings its own elements; only the two
  * that would otherwise be indistinguishable from the text around them are
@@ -1891,27 +1831,21 @@ main {
   text-transform: uppercase;
 }
 
-.o-msg[data-typed="1"] {
-  border-left: 3px solid var(--accent-strong);
-  /* Keeps the text where it was: the bar takes its width from the padding
-   * rather than shifting every typed message three pixels to the right. */
-  padding-left: 5px;
-}
-
 .session-panel .s-step[data-typed="1"] {
   border-left: 3px solid var(--accent-strong);
   padding-left: 5px;
 }
 
-/* What a pasted image has to say for itself, in the orchestrator column.
+/* What the orchestrator column's terminal says about itself: that it cannot
+ * type, or that it could not measure its pane.
  *
  * Own block at the end, so a task rewriting this stylesheet moves one piece.
  *
  * It sits where .o-error sits and shares its geometry, but not its colours:
- * the sentence it carries reports a session about to stop and ask permission,
- * which is the panel working exactly as intended. Painting that red is how a
- * person learns to stop reading red. So it borrows the quiet text colour the
- * rest of the page uses for things that are merely worth knowing. */
+ * the sentences it carries are standing facts about the terminal, not
+ * something that went wrong just now. Painting that red is how a person learns
+ * to stop reading red. So it borrows the quiet text colour the rest of the page
+ * uses for things that are merely worth knowing. */
 .o-notice {
   flex: none;
   margin: var(--gap) var(--gap) 0;
