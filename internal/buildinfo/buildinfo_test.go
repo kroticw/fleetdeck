@@ -1,8 +1,10 @@
 package buildinfo
 
 import (
+	"encoding/json"
 	"os"
 	"runtime/debug"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -153,5 +155,35 @@ func TestBuiltAtIsTheBinaryFilesTimeNotTheCommitTime(t *testing.T) {
 	}
 	if f.Executable != exe {
 		t.Errorf("executable = %q, want %q", f.Executable, exe)
+	}
+}
+
+// The version is the one `fleetdeck version` prints -- the release tag the
+// build was stamped with, or "dev" -- so the header and the command line can
+// never name two different versions of one binary. A person who downloaded the
+// app cannot tell a release from a commit hash; the header shows them this.
+func TestTheFingerprintCarriesTheVersionTheBinaryReports(t *testing.T) {
+	was := versionOf
+	t.Cleanup(func() { versionOf = was })
+	versionOf = func() string { return "v7.7.7" }
+
+	f, err := Read(fstest.MapFS{"index.html": {Data: []byte("x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Version != "v7.7.7" {
+		t.Errorf("version = %q, want the binary's own %q", f.Version, "v7.7.7")
+	}
+}
+
+// The header reads snapshot.build.version (web/js/buildcheck.js). The field's
+// JSON name is the other half of that agreement, in another language.
+func TestTheVersionReachesThePageUnderTheNameTheHeaderReads(t *testing.T) {
+	out, err := json.Marshal(Fingerprint{Web: "w", Version: "v7.7.7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"version":"v7.7.7"`) {
+		t.Errorf("the fingerprint marshals as %s, without the \"version\" the header reads", out)
 	}
 }

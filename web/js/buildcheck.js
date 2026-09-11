@@ -192,23 +192,33 @@ export function bannerHTML(state, { waiting = false } = {}) {
   return "";
 }
 
-// The brand in the header, with the panel's build beside it. The short commit
-// is on screen; the rest -- the full commit, when it was made, when this
-// binary was built and where the binary is -- sits in the title, for the
-// moment someone asks which of several installs is answering on this port.
+// The brand in the header, with the panel's build beside it. On screen: a
+// release's version, which is what a person who downloaded the app can read;
+// for a build from a checkout, which reports "dev", the word dev and the short
+// commit, so it never passes for a release; for a panel from before the version
+// was reported, the short commit alone, as it was then. The rest -- the version,
+// the full commit, when it was made, when this binary was built and where the
+// binary is -- sits in the title, for the moment someone asks which of several
+// installs is answering on this port.
 export function brandHTML(build) {
+  const version = build?.version ?? "";
   const revision = build?.revision ?? "";
   const short = revision.slice(0, 7);
   const mark = build?.modified ? "*" : "";
 
+  let label = short;
+  if (version === "dev") label = short ? `dev ${short}` : "dev";
+  else if (version) label = version;
+
   const lines = [];
+  if (version) lines.push(`${t("build_version")}: ${version}`);
   if (revision) lines.push(`${t("build_commit")}: ${revision}${build.modified ? ` (${t("build_modified")})` : ""}`);
   if (build?.commitTime) lines.push(`${t("build_commit_time")}: ${build.commitTime}`);
   if (build?.builtAt) lines.push(`${t("build_built_at")}: ${build.builtAt}`);
   if (build?.executable) lines.push(`${t("build_executable")}: ${build.executable}`);
 
   const title = lines.length ? ` title="${escape(lines.join("\n"))}"` : "";
-  const rev = short ? ` <span class="build-rev">${escape(short + mark)}</span>` : "";
+  const rev = label ? ` <span class="build-rev">${escape(label + mark)}</span>` : "";
   return `<div class="brand"${title}>fleetdeck${rev}</div>`;
 }
 

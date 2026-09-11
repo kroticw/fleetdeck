@@ -21,6 +21,9 @@
 //   - BuiltAt is when the binary file was written. It is not CommitTime: a
 //     binary built today from yesterday's commit carries yesterday's commit
 //     time, and that divergence is the very thing worth seeing.
+//   - Version is what `fleetdeck version` prints: the release tag the build was
+//     stamped with, or "dev". It is the one field a person who downloaded the
+//     app can read; a commit hash tells them nothing.
 package buildinfo
 
 import (
@@ -33,13 +36,20 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/version"
 )
+
+// versionOf is internal/version's answer, behind a variable so a test can
+// stand a release tag in for the "dev" every test binary is built with.
+var versionOf = version.String
 
 // Fingerprint describes the running build. Zero-valued fields mean "not
 // known", never "false" or "none": a binary built outside a checkout has no
 // revision to report, and says so by leaving it empty.
 type Fingerprint struct {
 	Web        string    `json:"web"`
+	Version    string    `json:"version,omitempty"`
 	Executable string    `json:"executable,omitempty"`
 	Revision   string    `json:"revision,omitempty"`
 	Modified   bool      `json:"modified,omitempty"`
@@ -97,7 +107,12 @@ func Read(web fs.FS) (Fingerprint, error) {
 		exe = resolved
 	}
 	info, _ := debug.ReadBuildInfo()
-	return read(web, exe, info)
+	f, err := read(web, exe, info)
+	if err != nil {
+		return f, err
+	}
+	f.Version = versionOf()
+	return f, nil
 }
 
 func read(web fs.FS, exe string, info *debug.BuildInfo) (Fingerprint, error) {
