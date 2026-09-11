@@ -161,6 +161,10 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"vendor/xterm.css":     true,
 		"vendor/LICENSE.xterm": true,
 		"vendor/README.md":     true,
+
+		// Sizes the terminal to its pane; pinned to the xterm release above.
+		"vendor/addon-fit.js":      true,
+		"vendor/LICENSE.addon-fit": true,
 	}
 	got := map[string]bool{}
 	if err := fs.WalkDir(web.FS, ".", func(file string, d fs.DirEntry, err error) error {
