@@ -5,11 +5,30 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
+
+// The two names are a contract across two languages: the window binds one and
+// calls the other, the page looks for the first and defines the second.
+func TestThePageUsesTheUpdateNamesTheWindowGivesIt(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "web", "js", "update.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`UPDATE_BINDING = "` + updateBindingName + `"`,
+		`PROGRESS_FUNCTION = "` + progressFunction + `"`,
+	} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("web/js/update.js does not say %s", want)
+		}
+	}
+}
 
 func TestTheBundleIsFoundFromTheWindowInsideIt(t *testing.T) {
 	for exe, want := range map[string]string{
