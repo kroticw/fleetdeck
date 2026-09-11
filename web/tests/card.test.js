@@ -307,6 +307,25 @@ test("Escape, the close button and a click outside all close the panel", () => {
   assert.equal(third.closed.length, 1);
 });
 
+// Escape inside a live terminal belongs to the session: in a Claude Code session
+// it interrupts the turn. Closing a card must not be that same keystroke — with
+// the orchestrator's terminal on screen all the time, it would be one press that
+// closes the card and interrupts the orchestrator.
+test("Escape pressed inside a live terminal does not close the panel, anywhere else it still does", () => {
+  const { closed } = open(snapshot());
+  const host = dom.element("div");
+  host.dataset.terminal = "";
+  const typedInto = dom.element("textarea");
+  host.appendChild(typedInto);
+  dom.document.body.appendChild(host);
+
+  fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: typedInto });
+  assert.equal(closed.length, 0, "an Escape meant for the session closed the card");
+
+  fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: dom.element("div") });
+  assert.equal(closed.length, 1, "an Escape from anywhere else must still close it");
+});
+
 test("a click inside the panel does not close it", () => {
   const { root, closed } = open(snapshot());
   fireDocumentEvent(dom.document, "mousedown", { target: root.querySelector("h3") });
