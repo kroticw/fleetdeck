@@ -158,7 +158,7 @@ func TestAddFleetRefusesAndLeavesTheFileAlone(t *testing.T) {
 		{"a name the top-level fleet has", fleet.Fleet{Name: "obsidian", BoardPath: "/x/board"}, commentedShape, `name "obsidian" is already the name of the top-level fleet`},
 		{"no board", fleet.Fleet{Name: "clining"}, commentedShape, "board path must be set"},
 		{"the top-level orchestrator", fleet.Fleet{Name: "clining", BoardPath: "/x/board", Orchestrator: "06a1f607"}, commentedShape, `orchestrator "06a1f607" is already the orchestrator of the top-level fleet`},
-		{"a newline in a value", fleet.Fleet{Name: "clining", BoardPath: "/x/board\nserver: 1"}, commentedShape, "newline"},
+		{"a newline in a value", fleet.Fleet{Name: "clining", BoardPath: "/x/board\nserver: 1"}, commentedShape, "a value must not contain a newline"},
 		{"a list written inline", clining, "board:\n    path: /b\nfleets: [{name: work, board: {path: /w}}]\n", "fleets is not written as a block list"},
 	}
 	for _, tc := range cases {
@@ -278,6 +278,47 @@ func TestSetFleetOrchestratorFillsAnEmptyOrchestratorKey(t *testing.T) {
 	}
 }
 
+func TestSetFleetOrchestratorUnpinningAnEmptyOrchestratorKeyChangesNothing(t *testing.T) {
+	before := "board:\n    path: /b\nfleets:\n    - name: work\n      board:\n        path: /w\n      orchestrator:\n"
+	p := writeText(t, before)
+	if err := SetFleetOrchestrator(p, "work", ""); err != nil {
+		t.Fatalf("SetFleetOrchestrator: %v", err)
+	}
+	if got := readText(t, p); got != before {
+		t.Fatalf("unpinning an empty orchestrator key changed the file:\n%s", got)
+	}
+}
+
+func TestSetFleetOrchestratorAddsTheKeyBeforeWhatFollowsTheEntry(t *testing.T) {
+	before := "fleets:\n" +
+		"    - name: work\n" +
+		"      board:\n" +
+		"        path: /w\n" +
+		"\n" +
+		"    # the next one is new\n" +
+		"    - name: home\n" +
+		"      board:\n" +
+		"        path: /h\n"
+	want := "fleets:\n" +
+		"    - name: work\n" +
+		"      board:\n" +
+		"        path: /w\n" +
+		"      orchestrator:\n" +
+		"        session: cafe0007\n" +
+		"\n" +
+		"    # the next one is new\n" +
+		"    - name: home\n" +
+		"      board:\n" +
+		"        path: /h\n"
+	p := writeText(t, before)
+	if err := SetFleetOrchestrator(p, "work", "cafe0007"); err != nil {
+		t.Fatalf("SetFleetOrchestrator: %v", err)
+	}
+	if got := readText(t, p); got != want {
+		t.Fatalf("file after SetFleetOrchestrator:\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestSetFleetOrchestratorRefusesAnInlineOrchestrator(t *testing.T) {
 	before := "board:\n    path: /b\nfleets:\n    - name: work\n      board: {path: /w}\n      orchestrator: {session: cafe0005}\n"
 	p := writeText(t, before)
@@ -298,7 +339,7 @@ func TestSetFleetOrchestratorRefusesAndLeavesTheFileAlone(t *testing.T) {
 		{"the top-level fleet", "obsidian", "cafe0003", `fleet "obsidian" is not in the fleets list`},
 		{"another fleet's orchestrator", "work", "1a2b3c4d", `is already the orchestrator of fleets[0]`},
 		{"the top-level orchestrator", "work", "06a1f607", `is already the orchestrator of the top-level fleet`},
-		{"a newline", "work", "cafe\nserver: 1", "newline"},
+		{"a newline", "work", "cafe\nserver: 1", "orchestrator must not contain a newline"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

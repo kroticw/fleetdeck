@@ -239,16 +239,13 @@ type fleetEntry struct {
 }
 
 // keyOn reports whether line holds key at the entry's key column, on the
-// dash line or on a line of its own, and returns what follows the colon.
-func (e fleetEntry) keyOn(line string, isDashLine bool, key string) (string, bool) {
+// dash line or on a line of its own, and returns what follows the colon. A
+// key nested deeper has spaces at that column, so it never matches.
+func (e fleetEntry) keyOn(line, key string) (string, bool) {
 	if len(line) < e.keyCol {
 		return "", false
 	}
-	if !isDashLine && indentOf(line) != e.keyCol {
-		return "", false
-	}
-	rest, ok := strings.CutPrefix(line[e.keyCol:], key+":")
-	return rest, ok
+	return strings.CutPrefix(line[e.keyCol:], key+":")
 }
 
 func fleetEntries(lines []string, header, end int) []fleetEntry {
@@ -262,7 +259,9 @@ func fleetEntries(lines []string, header, end int) []fleetEntry {
 		if dashCol == -1 {
 			dashCol = col
 		}
-		if col != dashCol || !strings.HasPrefix(lines[ln][col:], "-") {
+		// In a list that loads, every line at the dashes' column is a dash;
+		// deeper lines are the entry's own.
+		if col != dashCol {
 			continue
 		}
 		afterDash := lines[ln][col+1:]
@@ -282,7 +281,7 @@ func substituteFleetOrchestrator(raw []byte, name, short string) ([]byte, error)
 	if header != -1 {
 		for _, e := range fleetEntries(lines, header, end) {
 			for ln := e.start; ln < e.end; ln++ {
-				rest, ok := e.keyOn(lines[ln], ln == e.start, "name")
+				rest, ok := e.keyOn(lines[ln], "name")
 				if !ok {
 					continue
 				}
@@ -309,7 +308,7 @@ func substituteFleetOrchestrator(raw []byte, name, short string) ([]byte, error)
 	scalarText := strings.TrimRight(string(scalar), "\n")
 
 	for ln := target.start; ln < target.end; ln++ {
-		rest, ok := target.keyOn(lines[ln], ln == target.start, "orchestrator")
+		rest, ok := target.keyOn(lines[ln], "orchestrator")
 		if !ok {
 			continue
 		}

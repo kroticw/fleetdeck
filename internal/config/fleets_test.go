@@ -153,6 +153,11 @@ func TestFleetsRefuseMistakesAndSayWhereTheyAre(t *testing.T) {
 			`fleets[0]: board "/Users/me/obsidian/board/" is already the board of the top-level fleet ("obsidian")`,
 		},
 		{
+			"a fleet named like the named top-level fleet",
+			operatorShape + "name: основной\nfleets:\n    - name: основной\n      board:\n        path: /x/board\n",
+			`fleets[0]: name "основной" is already the name of the top-level fleet`,
+		},
+		{
 			"a top-level name with spaces around it",
 			operatorShape + "name: ' main'\n",
 			`the top-level fleet: name " main" has leading or trailing spaces`,
@@ -164,8 +169,10 @@ func TestFleetsRefuseMistakesAndSayWhereTheyAre(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Load accepted %s", tc.name)
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error\n%v\ndoes not say\n%s", err, tc.want)
+			// The whole end of the message, so a hint that belongs to one
+			// mistake cannot ride along on another.
+			if !strings.HasSuffix(err.Error(), tc.want) {
+				t.Fatalf("error\n%v\ndoes not end with\n%s", err, tc.want)
 			}
 		})
 	}
