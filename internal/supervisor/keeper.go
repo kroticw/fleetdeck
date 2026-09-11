@@ -305,14 +305,13 @@ func (k *Keeper) replaceable(ctx context.Context) (string, bool) {
 		return "", false // not a fleetdeck panel: not this window's to decide about
 	}
 	switch {
-	case b.Owner == k.Owner:
-		return "", false
 	case b.Owner != 0:
-		// A window that exits takes its panel with it within moments; a panel
-		// still answering is one shutting down, or one whose window died in a
-		// way its watch could not see. kill -0 is fine here: a PID taken by some
-		// other process since only means a panel that is going anyway is used
-		// for those moments.
+		// This window's own panel is left alone by the same test: its window,
+		// this process, is there. A window that exits takes its panel with it
+		// within moments; a panel still answering is one shutting down, or one
+		// whose window died in a way its watch could not see. kill -0 is fine
+		// here: a PID taken by some other process since only means a panel
+		// that is going anyway is used for those moments.
 		if errors.Is(syscall.Kill(b.Owner, 0), syscall.ESRCH) {
 			return fmt.Sprintf("the panel at %s belongs to a window (pid %d) that is gone", k.URL, b.Owner), true
 		}
