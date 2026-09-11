@@ -278,14 +278,31 @@ func main() {
 
 	configPath := flag.String("config", config.DefaultPath(), "path to the configuration file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	standSocket := flag.String("stand-socket", "", "fixed daemon control-socket path for an isolated test stand: given, this panel connects ONLY to this socket and never discovers the real fleet daemon (see internal/daemon.New); required for a panel run anywhere a live fleet daemon might otherwise be found")
 	flag.Parse()
+
+	// -stand-socket is the one flag whose mere presence changes what this
+	// panel is allowed to touch, so an accidentally empty value (a script
+	// templating an unset variable into `-stand-socket=`) must not be read
+	// as "flag not given" and fall through to discovering the real daemon —
+	// see checkStandSocket and daemonClient's own docs for why that
+	// fallback does not otherwise exist as code to reach.
+	standSocketGiven := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "stand-socket" {
+			standSocketGiven = true
+		}
+	})
+	if err := checkStandSocket(standSocketGiven, *standSocket); err != nil {
+		log.Fatalf("fleetdeck: %v", err)
+	}
 
 	if *showVersion {
 		runVersion(os.Stdout)
 		return
 	}
 
-	if err := run(*configPath); err != nil {
+	if err := run(*configPath, *standSocket); err != nil {
 		log.Fatalf("fleetdeck: %v", err)
 	}
 }
@@ -321,8 +338,10 @@ func projectsDir() string {
 // does not parse, and a port it cannot listen on. Everything else degrades — a daemon
 // that is not running, a board that is not there, a usage endpoint that has changed
 // shape — because a panel that refuses to start when one source is down is a panel
-// that cannot be used to find out which source is down.
-func run(configPath string) error {
+// that cannot be used to find out which source is down. (main's own flag parsing
+// adds a third, earlier one — an empty -stand-socket — before configPath even
+// reaches here.)
+func run(configPath, standSocket string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -331,10 +350,7 @@ func run(configPath string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Discover rather than a resolved socket path: the daemon's socket directory
-	// name is not stable across restarts, and a client bound to today's path keeps
-	// failing after the daemon comes back under a new one (spec section 7).
-	dc := daemon.Discover(daemon.ControlKey)
+	dc := daemonClient(standSocket)
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir())
 
@@ -410,6 +426,53 @@ func run(configPath string) error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+// checkStandSocket refuses an explicitly empty -stand-socket, which a script
+// templating an unset variable into `-stand-socket=` would otherwise produce
+// silently. given comes from flag.Visit, not from value == "", because the
+// bug this guards against is specifically "the flag was passed, but with
+// nothing in it" — "not passed at all" is the ordinary, unconfigured case
+// every real panel runs as, and must stay silent.
+func checkStandSocket(given bool, value string) error {
+	if given && value == "" {
+		return errors.New("-stand-socket was given empty; refusing to start rather than silently discover the real fleet daemon instead")
+	}
+	return nil
+}
+
+// daemonClient returns the client this panel talks to the daemon through.
+//
+// standSocket == "" (every real operator's panel, unconditionally) is
+// daemon.Discover: it resolves the real, uid-scoped daemon socket and
+// re-resolves it across restarts (spec section 7), because the daemon's
+// socket directory name is not stable across them and a client bound to
+// today's path would keep failing once the daemon comes back under a new
+// one.
+//
+// standSocket != "" is a test stand run somewhere a live fleet daemon might
+// otherwise be found (see docs/en/configuration.md's "Running an isolated
+// stand" section for the one command that sets this up correctly). It never
+// calls Discover or daemon.SocketPath at all: daemon.New binds to exactly
+// this path for the client's whole lifetime and never re-resolves, so there
+// is no code shared between the two branches below for a "not found at this
+// path, try the default instead" fallback to live in. THAT absence is the
+// actual guarantee against a stand ending up on the real fleet daemon — not
+// a runtime check that could itself have a bug, but a code path that does
+// not exist to be reached.
+//
+// Cost, stated here rather than only in a PR description because it is the
+// kind of thing someone finds by hitting it, not by reading about it first:
+// a client from daemon.New does not notice the daemon behind standSocket
+// restarting under a new socket, unlike Discover. A one-shot acceptance
+// stand never runs long enough to care; a long-lived test fleet built on
+// this flag would need restarting alongside its daemon.
+func daemonClient(standSocket string) *daemon.Client {
+	if standSocket == "" {
+		return daemon.Discover(daemon.ControlKey)
+	}
+	log.Printf("fleetdeck: daemon discovery disabled — bound to %s (-stand-socket), the real fleet daemon is not reachable from this panel", standSocket)
+	return daemon.New(standSocket, daemon.ControlKey)
 }
 
 // listedAlive reports whether short is in the daemon's list and not dying. A dying
