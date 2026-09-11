@@ -162,6 +162,34 @@ func testAppMenuQuitKeyEquivalent() (key string, ok bool) {
 	return "", false
 }
 
+// testMenuItemKey finds the item with the given action in the top-level menu
+// with the given title, and returns its key equivalent.
+func testMenuItemKey(menuTitle, action string) (key string, ok bool) {
+	mainMenu := C.t_main_menu()
+	n := int(C.t_menu_item_count(mainMenu))
+	var menu C.id
+	for i := 0; i < n; i++ {
+		item := C.t_menu_item_at(mainMenu, C.int(i))
+		if C.GoString(C.t_item_title(item)) == menuTitle {
+			menu = C.t_submenu(item)
+			break
+		}
+	}
+	if menu == nil {
+		return "", false
+	}
+	cAction := C.CString(action)
+	defer C.free(unsafe.Pointer(cAction))
+	m := int(C.t_menu_item_count(menu))
+	for i := 0; i < m; i++ {
+		item := C.t_menu_item_at(menu, C.int(i))
+		if C.t_item_has_action(item, cAction) != 0 {
+			return C.GoString(C.t_item_key_equivalent(item)), true
+		}
+	}
+	return "", false
+}
+
 func testHasTopLevelMenuTitled(title string) bool {
 	mainMenu := C.t_main_menu()
 	n := int(C.t_menu_item_count(mainMenu))
