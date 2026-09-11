@@ -68,6 +68,17 @@ func Commit(dir, file, message string) error {
 	return nil
 }
 
+// InitRepo makes dir a git repository of its own, on master. It is for a board
+// that has just been created: Commit needs a repository to record the panel's
+// writes in. It makes no commit — a signed commit would ask for a passphrase,
+// and the board is created by a panel with no terminal to ask in.
+func InitRepo(dir string) error {
+	if out, err := run(dir, "init", "--quiet", "--initial-branch=master"); err != nil {
+		return fmt.Errorf("git init %s: %s: %w", dir, strings.TrimSpace(out), err)
+	}
+	return nil
+}
+
 // validateFile rejects a file argument that is absolute or that, once
 // cleaned, escapes dir — a caller is expected to pass a plain filename such
 // as filepath.Base(path), and a "../" would stage something else in the

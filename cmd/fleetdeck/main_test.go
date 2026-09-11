@@ -327,6 +327,60 @@ func TestASuccessfulWriteIsCommitted(t *testing.T) {
 	}
 }
 
+// A card started from the panel is recorded in the board's history, as the
+// panel's field writes are.
+func TestACreatedCardIsCommitted(t *testing.T) {
+	dir := initRepo(t)
+	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path, err := createCard(dir, "A task", "planned", time.Now())
+	if err != nil {
+		t.Fatalf("a card created in a real repository must be committed: %v", err)
+	}
+	if filepath.Dir(path) != board.CardsDir(dir) {
+		t.Fatalf("the card must be in the board's cards directory, got %s", path)
+	}
+	cmd := exec.Command("git", "log", "--name-only", "--format=%s")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %s", out)
+	}
+	if !strings.Contains(string(out), "cards/"+filepath.Base(path)) {
+		t.Fatalf("the new card is not in the board's history:\n%s", out)
+	}
+}
+
+// A board with no git keeps the card and says the commit is missing.
+func TestACreatedCardThatCannotBeCommittedIsStillCreated(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path, err := createCard(dir, "A task", "planned", time.Now())
+	if !errors.Is(err, server.ErrCardWrittenNotCommitted) {
+		t.Fatalf("want ErrCardWrittenNotCommitted, got %v", err)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("the card must exist although the commit did not happen: %v", statErr)
+	}
+}
+
+func TestARefusedCardIsNotCreated(t *testing.T) {
+	dir := initRepo(t)
+	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := createCard(dir, "A task", "someday", time.Now())
+	if !errors.Is(err, board.ErrInvalidCard) {
+		t.Fatalf("want board.ErrInvalidCard, got %v", err)
+	}
+	if errors.Is(err, server.ErrCardWrittenNotCommitted) {
+		t.Fatal("a card that was never written is not a card waiting for its commit")
+	}
+}
+
 // TestARefusedFieldNeverReachesTheCommit pins that a write board itself refuses is
 // returned as it is: it wrote nothing, so there is nothing to say about a commit.
 func TestARefusedFieldNeverReachesTheCommit(t *testing.T) {

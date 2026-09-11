@@ -76,6 +76,29 @@ export async function setCardField(path, field, value) {
   throw await refusal(response);
 }
 
+// createCard starts a card on the board from a title and a zone — the two fields
+// the route takes, and nothing else. It answers {path, committed, reason}: 201
+// both when the card was committed and when it reached the board without its
+// commit, because the card exists either way and creating it again would make a
+// second one. A thrown error means no card was made.
+export async function createCard(title, zone) {
+  const response = await fetch("/api/cards", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ title: String(title), zone: String(zone) }),
+  });
+  if (response.status !== 201) {
+    throw await refusal(response);
+  }
+  const body = await readJSON(response);
+  // As with setCardField: a commit that cannot be seen is not claimed.
+  return {
+    path: String(body?.path ?? ""),
+    committed: body?.committed === true,
+    reason: String(body?.reason ?? ""),
+  };
+}
+
 async function post(url, body) {
   const response = await fetch(url, {
     method: "POST",

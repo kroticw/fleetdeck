@@ -40,6 +40,11 @@ import (
 // somewhere nobody asked for.
 var ErrFieldWrittenNotCommitted = errors.New("field written but not committed")
 
+// ErrCardWrittenNotCommitted is ErrFieldWrittenNotCommitted for a new card: the
+// card file exists and the commit did not happen. Reported as a failure, the
+// operator would create the card again and get a second one.
+var ErrCardWrittenNotCommitted = errors.New("card written but not committed")
+
 // Deps holds everything the HTTP surface needs from the rest of the program.
 //
 // Every field is optional. A nil function means a panel wired without that
@@ -73,6 +78,17 @@ type Deps struct {
 	// function is called, so what it receives is always an absolute path that
 	// resolves to somewhere inside the board.
 	SetCardField func(path, field, value string) error
+
+	// CreateCard starts a card on the board from a title and a zone, and records
+	// it in the board's git history if the caller wired it to do so. It returns
+	// the new card's path. internal/board decides what a valid title and zone
+	// are; this server maps its refusals onto status codes. An error wrapping
+	// ErrCardWrittenNotCommitted, returned with the path, means the card exists
+	// and only the commit did not happen, and is answered as a success.
+	//
+	// Nothing from the request names a file: the caller creates the card in its
+	// own board, under a name made from the title.
+	CreateCard func(title, zone string) (string, error)
 
 	// BoardDir is the only directory card writes may touch. Every path a card
 	// write arrives with is resolved and checked against it, and anything that
@@ -206,6 +222,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
 	mux.HandleFunc("POST /api/sessions/{id}/text", d.handleSendText)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
+	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
 	mux.HandleFunc("GET /api/docs", d.handleDocsList)
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)
 	mux.HandleFunc("POST /api/status", d.handleStatus)

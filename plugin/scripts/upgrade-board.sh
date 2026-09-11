@@ -11,10 +11,13 @@
 #   - про остальные разошедшиеся файлы только сообщает, решает человек.
 #
 # Использование:
-#   upgrade-board.sh [каталог]        по умолчанию ~/obsidian/board
+#   upgrade-board.sh [каталог]        по умолчанию ~/fleetdeck/board
+#
+# Доске, которая лежит в другом месте, каталог передают аргументом: он
+# записан в board.path файла ~/.config/fleetdeck/config.yaml.
 set -euo pipefail
 
-target="${1:-$HOME/obsidian/board}"
+target="${1:-$HOME/fleetdeck/board}"
 here="$(cd "$(dirname "$0")" && pwd -P)"
 template="$here/../templates/board"
 

@@ -28,12 +28,13 @@ func CardsDir(boardDir string) string {
 	return filepath.Join(boardDir, "cards")
 }
 
-// Scan reads every card in dir's cards subdirectory (see CardsDir). An empty
-// cards subdirectory is an error, not an empty success — and a board
-// directory with no cards subdirectory at all is a different, more specific
-// error (ErrNoCardsDir), so an operator whose board.path names the wrong
-// directory gets a message that says so instead of the generic "no cards
-// found" a genuinely empty, correctly-shaped board would also produce.
+// Scan reads every card in dir's cards subdirectory (see CardsDir). A board
+// directory with no cards subdirectory at all is an error (ErrNoCardsDir): that
+// is what a board.path naming the wrong directory looks like. An empty cards
+// subdirectory is an empty board and returns no cards and no error — a new
+// board starts that way. The cards/ subdirectory, not a card inside it, is
+// what tells a board apart from a wrong path; it used to be a card, and that
+// made every new board look broken until something wrote an example card in.
 //
 // There is deliberately no fallback to reading dir itself when cards/ is
 // missing: two directory shapes that both work would mean a typo'd or
@@ -60,9 +61,6 @@ func Scan(dir string) ([]Card, error) {
 			c = Card{Path: p, ParseError: err.Error()}
 		}
 		cards = append(cards, c)
-	}
-	if len(cards) == 0 {
-		return nil, fmt.Errorf("%w in %s", ErrNoCards, cardsDir)
 	}
 	sort.Slice(cards, func(i, j int) bool { return cards[i].Path < cards[j].Path })
 	return cards, nil

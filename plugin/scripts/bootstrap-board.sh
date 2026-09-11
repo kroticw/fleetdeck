@@ -7,13 +7,17 @@
 # компьютера дала бы смесь двух флотов с нерезолвимыми ссылками.
 #
 # Использование:
-#   bootstrap-board.sh [каталог]        по умолчанию ~/obsidian/board
+#   bootstrap-board.sh [каталог]        по умолчанию ~/fleetdeck/board
+#
+# Ту же доску из того же шаблона делает сам fleetdeck: `fleetdeck init` или
+# первый запуск приложения, вместе с конфигурацией и разрешением на запись.
+# Этот скрипт — для машины, где fleetdeck не стоит.
 #
 # Скрипт рассчитан на системный bash 3.2 в macOS: без mapfile, без
 # конструкции «условие и команда» последней строкой, с явным шаблоном mktemp.
 set -euo pipefail
 
-target="${1:-$HOME/obsidian/board}"
+target="${1:-$HOME/fleetdeck/board}"
 here="$(cd "$(dirname "$0")" && pwd -P)"
 template="$here/../templates/board"
 

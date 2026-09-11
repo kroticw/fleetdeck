@@ -177,6 +177,9 @@ func main() {
 	if err := w.Bind(startBindingName, keeper.Retry); err != nil {
 		log.Printf("fleetdeck-window: the failure page will not be able to start the panel again: %v", err)
 	}
+	if err := w.Bind(chooseFolderBindingName, chooseFolder); err != nil {
+		log.Printf("fleetdeck-window: the setup page will offer no folder chooser: %v", err)
+	}
 	if why := updateUnavailable(treeDir, exe); why != "" {
 		log.Printf("fleetdeck-window: no update button: %s", why)
 	} else {

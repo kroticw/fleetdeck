@@ -31,7 +31,7 @@ description: Ведение собственной карточки на дос�
 
 ## Где карточка
 
-Путь передан в промпте задачи, вид `~/obsidian/board/cards/ГГГГ-ММ-ДД-slug.md`.
+Путь передан в промпте задачи, вид `<доска>/cards/ГГГГ-ММ-ДД-slug.md`, где `<доска>` — каталог доски: значение `board.path` в `~/.config/fleetdeck/config.yaml`.
 Каталог доски прописан в `permissions.additionalDirectories`, поэтому карточка
 доступна на запись, даже если твоя рабочая директория совсем в другом месте.
 
@@ -129,7 +129,7 @@ progress: 10
 её путь аргументом:
 
 ```bash
-python3 ~/obsidian/board/scripts/validate_cards.py ~/obsidian/board/cards/ГГГГ-ММ-ДД-slug.md
+python3 <доска>/scripts/validate_cards.py <доска>/cards/ГГГГ-ММ-ДД-slug.md
 ```
 
 Он должен ответить `все карточки валидны`.

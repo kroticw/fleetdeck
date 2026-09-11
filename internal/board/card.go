@@ -14,12 +14,9 @@ import (
 )
 
 var (
-	// ErrNoCards means the board's cards subdirectory holds no cards at all.
-	ErrNoCards = errors.New("no cards found")
-	// ErrNoCardsDir means the board directory has no cards subdirectory —
-	// distinct from ErrNoCards so an operator whose board.path names the
-	// wrong directory entirely gets a different message than one whose
-	// board is genuinely, correctly empty.
+	// ErrNoCardsDir means the board directory has no cards subdirectory: the
+	// board.path names the wrong directory. A board whose cards subdirectory is
+	// empty is not an error at all (see Scan).
 	ErrNoCardsDir = errors.New("board directory has no cards subdirectory")
 	// ErrUnknownField means a write targeted a field the panel does not own.
 	ErrUnknownField = errors.New("field is not writable")

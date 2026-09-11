@@ -5,6 +5,7 @@ import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
 import { createSections } from "./sections.js";
+import { createNewCard } from "./newcard.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -90,6 +91,9 @@ createSections(document.getElementById("tabs"), [
     onFirstShow: () => renderDocs(document.getElementById("docs")),
   },
 ]);
+
+// After the tabs, not before: createSections replaces the row's children.
+createNewCard(document.getElementById("tabs"));
 
 connect();
 

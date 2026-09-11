@@ -88,6 +88,8 @@ The Go code the panel uses to read cards (`internal/board`) and the Python valid
 | `stage: done` requires `progress: 100`, and vice versa | not checked | enforced | enforced |
 | A started stage requires a non-empty `session` | not checked | enforced | enforced |
 
+A card the panel starts (`CreateCard`, behind the **+ card** button) is the one thing the Go code writes whole, and it is written to pass the validator script: exactly `zone` — one of the four allowed values, checked — `stage: new`, `progress: 0` and `created`, and a title. A test runs the validator script itself on such a card in each of the four zones.
+
 The Go reader is a lenient reader and a surgical writer of two fields; it was not built to be a schema gate. The validator script is the strict gate, and it has to be run on purpose — by a person or by an agent — since nothing in the Go code calls it. A card that the panel reads without complaint can still fail the validator script, and a card that fails the validator script can still be read and have its `stage` or `progress` field updated by the panel without any warning that something else about it is malformed.
 
 ## The card-write race

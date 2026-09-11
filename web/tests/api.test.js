@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, sendText, fetchDigest, fetchTerminalToken } from "../js/api.js";
+import { setCardField, sendText, fetchDigest, fetchTerminalToken, createCard } from "../js/api.js";
 
 let calls = [];
 let realFetch;
@@ -176,4 +176,29 @@ test("a token that cannot be had throws words, never an empty token", async () =
 
   stubFetch(answer({ status: 200, body: [] }));
   await assert.rejects(fetchTerminalToken(), /token/);
+});
+
+test("a new card is a POST of its title and zone, and nothing else", async () => {
+  stubFetch(answer({ status: 201, body: { path: "/b/cards/2026-09-11-a-task.md", committed: true } }));
+
+  const result = await createCard("A task", "planned");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/cards");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { title: "A task", zone: "planned" });
+  assert.deepEqual(result, { path: "/b/cards/2026-09-11-a-task.md", committed: true, reason: "" });
+});
+
+test("a new card that reached the board but not its history says so", async () => {
+  stubFetch(answer({ status: 201, body: { path: "/b/cards/x.md", committed: false, reason: "the commit timed out" } }));
+  const result = await createCard("A task", "planned");
+  assert.equal(result.committed, false);
+  assert.equal(result.reason, "the commit timed out");
+});
+
+test("a refused new card throws the server's words", async () => {
+  stubFetch(answer({ status: 400, body: { error: 'invalid card: unknown zone "someday"' } }));
+  await assert.rejects(createCard("A task", "someday"), /unknown zone/);
 });

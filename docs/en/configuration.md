@@ -20,7 +20,7 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 
 Switching one of the `notify.enabled.*` keys on turns a rule on, not a guarantee that its banner is seen — see the README's [Limitations](../../README.md#limitations) section for why.
 
-`board.path` names the board's root directory, not the directory cards live in directly: the panel reads cards from a `cards` subdirectory underneath it (`<board.path>/cards/*.md`), matching the layout `plugin/templates/board/` lays out (`cards/`, `archive/`, `scripts/`, `README.md`). A `board.path` that exists but has no `cards` subdirectory is reported as a distinct, more specific error than an empty board.
+`board.path` names the board's root directory, not the directory cards live in directly: the panel reads cards from a `cards` subdirectory underneath it (`<board.path>/cards/*.md`), matching the layout `plugin/templates/board/` lays out (`cards/`, `archive/`, `scripts/`, `README.md`). A `board.path` that exists but has no `cards` subdirectory is reported as the wrong directory. An empty `cards` subdirectory is an empty board, not an error: a new board starts that way.
 
 `docs.paths` names the directories the panel's documentation section reads. Every markdown file under them is listed, and a document is served only when it resolves to somewhere inside one of them: a symlink inside a documentation directory that points out of it is refused, exactly as a card write outside the board directory is. Nothing but markdown is served, so a directory holding notes and credentials side by side hands out only the notes. Configuring no directory at all, and configuring directories that turn out not to be readable, are both reported as such rather than shown as an empty documentation set — "there is no documentation" and "the directory you named is not there" are different statements, and only one of them is fixed by editing this file.
 
@@ -71,7 +71,7 @@ A file containing more than one YAML document (separated by a `---` line partway
 
 ## Where the configuration file lives
 
-`fleetdeck` reads its configuration from the path the `--config` flag names, defaulting to `~/.config/fleetdeck/config.yaml` (`defaultConfigPath` in `cmd/fleetdeck/main.go`) when the flag is not given. `fleetdeck init` writes that default path the first time it runs, if nothing is there yet.
+`fleetdeck` reads its configuration from the path the `--config` flag names, defaulting to `~/.config/fleetdeck/config.yaml` (`defaultConfigPath` in `cmd/fleetdeck/main.go`) when the flag is not given. `fleetdeck init` writes that default path the first time it runs, if nothing is there yet. A panel that finds no file at its path serves the setup page instead of the board and writes the file there once a workspace is chosen — see [`getting-started.md`](getting-started.md#first-launch-choosing-the-workspace). A file that exists and does not parse is an error, never a reason to offer setup.
 
 ## Running an isolated stand
 
@@ -88,6 +88,14 @@ fleetdeck -config "$tmp/config.yaml" -stand-socket "$tmp/no-daemon-here.sock"
 ```
 
 The session list on a stand started this way reads empty, or shows a daemon error — never another session's data — because nothing is listening at that path and nothing here will look anywhere else.
+
+A stand of the first launch itself has no configuration file, so there is no `server.port` to keep it off the operator's port: `--port` gives it one. It also needs a home of its own, because setup writes the configuration, Claude Code's `settings.json` and the board's git history under the home directory:
+
+```bash
+tmp=$(mktemp -d) && HOME="$tmp/home" fleetdeck -port 7799 -stand-socket "$tmp/no-daemon-here.sock"
+```
+
+Open `http://127.0.0.1:7799/` and the setup page proposes `$tmp/home/fleetdeck`. Everything setup writes lands under `$tmp/home`.
 
 The cost of this isolation, so it is not found only by hitting it: a client bound to `--stand-socket` does not notice a daemon behind it restarting under a new socket, unlike ordinary discovery (`cmd/fleetdeck/main.go`'s own `daemonClient`). A one-shot acceptance stand never runs long enough to care; a long-lived test fleet built on this flag would need restarting alongside its daemon.
 

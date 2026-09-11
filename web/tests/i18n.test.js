@@ -33,6 +33,33 @@ const KEYS = [
   // "tab_docs" in the interface.
   "tab_board",
   "tab_docs",
+  // web/js/newcard.js. The missing-commit note especially: it is the one line
+  // that says the card is on the board and not in its history, and falling
+  // through to its own key would print "new_card_not_committed" instead.
+  "new_card",
+  "new_card_title",
+  "new_card_zone",
+  "new_card_create",
+  "new_card_cancel",
+  "new_card_title_required",
+  "new_card_not_committed",
+  // web/js/setup.js. setup_outside above all: it is the sentence that says
+  // what is written outside the chosen folder before the button is pressed.
+  "setup_title",
+  "setup_intro",
+  "setup_board",
+  "setup_docs",
+  "setup_outside",
+  "setup_path",
+  "setup_choose",
+  "setup_choose_message",
+  "setup_choose_prompt",
+  "setup_create",
+  "setup_path_required",
+  "setup_skipped",
+  "setup_opening",
+  "setup_failed",
+  "setup_no_handover",
   "pick_doc",
   "doc_opening",
   "docs_empty",
