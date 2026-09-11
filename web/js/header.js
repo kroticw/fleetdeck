@@ -140,6 +140,35 @@ export function createStalledTracker() {
 // does not sit muted for long.
 export const USAGE_ERROR_STALE_MS = 15 * 60 * 1000;
 
+// How old snap.limits.fetchedAt must be before the panel shows its age
+// instead of drawing it as live. This is not about an error at all: the
+// local rate-limits file (cmd/fleetdeck-status) is rewritten every time any
+// session's statusline ticks, often several times a minute while a session
+// is actively working, so a value this old means no session has ticked in
+// a while -- a fact the operator should see, not one the colorful gauge
+// should paper over just because nothing is currently failing. Chosen well
+// past a single statusline cycle so an ordinary few-seconds-old value never
+// crosses it.
+export const RATE_LIMITS_AGE_WORTH_SHOWING_MS = 2 * 60 * 1000;
+
+// isUsageStale decides the calm-vs-severity read for the limits gauges.
+// Stale for two different reasons, both meaning "this number is not this
+// instant's": a value present alongside an error is usage.Fetcher's own
+// cache fallback (cmd/fleetdeck/collect.go) -- real numbers, just not from
+// this cycle's fetch; a value old enough on its own (RATE_LIMITS_AGE_WORTH
+// _SHOWING_MS) is the local-file source (cmd/fleetdeck-status) not having
+// been rewritten in a while, with no error at all -- nothing failed, a
+// session just has not ticked its statusline recently. gauge() reads calm
+// rather than hot/warm/cool for either case -- see its own comment. nowMs
+// is always supplied by the caller, never read from Date.now() in here, for
+// the same reason as createStalledTracker.
+export function isUsageStale(snap, nowMs) {
+  if (!snap.limits) return false;
+  if (snap.usageError) return true;
+  const ageMs = nowMs - new Date(snap.limits.fetchedAt).getTime();
+  return ageMs > RATE_LIMITS_AGE_WORTH_SHOWING_MS;
+}
+
 // createUsageErrorTracker holds the moment usageError last turned true.
 // update(active, nowMs) is called once per snapshot and returns "none" (not
 // failing), "fresh" (failing, under the threshold -- read calmly, the
@@ -377,11 +406,7 @@ export function renderHeader(root) {
     const stalledSessions = stalledTracker.update(sessions, nowMs);
     const stalledCount = stalledSessions.length;
     const usageSeverity = usageTracker.update(!!snap.usageError, nowMs);
-    // A value present alongside an error is usage.Fetcher's own cache
-    // fallback (cmd/fleetdeck/collect.go): real numbers, just not from this
-    // cycle's fetch. gauge() reads calm rather than hot/warm/cool for that
-    // case -- see its own comment.
-    const usageStale = Boolean(snap.limits) && Boolean(snap.usageError);
+    const usageStale = isUsageStale(snap, nowMs);
 
     root.innerHTML = `
       <div class="brand">fleetdeck</div>

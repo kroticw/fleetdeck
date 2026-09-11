@@ -20,6 +20,14 @@ import (
 	"github.com/kroticw/fleetdeck/internal/usage"
 )
 
+// The two values Snapshot.LimitsSource takes -- see its own doc comment for
+// why both the caller (cmd/fleetdeck's Collector) and the frontend need to
+// know which one answered, not just how old the answer is.
+const (
+	LimitsSourceLocal   = "local"
+	LimitsSourceNetwork = "network"
+)
+
 // SessionView is a daemon session enriched with what the other two sources
 // know about it.
 type SessionView struct {
@@ -70,6 +78,16 @@ type Snapshot struct {
 	Sessions []SessionView `json:"sessions"`
 	Cards    []board.Card  `json:"cards"`
 	Limits   *usage.Limits `json:"limits,omitempty"`
+	// LimitsSource names which of the two places Limits came from: "local"
+	// (a session's statusline already wrote the rate-limit windows to disk,
+	// see internal/usage/localfile.go) or "network" (usage.Fetcher asked the
+	// account endpoint itself, the fallback for a machine no statusline has
+	// ticked on yet). Age alone cannot tell these apart -- a two-minute-old
+	// local file and a two-minute-old network answer look identical on the
+	// gauge, but mean different things: the first is normal (no session has
+	// run recently), the second means the endpoint itself is degraded. Set
+	// only alongside Limits; empty whenever Limits is nil.
+	LimitsSource string `json:"limitsSource,omitempty"`
 	// OrphanCards holds the path of every card whose Session field names a
 	// session the daemon no longer lists — spec section 7's "карточка ссылается
 	// на мёртвую сессию", which the panel must surface rather than quietly leave

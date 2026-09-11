@@ -61,6 +61,16 @@ const reportedPercentWindow = 100
 // real deadline out; nothing outside a test may write to it.
 var usageTimeout = 10 * time.Second
 
+// localRateLimitsPath is where cmd/fleetdeck-status writes the rate-limit
+// windows Claude Code already hands every session's statusline on stdin --
+// see internal/usage/localfile.go. Collect reads it first, before ever
+// asking the network endpoint usageTimeout bounds: that endpoint costs a
+// real request and can be rate-limited itself, while this file costs
+// nothing and is usually seconds old, written by whichever session's
+// statusline last ran. A var for the same reason as usageTimeout: a test
+// points it at its own temp file rather than the real machine's.
+var localRateLimitsPath = usage.LocalFilePath()
+
 // cachedUsage remembers the last context estimate together with the file state it was
 // computed from, so an idle session costs no reads at all. Transcripts reach tens of
 // megabytes and Collect runs every couple of seconds; without this the panel would
@@ -380,24 +390,36 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	c.pruneContextCache(c.enrich(snap.Sessions, cfg.SessionLabels))
 
 	if cfg.UsageEnabled && c.usage != nil {
-		usageCtx, cancel := context.WithTimeout(ctx, usageTimeout)
-		l, err := c.usage.Limits(usageCtx)
-		cancel()
-		if err != nil {
-			snap.UsageError = err.Error()
-			snap.UsageErrorKind = classifyUsageError(err)
-		}
-		// l carries the last successfully fetched value even when err != nil
-		// (usage.Fetcher.Limits falls back to its cache on a failed refresh) --
-		// its own FetchedAt is the only way to tell a real value from the zero
-		// Limits a fetcher with no successful call yet returns. Setting
-		// snap.Limits whenever there is a real value, independent of err,
-		// is what stops a single transient failure between two good fetches
-		// from blanking the gauges to "—" for one poll cycle: the panel keeps
-		// showing what it last knew, aged, rather than discarding it because
-		// the one attempt that happened to run this cycle failed.
-		if !l.FetchedAt.IsZero() {
+		if l, err := usage.ReadLocal(localRateLimitsPath); err == nil {
+			// The local file is a session's statusline having already asked
+			// Claude Code for this, seconds ago and for free (spec: source
+			// order is local-file-first, network endpoint as the fallback
+			// for the one case the file cannot cover -- a machine where no
+			// session has ever answered). No usage.Fetcher call, no
+			// network request, no way to hit its rate limit.
 			snap.Limits = &l
+			snap.LimitsSource = state.LimitsSourceLocal
+		} else {
+			usageCtx, cancel := context.WithTimeout(ctx, usageTimeout)
+			l, err := c.usage.Limits(usageCtx)
+			cancel()
+			if err != nil {
+				snap.UsageError = err.Error()
+				snap.UsageErrorKind = classifyUsageError(err)
+			}
+			// l carries the last successfully fetched value even when err != nil
+			// (usage.Fetcher.Limits falls back to its cache on a failed refresh) --
+			// its own FetchedAt is the only way to tell a real value from the zero
+			// Limits a fetcher with no successful call yet returns. Setting
+			// snap.Limits whenever there is a real value, independent of err,
+			// is what stops a single transient failure between two good fetches
+			// from blanking the gauges to "—" for one poll cycle: the panel keeps
+			// showing what it last knew, aged, rather than discarding it because
+			// the one attempt that happened to run this cycle failed.
+			if !l.FetchedAt.IsZero() {
+				snap.Limits = &l
+				snap.LimitsSource = state.LimitsSourceNetwork
+			}
 		}
 	}
 	return snap

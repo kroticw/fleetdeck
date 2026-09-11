@@ -671,6 +671,86 @@ func TestUsageErrorKindIsAuthForAMissingToken(t *testing.T) {
 	}
 }
 
+// TestLocalRateLimitsFileWinsOverTheNetwork is the fix this task exists
+// for: a session's statusline already asked Claude Code for these numbers,
+// for free, before Collect ever gets to decide whether to spend a network
+// request on the same question. If the local file is readable, the
+// network endpoint must never be asked at all -- not "asked and ignored",
+// asked. hits below proves that, not just that the local value won.
+func TestLocalRateLimitsFileWinsOverTheNetwork(t *testing.T) {
+	original := localRateLimitsPath
+	path := filepath.Join(t.TempDir(), "rate_limits.json")
+	localRateLimitsPath = path
+	t.Cleanup(func() { localRateLimitsPath = original })
+
+	local := usage.Limits{
+		FiveHour:  usage.Window{Utilization: 13, ResetsAt: time.Now().Add(5 * time.Hour)},
+		SevenDay:  usage.Window{Utilization: 40, ResetsAt: time.Now().Add(7 * 24 * time.Hour)},
+		FetchedAt: time.Now(),
+	}
+	if err := usage.WriteLocal(path, local); err != nil {
+		t.Fatal(err)
+	}
+
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Write([]byte(`{"five_hour":{"utilization":99,"resets_at":"2026-09-13T00:00:00.000Z"},"seven_day":{"utilization":99,"resets_at":"2026-09-13T00:00:00.000Z"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	uf := usage.NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
+
+	if hits != 0 {
+		t.Fatalf("network endpoint was hit %d times; the local file must make it unnecessary", hits)
+	}
+	if snap.Limits == nil {
+		t.Fatal("no limits in the snapshot at all")
+	}
+	if snap.Limits.FiveHour.Utilization != 13 || snap.Limits.SevenDay.Utilization != 40 {
+		t.Fatalf("snapshot carries %+v, want the local file's numbers, not the network's", snap.Limits)
+	}
+	if snap.UsageError != "" {
+		t.Fatalf("a successful local read must not report a usage error, got %q", snap.UsageError)
+	}
+	if snap.LimitsSource != state.LimitsSourceLocal {
+		t.Fatalf("LimitsSource = %q, want %q -- the panel cannot tell a stale local file from a degraded endpoint without this", snap.LimitsSource, state.LimitsSourceLocal)
+	}
+}
+
+// TestNetworkIsTheFallbackWhenNoLocalFileExists covers the one case the
+// local file cannot: a machine (or a fresh session) where no statusline
+// has ever run. Collect must fall back to exactly the path #83 already
+// tested, not silently show nothing because the local file was absent.
+func TestNetworkIsTheFallbackWhenNoLocalFileExists(t *testing.T) {
+	original := localRateLimitsPath
+	localRateLimitsPath = filepath.Join(t.TempDir(), "never-written.json")
+	t.Cleanup(func() { localRateLimitsPath = original })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"five_hour":{"utilization":17.4,"resets_at":"2026-09-09T12:00:00.000Z"},"seven_day":{"utilization":48.2,"resets_at":"2026-09-13T00:00:00.000Z"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.BoardPath = ""
+	uf := usage.NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
+
+	if snap.Limits == nil {
+		t.Fatal("no local file and the network fetch should still have produced limits")
+	}
+	if snap.Limits.FiveHour.Utilization != 17.4 {
+		t.Fatalf("expected the network fixture's own numbers, got %+v", snap.Limits)
+	}
+	if snap.LimitsSource != state.LimitsSourceNetwork {
+		t.Fatalf("LimitsSource = %q, want %q", snap.LimitsSource, state.LimitsSourceNetwork)
+	}
+}
+
 func TestASlowUsageEndpointDoesNotStallTheCycle(t *testing.T) {
 	original := usageTimeout
 	usageTimeout = 50 * time.Millisecond

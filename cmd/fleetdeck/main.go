@@ -273,7 +273,7 @@ func main() {
 		return
 	}
 
-	configPath := flag.String("config", defaultConfigPath(), "path to the configuration file")
+	configPath := flag.String("config", config.DefaultPath(), "path to the configuration file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -285,17 +285,6 @@ func main() {
 	if err := run(*configPath); err != nil {
 		log.Fatalf("fleetdeck: %v", err)
 	}
-}
-
-// defaultConfigPath is where spec section 11 puts the configuration file. A missing
-// file is a set of defaults, not a failure, so this default is usable on a machine
-// that has never been configured.
-func defaultConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "config.yaml"
-	}
-	return filepath.Join(home, ".config", "fleetdeck", "config.yaml")
 }
 
 // imagesDir is where an image attached to a session is kept: the panel's own
