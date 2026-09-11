@@ -32,7 +32,7 @@ func startForeign(t *testing.T, kind string) (addr, logPath string, cmd *exec.Cm
 		t.Fatal(err)
 	}
 	cmd = exec.Command(os.Args[0])
-	cmd.Env = append(os.Environ(), helperEnv+"="+kind+"@"+addr)
+	cmd.Env = helperEnvFor(kind, addr)
 	cmd.Stdout, cmd.Stderr = log, log
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

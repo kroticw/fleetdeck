@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -20,6 +21,35 @@ import (
 // process, real port, real signals -- the parts of starting and stopping a
 // panel that a fake could not show.
 const helperEnv = "FLEETDECK_SUPERVISOR_HELPER"
+
+// ownerEnv carries the PID of the test process that started a stand-in. The
+// stand-ins are panels, and a panel is made to outlive whatever started it
+// (Setsid) -- which is exactly what kept them running after a test binary was
+// killed by its -timeout, when no t.Cleanup runs: 19 of them were found on the
+// operator's machine, left by mutation runs, an hour old. A stand-in whose
+// test process is gone now exits by itself.
+const ownerEnv = "FLEETDECK_SUPERVISOR_HELPER_OWNER"
+
+// helperEnvFor is the environment a stand-in of kind is started with.
+func helperEnvFor(kind, addr string) []string {
+	return append(os.Environ(), helperEnv+"="+kind+"@"+addr, ownerEnv+"="+strconv.Itoa(os.Getpid()))
+}
+
+// watchOwner ends the stand-in once the test process that started it is gone.
+func watchOwner() {
+	owner, err := strconv.Atoi(os.Getenv(ownerEnv))
+	if err != nil || owner <= 0 {
+		return
+	}
+	go func() {
+		for {
+			if syscall.Kill(owner, 0) != nil {
+				os.Exit(4)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+}
 
 // termNotice is what the stand-in prints to its log when SIGTERM reaches it.
 const termNotice = "helper: SIGTERM, leaving"
@@ -36,6 +66,7 @@ func TestMain(m *testing.M) {
 }
 
 func runHelper(mode string) {
+	watchOwner()
 	kind, addr, _ := strings.Cut(mode, "@")
 	if kind == "ignore-term" {
 		signal.Ignore(syscall.SIGTERM)
@@ -94,7 +125,7 @@ func startHelper(t *testing.T, kind string) (*Panel, string) {
 func startHelperLogging(t *testing.T, kind, logPath string) (*Panel, string) {
 	t.Helper()
 	addr := freeAddr(t)
-	p, err := StartPanel(os.Args[0], nil, append(os.Environ(), helperEnv+"="+kind+"@"+addr), logPath)
+	p, err := StartPanel(os.Args[0], nil, helperEnvFor(kind, addr), logPath)
 	if err != nil {
 		t.Fatal(err)
 	}

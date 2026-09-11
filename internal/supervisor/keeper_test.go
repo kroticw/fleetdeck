@@ -31,7 +31,7 @@ func newKeeper(t *testing.T, kind, addr string) *Keeper {
 	return &Keeper{
 		URL:          "http://" + addr + "/",
 		Bin:          os.Args[0],
-		Env:          append(os.Environ(), helperEnv+"="+kind+"@"+addr),
+		Env:          helperEnvFor(kind, addr),
 		LogPath:      filepath.Join(t.TempDir(), "panel.log"),
 		StartTimeout: 5 * time.Second,
 		MinUptime:    300 * time.Millisecond,
