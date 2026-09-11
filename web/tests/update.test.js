@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   UPDATE_BINDING,
   WAIT_SHOWN_AFTER_MS,
+  UPDATE_REPAINT_MS,
   initialState,
   onPress,
   onProgress,
@@ -63,6 +64,13 @@ test("a wait is shown with its time once it passes two seconds, and not before",
   assert.ok(!has(updateHTML(state, 10_000 + 1999), "update_elapsed", { n: "0" }));
   assert.ok(has(updateHTML(state, 10_000 + 2000), "update_elapsed", { n: "2" }));
   assert.ok(has(updateHTML(state, 10_000 + 7400), "update_elapsed", { n: "7" }));
+});
+
+// The header repaints a running update on this cadence, so the time of a wait
+// appears at most this long after the wait passes two seconds. At once a
+// second it appeared up to a second late -- seen on a live page.
+test("a running update is repainted often enough for the time to appear on time", () => {
+  assert.ok(UPDATE_REPAINT_MS <= 250, `UPDATE_REPAINT_MS = ${UPDATE_REPAINT_MS}`);
 });
 
 test("each step says what is happening, with the build it is about", () => {
