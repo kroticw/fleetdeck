@@ -203,6 +203,49 @@ body {
   color: var(--text);
 }
 
+/* The commit beside the brand: there to be glanced at, not read, so it stays
+   quiet. The full picture is in the brand's title. */
+#header .build-rev {
+  font-weight: 400;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+  color: var(--text-faint);
+}
+
+/* Above the header, the whole width: the page is out of date as a whole, not
+   in any one column. --attn, not --danger: nothing is broken yet, the page
+   just needs a reload. A reload that did not help is --danger -- it will not
+   resolve itself, and the message says what will. */
+#build-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: var(--gap) calc(var(--gap) * 2);
+  background: color-mix(in srgb, var(--attn) 14%, var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--attn) 35%, var(--border));
+  color: var(--text);
+}
+
+#build-banner.build-banner-failed {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  border-bottom-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+#build-banner .build-reload {
+  font: inherit;
+  padding: 0.2em 0.8em;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+#build-banner .build-reload:hover {
+  background: var(--surface-hover);
+}
+
 #header .limits {
   display: flex;
   align-items: center;

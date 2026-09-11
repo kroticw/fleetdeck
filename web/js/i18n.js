@@ -128,6 +128,17 @@ const en = {
   // through a dialog.
   edit_label: "edit the name",
   label_save_failed: "the name was not saved",
+
+  build_stale: "The panel has been updated; this page has not.",
+  build_reload: "Reload",
+  build_stale_waiting: "The panel has been updated. This page will reload by itself once the text you are typing is sent.",
+  build_reload_now: "Reload now",
+  build_reload_failed: "Reloading did not help: the window got the previous page again. Quit the window with Cmd+Q and open it again.",
+  build_commit: "commit",
+  build_modified: "modified tree",
+  build_commit_time: "commit made",
+  build_built_at: "built",
+  build_executable: "binary",
 };
 
 const ru = {
@@ -217,6 +228,17 @@ const ru = {
 
   edit_label: "изменить имя",
   label_save_failed: "имя не сохранено",
+
+  build_stale: "Панель обновилась, а эта страница — нет.",
+  build_reload: "Перезагрузить",
+  build_stale_waiting: "Панель обновилась. Страница перезагрузится сама, как только набранный текст будет отправлен.",
+  build_reload_now: "Перезагрузить сейчас",
+  build_reload_failed: "Перезагрузка не помогла: окно снова получило прежнюю страницу. Закройте окно через Cmd+Q и откройте заново.",
+  build_commit: "коммит",
+  build_modified: "изменённое дерево",
+  build_commit_time: "коммит сделан",
+  build_built_at: "собран",
+  build_executable: "бинарь",
 };
 
 const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;

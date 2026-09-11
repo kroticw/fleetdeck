@@ -57,6 +57,26 @@ import (
 // itself failing to load.
 const defaultURL = "http://127.0.0.1:7777/"
 
+// reloadBindingName is the global function the window gives the page. The page
+// (web/js/buildcheck.js) calls it when the panel under it has been replaced by
+// one serving a different interface, and the window navigates it afresh -- no
+// Cmd+Q, no person. Its presence is also how the page knows it is inside this
+// window: in a browser nothing binds it, and the page asks for a click instead.
+// The name is a contract across two languages; reload_test.go checks both
+// sides still spell it the same way.
+const reloadBindingName = "fleetdeckReload"
+
+// reloadBinding is what the page's call runs. It hops to the UI thread before
+// touching the web view -- a bound function is called from the web view's own
+// callback, and the web view is only safe to drive from the UI thread -- and
+// navigates to the panel's URL rather than reloading: a reload may take the
+// document from cache, a navigation asks the server.
+func reloadBinding(dispatch func(func()), navigate func(string), url string) func() {
+	return func() {
+		dispatch(func() { navigate(url) })
+	}
+}
+
 // reachabilityTimeout bounds the one check this command makes before deciding
 // whether to open the panel directly or show the waiting page. A window that
 // hangs on a slow or absent network answer before it has even appeared would
@@ -165,6 +185,12 @@ func main() {
 	// panel, the same way a browser tab survives being put away.
 	installMenu()
 	installCloseToHide(w.Window())
+
+	// Bound before the first navigation, so the page finds it from its very
+	// first load, including the load the waiting page hands over to.
+	if err := w.Bind(reloadBindingName, reloadBinding(w.Dispatch, w.Navigate, *url)); err != nil {
+		log.Printf("fleetdeck-window: the page will not be able to reload itself: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), reachabilityTimeout)
 	up := reachable(ctx, *url)

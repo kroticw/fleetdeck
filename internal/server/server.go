@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
@@ -146,6 +147,13 @@ type Deps struct {
 	// rather than choosing a directory on its own.
 	ImageDir string
 
+	// Build describes the running panel. It is stamped on every snapshot, and
+	// its web hash is written into index.html in the same response that
+	// delivers the page -- so the page knows which build it came from without
+	// asking again, and learns from the socket when the panel under it has
+	// changed. Nil serves the page as embedded and the snapshot without it.
+	Build *buildinfo.Fingerprint
+
 	// Attach opens a held, two-way terminal on a session at the given geometry —
 	// daemon.Client.Attach. It backs GET /api/sessions/{id}/pty. ctx bounds opening
 	// only; the terminal lives until it is closed. Nil leaves the route answering 503.
@@ -191,6 +199,18 @@ type Deps struct {
 // type checks that keep a page on another site from driving this panel through
 // the operator's own browser.
 func New(d Deps) http.Handler {
+	// Stamped here, once, so the HTTP route and the socket cannot disagree:
+	// both read snapshots through d.Snapshot, and the handlers below are bound
+	// to this copy of d.
+	if d.Snapshot != nil && d.Build != nil {
+		collect, build := d.Snapshot, d.Build
+		d.Snapshot = func() state.Snapshot {
+			snap := collect()
+			snap.Build = build
+			return snap
+		}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
 	mux.HandleFunc("POST /api/sessions/{id}/text", d.handleSendText)
@@ -207,6 +227,6 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /ws", d.handleWS)
 	mux.HandleFunc("GET /api/sessions/{id}/pty", d.handlePTY)
 	mux.HandleFunc("GET /api/terminal-token", d.handleTerminalToken)
-	mux.Handle("GET /", staticHandler())
+	mux.Handle("GET /", staticHandler(d.Build))
 	return guard(mux)
 }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/notify"
@@ -32,6 +33,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
 	"github.com/kroticw/fleetdeck/internal/version"
+	"github.com/kroticw/fleetdeck/web"
 )
 
 const (
@@ -487,5 +489,22 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		SetSessionLabel: func(sessionID, label string) error {
 			return setSessionLabel(configPath, collector, sessionID, label)
 		},
+
+		// Which build this is: stamped on every snapshot, and its web hash put
+		// into the page itself, so a page left open while this binary is
+		// replaced can tell that it is out of date.
+		Build: readBuild(),
 	}
+}
+
+// readBuild fingerprints the running binary. A panel that cannot hash its own
+// embedded interface -- which would be a build mistake, not a runtime one --
+// still starts; it only loses the ability to tell an open page it is stale.
+func readBuild() *buildinfo.Fingerprint {
+	f, err := buildinfo.Read(web.FS)
+	if err != nil {
+		log.Printf("fleetdeck: no build fingerprint, pages will not be told when they are out of date: %v", err)
+		return nil
+	}
+	return &f
 }

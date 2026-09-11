@@ -82,6 +82,18 @@ void fleetdeck_install_menu(void) {
   itemSetSubmenu(editMenuItem, editMenu);
   menuAddItem(menubar, editMenuItem);
 
+  // View menu: Reload. Without it the page in this window lives until Quit --
+  // the red button hides the window instead of closing it -- so a page left
+  // open over a rebuilt panel kept running the old code with no way to swap
+  // it short of quitting. reload: is WKWebView's own action and needs no
+  // target, the same way cut: and paste: above do not: AppKit walks the
+  // responder chain to the web view.
+  id viewMenuItem = newMenuItem("View", NULL, "");
+  id viewMenu = newMenu("View");
+  menuAddItem(viewMenu, newMenuItem("Reload", "reload:", "r"));
+  itemSetSubmenu(viewMenuItem, viewMenu);
+  menuAddItem(menubar, viewMenuItem);
+
   sendVoid1(app, sel("setMainMenu:"), menubar);
 }
 
