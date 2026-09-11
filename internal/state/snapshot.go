@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
@@ -111,6 +112,14 @@ type Snapshot struct {
 	// column, copied from configuration by the caller (cmd/fleetdeck's
 	// Collector). Empty means nothing is pinned; the panel then offers a picker.
 	OrchestratorSession string `json:"orchestratorSession,omitempty"`
+
+	// Build describes the panel that produced this snapshot. A page open for
+	// hours compares Build.Web with the fingerprint its own document arrived
+	// with, and a mismatch means the panel was replaced under it. Stamped by
+	// internal/server, not by the Collector: the collector knows the fleet,
+	// the server knows what it is serving. Nil when the panel was wired
+	// without one, which the page reads as "nothing to compare".
+	Build *buildinfo.Fingerprint `json:"build,omitempty"`
 }
 
 // Link attaches each session to the card that names it. A card names a

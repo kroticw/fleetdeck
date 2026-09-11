@@ -1,8 +1,12 @@
 package server
 
 import (
+	"html"
+	"io/fs"
 	"net/http"
+	"strings"
 
+	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/web"
 )
 
@@ -52,10 +56,60 @@ const contentSecurityPolicy = "default-src 'self'; connect-src 'self' ws: wss:; 
 // package's own directory, so index.html, app.css and js/ sit at its root with
 // no "web/" prefix to strip. That is why no fs.Sub is needed here, unlike an
 // embed rooted one directory higher.
-func staticHandler() http.Handler {
+//
+// The document itself is the one exception to serving files as embedded: it
+// carries the build fingerprint, see indexWithFingerprint. It is also sent
+// with Cache-Control: no-cache. The embedded files have no modification time,
+// so the file server sends no validator either, and what a WebView does with
+// such a response on reload is not something to leave to it -- a document
+// taken from cache after the banner's "reload" would bring the old
+// fingerprint back, and the banner with it.
+func staticHandler(build *buildinfo.Fingerprint) http.Handler {
 	fileServer := http.FileServerFS(web.FS)
+	index := indexWithFingerprint(build)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
-		fileServer.ServeHTTP(w, r)
+		if r.URL.Path != "/" {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		if index == nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(index)
 	})
+}
+
+// headTag is where the fingerprint is inserted. The page reads it back with a
+// selector, so its position inside <head> is all that matters; the real
+// index.html is checked to have exactly one of these in the static tests.
+const headTag = "<head>"
+
+// indexWithFingerprint returns index.html with the running build's web hash in
+// a <meta> tag, or nil to serve the page as embedded.
+//
+// The fingerprint rides in the document rather than being fetched by the page
+// afterwards: the page must know which build it came from as of the moment it
+// arrived. Asked any later -- the first snapshot on the socket, say -- the
+// answer may already come from a panel that replaced this one in between,
+// and the page would adopt a fingerprint that is not its own. A <meta> tag
+// needs no script, so the Content-Security-Policy's script-src 'self' is not
+// in the way.
+func indexWithFingerprint(build *buildinfo.Fingerprint) []byte {
+	if build == nil || build.Web == "" {
+		return nil
+	}
+	data, err := fs.ReadFile(web.FS, "index.html")
+	if err != nil {
+		return nil
+	}
+	page := string(data)
+	if !strings.Contains(page, headTag) {
+		return nil
+	}
+	meta := headTag + "\n  <meta name=\"fleetdeck-build\" content=\"" + html.EscapeString(build.Web) + "\">"
+	return []byte(strings.Replace(page, headTag, meta, 1))
 }
