@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,8 +22,10 @@ const (
 	// looks for it beside the fleetdeck binary it was started from.
 	statusBinaryName = "fleetdeck-status"
 
-	// launchAgentLabel is the launchd label of the panel's agent, and the string
-	// that identifies an agent file as one this command wrote.
+	// launchAgentLabel is the launchd label of the agent earlier versions of this
+	// command wrote, and the string that identifies an agent file as theirs. init
+	// no longer writes one -- the fleetdeck window starts the panel -- but it
+	// still recognises one and says how to remove it.
 	launchAgentLabel = "dev.fleetdeck.panel"
 	launchAgentFile  = launchAgentLabel + ".plist"
 
@@ -42,7 +43,7 @@ const (
 func initCommand(args []string) error {
 	flags := flag.NewFlagSet("init", flag.ExitOnError)
 	boardPath := flags.String("board", "", "board directory to record in the configuration file this command creates")
-	force := flags.Bool("force", false, "replace a statusline or a launch agent that init would otherwise refuse to touch")
+	force := flags.Bool("force", false, "replace a statusline that init would otherwise refuse to touch")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -66,12 +67,12 @@ type initEnv struct {
 	// home is the directory holding .config, .claude and Library.
 	home string
 	// binary is the path of the running fleetdeck binary; the statusline reporter
-	// and the launch agent's program are both derived from it.
+	// is looked for beside it.
 	binary string
 	// board is the --board flag: empty means "decide for me".
 	board string
-	// force allows the two steps that would otherwise refuse to touch something the
-	// operator configured themselves.
+	// force allows the statusline step to replace a statusline the operator
+	// configured themselves.
 	force bool
 	out   io.Writer
 }
@@ -105,7 +106,6 @@ func runInit(env initEnv) error {
 		cfgStep,
 		ensureBoard(cfgPath, cfg, cfgCreated, cfgStep.err, env),
 		ensureStatusline(env),
-		ensureLaunchAgent(env),
 	}
 
 	failed := 0
@@ -122,18 +122,7 @@ func runInit(env initEnv) error {
 		}
 	}
 
-	// Loading the agent is a change to a machine's login behaviour, and it is the
-	// operator's to make: init prints the command and does not run it.
-	//
-	// bootstrap, not load: man launchctl lists load under LEGACY SUBCOMMANDS and
-	// names bootstrap among its recommended replacements. This line is the one
-	// instruction an operator copies verbatim, so it carries the current spelling.
-	// $(id -u) is left for the shell to expand — gui/<uid> is how the same man page
-	// spells the target for a user's GUI domain.
-	if steps[len(steps)-1].err == nil {
-		fmt.Fprintf(&report, "\nstart the panel at login with:\n  launchctl bootstrap gui/$(id -u) %s\n",
-			filepath.Join(env.home, "Library", "LaunchAgents", launchAgentFile))
-	}
+	report.WriteString(earlierLaunchAgent(env.home))
 	if _, err := io.WriteString(out, report.String()); err != nil {
 		return fmt.Errorf("print what init did: %w", err)
 	}
@@ -441,94 +430,26 @@ func isOurStatusline(existing any) bool {
 	return filepath.Base(fields[0]) == statusBinaryName
 }
 
-// ensureLaunchAgent installs the launchd agent that starts the panel at login.
-func ensureLaunchAgent(env initEnv) initStep {
-	s := initStep{name: "launch agent"}
-	agentPath := filepath.Join(env.home, "Library", "LaunchAgents", launchAgentFile)
-	// The log belongs with the machine's other logs, not among launchd's agent
-	// definitions: ~/Library/LaunchAgents is a directory of plists, and launchd
-	// reads what is in it.
-	logPath := filepath.Join(env.home, "Library", "Logs", "fleetdeck.log")
-
-	what, err := writeLaunchAgent(agentPath, env.binary, logPath, env.force)
-	if err != nil {
-		s.err = err
-		return s
-	}
-	s.note = fmt.Sprintf("%s (%s, log: %s)", agentPath, what, logPath)
-	return s
-}
-
-const launchAgentTemplate = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>` + launchAgentLabel + `</string>
-  <key>ProgramArguments</key><array><string>%s</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>%s</string>
-  <key>StandardErrorPath</key><string>%s</string>
-</dict>
-</plist>
-`
-
-// writeLaunchAgent writes the panel's launchd agent, creating the directory its
-// log goes in. It returns what it did: created, updated or kept.
+// earlierLaunchAgent is what init says about a launch agent an earlier
+// version of it wrote: nothing when there is none, or when the file at that
+// path is not one init wrote.
 //
-// An agent file that this command did not write is refused without force: the
-// operator's launchd agents are theirs.
-func writeLaunchAgent(path, binary, logPath string, force bool) (string, error) {
-	body, err := launchAgentPlist(binary, logPath)
-	if err != nil {
-		return "", err
+// The fleetdeck window starts the panel now (the operator's decision,
+// 2026-09-11), and an agent left in place starts a second panel at every
+// login -- which takes the port first, and leaves the window watching a panel
+// it did not start. Removing the agent is the operator's call, as loading it
+// was: init prints the two commands and runs neither. bootout, not unload:
+// man launchctl lists unload under LEGACY SUBCOMMANDS, and this is the line
+// an operator copies verbatim.
+func earlierLaunchAgent(home string) string {
+	path := filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)
+	raw, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(raw, []byte(launchAgentLabel)) {
+		return ""
 	}
-
-	what := "created"
-	existing, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-	case err != nil:
-		return "", fmt.Errorf("read launch agent %s: %w", path, err)
-	case string(existing) == body:
-		return "kept", nil
-	case !force && !bytes.Contains(existing, []byte(launchAgentLabel)):
-		return "", fmt.Errorf("%s holds an agent this command did not write; re-run with --force to replace it", path)
-	default:
-		what = "updated"
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("create launch agent dir: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return "", fmt.Errorf("create log dir: %w", err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return "", fmt.Errorf("write launch agent %s: %w", path, err)
-	}
-	return what, nil
-}
-
-// launchAgentPlist renders the agent. Every interpolated value is XML-escaped: a
-// home directory or a binary path holding &, < or > otherwise produces a document
-// launchd rejects, and nothing on the way there would have said so.
-func launchAgentPlist(binary, logPath string) (string, error) {
-	escapedBinary, err := escapeXML(binary)
-	if err != nil {
-		return "", err
-	}
-	escapedLog, err := escapeXML(logPath)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf(launchAgentTemplate, escapedBinary, escapedLog, escapedLog), nil
-}
-
-func escapeXML(s string) (string, error) {
-	var b bytes.Buffer
-	if err := xml.EscapeText(&b, []byte(s)); err != nil {
-		return "", fmt.Errorf("escape %q for the launch agent: %w", s, err)
-	}
-	return b.String(), nil
+	return fmt.Sprintf("\nlaunch agent:  %s is from an earlier fleetdeck init.\n"+
+		"               The fleetdeck window starts the panel now, and this agent would start\n"+
+		"               a second one at every login. To remove it:\n"+
+		"  launchctl bootout gui/$(id -u)/%s\n"+
+		"  rm '%s'\n", path, launchAgentLabel, path)
 }
