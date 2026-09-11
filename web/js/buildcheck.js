@@ -31,6 +31,18 @@ export const RELOAD_FROM_KEY = "fleetdeck-reload-from";
 
 const META_SELECTOR = 'meta[name="fleetdeck-build"]';
 
+// The session storage of this page, or undefined. Reading the sessionStorage
+// property itself throws where site data is blocked -- not only calls on it --
+// and a default parameter that throws takes the whole module's wiring down
+// with it, not just the memory of a reload.
+export function pageStorage() {
+  try {
+    return globalThis.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 export function readOwnBuild(doc) {
   return doc?.querySelector(META_SELECTOR)?.content ?? "";
 }
@@ -73,10 +85,103 @@ export function reloadNow(storage, own, reload) {
   reload();
 }
 
-export function bannerHTML(state) {
+// --- inside the fleetdeck window ---------------------------------------------
+//
+// cmd/fleetdeck-window binds window.fleetdeckReload: a function that navigates
+// the page afresh from Go. Its presence is how the page knows it is in the
+// window and not in a browser, and it is what lets the page be reloaded with
+// no person involved. In a browser nothing binds it, and the page behaves
+// exactly as before: it shows the banner and waits for a click.
+//
+// A fresh navigation rather than location.reload(): a reload may take the
+// document from cache, a navigation asks the server.
+
+// One extra attempt after a reload that brought the same page back, then the
+// page stops and says so. Anything that retries on its own needs a ceiling,
+// or a window that is handed a stale page keeps reloading forever.
+export const MAX_WINDOW_ATTEMPTS = 1;
+export const ATTEMPTS_KEY = "fleetdeck-reload-attempts";
+
+// "none"   nothing to do
+// "banner" show the banner for the current state and wait
+// "reload" reload now, without asking
+export function nextAction({ state, host, unsent, attempts }) {
+  if (state !== "stale" && state !== "reloadFailed") return "none";
+  if (!host) return "banner";
+  // Text typed and not sent is lost by any reload. The page waits for the
+  // field to empty -- the operator sending the message is what empties it.
+  if (unsent) return "banner";
+  if (state === "reloadFailed" && attempts >= MAX_WINDOW_ATTEMPTS) return "banner";
+  return "reload";
+}
+
+// Whether any field on the page holds text that has not been sent.
+//
+// xterm.js keeps a hidden textarea of its own for keyboard input; whatever is
+// in it has already reached the session byte by byte, and the session's own
+// input line survives a reload because it lives in the session, not the page.
+// So a terminal never holds a reload back.
+export function hasUnsentText(doc) {
+  const fields = doc?.querySelectorAll?.("textarea, input[type=text], input:not([type])") ?? [];
+  return Array.from(fields).some((el) => !el.closest?.(".xterm") && String(el.value ?? "").trim() !== "");
+}
+
+export function takeAttempts(storage) {
+  try {
+    const value = Number(storage?.getItem(ATTEMPTS_KEY) ?? 0);
+    storage?.removeItem(ATTEMPTS_KEY);
+    return Number.isInteger(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function rememberAttempts(storage, attempts) {
+  try {
+    storage?.setItem(ATTEMPTS_KEY, String(attempts));
+  } catch {
+    // Without storage the retry count resets on every load, and the ceiling
+    // becomes per-load rather than per-episode. Still a ceiling.
+  }
+}
+
+// --- the session that was open -------------------------------------------------
+//
+// A reload closes whatever session panel was open. A person pressing reload
+// expects that; a window reloading by itself would close the panel under them
+// for no reason they can see. main.js writes the open session down here and
+// opens it again after the load. Which tab inside the session panel was open
+// is session.js's to keep, not this module's.
+const OPEN_SESSION_KEY = "fleetdeck-open-session";
+
+export function rememberOpenSession(storage, short) {
+  try {
+    if (short) storage?.setItem(OPEN_SESSION_KEY, short);
+    else storage?.removeItem(OPEN_SESSION_KEY);
+  } catch {
+    // The panel simply does not come back after a reload.
+  }
+}
+
+export function takeOpenSession(storage) {
+  try {
+    const value = storage?.getItem(OPEN_SESSION_KEY) ?? "";
+    storage?.removeItem(OPEN_SESSION_KEY);
+    return value;
+  } catch {
+    return "";
+  }
+}
+
+// waiting: the page is in the window, which would reload it by itself, and is
+// holding back only because a field has text in it. The banner then says the
+// reload will come on its own, and still offers it now, at the person's choice.
+export function bannerHTML(state, { waiting = false } = {}) {
   if (state === "stale") {
-    return `<span class="build-banner-text">${escape(t("build_stale"))}</span>
-      <button type="button" class="build-reload">${escape(t("build_reload"))}</button>`;
+    const text = waiting ? t("build_stale_waiting") : t("build_stale");
+    const button = waiting ? t("build_reload_now") : t("build_reload");
+    return `<span class="build-banner-text">${escape(text)}</span>
+      <button type="button" class="build-reload">${escape(button)}</button>`;
   }
   if (state === "reloadFailed") {
     // No button here on purpose. The action that just failed is not offered
@@ -109,23 +214,53 @@ export function brandHTML(build) {
 
 // Wires the banner to a root element and the store. Kept apart from the
 // functions above so those can be tested without a page.
-export function renderBuildBanner(root, subscribe, { doc = document, storage = sessionStorage, reload = () => location.reload() } = {}) {
+//
+// hostReload is window.fleetdeckReload when the page is inside the fleetdeck
+// window, and undefined in a browser; see the section above nextAction.
+export function renderBuildBanner(
+  root,
+  subscribe,
+  {
+    doc = document,
+    storage = pageStorage(),
+    reload = () => location.reload(),
+    hostReload = typeof window.fleetdeckReload === "function" ? () => window.fleetdeckReload() : undefined,
+  } = {},
+) {
   const own = readOwnBuild(doc);
   const reloadFrom = takeReloadFrom(storage);
+  const attempts = takeAttempts(storage);
+  const doReload = hostReload ?? reload;
   let shown = null;
+  let reloading = false;
 
   root.addEventListener("click", (event) => {
     if (!event.target.closest(".build-reload")) return;
-    reloadNow(storage, own, reload);
+    reloadNow(storage, own, doReload);
   });
 
   subscribe((snap) => {
+    if (reloading) return;
     const state = buildState(own, snap?.build?.web, reloadFrom);
-    // Redrawn only when the state changes: snapshots arrive about once a
+    const unsent = hasUnsentText(doc);
+    const action = nextAction({ state, host: !!hostReload, unsent, attempts });
+
+    if (action === "reload") {
+      // Once: snapshots keep arriving until the navigation actually starts,
+      // and each would otherwise ask for another one.
+      reloading = true;
+      if (state === "reloadFailed") rememberAttempts(storage, attempts + 1);
+      reloadNow(storage, own, doReload);
+      return;
+    }
+
+    const waiting = action === "banner" && state === "stale" && !!hostReload && unsent;
+    const key = action === "none" ? "none" : `${state}:${waiting}`;
+    // Redrawn only when what is shown changes: snapshots arrive about once a
     // second, and redrawing every time would take focus off the button.
-    if (state === shown) return;
-    shown = state;
-    const html = bannerHTML(state);
+    if (key === shown) return;
+    shown = key;
+    const html = action === "none" ? "" : bannerHTML(state, { waiting });
     root.innerHTML = html;
     root.hidden = html === "";
     root.classList.toggle("build-banner-failed", state === "reloadFailed");

@@ -38,6 +38,8 @@ var (
 	editMenuActionKeys    map[string]string
 	quitKey               string
 	quitKeyOK             bool
+	reloadKey             string
+	reloadKeyOK           bool
 
 	closeHideWindow             unsafe.Pointer
 	closeHideShouldCloseResult  int
@@ -56,6 +58,7 @@ func TestMain(m *testing.M) {
 	hasAppMenu = testHasTopLevelMenuTitled("fleetdeck")
 	editMenuActionKeys = testEditMenuActionKeys()
 	quitKey, quitKeyOK = testAppMenuQuitKeyEquivalent()
+	reloadKey, reloadKeyOK = testMenuItemKey("View", "reload:")
 
 	closeHideWindow = testNewHiddenWindow()
 	if closeHideWindow != nil {
@@ -93,6 +96,21 @@ func TestAppMenuQuitRoutesToTerminate(t *testing.T) {
 	}
 	if quitKey != "q" {
 		t.Fatalf("Quit key equivalent = %q, want \"q\"", quitKey)
+	}
+}
+
+// The page in the window used to live forever: the red button hides the
+// window rather than closing it, and there was no way to reload short of
+// quitting. reload: is WKWebView's own action, reached through the responder
+// chain the same way cut: and paste: are. As with those, this proves the item
+// exists with the right action and key; that Cmd+R reloads the page for a
+// person pressing it is checked on the live window, by hand.
+func TestViewMenuReloadRoutesToTheWebViewsReload(t *testing.T) {
+	if !reloadKeyOK {
+		t.Fatal("no View menu item with action reload: -- the page in the window cannot be reloaded without quitting")
+	}
+	if reloadKey != "r" {
+		t.Fatalf("Reload key equivalent = %q, want \"r\"", reloadKey)
 	}
 }
 

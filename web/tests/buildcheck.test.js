@@ -18,7 +18,17 @@ import {
   brandHTML,
   readOwnBuild,
   RELOAD_FROM_KEY,
+  nextAction,
+  hasUnsentText,
+  takeAttempts,
+  rememberAttempts,
+  ATTEMPTS_KEY,
+  MAX_WINDOW_ATTEMPTS,
+  rememberOpenSession,
+  takeOpenSession,
+  pageStorage,
 } from "../js/buildcheck.js";
+import { t } from "../js/i18n.js";
 
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial));
@@ -173,4 +183,136 @@ test("the brand survives a panel with no fingerprint at all", () => {
 test("the title escapes what it quotes", () => {
   const html = brandHTML({ web: "a", revision: "24d0c7a", executable: '/tmp/"><img src=x>' });
   assert.doesNotMatch(html, /"><img/);
+});
+
+// --- inside the fleetdeck window ---------------------------------------------
+//
+// In the window the page can be reloaded without a person: the window binds a
+// function that navigates it afresh. So there the page does not ask, it acts --
+// with one exception, and one limit. The exception: text typed and not yet
+// sent would be lost, so while a field holds any, the page waits and shows the
+// banner instead. The limit: a reload that brings back the same page is tried
+// once more, then the page says so; it never reloads itself in a loop.
+
+test("in the window a stale page reloads itself", () => {
+  assert.equal(nextAction({ state: "stale", host: true, unsent: false, attempts: 0 }), "reload");
+});
+
+test("in a browser a stale page still only offers the reload", () => {
+  assert.equal(nextAction({ state: "stale", host: false, unsent: false, attempts: 0 }), "banner");
+});
+
+// The operator is halfway through a message. Reloading now throws it away.
+test("text typed and not sent holds the reload back", () => {
+  assert.equal(nextAction({ state: "stale", host: true, unsent: true, attempts: 0 }), "banner");
+});
+
+test("a current page, or one with nothing to compare, is left alone", () => {
+  for (const host of [true, false]) {
+    assert.equal(nextAction({ state: "current", host, unsent: false, attempts: 0 }), "none");
+    assert.equal(nextAction({ state: "unknown", host, unsent: false, attempts: 0 }), "none");
+  }
+});
+
+test("a failed reload in the window is tried once more, then reported", () => {
+  assert.equal(nextAction({ state: "reloadFailed", host: true, unsent: false, attempts: 0 }), "reload");
+  assert.equal(
+    nextAction({ state: "reloadFailed", host: true, unsent: false, attempts: MAX_WINDOW_ATTEMPTS }),
+    "banner",
+    "past the limit the page must stop and say so, not reload forever",
+  );
+});
+
+test("a failed reload in a browser is reported at once", () => {
+  assert.equal(nextAction({ state: "reloadFailed", host: false, unsent: false, attempts: 0 }), "banner");
+});
+
+test("the retry count survives the reload and is read back once", () => {
+  const storage = fakeStorage();
+  rememberAttempts(storage, 1);
+  assert.equal(storage.map.get(ATTEMPTS_KEY), "1");
+  assert.equal(takeAttempts(storage), 1);
+  assert.equal(takeAttempts(storage), 0, "a later load must start from zero");
+  assert.equal(takeAttempts(brokenStorage), 0);
+  assert.doesNotThrow(() => rememberAttempts(brokenStorage, 1));
+});
+
+// --- what counts as unsent ---------------------------------------------------
+
+function field(value, { terminal = false } = {}) {
+  return { value, closest: (sel) => (terminal && sel === ".xterm" ? {} : null) };
+}
+function docWith(...fields) {
+  return { querySelectorAll: () => fields };
+}
+
+test("an empty page has nothing unsent", () => {
+  assert.equal(hasUnsentText(docWith()), false);
+  assert.equal(hasUnsentText(docWith(field(""), field("   "))), false, "whitespace alone is not a message");
+});
+
+test("a field with text in it is unsent", () => {
+  assert.equal(hasUnsentText(docWith(field(""), field("почти дописала"))), true);
+});
+
+// xterm.js keeps a hidden textarea of its own for keyboard input. Whatever is
+// in it has already gone to the session byte by byte, so a terminal never
+// holds anything back.
+test("the terminal's own hidden field does not count", () => {
+  assert.equal(hasUnsentText(docWith(field("x", { terminal: true }))), false);
+});
+
+// --- the session that was open ---------------------------------------------
+//
+// A reload closes whatever session panel was open. When a person pressed
+// reload they expect that; when the window reloads by itself it would close
+// the panel under them for no reason they can see. The open session is written
+// down and opened again after the load.
+
+test("the open session is remembered across a reload and read back once", () => {
+  const storage = fakeStorage();
+  rememberOpenSession(storage, "52d3591d");
+  assert.equal(takeOpenSession(storage), "52d3591d");
+  assert.equal(takeOpenSession(storage), "", "a later load must not reopen it again");
+});
+
+test("closing the session forgets it", () => {
+  const storage = fakeStorage();
+  rememberOpenSession(storage, "52d3591d");
+  rememberOpenSession(storage, "");
+  assert.equal(takeOpenSession(storage), "");
+});
+
+test("storage that refuses everything costs only the reopening", () => {
+  assert.doesNotThrow(() => rememberOpenSession(brokenStorage, "52d3591d"));
+  assert.equal(takeOpenSession(brokenStorage), "");
+});
+
+// In the window, with a message half typed, the page does not reload -- and
+// says that it will, by itself, once the field is empty. Without that sentence
+// the operator sees an ordinary "reload?" banner and has no way to know the
+// window would have taken care of it.
+//
+// The sentence itself is checked, not merely that the banner differs: the
+// button's label changes too, and a first version of this case that only
+// compared the two banners stayed green with the sentence removed.
+test("a stale page waiting on unsent text says it will reload by itself", () => {
+  const waiting = bannerHTML("stale", { waiting: true });
+  assert.ok(waiting.includes(t("build_stale_waiting")), "the banner must say the reload will come by itself");
+  assert.ok(!bannerHTML("stale").includes(t("build_stale_waiting")), "and only while waiting");
+  assert.match(waiting, /class="build-reload"/, "reloading now stays possible, at the person's own choice");
+});
+
+// Reading the sessionStorage property throws where site data is blocked. A
+// default parameter that throws takes the banner's whole wiring down, so the
+// page reaches storage only through this.
+test("reaching storage never throws, even when the property itself does", () => {
+  const had = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, get() { throw new Error("SecurityError"); } });
+  try {
+    assert.equal(pageStorage(), undefined);
+  } finally {
+    if (had) Object.defineProperty(globalThis, "sessionStorage", had);
+    else delete globalThis.sessionStorage;
+  }
 });
