@@ -2,6 +2,26 @@
 
 This page walks through installing fleetdeck, opening the panel, creating a first board card, and connecting it to a running Claude Code session. The last section, about the `session` field, describes the design as it exists today and is the part worth reading carefully.
 
+## Installing the app from a release
+
+Every release on the [releases page](https://github.com/kroticw/fleetdeck/releases) carries `fleetdeck-<version>-macos.zip`: the fleetdeck app, one download for Apple silicon and Intel Macs, with the release's version in Finder's Get Info. It needs Claude Code on the same Mac, since the app starts sessions with `claude`, and git and python3 for the board — see "What the machine needs" under [First launch](#first-launch-choosing-the-workspace).
+
+**Read this before the steps.** The app is not signed with an Apple Developer ID certificate and is not notarized by Apple. macOS therefore will not open it until you make an exception for it in System Settings. That is a way past Gatekeeper for an app you have decided to trust, not a normal installation: an app signed with a Developer ID and notarized by Apple opens with a double click and none of the steps below. fleetdeck is not signed that way yet.
+
+What the release does carry is an ad-hoc seal over the whole app. It says nothing about who built the app, but without it macOS calls a downloaded copy damaged and offers no way to open it at all — that is what a downloaded copy of an app built with `make window-app` gets. With the seal, macOS asks you instead.
+
+The order of the steps matters:
+
+1. Download the zip and double-click it. `fleetdeck.app` appears beside it.
+2. Drag `fleetdeck.app` into Applications **before** you open it for the first time. Opened from Downloads, it runs from a temporary copy at a random path, and first-run setup would record that path in Claude Code's settings as the statusline command.
+3. Open fleetdeck from Applications. macOS refuses and says that it could not verify the app is free of malware. Press **Done**. The highlighted button is **Move to Trash**: do not press that one.
+4. Now open System Settings, choose **Privacy & Security**, and scroll down to **Security**. A line saying that fleetdeck was blocked is there, with an **Open Anyway** button. It appears only after step 3 and, according to Apple, stays for about an hour: looking there before you have tried to open the app finds nothing.
+5. Press **Open Anyway**. The warning comes back, now with a button that opens the app; press it. Apple's instructions say macOS then asks for your login password.
+
+From then on fleetdeck opens with a double click like any other app, and the panel's setup page takes over — see [First launch](#first-launch-choosing-the-workspace).
+
+What the window in step 3 says, word for word, on macOS 26.6.2 in Russian, where these steps were recorded on 2026-09-11: «Файл «fleetdeck» не был открыт» — «Apple не удалось подтвердить, что файл «fleetdeck» не содержит вредоносного ПО, которое может нанести вред Вашему Mac или конфиденциальности Ваших данных.», with the buttons «Переместить в Корзину» and «Готово». The English names above are Apple's own, from [its instructions for opening an app that is not notarized](https://support.apple.com/guide/mac-help/mh40616/mac); another macOS version or language may word them differently. The text of the second warning in step 5 was not recorded.
+
 ## Installing the binary
 
 Build from source with `make build`, which puts two binaries in `bin/`:
@@ -114,6 +134,8 @@ Pressing it brings the checkout forward and hands over to the new build:
 A step that takes longer than two seconds shows how long it has taken. A second press while an update runs does nothing, and a second window or a terminal cannot start another update of the same checkout alongside it. If you have typed a message and not sent it, the first press asks whether to update anyway: the page reloads into the new version at the end.
 
 If the new version's panel does not start, or answers with another build, nothing is replaced: the installed app stays, its panel is started again, and the button says what went wrong. The version an update replaces stays in `.fleetdeck-update/` until the next update.
+
+An app installed from a release has no Update button: it was built by the release workflow, not from a checkout on your Mac, and there is no tree for it to bring forward. A new version is installed the way the first one was — download it and drag it into Applications, replacing the old one. macOS will probably ask about the new version again, since to Gatekeeper it is a different app; that has not been tried.
 
 ## Opening the panel
 
