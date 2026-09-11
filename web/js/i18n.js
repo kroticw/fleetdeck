@@ -88,9 +88,12 @@ const en = {
   no_steps: "no readable steps yet",
   terminal_missing: "the terminal library did not load",
 
-  // The live terminal on the screen tab (web/js/session.js). Each ending is
-  // named apart, because each asks something different of the operator: wait,
-  // look elsewhere, fix the key, start the daemon, or simply reopen the tab.
+  // The live terminal (web/js/liveterminal.js), on the session panel's screen
+  // tab and in the orchestrator column. Each ending is named apart, because each
+  // asks something different of the operator: wait, look elsewhere, fix the
+  // key, start the daemon, or simply reopen the tab. The column reconnects by
+  // itself and has no tab to reopen, so what it says while it tries again ends
+  // in terminal_reconnecting instead of in that advice.
   terminal_not_connected: "the terminal is not connected yet",
   terminal_read_only: "this terminal only shows the session: the control key is unavailable, so typing is off",
   terminal_not_fitted: "the terminal could not measure this pane, so it is drawn at its default size — and the session runs at that size too",
@@ -106,6 +109,7 @@ const en = {
   terminal_connection_lost: "the terminal connection was lost — reopen the tab to reconnect",
   terminal_reconnecting: "reconnecting by itself…",
   terminal_link_lost: "the terminal lost its connection",
+  terminal_token_stale: "the panel did not accept this terminal's token",
 
   // Attaching an image to a session (web/js/session.js, web/js/imagefile.js).
   // Both refusals are worded as what the panel will accept rather than as what
@@ -219,6 +223,7 @@ const ru = {
   terminal_connection_lost: "связь с терминалом потеряна — откройте вкладку заново, чтобы переподключиться",
   terminal_reconnecting: "переподключаюсь сам…",
   terminal_link_lost: "терминал потерял связь",
+  terminal_token_stale: "пульт не принял токен этого терминала",
 
   image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
   image_too_large: "эта картинка слишком велика, чтобы её прикрепить",

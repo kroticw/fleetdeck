@@ -162,16 +162,22 @@ const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 
 // Endings a reconnect cannot fix, so a terminal that reconnects does not try
 // after them: the session ended (4000) or is not there (4404) — its caller
-// opens it again if it comes back — another attacher took the terminal over
+// opens it again if it comes back — or another attacher took the terminal over
 // (4001; on Windows that is the operator's own terminal, and taking it back
-// would evict them in a loop), or the panel refused the token (4403).
-const FINAL_ENDINGS = new Set([4000, 4001, 4403, 4404]);
+// would evict them in a loop).
+//
+// A refused token (4403) is not among them. The token lives exactly as long as
+// the panel's process, and the one moment a page presents a token the panel
+// does not know is a restart between reading the token and opening the socket —
+// the very case reconnecting is for. Every attempt reads the token afresh, so
+// the next one presents the new process's.
+const FINAL_ENDINGS = new Set([4000, 4001, 4404]);
 
 // What an ending that is being retried says. The words closeMessage gives the
 // screen tab end in advice to reopen the tab, which a terminal that reconnects
-// by itself must not give; only the daemon being away says something more
-// useful than that the connection went.
-const RETRIED_ENDINGS = { 4503: "terminal_daemon_unavailable" };
+// by itself must not give; only a daemon that is away and a token that was
+// refused say something more useful than that the connection went.
+const RETRIED_ENDINGS = { 4403: "terminal_token_stale", 4503: "terminal_daemon_unavailable" };
 
 // createLiveTerminal draws the live terminal of session `short` into `host`.
 // Nothing happens until open(); stop() leaves no socket, timer, observer or

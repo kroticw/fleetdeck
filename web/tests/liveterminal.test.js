@@ -115,11 +115,11 @@ test("each failed attempt waits longer, up to a ceiling, and a success starts ov
 });
 
 // Each of these is a verdict, not a hiccup: the session is gone or has ended,
-// another window took the terminal over — on Windows that is the operator's
-// own terminal, and taking it back would evict them over and over — or the
-// panel refused the token. Trying again changes none of it.
+// or another window took the terminal over — on Windows that is the operator's
+// own terminal, and taking it back would evict them over and over. Trying
+// again changes none of it.
 test("an ending that trying again cannot fix is not tried again", async () => {
-  for (const code of [4000, 4001, 4403, 4404]) {
+  for (const code of [4000, 4001, 4404]) {
     sockets.length = 0;
     const run = await start();
     ready(sockets[0]);
@@ -136,6 +136,22 @@ test("a daemon that is away is named while the terminal waits for it", async () 
   sockets[0].serverClose(4503, "daemon unavailable");
   assert.ok(run.lastStream().startsWith(t("terminal_daemon_unavailable")), run.lastStream());
   assert.ok(run.lastStream().includes(t("terminal_reconnecting")));
+});
+
+// The token lives as long as the panel's process. A panel that restarts
+// between the page reading the token and the socket presenting it refuses the
+// old one — and the next attempt reads the new process's.
+test("a refused token is tried again, with a token read afresh", async () => {
+  const run = await start();
+  ready(sockets[0]);
+  sockets[0].serverClose(4403, "");
+  assert.ok(run.lastStream().startsWith(t("terminal_token_stale")), run.lastStream());
+  assert.ok(run.lastStream().includes(t("terminal_reconnecting")), "a refused token was taken as final");
+  assert.equal(run.lastStream().includes(t("terminal_token_refused")), false, "and told to reopen a tab it does not have");
+
+  await run.timers.tick();
+  assert.equal(sockets.length, 2);
+  assert.equal(tokenCalls, 2, "the retry presented the token that was just refused");
 });
 
 test("a token that cannot be read while the panel restarts is tried again", async () => {
