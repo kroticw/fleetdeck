@@ -444,6 +444,7 @@ func windowKeeper(t *testing.T, addr string) *Keeper {
 }
 
 func TestAPanelWhoseWindowIsGoneIsReplaced(t *testing.T) {
+	needLsof(t) // replacing stops the holder, found by lsof
 	addr := freeAddr(t)
 	orphan := foreignPanel(t, addr, os.Args[0], deadPID(t))
 	r := run(t, windowKeeper(t, addr))
@@ -464,6 +465,7 @@ func TestAPanelWhoseWindowIsGoneIsReplaced(t *testing.T) {
 // A panel started by a window from before panels reported their owner runs
 // from inside an app bundle and reports none. See Keeper.replaceable.
 func TestAPanelFromABundleThatReportsNoOwnerIsReplaced(t *testing.T) {
+	needLsof(t) // replacing stops the holder, found by lsof
 	addr := freeAddr(t)
 	bundled := filepath.Join(t.TempDir(), "fleetdeck.app", "Contents", "MacOS", "fleetdeck")
 	self, err := os.ReadFile(os.Args[0])
