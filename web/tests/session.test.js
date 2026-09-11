@@ -267,7 +267,20 @@ afterEach(() => {
   else globalThis.FitAddon = realFit;
 });
 
-async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }) } = {}) {
+// The page's session storage, reduced to what the panel touches: survives a
+// reload of the page, which in these tests is a second mount against the same
+// store with the first one simply abandoned, as a reload abandons it.
+function fakeStorage() {
+  const items = new Map();
+  return {
+    items,
+    getItem: (key) => (items.has(key) ? items.get(key) : null),
+    setItem: (key, value) => items.set(key, String(value)),
+    removeItem: (key) => items.delete(key),
+  };
+}
+
+async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }), storage = fakeStorage(), short = SHORT } = {}) {
   const root = dom.element("div");
   // In the page before the panel draws into it, as it is in a browser: a node
   // outside the document has no layout, and anything measured against it reads
@@ -275,9 +288,9 @@ async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }) } = {}
   dom.document.body.appendChild(root);
   const timers = fakeTimers();
   let closed = 0;
-  const stop = renderSession(root, SHORT, () => {
+  const stop = renderSession(root, short, () => {
     closed += 1;
-  }, { timers, lookup });
+  }, { timers, lookup, storage });
   await settle(); // let the first poll land
 
   const errorText = () => {
@@ -1095,6 +1108,92 @@ test("a transcript with no readable steps says so rather than showing nothing", 
 // and four of those five buttons do not: they press a key inside a Claude Code
 // session running somewhere else, which no undo reaches. The three tests below
 // are what stops that row from coming back.
+
+// --- the tab across a reload ---------------------------------------------------
+//
+// The window reloads the page by itself, and main.js opens the session that was
+// open again (web/js/buildcheck.js). Which tab was open is this panel's to keep:
+// somebody who pressed Cmd+R in the terminal expects to land in the terminal.
+
+const openTab = (panel) => panel.root.querySelector(".s-tab-on")?.dataset.tab;
+
+test("a panel brought back by a reload opens on the tab it was on", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const storage = fakeStorage();
+  const before = await mount({ storage });
+  await before.openScreenTab();
+  assert.equal(sockets.length, 1);
+
+  // The reload: the old page is gone without stopping anything, and the new one
+  // opens the same session against the same storage.
+  const after = await mount({ storage });
+  assert.equal(openTab(after), "screen", "the reloaded panel came back on another tab");
+  assert.equal(sockets.length, 2, "and the terminal it came back to is connected");
+});
+
+// Restoring is for a reload only. A panel the operator closed, or left for
+// another session, opens the way it always has.
+test("a panel opened afresh starts on the digest, whatever tab it was closed on", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const storage = fakeStorage();
+
+  let panel = await mount({ storage });
+  await panel.openScreenTab();
+  panel.stop();
+  panel = await mount({ storage });
+  assert.equal(openTab(panel), "digest", "stopped by its owner");
+  panel.stop();
+
+  panel = await mount({ storage });
+  await panel.openScreenTab();
+  await panel.click(".s-close");
+  panel = await mount({ storage });
+  assert.equal(openTab(panel), "digest", "closed with its own button");
+  assert.equal(storage.items.size, 0, "nothing is left behind once the panel is closed");
+});
+
+test("a remembered tab belongs to its session", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const storage = fakeStorage();
+  const other = await mount({ storage, short: "ffff0000" });
+  await other.openScreenTab();
+
+  const panel = await mount({ storage });
+  assert.equal(openTab(panel), "digest", "another session's tab was applied to this one");
+  panel.stop();
+
+  // Storage is the page's, and anything may have written there.
+  for (const kept of [JSON.stringify({ short: SHORT, tab: "launch" }), "not json"]) {
+    storage.items.set("fleetdeck-session-tab", kept);
+    const odd = await mount({ storage });
+    assert.equal(openTab(odd), "digest", `came back on a tab from ${kept}`);
+    odd.stop();
+  }
+});
+
+test("a page whose storage refuses is a panel without memory, not a broken one", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const refusing = {
+    getItem() {
+      throw new Error("blocked");
+    },
+    setItem() {
+      throw new Error("blocked");
+    },
+    removeItem() {
+      throw new Error("blocked");
+    },
+  };
+  const panel = await mount({ storage: refusing });
+  assert.equal(openTab(panel), "digest");
+  await panel.openScreenTab();
+  assert.equal(openTab(panel), "screen", "switching tabs still works");
+  panel.stop();
+});
 
 test("the keys are drawn on the screen tab and on no other", async () => {
   // A control that does nothing meaningful where it is shown teaches the person

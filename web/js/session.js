@@ -241,6 +241,47 @@ function fitTerminal(terminal) {
   return true;
 }
 
+// Which tab a session panel was on, kept across a reload of the page.
+//
+// The window reloads the page by itself, and main.js opens the session that was
+// open again (web/js/buildcheck.js keeps that); the tab inside it is this
+// module's to keep. Written on every tab switch and removed when the panel is
+// closed or replaced, so only a panel the page lost without closing it — a
+// reload — comes back on its tab; one opened afresh starts on the digest as it
+// always has.
+//
+// sessionStorage, for the reason buildcheck.js gives: this is about one reload
+// of one window. Every access is guarded — reading the property itself throws
+// where site data is blocked, and a panel without this memory still works.
+const TAB_KEY = "fleetdeck-session-tab";
+const TABS = new Set(["digest", "screen"]);
+
+function pageStorage() {
+  try {
+    return globalThis.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function recalledTab(storage, short) {
+  try {
+    const kept = JSON.parse(storage?.getItem(TAB_KEY) ?? "null");
+    return kept?.short === short && TABS.has(kept.tab) ? kept.tab : "digest";
+  } catch {
+    return "digest";
+  }
+}
+
+function keepTab(storage, short, tab) {
+  try {
+    if (tab) storage?.setItem(TAB_KEY, JSON.stringify({ short, tab }));
+    else storage?.removeItem(TAB_KEY);
+  } catch {
+    // The panel comes back on the digest after a reload, as it did before.
+  }
+}
+
 // renderSession draws the panel for one session into `root` and starts polling.
 // It returns a stop function; calling it, or the panel's own close button,
 // leaves no timer and no terminal behind.
@@ -268,10 +309,14 @@ export function renderSession(
   root,
   short,
   onClose,
-  { timers = globalThis, lookup = (id) => (get()?.sessions ?? []).find((s) => s.short === id) } = {},
+  {
+    timers = globalThis,
+    lookup = (id) => (get()?.sessions ?? []).find((s) => s.short === id),
+    storage = pageStorage(),
+  } = {},
 ) {
 
-  let tab = "digest";
+  let tab = recalledTab(storage, short);
   let poller = null;
   let terminal = null;
   // The screen tab's stream, and whether it may type. A socket that is not this
@@ -640,6 +685,7 @@ export function renderSession(
   const selectTab = (next) => {
     if (next === tab) return;
     tab = next;
+    keepTab(storage, short, tab);
     stop();
     drawShell();
     startPolling();
@@ -728,7 +774,7 @@ export function renderSession(
     close.type = "button";
     close.title = t("close_session");
     close.addEventListener("click", () => {
-      stop();
+      dispose();
       onClose();
     });
 
@@ -825,9 +871,17 @@ export function renderSession(
     paintNotice();
   }
 
+  // What the panel's owner, and its own close button, end it with: stop, and
+  // forget the tab, because a panel closed on purpose is not one a reload lost.
+  // selectTab stops without forgetting.
+  function dispose() {
+    keepTab(storage, short, "");
+    stop();
+  }
+
   drawShell();
   startPolling();
-  return stop;
+  return dispose;
 }
 
 export default renderSession;
