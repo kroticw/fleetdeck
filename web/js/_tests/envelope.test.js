@@ -8,7 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { unwrapEnvelope, envelopeText, stripToolNote } from "../envelope.js";
+import { parseAgentMessage, unwrapEnvelope, envelopeText, stripToolNote } from "../envelope.js";
 
 globalThis.navigator ??= { language: "en" };
 
@@ -172,3 +172,124 @@ test("a message id that is not followed by the note is not touched", () => {
   assert.equal(stripToolNote(step), step);
 });
 
+// --- reading an envelope ------------------------------------------------------
+//
+// These lived with the orchestrator column while it drew a feed of the
+// transcript. The column is a terminal now; the digest tab of the session panel
+// still reads envelopes through this module, so the rules stay pinned here.
+
+test("an agent-message wrapper is read as sender, time and body", () => {
+  const m = parseAgentMessage('<agent-message id="m-1" from="06a1f607" to="worker [80b7dc38]" at="2026-09-10T14:43:51+05:00">Two new things.</agent-message>');
+  assert.equal(m.from, "06a1f607");
+  assert.equal(m.at, "2026-09-10T14:43:51+05:00");
+  assert.equal(m.body, "Two new things.");
+});
+
+test("an unterminated wrapper still yields its body — a digest is a tail and can cut", () => {
+  const m = parseAgentMessage('<agent-message id="m-1" from="abc" at="2026-09-10T14:00:00+05:00">cut off mid-sen');
+  assert.equal(m.from, "abc");
+  assert.equal(m.body, "cut off mid-sen");
+});
+
+test("a step that is not a wrapper is left alone, tags and all", () => {
+  // Tolerant on purpose: swallowing something that merely looks like a tag
+  // would hide the very text the operator is trying to read.
+  assert.equal(parseAgentMessage("plain text"), null);
+  assert.equal(parseAgentMessage("<agent-message-ish from=\"x\">no</agent-message-ish>"), null);
+  assert.equal(parseAgentMessage("<div>not ours</div>"), null);
+  assert.equal(parseAgentMessage("prefix <agent-message from=\"x\">body</agent-message>"), null);
+});
+
+test("a wrapper's body keeps its own text, trimmed of the tag's own padding only", () => {
+  const m = parseAgentMessage('<agent-message from="x" at="t">  **bold** stays  </agent-message>');
+  assert.equal(m.body, "**bold** stays", "the markdown reaches the renderer intact");
+});
+
+test("a wrapper with no time still names its sender", () => {
+  const m = parseAgentMessage('<agent-message from="x">body</agent-message>');
+  assert.equal(m.from, "x");
+  assert.equal(m.at, "", "an absent time is absent, not invented");
+});
+
+test("a wrapper with no sender is not a wrapper worth unwrapping", () => {
+  // Without `from` there is no attribution to show, so the tag carries nothing
+  // the body does not, and hiding it would only lose text.
+  assert.equal(parseAgentMessage('<agent-message id="m-1">body</agent-message>'), null);
+});
+
+test("a wrapper's attributes are data, never markup", () => {
+  const m = parseAgentMessage('<agent-message from="&lt;img src=x onerror=alert(1)&gt;" at="now">hi</agent-message>');
+  assert.equal(m.from, "&lt;img src=x onerror=alert(1)&gt;");
+  assert.equal(m.body, "hi");
+});
+
+// --- background-task notifications ---
+//
+// The same complaint as the agent-message wrapper, one tag along: a notification
+// arrives as eight nested tags, of which two say what happened and the rest are
+// identifiers. Shown raw it is a screenful of machinery around one sentence.
+
+const NOTIFICATION = [
+  "<task-notification>",
+  "<task-id>addce847dd288ca47</task-id>",
+  "<tool-use-id>toolu_01FpzR6Pe9cDKLuwigxzmAHs</tool-use-id>",
+  "<output-file>/private/tmp/claude-501/x/tasks/addce847dd288ca47.output</output-file>",
+  "<status>completed</status>",
+  '<summary>Agent "Implement Task 6" finished</summary>',
+  "<result>**Status:** DONE. Three commits.</result>",
+  "</task-notification>",
+].join("\n");
+
+test("a notification is read as its outcome, its summary and its body", () => {
+  const step = unwrapEnvelope(NOTIFICATION);
+  assert.ok(step, "a notification is a wrapper worth unwrapping");
+  assert.ok(step.label.includes("completed"), "the outcome is what a person looks for first");
+  assert.ok(step.label.includes('Agent "Implement Task 6" finished'), "and the summary says what it was");
+  assert.equal(step.body, "**Status:** DONE. Three commits.", "the result is the message itself");
+});
+
+test("a notification's identifiers are kept, not thrown away", () => {
+  // They are useless to read and the only way to chase a lead afterwards, so
+  // they move out of the way rather than out of existence.
+  const step = unwrapEnvelope(NOTIFICATION);
+  assert.ok(step.detail.includes("addce847dd288ca47"), "the task id is still reachable");
+  assert.ok(step.detail.includes("tasks/addce847dd288ca47.output"), "and so is the output file");
+  assert.ok(!step.label.includes("toolu_01"), "but none of it is in the line a person reads");
+});
+
+test("a notification with no result still says what happened", () => {
+  const noResult = "<task-notification>\n<status>failed</status>\n<summary>Agent died</summary>\n</task-notification>";
+  const step = unwrapEnvelope(noResult);
+  assert.ok(step.label.includes("failed"));
+  assert.ok(step.label.includes("Agent died"));
+  assert.equal(step.body, "", "an absent result is absent, not invented");
+});
+
+test("a sentence that mentions a notification tag is left alone", () => {
+  // This is not hypothetical: the fleet talks about these tags, so a step that
+  // merely names one has to survive. Swallowing it would hide the very message
+  // that explains the tag.
+  assert.equal(unwrapEnvelope("Next to it lie raw <task-notification> and <task-id>, unhandled."), null);
+  assert.equal(unwrapEnvelope("look: <task-notification>"), null, "the tag must open the step");
+  // A whole notification quoted inside a sentence is the sharp case: unwrapping
+  // it would keep the quote and throw away the sentence that framed it.
+  const quoted = "This is what arrives: <task-notification><status>completed</status><summary>x</summary></task-notification> — pure noise.";
+  assert.equal(unwrapEnvelope(quoted), null, "the tag must OPEN the step, not merely appear in it");
+});
+
+test("a notification with nothing in it is not unwrapped", () => {
+  assert.equal(unwrapEnvelope("<task-notification></task-notification>"), null, "there is nothing to show instead");
+  assert.equal(unwrapEnvelope("<task-notification>\n<task-id>x</task-id>\n</task-notification>"), null,
+    "identifiers alone say nothing a person can read");
+});
+
+test("unwrapStep still handles the agent-message wrapper it started with", () => {
+  const step = unwrapEnvelope('<agent-message id="m-1" from="06a1f607" at="t">body</agent-message>');
+  assert.equal(step.label, "06a1f607 · t");
+  assert.equal(step.body, "body");
+  assert.ok(step.detail.includes("m-1"), "the message id moves to the detail, not the label");
+});
+
+test("unwrapStep leaves a plain step alone", () => {
+  assert.equal(unwrapEnvelope("just a message"), null);
+});
