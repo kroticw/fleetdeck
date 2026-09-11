@@ -11,7 +11,7 @@ The socket is a Unix domain socket. One client connection carries one request an
 - The daemon reads bytes from the connection until the **first `\n`**. That line is the whole JSON request; anything after the newline is a payload tail (relevant only to `attach`, see below).
 - A request sent without a trailing newline is never parsed: the daemon stays silent until its own idle timeout fires. This failure is invisible to the eye, so a correct client always appends the newline itself rather than relying on the caller to remember it.
 - The request line is capped at **1 MB**. A larger line is rejected with `ETOOLARGE` (see the error table below) rather than being read into memory.
-- The connection has a **30-second idle timeout** on the daemon side.
+- The connection has a **30-second idle timeout** on the daemon side. An `attach` stream past its header is held regardless: one attached to an idle session stayed open through 80 seconds without a single byte in either direction (CLI 2.1.263), so a client holding a live terminal needs no keepalive.
 - The daemon rejects a connection whose peer uid differs from its own, before parsing anything at all, with `EPEERUID`. This is a defence against another local user connecting to a socket that happens to be reachable; it is not a substitute for the client verifying the socket's on-disk ownership before it ever dials (see the client ownership checks in `internal/daemon/client.go`).
 
 Responses are a single JSON object per line, except `attach`, which answers with one JSON header line and then streams raw PTY bytes with no further framing until the connection closes.
@@ -72,7 +72,7 @@ Failure codes: `EAUTH` (missing or wrong key), `ENOJOB` (no such session), `ENOR
 Auth is **optional** for `attach`: the daemon allows an attach with no `auth` field at all, relying on the peer-uid check instead, but it rejects a *wrong* key outright. Send the key when the caller has one; omit the field entirely when it does not. This is why reading (see the screen-reading use below) keeps working even when no control key is available, while anything that writes into the session must not proceed without one.
 
 ```text
-request: {"proto": <n>, "op": "attach", "short": "<short id>", "cols": <int>, "rows": <int>}
+request: {"proto": <n>, "op": "attach", "short": "<short id>", "cols": <int>, "rows": <int>, "attachId": "<optional, caller-chosen>"}
 response header line:
   {"ok": true, "op": "attach", "imarkNonce": "...", "decModes": {...}, "via": "...",
    "booting": false, "tempo": "...", "state": "...", "cached": false, "stale": false,
@@ -84,14 +84,35 @@ then: raw terminal bytes, streamed until the connection is closed.
 
 The size a session is currently running at is reported nowhere: it is absent from a `list` record (see section 4) and from the attach header above. A client that wants to leave a session's geometry alone therefore has nothing to send — the only geometry it can name is its own.
 
-Two distinct uses are built on the same `attach` connection:
+`attachId` names this attacher to the daemon, which keys its attachers by it and lets a later `resize` be addressed to exactly this one (see `resize` below). A client that intends to resize an attach it keeps open must choose the id itself, keep it private, and make it unique per connection: the daemon answers a resize for an id it does not know with success and changes nothing. For the same reason it must stop resizing by that id the moment its attach connection ends — closed by the client, kicked, or ended by the session exiting — because from then on the id names nobody, and the daemon will keep answering success. `internal/daemon`'s `Attachment.Resize` refuses in that case with `ErrAttachmentClosed` rather than sending the request.
 
+The stream carries the terminal modes the session has set, as ordinary escape sequences, so a terminal emulator on the client side picks them up without reading the header's `decModes`. Captured from a Claude Code session: `?1000h`, `?1002h`, `?1003h` and `?1006h` (the application tracks the mouse — a click-drag is reported to it rather than selecting text, and the wheel scrolls inside it), `?2004h` (bracketed paste), `?1004h` (focus events), `?2031h`, and `?2026` (synchronized output). `?1049` is absent: the session draws on the main screen, not the alternate one.
+
+Three distinct uses are built on the same `attach` connection:
+
+- **Holding a live terminal**: keep the connection open, hand bytes to a terminal emulator as they arrive, and write the operator's keystrokes into it. A keystroke's echo arrives in about ten milliseconds (9.6 to 21.3ms across five measurements through `internal/daemon`'s `Client.Attach`). Geometry after opening is changed with `resize`, never by reconnecting: a second attach would itself resize the session. A key is required to write, as below.
 - **Reading the screen**: after the header, read the streamed bytes for a while (until the stream goes idle, or a byte cap is reached, or the caller's deadline fires) and return what arrived. No key is required for this.
 - **Sending keys**: after the header, write key bytes into the connection. The daemon wires the connection's incoming bytes straight into the session's PTY writer. There is **no per-delivery acknowledgement** beyond the header — once the header is accepted, nothing in the protocol confirms that a specific byte sequence was received. A key is required for this, exactly like `reply`, because it is a write into someone's session.
 
   The only observable signal past the header is the connection closing, which happens when another attacher takes over (a "kick") or when the session exits — both of which can happen *as a direct result* of the very keys just delivered (e.g. pressing Enter ends the session's current turn). A connection that closes right after a successful write is therefore a **normal outcome, not a delivery failure**, and must not be reported as one: doing so invites a caller to retry, and a retry here means typing into a live session a second time. A write that itself fails, before any bytes are confirmed sent, is the only case that should be reported as "not delivered" — and even that must never be retried blindly, since a partial write to a stream socket is possible.
 
   The daemon evicts an existing attacher by writing a plain-text `EKICKED: ...` marker into the stream and then closing the connection, rather than a structured JSON message (the connection is long past the JSON header by that point). Both the screen-reading path and the key-sending path must recognise this marker and surface it as a distinct, typed error instead of treating the bytes as ordinary screen content, or the write that preceded it as a successful key delivery.
+
+### `resize` — change one attacher's geometry
+
+Its own connection, one request and one reply, like `reply`.
+
+```text
+request:  {"proto": <n>, "op": "resize", "short": "<short id>", "cols": <int>, "rows": <int>,
+           "attachId": "<id the attach was opened with>"}
+response: {"ok": true, "op": "resize"}
+```
+
+With an `attachId` the daemon updates that attacher's recorded size, resizes the session's PTY to it, and repaints that attacher's connection — which stays open. Without one it resizes the session directly. Measured against CLI 2.1.263 by reading the session's tty: an attach opened at 100x30 and resized by its id to 130x35 left the PTY at 130x35, and the held connection received a fresh frame (1675 bytes) without reconnecting.
+
+- **No key is required.** A resize sent with no `auth` field took effect. A client sends the key when it has one all the same.
+- **An unknown `attachId` is answered `{"ok": true}` and does nothing.** Measured: a resize addressed to an id no attacher holds left the PTY exactly as it was. The reply therefore confirms nothing about the effect; see `attachId` under `attach` for what a client has to do about that.
+- **Zero is refused** the same way it is on `attach`: `{"ok": false, "error": "malformed request: Invalid input", "code": "EUNKNOWN"}`.
 
 ## 4. The job record
 
