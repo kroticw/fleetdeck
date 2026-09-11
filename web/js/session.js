@@ -219,8 +219,9 @@ function defaultTerminalFactory(host) {
   return terminal;
 }
 
-// fitTerminal sizes an opened terminal to the element it was opened into, and
-// reports whether it could.
+// terminalFitter loads the fit addon into an opened terminal and returns a
+// function that sizes the terminal to the element it was opened into, reporting
+// whether it could — or null when the addon is not there at all.
 //
 // The measuring is web/vendor/addon-fit.js's, not this file's: the addon reads
 // the cell size from xterm's own renderer, which is why it is pinned to the
@@ -230,17 +231,28 @@ function defaultTerminalFactory(host) {
 // Two ways it cannot, and both must be said rather than swallowed. The script
 // did not load; or the addon has nothing to measure — an element with no
 // layout — in which case proposeDimensions answers nothing and fit() on its own
-// would return without a word, leaving the terminal at its default 80x24 in a
-// larger pane and the session reshaped to match.
-function fitTerminal(terminal) {
+// would return without a word, leaving the terminal at whatever size it had in
+// a pane that no longer matches it.
+function terminalFitter(terminal) {
   const Fit = globalThis.FitAddon?.FitAddon;
-  if (typeof Fit !== "function") return false;
-  const fit = new Fit();
-  terminal.loadAddon(fit);
-  if (!fit.proposeDimensions()) return false;
-  fit.fit();
-  return true;
+  if (typeof Fit !== "function") return null;
+  const addon = new Fit();
+  terminal.loadAddon(addon);
+  return () => {
+    if (!addon.proposeDimensions()) return false;
+    addon.fit();
+    return true;
+  };
 }
+
+// How long the pane must stay still before the terminal follows it and the
+// session is told its new size. A drag of the column's edge moves the pane on
+// every pointer event — one per display frame, 8 to 17 ms apart at 120 or
+// 60 Hz — and every resize reshapes the session for everyone watching it and
+// makes it repaint. 150 ms is nine frames even at 60 Hz: a hand still moving
+// never goes that long between events, and a person who has let go waits less
+// than a blink for the terminal to follow.
+const PANE_SETTLE_MS = 150;
 
 // Which tab a session panel was on, kept across a reload of the page.
 //
@@ -323,6 +335,14 @@ export function renderSession(
   // and the opening that was waiting finds it has been superseded and opens
   // nothing.
   let opening = 0;
+  // Following the pane: the fitter from terminalFitter, the observer watching
+  // the terminal's element, the settle timer, and the size the session was last
+  // given — at attach, then by each resize
+  // message — so a pane that settles where it started sends nothing.
+  let refit = null;
+  let paneWatcher = null;
+  let settle = null;
+  let sessionSize = null;
   let body = null;
   let errorLine = null;
   let noticeLine = null;
@@ -443,6 +463,11 @@ export function renderSession(
     if (terminal && typeof terminal.dispose === "function") terminal.dispose();
     terminal = null;
     unfitted = false;
+    refit = null;
+    if (paneWatcher) paneWatcher.disconnect();
+    paneWatcher = null;
+    if (settle !== null) timers.clearTimeout(settle);
+    settle = null;
   };
 
   const stopPolling = () => {
@@ -458,6 +483,7 @@ export function renderSession(
     if (typing) typing.dispose();
     typing = null;
     readOnly = false;
+    sessionSize = null;
     if (!socket) return;
     const ws = socket;
     socket = null;
@@ -556,10 +582,51 @@ export function renderSession(
       return null;
     }
     terminal = made;
+    refit = terminalFitter(made);
     // Before the socket exists, because the socket asks for this size.
-    unfitted = !fitTerminal(made);
+    unfitted = !(refit && refit());
     paintNotice();
+    watchPane(host);
     return terminal;
+  };
+
+  // tellSession sends the terminal's size to the session when it differs from
+  // the size the session was last given, through an open socket. One that is
+  // still connecting cannot carry it, so ready calls this again. One that is
+  // open but not yet attached can: the bridge reads the token first and the
+  // rest only once it has attached, so the resize lands after the attach — the
+  // order the session needs.
+  const tellSession = () => {
+    const open = globalThis.WebSocket?.OPEN ?? 1;
+    if (!terminal || !socket || socket.readyState !== open) return;
+    const cols = terminal.cols;
+    const rows = terminal.rows;
+    if (sessionSize && sessionSize[0] === cols && sessionSize[1] === rows) return;
+    socket.send(JSON.stringify({ type: "resize", cols, rows }));
+    sessionSize = [cols, rows];
+  };
+
+  // followPane runs once the pane has stopped moving: refit, say whether that
+  // worked, and tell the session.
+  const followPane = () => {
+    settle = null;
+    if (!terminal) return;
+    unfitted = !(refit && refit());
+    paintNotice();
+    if (!unfitted) tellSession();
+  };
+
+  // watchPane follows the terminal's element for as long as the terminal
+  // lives. Every change restarts the settle timer, so a drag becomes one
+  // resize when it stops, however many pointer moves it took.
+  const watchPane = (host) => {
+    const Observer = globalThis.ResizeObserver;
+    if (typeof Observer !== "function") return;
+    paneWatcher = new Observer(() => {
+      if (settle !== null) timers.clearTimeout(settle);
+      settle = timers.setTimeout(followPane, PANE_SETTLE_MS);
+    });
+    paneWatcher.observe(host);
   };
 
   // sendBytes puts bytes into the session through the stream — typed keys and
@@ -592,6 +659,8 @@ export function renderSession(
       showPollError("");
       paintNotice();
       refreshName();
+      // The pane may have moved while the bridge was attaching.
+      tellSession();
     } else if (msg?.type === "error") {
       showError(String(msg.error ?? ""));
     }
@@ -629,6 +698,7 @@ export function renderSession(
     const ws = new Socket(socketURL(`/api/sessions/${encodeURIComponent(short)}/pty?cols=${cols}&rows=${rows}`));
     ws.binaryType = "arraybuffer";
     socket = ws;
+    sessionSize = [cols, rows];
     ws.onopen = () => {
       if (socket !== ws) return;
       ws.send(JSON.stringify({ type: "auth", token }));
@@ -647,6 +717,7 @@ export function renderSession(
       socket = null;
       writable = false;
       readOnly = false;
+      sessionSize = null;
       // The terminal stays as it was: the last thing the session said is often
       // exactly what the operator needs while reading why it stopped.
       showPollError(closeMessage(event.code, event.reason));

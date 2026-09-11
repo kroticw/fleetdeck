@@ -171,7 +171,9 @@ function installFit(pane = "own") {
       proposeDimensions() {
         // Like the real one: a terminal not yet opened into an element has no
         // size to propose.
-        if (!this.terminal?.host || pane === null) return undefined;
+        // A pane with `hidden` set is one that stopped having a layout — a
+        // folded column — after the terminal was opened into it.
+        if (!this.terminal?.host || pane === null || pane?.hidden) return undefined;
         return pane === "own" ? { cols: this.terminal.cols, rows: this.terminal.rows } : { ...pane };
       }
       fit() {
@@ -179,6 +181,30 @@ function installFit(pane = "own") {
         if (dims) this.terminal.resize(dims.cols, dims.rows);
       }
     },
+  };
+  return made;
+}
+
+// The browser's ResizeObserver, driven by hand: resize() is the pane changing
+// size, and delivers what a real observer would — one callback per change.
+function installObserver() {
+  const made = [];
+  globalThis.ResizeObserver = class {
+    constructor(callback) {
+      this.callback = callback;
+      this.targets = [];
+      this.disconnected = false;
+      made.push(this);
+    }
+    observe(target) {
+      this.targets.push(target);
+    }
+    disconnect() {
+      this.disconnected = true;
+    }
+    resize() {
+      if (!this.disconnected) this.callback(this.targets.map((target) => ({ target })));
+    }
   };
   return made;
 }
@@ -242,8 +268,10 @@ const frame = (s) => new TextEncoder().encode(s).buffer;
 let sockets;
 let realSocket;
 let realFit;
+let realObserver;
 
 beforeEach(() => {
+  realObserver = Object.hasOwn(globalThis, "ResizeObserver") ? globalThis.ResizeObserver : undefined;
   dom = installDOM();
   calls = [];
   tokenCalls = [];
@@ -265,6 +293,8 @@ afterEach(() => {
   else globalThis.WebSocket = realSocket;
   if (realFit === undefined) delete globalThis.FitAddon;
   else globalThis.FitAddon = realFit;
+  if (realObserver === undefined) delete globalThis.ResizeObserver;
+  else globalThis.ResizeObserver = realObserver;
 });
 
 // The page's session storage, reduced to what the panel touches: survives a
@@ -660,6 +690,159 @@ test("the terminal is fitted to its pane before the socket asks for a size", asy
 // and a missing script tag reports nothing to anybody. Either would leave a
 // terminal at its default size in a larger pane, with the session reshaped to
 // match, and nothing on screen saying why.
+// --- following the pane -----------------------------------------------------
+//
+// The pane changes size under the terminal: the window is resized, the
+// orchestrator column's edge is dragged (which moves this pane's edge too), a
+// column is folded. The terminal is refitted, and the session — whose size is
+// shared by everyone watching it — is told once the pane has stopped moving,
+// not on every pointer move of a drag.
+
+const resizes = (socket) =>
+  socket.sent
+    .filter((data) => typeof data === "string")
+    .map((data) => JSON.parse(data))
+    .filter((msg) => msg.type === "resize");
+
+test("a pane that changes size refits the terminal and tells the session once, when it settles", async () => {
+  const terminals = installTerminal();
+  const pane = { cols: 120, rows: 40 };
+  installFit(pane);
+  const observers = installObserver();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+
+  // A drag: the pane moves many times in a row.
+  for (const cols of [110, 100, 90, 80, 70]) {
+    pane.cols = cols;
+    observers[0].resize();
+  }
+  assert.deepEqual(resizes(sockets[0]), [], "nothing is sent while the pane is still moving");
+  assert.equal(panel.timers.count(), 1, "one settle timer, however many times the pane moved");
+
+  await panel.timers.tick();
+  assert.equal(terminals[0].cols, 70, "the terminal is refitted to where the pane stopped");
+  assert.deepEqual(resizes(sockets[0]), [{ type: "resize", cols: 70, rows: 40 }], "and the session is told exactly once");
+
+  // The observer fires again at the same size — a layout pass, a sibling moving.
+  observers[0].resize();
+  await panel.timers.tick();
+  assert.equal(resizes(sockets[0]).length, 1, "the size the session was just given is not given again");
+});
+
+test("a pane that settles back at the size the session already has tells it nothing", async () => {
+  installTerminal();
+  const pane = { cols: 120, rows: 40 };
+  installFit(pane);
+  const observers = installObserver();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+
+  pane.cols = 90;
+  observers[0].resize();
+  pane.cols = 120;
+  observers[0].resize();
+  await panel.timers.tick();
+  assert.deepEqual(resizes(sockets[0]), [], "a resize to the size it already has still reshapes the session for everyone");
+});
+
+// The attach went out at the size the pane had when the tab opened. If the pane
+// moved before the bridge was ready, the session is still at that size.
+test("a pane that moved before the stream was ready is told when it is", async () => {
+  installTerminal();
+  const pane = { cols: 120, rows: 40 };
+  installFit(pane);
+  const observers = installObserver();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  assert.equal(new URL(sockets[0].url).searchParams.get("cols"), "120");
+
+  pane.cols = 100;
+  observers[0].resize();
+  await panel.timers.tick();
+  assert.deepEqual(resizes(sockets[0]), [], "a socket still connecting cannot carry it");
+
+  ready(sockets[0]);
+  assert.deepEqual(resizes(sockets[0]), [{ type: "resize", cols: 100, rows: 40 }]);
+});
+
+// The bridge reads the token first and everything else once it has attached, so
+// a resize sent into an open socket before the bridge says ready is fine — as
+// long as it goes after the token.
+test("a pane that settles while the bridge is attaching is told behind the token", async () => {
+  installTerminal();
+  const pane = { cols: 120, rows: 40 };
+  installFit(pane);
+  const observers = installObserver();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  sockets[0].serverOpen();
+
+  pane.cols = 100;
+  observers[0].resize();
+  await panel.timers.tick();
+  assert.equal(JSON.parse(sockets[0].sent[0]).type, "auth", "the token went first");
+  assert.deepEqual(resizes(sockets[0]), [{ type: "resize", cols: 100, rows: 40 }]);
+
+  sockets[0].serverSend(JSON.stringify({ type: "ready", writable: true }));
+  assert.equal(resizes(sockets[0]).length, 1, "and ready does not send it again");
+});
+
+test("a pane that can no longer be measured says so and tells the session nothing", async () => {
+  installTerminal();
+  const pane = { cols: 120, rows: 40 };
+  installFit(pane);
+  const observers = installObserver();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+
+  pane.hidden = true;
+  observers[0].resize();
+  await panel.timers.tick();
+  assert.deepEqual(resizes(sockets[0]), []);
+  assert.ok(panel.noticeText().includes(t("terminal_not_fitted")), "a terminal that stopped following its pane says so");
+
+  pane.hidden = false;
+  pane.cols = 100;
+  observers[0].resize();
+  await panel.timers.tick();
+  assert.equal(panel.noticeText(), "", "and stops saying so once it follows again");
+  assert.deepEqual(resizes(sockets[0]), [{ type: "resize", cols: 100, rows: 40 }]);
+});
+
+// Nothing outlives the tab: an observer left watching, or a settle timer left
+// armed, would refit a disposed terminal and send into a socket that is gone.
+test("a pane nobody is looking at any more is not watched, and a stream that ended is not told", async () => {
+  installTerminal();
+  const pane = { cols: 120, rows: 40 };
+  installFit(pane);
+  const observers = installObserver();
+  stubFetch(answer({ body: [] }));
+
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+  sockets[0].serverClose(4000);
+  pane.cols = 90;
+  observers[0].resize();
+  await panel.timers.tick();
+  assert.deepEqual(resizes(sockets[0]), [], "a stream that has ended was told about its pane");
+
+  pane.cols = 80;
+  observers[0].resize();
+  panel.stop();
+  assert.equal(observers[0].disconnected, true, "the observer outlived the panel");
+  assert.equal(panel.timers.count(), 0, "a settle timer outlived the panel");
+});
+
 test("a terminal the fit addon cannot size is drawn at its own size, says so, and still connects", async () => {
   for (const [label, setup] of [
     ["addon missing", () => delete globalThis.FitAddon],
