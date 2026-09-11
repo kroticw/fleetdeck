@@ -2343,3 +2343,168 @@ body.is-resizing {
   color: var(--text-muted);
 }
 
+/* The orchestrator step of the same page. The message and the path are code a
+   person may want to copy, so they wrap anywhere instead of widening the page.
+   The warning is the card's point and is set apart by colour and a rule, not
+   hidden behind a toggle: it is read before the button, which comes after it. */
+.wizard-made {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.wizard-made p,
+.wizard-message p,
+.wizard-section p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.wizard-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.wizard-line,
+.wizard-path {
+  overflow-wrap: anywhere;
+}
+
+.wizard-line {
+  display: block;
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.wizard-brief {
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: var(--fs-xs);
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.wizard-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.wizard-section h2 {
+  font-size: var(--fs-sm);
+  margin: 0;
+}
+
+.wizard-unavailable,
+.wizard-sessions-note {
+  color: var(--attn);
+}
+
+.wizard-sessions-note:empty {
+  display: none;
+}
+
+.wizard-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.wizard-session {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.wizard-session:hover {
+  background: var(--surface-hover);
+}
+
+.wizard-session-chosen {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.wizard-session-name {
+  font-weight: 600;
+}
+
+.wizard-session-current {
+  font-size: var(--fs-xs);
+  color: var(--accent-strong);
+}
+
+.wizard-session-meta,
+.wizard-session-doing {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.wizard-session-waiting {
+  color: var(--attn);
+}
+
+.wizard-warning {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap);
+  border-left: 3px solid var(--attn);
+  line-height: 1.5;
+}
+
+.wizard-warn-title {
+  font-weight: 600;
+  color: var(--attn);
+}
+
+.wizard-warn-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.wizard-warn-note {
+  color: var(--text-muted);
+}
+
+.wizard-rerun {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* The way to the orchestrator wizard from the orchestrator column's head. */
+.o-wizard {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.o-wizard:hover {
+  color: var(--text);
+}
+

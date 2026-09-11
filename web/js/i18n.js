@@ -88,6 +88,49 @@ const en = {
   setup_opening: "Done. Opening the panel…",
   setup_failed: "The board could not be made. Choose another folder, or fix what is named above.",
   setup_no_handover: "The panel did not take over. Reload this page.",
+
+  // The orchestrator step of the same page (web/js/setup.js). The wizard_warn_*
+  // lines are the card's point: appointing an existing session adds to a
+  // conversation that already has its own history and its own task, and the
+  // person reads that before the button, not after it.
+  wizard_setup_done: "The folder is made:",
+  wizard_title: "The orchestrator",
+  wizard_intro:
+    "The orchestrator is the Claude Code session you run the fleet through: it sets other sessions their tasks, takes their work in and keeps the board. To make a session the orchestrator, fleetdeck writes the orchestrator's working order into a file and sends the session one message telling it to read that file. The message is the same whichever session you choose.",
+  wizard_message: "The message:",
+  wizard_brief: "The working order is written to",
+  wizard_brief_show: "Show it as the session will read it",
+  wizard_new_title: "A new session",
+  wizard_new_text: "fleetdeck starts a background session named «{name}» in {path}. It has no history of its own: the working order is the first thing it reads.",
+  wizard_new_button: "Start a session and send it the message",
+  wizard_new_unavailable: "This panel does not start sessions: it is a test stand given no claude of its own. Choose an existing session.",
+  wizard_existing_title: "An existing session",
+  wizard_existing_text: "Choose a session to read what appointing it means for the work it is doing.",
+  wizard_no_sessions: "No sessions are running.",
+  wizard_daemon_down: "The sessions cannot be listed: {detail}",
+  wizard_current: "the orchestrator now",
+  wizard_waiting_for_you: "waiting for your answer",
+  wizard_context: "context {n}% full",
+  wizard_doing_unknown: "the daemon does not say what it is doing",
+  wizard_warn_title: "You are adding to a conversation that is already under way.",
+  wizard_warn_lead: "«{name}» has a history and a task of its own — right now: {doing}. The message goes onto the end of that conversation, as if you had typed it yourself:",
+  wizard_warn_kept: "its history and the work it has done stay where they are: fleetdeck erases nothing and restarts nothing;",
+  wizard_warn_context: "the working order takes up part of its context, and from then on it carries its own task and the fleet together — one can get in the way of the other;",
+  wizard_warn_context_now: "its context is {n}% full now;",
+  wizard_warn_busy: "if it is working right now, it reads the message once it finishes the step it is on; if it is waiting for your answer, answer it first — while a question is on its screen the message may not go in;",
+  wizard_warn_final: "it cannot be taken back: the message stays in its history even if you later make another session the orchestrator.",
+  wizard_warn_replaces: "«{old}» is the orchestrator now. The session you chose takes its place in the orchestrator column, and the message «{old}» was sent before stays in its history.",
+  wizard_warn_again: "This session is the orchestrator already. Appointing it again sends it the same message once more — after its context was compacted, for instance.",
+  wizard_appoint_button: "Add the message to «{name}»",
+  wizard_skip: "Skip — appoint one later",
+  wizard_rerun_hint: "The wizard can be run again from the orchestrator column.",
+  wizard_working: "Appointing…",
+  wizard_starting: "Starting the session — this can take up to a minute…",
+  wizard_done: "Done: the session has its message and is pinned to the orchestrator column.",
+  wizard_failed: "No orchestrator was appointed. What stopped it is named above; nothing after that step was done.",
+  wizard_open: "Open the panel",
+  orchestrator_wizard: "wizard…",
+  orchestrator_wizard_hint: "Appoint the orchestrator: send a session the working order and pin it here",
   pick_doc: "pick a document",
   doc_opening: "opening…",
   docs_empty: "no documents in the configured directories",
@@ -263,6 +306,45 @@ const ru = {
   setup_opening: "Готово. Открываю панель…",
   setup_failed: "Доску создать не удалось. Выберите другую папку или устраните то, что названо выше.",
   setup_no_handover: "Панель не открылась. Перезагрузите страницу.",
+
+  wizard_setup_done: "Папка создана:",
+  wizard_title: "Оркестратор",
+  wizard_intro:
+    "Оркестратор — сессия Claude Code, через которую вы ведёте флот: она ставит задачи другим сессиям, принимает их работу и ведёт доску. Чтобы сессия стала оркестратором, fleetdeck запишет порядок работы оркестратора в файл и отправит сессии одно сообщение — прочитать этот файл. Сообщение одно и то же, какую бы сессию вы ни выбрали.",
+  wizard_message: "Сообщение:",
+  wizard_brief: "Порядок работы будет записан в",
+  wizard_brief_show: "Показать его так, как его прочтёт сессия",
+  wizard_new_title: "Новая сессия",
+  wizard_new_text: "fleetdeck запустит фоновую сессию «{name}» в папке {path}. Своей истории у неё нет: порядок работы станет первым, что она прочтёт.",
+  wizard_new_button: "Запустить сессию и отправить ей сообщение",
+  wizard_new_unavailable: "Эта панель не запускает сессий: это тестовый стенд без своего claude. Выберите существующую сессию.",
+  wizard_existing_title: "Существующая сессия",
+  wizard_existing_text: "Выберите сессию — ниже будет сказано, что назначение значит для её работы.",
+  wizard_no_sessions: "Запущенных сессий нет.",
+  wizard_daemon_down: "Список сессий недоступен: {detail}",
+  wizard_current: "сейчас оркестратор",
+  wizard_waiting_for_you: "ждёт вашего ответа",
+  wizard_context: "контекст занят на {n}%",
+  wizard_doing_unknown: "чем она занята, демон не сообщает",
+  wizard_warn_title: "Вы доливаете контекст в чужой разговор.",
+  wizard_warn_lead: "У «{name}» своя история и своё дело — сейчас: {doing}. Сообщение встанет в конец этого разговора, как если бы вы напечатали его сами:",
+  wizard_warn_kept: "прежняя история и сделанная работа останутся на месте: fleetdeck ничего не стирает и не перезапускает;",
+  wizard_warn_context: "порядок работы займёт часть её контекста, и дальше она будет вести и своё дело, и флот — одно может мешать другому;",
+  wizard_warn_context_now: "сейчас её контекст занят на {n}%;",
+  wizard_warn_busy: "если она сейчас работает, то прочтёт сообщение, когда закончит текущий шаг; если ждёт вашего ответа — сначала ответьте ей: пока на её экране вопрос, сообщение может не пройти;",
+  wizard_warn_final: "отменить нельзя: сообщение останется в её истории, даже если потом назначить оркестратором другую сессию.",
+  wizard_warn_replaces: "Сейчас оркестратор — «{old}». Её место в колонке оркестратора займёт выбранная сессия, а сообщение, отправленное «{old}» раньше, останется в её истории.",
+  wizard_warn_again: "Эта сессия уже оркестратор. Повторное назначение отправит ей то же сообщение ещё раз — например, после того как её контекст сжали.",
+  wizard_appoint_button: "Долить сообщение в «{name}»",
+  wizard_skip: "Пропустить — назначить позже",
+  wizard_rerun_hint: "Мастер можно пройти снова из колонки оркестратора.",
+  wizard_working: "Назначаю…",
+  wizard_starting: "Запускаю сессию — это может занять до минуты…",
+  wizard_done: "Готово: сессия получила сообщение и закреплена в колонке оркестратора.",
+  wizard_failed: "Оркестратор не назначен. Что помешало — написано выше; шаги после него не выполнялись.",
+  wizard_open: "Открыть панель",
+  orchestrator_wizard: "мастер…",
+  orchestrator_wizard_hint: "Назначить оркестратора: отправить сессии порядок работы и закрепить её здесь",
   pick_doc: "выберите документ",
   doc_opening: "открываем…",
   docs_empty: "в настроенных каталогах нет документов",
@@ -337,7 +419,12 @@ const ru = {
   build_executable: "бинарь",
 };
 
-const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? ru : en;
+// The language the page speaks, as a code the panel understands: what the
+// orchestrator wizard asks the working order in, so the session reads it in the
+// same language the person read the wizard in.
+export const langCode = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
+
+const lang = langCode === "ru" ? ru : en;
 
 // A key with no entry renders as the key itself, never as an empty string: a
 // missing entry has to be visible as a defect on screen, and a blank label looks
