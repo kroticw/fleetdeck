@@ -41,31 +41,51 @@ const fallbackName = "main"
 // DefaultName is the name of a fleet configuration did not name: the folder
 // above its board, which for a workspace is the workspace itself
 // (~/fleetdeck/board is "fleetdeck"). A fleet with no board, or with a board
-// directly under the filesystem root, is "main".
+// directly under the filesystem root, is "main". So is one whose folder name
+// Validate would refuse: a configuration that loaded before fleets existed
+// must not start failing over the name of a folder nobody chose as a name.
 func DefaultName(boardPath string) string {
 	if boardPath == "" {
 		return fallbackName
 	}
 	parent := filepath.Base(filepath.Dir(filepath.Clean(boardPath)))
-	if parent == string(filepath.Separator) || parent == "." {
+	if parent == string(filepath.Separator) || parent == "." || validateName(parent) != "" {
 		return fallbackName
 	}
 	return parent
 }
 
 // Error is a configuration mistake in one fleet. Index is the fleet's position
-// in the list Validate was given, -1 when the mistake is the list itself; the
-// caller knows where in its own file that position is written and says so.
+// in the list Validate was given, -1 when the mistake is the list itself.
+// Other is the fleet this one collides with, -1 when it collides with none,
+// and Field names what collides ("name", "orchestrator", "board"). Positions
+// are all this package knows; the caller knows where in its own file each is
+// written and says so through Describe.
 type Error struct {
 	Index int
-	Msg   string
+	Other int
+	Field string
+	msg   func(where func(int) string) string
 }
 
 func (e *Error) Error() string {
+	return e.Describe(func(i int) string { return fmt.Sprintf("fleet %d", i) })
+}
+
+// Describe spells the error out with where naming each fleet position.
+func (e *Error) Describe(where func(int) string) string {
 	if e.Index < 0 {
-		return e.Msg
+		return e.msg(where)
 	}
-	return fmt.Sprintf("fleet %d: %s", e.Index, e.Msg)
+	return where(e.Index) + ": " + e.msg(where)
+}
+
+func fixed(msg string) func(func(int) string) string {
+	return func(func(int) string) string { return msg }
+}
+
+func invalid(i int, msg string) *Error {
+	return &Error{Index: i, Other: -1, msg: fixed(msg)}
 }
 
 // Validate refuses a list of fleets the panel could not tell apart or would
@@ -76,38 +96,48 @@ func (e *Error) Error() string {
 // always worked.
 func Validate(fleets []Fleet) error {
 	if len(fleets) == 0 {
-		return &Error{Index: -1, Msg: "no fleet is configured"}
+		return invalid(-1, "no fleet is configured")
 	}
 	names := map[string]int{}
 	orchestrators := map[string]int{}
 	boards := map[string]int{}
 	for i, f := range fleets {
 		if err := validateName(f.Name); err != "" {
-			return &Error{Index: i, Msg: err}
+			return invalid(i, err)
 		}
 		if j, taken := names[f.Name]; taken {
-			return &Error{Index: i, Msg: fmt.Sprintf("name %q is already the name of fleet %d", f.Name, j)}
+			return collision(i, j, "name", func(where func(int) string) string {
+				return fmt.Sprintf("name %q is already the name of %s", f.Name, where(j))
+			})
 		}
 		names[f.Name] = i
 		if f.Orchestrator != "" {
 			if j, taken := orchestrators[f.Orchestrator]; taken {
-				return &Error{Index: i, Msg: fmt.Sprintf("orchestrator %q is already the orchestrator of fleet %d (%q)", f.Orchestrator, j, fleets[j].Name)}
+				return collision(i, j, "orchestrator", func(where func(int) string) string {
+					return fmt.Sprintf("orchestrator %q is already the orchestrator of %s (%q)", f.Orchestrator, where(j), fleets[j].Name)
+				})
 			}
 			orchestrators[f.Orchestrator] = i
 		}
 		if f.BoardPath == "" {
 			if i > 0 {
-				return &Error{Index: i, Msg: "board path must be set"}
+				return invalid(i, "board path must be set")
 			}
 			continue
 		}
 		clean := filepath.Clean(f.BoardPath)
 		if j, taken := boards[clean]; taken {
-			return &Error{Index: i, Msg: fmt.Sprintf("board %q is already the board of fleet %d (%q)", f.BoardPath, j, fleets[j].Name)}
+			return collision(i, j, "board", func(where func(int) string) string {
+				return fmt.Sprintf("board %q is already the board of %s (%q)", f.BoardPath, where(j), fleets[j].Name)
+			})
 		}
 		boards[clean] = i
 	}
 	return nil
+}
+
+func collision(i, other int, field string, msg func(func(int) string) string) *Error {
+	return &Error{Index: i, Other: other, Field: field, msg: msg}
 }
 
 // validateName returns what is wrong with name, or "" when nothing is. A name
