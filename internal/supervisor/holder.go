@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -65,9 +64,6 @@ func StopHolder(ctx context.Context, panelURL string, grace time.Duration) error
 	}
 	if pid == 0 {
 		return nil
-	}
-	if pid == os.Getpid() {
-		return fmt.Errorf("the panel at %s is served by this very process (pid %d)", panelURL, pid)
 	}
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("stop the panel (pid %d): %w", pid, err)
