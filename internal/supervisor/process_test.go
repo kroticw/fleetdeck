@@ -69,8 +69,13 @@ func runHelper(mode string) {
 	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/snapshot" {
 			// What a real panel's snapshot carries, as far as telling a panel
-			// from any other program goes.
-			fmt.Fprint(w, `{"build":{"web":"stand-in"}}`)
+			// from any other program goes -- and its revision, which a built
+			// stand-in finds in a file its build put beside it.
+			rev := ""
+			if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "revision")); err == nil {
+				rev = strings.TrimSpace(string(b))
+			}
+			fmt.Fprintf(w, `{"build":{"web":"stand-in","revision":%q}}`, rev)
 			return
 		}
 		fmt.Fprint(w, "panel")
