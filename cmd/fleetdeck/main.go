@@ -279,6 +279,7 @@ func main() {
 	configPath := flag.String("config", config.DefaultPath(), "path to the configuration file")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	standSocket := flag.String("stand-socket", "", "fixed daemon control-socket path for an isolated test stand: given, this panel connects ONLY to this socket and never discovers the real fleet daemon (see internal/daemon.New); required for a panel run anywhere a live fleet daemon might otherwise be found")
+	ownerPID := flag.Int("owner-pid", 0, "the fleetdeck window that started this panel, as its parent: the panel stops when that process is gone")
 	flag.Parse()
 
 	// -stand-socket is the one flag whose mere presence changes what this
@@ -302,7 +303,7 @@ func main() {
 		return
 	}
 
-	if err := run(*configPath, *standSocket); err != nil {
+	if err := run(*configPath, *standSocket, *ownerPID); err != nil {
 		log.Fatalf("fleetdeck: %v", err)
 	}
 }
@@ -341,7 +342,16 @@ func projectsDir() string {
 // that cannot be used to find out which source is down. (main's own flag parsing
 // adds a third, earlier one — an empty -stand-socket — before configPath even
 // reaches here.)
-func run(configPath, standSocket string) error {
+//
+// owner is the PID of the window that started the panel, or 0. With an owner,
+// the panel shuts down the same way it does on SIGTERM once that process is
+// gone (see owner.go).
+func run(configPath, standSocket string, owner int) error {
+	if owner != 0 {
+		if err := checkOwner(owner); err != nil {
+			return err
+		}
+	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -349,6 +359,17 @@ func run(configPath, standSocket string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if owner != 0 {
+		gone := ownerGone(owner)
+		go func() {
+			select {
+			case <-gone:
+				log.Printf("fleetdeck: the window that started this panel (pid %d) is gone; shutting down with it", owner)
+				stop()
+			case <-ctx.Done():
+			}
+		}()
+	}
 
 	dc := daemonClient(standSocket)
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
@@ -392,8 +413,13 @@ func run(configPath, standSocket string) error {
 		return fmt.Errorf("bind %s: %w", addr, err)
 	}
 
+	d := deps(ctx, p, dc, collector, cfg, configPath)
+	if d.Build != nil {
+		// Which window this panel belongs to, for a window that finds it answering.
+		d.Build.Owner = owner
+	}
 	srv := &http.Server{
-		Handler:           server.New(deps(ctx, p, dc, collector, cfg, configPath)),
+		Handler:           server.New(d),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}

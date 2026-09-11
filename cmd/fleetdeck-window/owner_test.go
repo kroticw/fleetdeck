@@ -149,7 +149,8 @@ func TestTheFailurePageSaysWhyShowsTheLogAndOffersToStartAgain(t *testing.T) {
 func TestPagesEscapeEverythingTheyInterpolate(t *testing.T) {
 	const evil = `"><script>alert(1)</script>`
 	for name, page := range map[string]string{
-		"starting": startingPage("http://x/" + evil),
+		"starting":  startingPage("http://x/" + evil),
+		"replacing": replacingPage(evil),
 		"failed": failedPage("http://x/"+evil, supervisor.Event{
 			State: supervisor.Failed, Err: errors.New(evil), LogTail: evil,
 		}, "/log/"+evil),
@@ -157,6 +158,67 @@ func TestPagesEscapeEverythingTheyInterpolate(t *testing.T) {
 		if strings.Contains(page, "<script>alert(1)</script>") {
 			t.Errorf("the %s page carries the interpolated markup unescaped", name)
 		}
+	}
+}
+
+// The window names itself as the panel's owner in the panel's own flag: two
+// halves of one agreement, in two programs. Checked against the real panel:
+// told that PID 1 started it -- which never does -- the panel must refuse,
+// naming the flag. A panel that did not know the flag would fail differently;
+// one that ignored it would start.
+func TestThePanelUnderstandsHowTheWindowNamesItsOwner(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the panel")
+	}
+	panel := filepath.Join(t.TempDir(), "fleetdeck")
+	build := exec.Command("go", "build", "-o", panel, "./cmd/fleetdeck")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build ./cmd/fleetdeck: %v\n%s", err, out)
+	}
+	// Refused before anything is read, but kept off the machine's config,
+	// board and fleet daemon anyway: HOME of its own, and a -stand-socket
+	// nothing listens on (the daemon is found by uid, not by HOME).
+	dir := t.TempDir()
+	cmd := exec.Command(panel, append([]string{"--stand-socket", filepath.Join(dir, "no-daemon.sock")}, panelArgs(1)...)...)
+	cmd.Env = append(os.Environ(), "HOME="+dir)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("the panel started though PID 1 is not its parent:\n%s", out)
+	}
+	if !strings.Contains(string(out), "started with --owner-pid 1, but this panel's parent is") {
+		t.Fatalf("the panel failed, but not by refusing the owner: %v\n%s", err, out)
+	}
+}
+
+func TestThePanelIsToldWhichWindowItBelongsTo(t *testing.T) {
+	got := panelArgs(4242)
+	if want := []string{"--owner-pid", "4242"}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("panelArgs(4242) = %q, want %q", got, want)
+	}
+}
+
+// A panel an earlier window left behind is being stopped: the window says so,
+// over the panel's page too -- the page belongs to the panel being stopped --
+// and opens the new panel once it answers.
+func TestTheScreenSaysALeftBehindPanelIsBeingReplacedAndOpensTheNewOne(t *testing.T) {
+	s := &screen{url: testURL, logPath: "/log"}
+	s.on(supervisor.Event{State: supervisor.Answering})
+	const whose = "its window (pid 777) is gone"
+	navigate, html := s.on(supervisor.Event{State: supervisor.Replacing, Detail: whose})
+	if navigate || !strings.Contains(html, "Заменяю панель") || !strings.Contains(html, whose) {
+		t.Fatalf("on(Replacing) = %v, %q; want the replacing page naming whose panel it was", navigate, html)
+	}
+	s.on(supervisor.Event{State: supervisor.Starting, PID: 45})
+	if navigate, _ := s.on(supervisor.Event{State: supervisor.Answering, Ours: true}); !navigate {
+		t.Fatal("after a replacement, the new panel is not opened")
+	}
+}
+
+func TestTheLogSaysWhosePanelIsBeingReplaced(t *testing.T) {
+	const whose = "its window (pid 777) is gone"
+	if got := describeEvent(supervisor.Event{State: supervisor.Replacing, Detail: whose}); !strings.Contains(got, whose) {
+		t.Fatalf("describeEvent(Replacing) = %q, want it to say %q", got, whose)
 	}
 }
 

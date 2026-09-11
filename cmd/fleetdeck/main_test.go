@@ -371,7 +371,7 @@ func TestBindFailureNeverLogsSuccess(t *testing.T) {
 	log.SetOutput(&logged)
 	defer log.SetOutput(os.Stderr)
 
-	err = run(cfgPath, "")
+	err = run(cfgPath, "", 0)
 
 	if err == nil {
 		t.Fatal("binding a port already in use must be reported as an error, not a success")

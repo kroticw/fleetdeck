@@ -19,12 +19,17 @@
 //   - saying so in the window, with the end of the panel's log, when the panel
 //     will not start, and starting it again when asked.
 //
-// What stays as it was: the panel outlives the window. Closing the window, or
-// quitting it, does not stop the panel -- notifications keep coming, the
-// status line keeps finding where to report, and the window opened again later
-// finds everything as it was left. A panel that already answers at the URL --
-// from a launch agent still installed, from a terminal -- is used as it is,
-// and the window starts its own only once that one is gone.
+// The panel lives exactly as long as the window -- the operator's rule, later
+// the same day, 2026-09-11: "with fleetdeck the panel goes out, with its start
+// it starts". The first version of this command let the panel outlive the
+// window, and a panel an earlier window left behind was how a new window came
+// to show an old build. Now the window starts its panel with its own PID as
+// the owner, and the panel goes when the window's process does, however it
+// went: quit, crash, SIGKILL (cmd/fleetdeck, owner.go). Hiding the window --
+// the red button -- is not the window going: the process runs on, and so does
+// the panel. A panel a window left behind that still answers is replaced; a
+// panel started from a terminal, or anything that is not a fleetdeck panel,
+// is used as it is (see internal/supervisor's Keeper).
 //
 // Why webview_go, and what the fallback is: this needed a native window
 // without a second build toolchain in a project that currently has only Go.
@@ -119,16 +124,19 @@ func main() {
 	// confirmed by timing, not assumed: SetTitle/SetSize above already rely
 	// on the same fact. installMenu is what makes Cmd+X/C/V/A/Z (and Cmd+Q)
 	// do anything at all; see menu_darwin.c for why. installCloseToHide
-	// makes the red button hide the window rather than tear down the engine
-	// underneath a panel that keeps running, the same way a browser tab
-	// survives being put away.
+	// makes the red button hide the window rather than quit: the process runs
+	// on, and with it the panel it owns -- hiding is not the window going.
 	installMenu()
 	installCloseToHide(w.Window())
 
 	scr := &screen{url: *url, logPath: logPath}
 	keeper := &supervisor.Keeper{
-		URL:          *url,
-		Bin:          panelBinary(exe),
+		URL:  *url,
+		Bin:  panelBinary(exe),
+		Args: panelArgs(os.Getpid()),
+		// This window: its panels report it as their owner and go when it
+		// goes, and a panel whose window is gone is replaced.
+		Owner:        os.Getpid(),
 		Env:          os.Environ(),
 		LogPath:      logPath,
 		StartTimeout: panelStartTimeout,
@@ -168,8 +176,9 @@ func main() {
 	}()
 
 	w.Run()
-	// The keeper stops; the panel does not. Waiting for the keeper keeps it
-	// from dispatching onto a window already destroyed.
+	// The keeper stops here; the panel goes by itself once this process has
+	// ended, having watched it. Waiting for the keeper keeps it from
+	// dispatching onto a window already destroyed.
 	cancel()
 	<-kept
 }
@@ -178,6 +187,8 @@ func describeEvent(e supervisor.Event) string {
 	switch {
 	case e.Err != nil:
 		return fmt.Sprintf("%s: %v", e.State, e.Err)
+	case e.Detail != "":
+		return fmt.Sprintf("%s: %s", e.State, e.Detail)
 	case e.PID != 0:
 		return fmt.Sprintf("%s (pid %d, started by this window)", e.State, e.PID)
 	default:

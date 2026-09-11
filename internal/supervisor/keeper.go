@@ -2,11 +2,16 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -23,6 +28,9 @@ const (
 	// answered, never answered, or died too soon after it started. The keeper
 	// does nothing more until Retry.
 	Failed
+	// Replacing: a panel a window left behind answers at the URL; the keeper
+	// is stopping it to start its own. Event.Detail says whose it was.
+	Replacing
 )
 
 func (s State) String() string {
@@ -33,6 +41,8 @@ func (s State) String() string {
 		return "starting"
 	case Failed:
 		return "failed"
+	case Replacing:
+		return "replacing"
 	}
 	return fmt.Sprintf("State(%d)", int(s))
 }
@@ -49,6 +59,8 @@ type Event struct {
 	// LogTail is the end of the panel's log, for Failed: what the panel itself
 	// said before it went.
 	LogTail string
+	// Detail says whose panel is being replaced, for Replacing.
+	Detail string
 }
 
 // stopGrace is how long a panel the keeper gives up on has to leave after
@@ -61,17 +73,24 @@ const stopGrace = 6 * time.Second
 // panel over: it started the panel, and launchd's KeepAlive started it again
 // when it died.
 //
-// Whatever already answers at URL is used as it is -- a panel from a launch
-// agent, from a terminal, from a window that has since quit -- and watched
-// until it goes, at which point the keeper starts its own. The keeper's own
-// panel is started again when it dies, unless it dies within MinUptime of
-// starting: then the keeper stops, reports Failed with the end of the log,
-// and waits for Retry. launchd does the same thing with its ThrottleInterval,
-// for the same reason: a panel that dies at once dies at once again.
+// A panel lives exactly as long as the window that started it (the
+// operator's rule, 2026-09-11; the panel keeps it itself, see cmd/fleetdeck's
+// owner.go). So a panel found answering at URL is either a window's -- a
+// window still running, or one a window left behind -- or one started some
+// other way, from a terminal. A keeper that knows its window (Owner) replaces
+// a panel whose window is gone, and uses any other as it is, watching it
+// until it goes and then starting its own: a panel from a terminal is
+// somebody's on purpose, and neither a panel of a live window nor anything
+// that is not a fleetdeck panel is this window's to decide about.
 //
-// When Run returns, the keeper's panel keeps running. The panel outlives the
-// window: notifications keep coming, the status line keeps finding where to
-// report.
+// The keeper's own panel is started again when it dies, unless it dies within
+// MinUptime of starting: then the keeper stops, reports Failed with the end of
+// the log, and waits for Retry. launchd does the same thing with its
+// ThrottleInterval, for the same reason: a panel that dies at once dies at
+// once again.
+//
+// When Run returns, the keeper's panel is not stopped by the keeper: the panel
+// goes by itself when its window -- the process that runs the keeper -- goes.
 type Keeper struct {
 	URL     string
 	Bin     string
@@ -86,6 +105,11 @@ type Keeper struct {
 	MinUptime time.Duration
 	// Poll is how often a panel the keeper did not start is checked.
 	Poll time.Duration
+
+	// Owner is the PID of the window this keeper runs in, which its panels are
+	// started to report as their owner (in Args). Zero for a keeper that is not
+	// a window's: it replaces nothing.
+	Owner int
 
 	// OnEvent is called from Run's goroutine.
 	OnEvent func(Event)
@@ -112,11 +136,19 @@ func (k *Keeper) Run(ctx context.Context) {
 	k.init()
 	for ctx.Err() == nil {
 		if answers(ctx, k.URL) {
-			k.emit(Event{State: Answering})
-			k.waitUntilGone(ctx)
-			continue
-		}
-		if k.runOwn(ctx) {
+			why, replace := k.replaceable(ctx)
+			if !replace {
+				k.emit(Event{State: Answering})
+				k.waitUntilGone(ctx)
+				continue
+			}
+			k.emit(Event{State: Replacing, Detail: why})
+			err := StopHolder(ctx, k.URL, stopGrace)
+			if err == nil {
+				continue
+			}
+			k.fail(fmt.Errorf("%s, and it could not be stopped: %w", why, err), "")
+		} else if k.runOwn(ctx) {
 			continue
 		}
 		select {
@@ -260,4 +292,73 @@ func LogTail(path string, n int) string {
 		return ""
 	}
 	return tail(string(data), n)
+}
+
+// replaceable says whether the panel answering at URL is one a window left
+// behind, and whose it was.
+func (k *Keeper) replaceable(ctx context.Context) (string, bool) {
+	if k.Owner == 0 {
+		return "", false
+	}
+	b, ok := holderBuild(ctx, k.URL)
+	if !ok {
+		return "", false // not a fleetdeck panel: not this window's to decide about
+	}
+	switch {
+	case b.Owner != 0:
+		// This window's own panel is left alone by the same test: its window,
+		// this process, is there. A window that exits takes its panel with it
+		// within moments; a panel still answering is one shutting down, or one
+		// whose window died in a way its watch could not see. kill -0 is fine
+		// here: a PID taken by some other process since only means a panel
+		// that is going anyway is used for those moments.
+		if errors.Is(syscall.Kill(b.Owner, 0), syscall.ESRCH) {
+			return fmt.Sprintf("the panel at %s belongs to a window (pid %d) that is gone", k.URL, b.Owner), true
+		}
+		return "", false
+	case strings.Contains(b.Executable, ".app/Contents/MacOS/"):
+		// TEMPORARY, for the change-over only. A panel started by a window from
+		// before panels reported their owner runs from inside an app bundle and
+		// reports none -- the case that showed an old build to a new window on
+		// 2026-09-11. Remove this case once no machine can have such a panel
+		// running: when every fleetdeck panel answering anywhere reports its
+		// owner. Left in past that, it would stop a debugging run started from
+		// inside a bundle by hand.
+		return fmt.Sprintf("the panel at %s runs from an app bundle (%s) but reports no window: it was left by a window from before panels reported their owner", k.URL, b.Executable), true
+	default:
+		return "", false // started some other way: somebody's on purpose
+	}
+}
+
+// holderInfo is what a panel's build fingerprint says about which panel it
+// is.
+type holderInfo struct {
+	Owner      int    `json:"owner"`
+	Executable string `json:"executable"`
+}
+
+// holderBuild is what the panel at panelURL says about itself, or false when
+// what answers is not a fleetdeck panel: no build fingerprint in a snapshot.
+func holderBuild(ctx context.Context, panelURL string) (holderInfo, bool) {
+	u, err := url.Parse(panelURL)
+	if err != nil {
+		return holderInfo{}, false
+	}
+	u.Path = "/api/snapshot"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return holderInfo{}, false
+	}
+	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
+	if err != nil {
+		return holderInfo{}, false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var snap struct {
+		Build *holderInfo `json:"build"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&snap) != nil || snap.Build == nil {
+		return holderInfo{}, false
+	}
+	return *snap.Build, true
 }

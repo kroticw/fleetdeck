@@ -45,6 +45,11 @@ type Fingerprint struct {
 	Modified   bool      `json:"modified,omitempty"`
 	CommitTime time.Time `json:"commitTime,omitzero"`
 	BuiltAt    time.Time `json:"builtAt,omitzero"`
+	// Owner is the PID of the fleetdeck window that started this panel, which
+	// the panel does not outlive; 0 for a panel started any other way, from a
+	// terminal say. Not about the build, strictly -- it sits beside Executable
+	// as the other half of "which panel is this".
+	Owner int `json:"owner,omitempty"`
 }
 
 // WebHash hashes every regular file in fsys by path and content.

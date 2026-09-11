@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -20,6 +21,40 @@ import (
 // process, real port, real signals -- the parts of starting and stopping a
 // panel that a fake could not show.
 const helperEnv = "FLEETDECK_SUPERVISOR_HELPER"
+
+// ownerEnv carries the PID of the test process that started a stand-in. The
+// stand-ins are started as panels are, in a session of their own (Setsid), so
+// nothing that ends a test binary reaches them -- which is exactly what kept
+// them running after a test binary was killed by its -timeout, when no
+// t.Cleanup runs: 19 of them were found on the operator's machine, left by
+// mutation runs, an hour old. A stand-in whose test process is gone now exits
+// by itself, as a real panel does when its window is gone.
+const ownerEnv = "FLEETDECK_SUPERVISOR_HELPER_OWNER"
+
+// helperEnvFor is the environment a stand-in of kind is started with.
+func helperEnvFor(kind, addr string) []string {
+	return append(os.Environ(), helperEnv+"="+kind+"@"+addr, ownerEnv+"="+strconv.Itoa(os.Getpid()))
+}
+
+// watchOwner ends the stand-in once the test process that started it is gone.
+func watchOwner() {
+	owner, err := strconv.Atoi(os.Getenv(ownerEnv))
+	if err != nil || owner <= 0 {
+		return
+	}
+	go func() {
+		for {
+			if syscall.Kill(owner, 0) != nil {
+				os.Exit(4)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+}
+
+// reportOwnerEnv is the window PID a stand-in reports as its owner in its
+// snapshot, as a panel started by a window does.
+const reportOwnerEnv = "FLEETDECK_SUPERVISOR_HELPER_REPORT_OWNER"
 
 // termNotice is what the stand-in prints to its log when SIGTERM reaches it.
 const termNotice = "helper: SIGTERM, leaving"
@@ -36,6 +71,7 @@ func TestMain(m *testing.M) {
 }
 
 func runHelper(mode string) {
+	watchOwner()
 	kind, addr, _ := strings.Cut(mode, "@")
 	if kind == "ignore-term" {
 		signal.Ignore(syscall.SIGTERM)
@@ -58,13 +94,22 @@ func runHelper(mode string) {
 		// in its configuration other than the one the window asks.
 		select {}
 	}
+	exe, _ := os.Executable()
+	fmt.Printf("helper ppid: %d\n", os.Getppid())
 	fmt.Println("helper stdout: listening on " + addr)
 	fmt.Fprintln(os.Stderr, "helper stderr: listening on "+addr)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		os.Exit(3)
 	}
-	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/snapshot" {
+			// What a real panel's snapshot carries, as far as telling a panel
+			// from any other program goes -- and whose window it says it is.
+			owner, _ := strconv.Atoi(os.Getenv(reportOwnerEnv))
+			fmt.Fprintf(w, `{"build":{"web":"stand-in","executable":%q,"owner":%d}}`, exe, owner)
+			return
+		}
 		fmt.Fprint(w, "panel")
 	}))
 }
@@ -88,7 +133,7 @@ func startHelper(t *testing.T, kind string) (*Panel, string) {
 func startHelperLogging(t *testing.T, kind, logPath string) (*Panel, string) {
 	t.Helper()
 	addr := freeAddr(t)
-	p, err := StartPanel(os.Args[0], nil, append(os.Environ(), helperEnv+"="+kind+"@"+addr), logPath)
+	p, err := StartPanel(os.Args[0], nil, helperEnvFor(kind, addr), logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,11 +175,12 @@ func TestAStartedPanelWritesBothStreamsToItsLog(t *testing.T) {
 	}
 }
 
-// The panel must outlive the window that started it: closing the window must
-// not take the panel down, notifications keep coming, the status line keeps
-// finding where to report. A process started with Setsid leads a new session
-// and, with it, a new process group -- and a process group is what signals
-// meant for the window are delivered to. The group is what is checked:
+// Signals meant for the window are not the panel's: the panel goes when its
+// window goes, by its own graceful shutdown (cmd/fleetdeck, owner.go), not by
+// a Ctrl+C delivered to the window's whole process group. A process started
+// with Setsid leads a new session and, with it, a new process group -- and a
+// process group is what such signals are delivered to. The group is what is
+// checked:
 // syscall has Getpgid on every platform this runs on, Getsid only on darwin
 // (the first version of this test used Getsid and did not compile on the
 // Linux CI leg).
@@ -150,6 +196,23 @@ func TestAStartedPanelLivesInAProcessGroupOfItsOwn(t *testing.T) {
 	}
 	if pgid != p.PID {
 		t.Fatalf("process group %d, want the panel to lead its own (%d)", pgid, p.PID)
+	}
+}
+
+// The panel is the starter's direct child. A panel told to go when its window
+// goes watches its parent (cmd/fleetdeck, owner.go); a start wrapped in a shell
+// -- for its environment, say -- would make the shell the parent, and the
+// panel would outlive the window with nothing else noticing. This is what
+// notices.
+func TestAStartedPanelIsTheStartersOwnChild(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "panel.log")
+	startHelperLogging(t, "listen", logPath)
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("helper ppid: %d\n", os.Getpid()); !strings.Contains(string(data), want) {
+		t.Fatalf("the panel's parent is not the process that started it; its log holds:\n%s", data)
 	}
 }
 
