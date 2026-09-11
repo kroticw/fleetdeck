@@ -73,6 +73,24 @@ A file containing more than one YAML document (separated by a `---` line partway
 
 `fleetdeck` reads its configuration from the path the `--config` flag names, defaulting to `~/.config/fleetdeck/config.yaml` (`defaultConfigPath` in `cmd/fleetdeck/main.go`) when the flag is not given. `fleetdeck init` writes that default path the first time it runs, if nothing is there yet.
 
+## Running an isolated stand
+
+A panel started for testing or acceptance next to a real, working fleet still finds the real daemon: the socket is discovered by the current user's uid under `/tmp`, not by anything `--config` names, so a separate config file, a separate `HOME`, and a separate board do not isolate it. The session list of a stand run this way has shown the real fleet's own sessions and message fragments before, and opening one of them on the stand resizes that session's real terminal for everyone attached to it, including the operator — a stand is not a spectator here by default, it is a second, uninvited hand on the same live sessions.
+
+`--stand-socket` closes this: given a path, the panel connects only to that path and never discovers the real daemon at all — the two code paths share nothing, so there is no way for the real daemon to be found as a fallback. Given but empty (a script's unset variable landing in `--stand-socket=`) is refused at startup rather than read as "not given". Copy this whole block to start a stand that cannot reach a live fleet's daemon, whatever else is running on the machine:
+
+```bash
+tmp=$(mktemp -d) && cat > "$tmp/config.yaml" <<'YAML'
+server:
+  port: 7799
+YAML
+fleetdeck -config "$tmp/config.yaml" -stand-socket "$tmp/no-daemon-here.sock"
+```
+
+The session list on a stand started this way reads empty, or shows a daemon error — never another session's data — because nothing is listening at that path and nothing here will look anywhere else.
+
+The cost of this isolation, so it is not found only by hitting it: a client bound to `--stand-socket` does not notice a daemon behind it restarting under a new socket, unlike ordinary discovery (`cmd/fleetdeck/main.go`'s own `daemonClient`). A one-shot acceptance stand never runs long enough to care; a long-lived test fleet built on this flag would need restarting alongside its daemon.
+
 ## Where other files live
 
 The panel's log is `~/Library/Logs/fleetdeck.log`: the fleetdeck app appends both output streams of a panel it starts there. See [`getting-started.md`](getting-started.md#the-app-and-the-panel) for how the app starts and keeps the panel.
