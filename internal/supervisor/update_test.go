@@ -40,8 +40,9 @@ type updateRig struct {
 	newKind   string // the stand-in kind the new window's panel runs as
 	// expect, when set, is the build the new window believes it is, in place
 	// of what its bundle says.
-	expect   string
-	takeover error
+	expect    string
+	takeover  error
+	oldStarts atomic.Int64 // panels the old window's keeper started
 }
 
 func newUpdateRig(t *testing.T) *updateRig {
@@ -75,10 +76,17 @@ func newUpdateRig(t *testing.T) *updateRig {
 		t.Fatal(err)
 	}
 	r.env = append(os.Environ(), helperEnv+"=listen@"+r.addr)
+	// MinUptime zero: the old window's panel has been up for hours, so its
+	// keeper would start it again the moment it stops -- unless paused.
 	r.oldKeeper = &Keeper{
 		URL: r.url, Bin: PanelIn(r.canonical), Env: r.env,
 		LogPath: filepath.Join(t.TempDir(), "old.log"), StartTimeout: 5 * time.Second,
-		MinUptime: time.Minute, Poll: 100 * time.Millisecond,
+		MinUptime: 0, Poll: 100 * time.Millisecond,
+		OnEvent: func(e Event) {
+			if e.State == Starting {
+				r.oldStarts.Add(1)
+			}
+		},
 	}
 	r.resumeOld()
 	t.Cleanup(func() {
@@ -209,11 +217,18 @@ func TestAnUpdateBuildsToTheSideAndTheNewWindowPutsItInPlace(t *testing.T) {
 			reads.Add(1)
 		}
 	}()
+	startsBefore := r.oldStarts.Load()
 	err := r.update("old").Run(context.Background())
 	stop.Store(true)
 	<-watched
 	if err != nil {
 		t.Fatalf("update: %v (steps %v)", err, r.steps())
+	}
+	// The old window's keeper started nothing while the new window took over:
+	// it was paused. Unpaused, it would start the old panel again the moment
+	// the new window stopped it, and the two would race for the port.
+	if n := r.oldStarts.Load() - startsBefore; n != 0 {
+		t.Fatalf("the old window's keeper started %d panel(s) during the update", n)
 	}
 	if misses.Load() != 0 {
 		t.Fatalf("%d of %d looks found nothing at the canonical path during the update", misses.Load(), reads.Load())
