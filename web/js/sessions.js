@@ -23,6 +23,7 @@ import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { setSessionLabel } from "./api.js";
+import { createStalledTracker } from "./header.js";
 
 // Closed vocabulary of "no person needed" needs strings, copied verbatim
 // (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
@@ -51,7 +52,10 @@ function isWaiting(s) {
   return !isStalledNeeds(s.needs);
 }
 
-// Stalled: mutually exclusive with isWaiting by construction.
+// Stalled: mutually exclusive with isWaiting by construction. Kept exactly
+// as daemon.Session.Stalled() mirrors it in header.js's own copy -- this is
+// the per-instant rule, not the row's own display decision (see rowHtml's
+// own comment for why the two are no longer the same question).
 function isStalled(s) {
   if (s.dying) return false;
   if (s.needs) return isStalledNeeds(s.needs);
@@ -61,8 +65,12 @@ function isStalled(s) {
 // The text explaining *why* a Waiting/Stalled session isn't moving. For a
 // flags-only Stalled session (needs empty) detail is the only field that
 // still says anything; everywhere else needs is the words that matter.
-function reasonText(s) {
-  if (isStalled(s) && !s.needs) return s.detail || "";
+// stalled is the row's own tracker-backed decision (rowHtml's stalledNow),
+// not a fresh isStalled(s) call: a flag-only stall not yet counted by the
+// tracker must not show detail either, or the row would carry a "why it
+// stopped" reason for a stop the badge itself does not yet claim happened.
+function reasonText(s, stalled) {
+  if (stalled && !s.needs) return s.detail || "";
   return s.needs || "";
 }
 
@@ -138,9 +146,19 @@ function applyContextWidths(root) {
   }
 }
 
-export function rowHtml(s) {
+// stalledNow is the row's own Stalled verdict, already decided by the same
+// createStalledTracker the header's counter shares -- see the header.js
+// import above and renderSessions' own use of it below. Never recomputed
+// here from isStalled(s) directly: that per-instant check is what put a
+// "Stalled" badge on a session's very first blocked tick, several times an
+// hour, for as long as its conversation with the orchestrator ran -- the
+// header's own counter, watching the same session through the same
+// tracker, said "0 stalled" in the same screenshot. Omitting stalledNow
+// (every existing caller that is not testing the badge itself) reads as
+// false, matching a session that has not been through the tracker at all.
+export function rowHtml(s, stalledNow) {
   const waiting = isWaiting(s);
-  const stalled = isStalled(s);
+  const stalled = Boolean(stalledNow);
   const classes = ["srow"];
   if (waiting) classes.push("srow-waiting");
   if (stalled) classes.push("srow-stalled");
@@ -159,7 +177,7 @@ export function rowHtml(s) {
   // keeps the text itself intact -- spec 3.1 wants detail carried verbatim
   // because a person has to read it, so it has to stay reachable here rather
   // than only in the daemon.
-  const raw = waiting || stalled ? reasonText(s) : "";
+  const raw = waiting || stalled ? reasonText(s, stalled) : "";
   // The envelope comes off, and nothing else does. What a session says about
   // why it stopped is carried verbatim (spec 3.1) because a person decides from
   // its exact words whether they are being called — so this is NOT rendered as
@@ -244,6 +262,16 @@ export function renderSessions(root, onSelect, onOpenCard) {
   let lastSnap = null;
   let lastConnected = false;
 
+  // One tracker per renderSessions() call, outside render: it holds
+  // since-timestamps across snapshots (the same shape header.js's own
+  // instance does), not something a single render may rebuild. Two
+  // independent instances -- this one and the header's -- fed the same
+  // sessions on every snapshot (both push through the same store.js
+  // broadcast) settle on identical per-session answers; a single shared
+  // instance would need this column and the header wired together across
+  // a third file, which the two-instance shape avoids.
+  const stalledTracker = createStalledTracker();
+
   // Shown once, on the next render after a save fails — a silent
   // console.error would never reach the operator, who does not have
   // devtools open, and this column has no other error slot a per-row write
@@ -297,9 +325,22 @@ export function renderSessions(root, onSelect, onOpenCard) {
     }
     const ordered = [...waitingRows, ...otherRows];
 
+    // Fed `all`, not the pinned-out `sessions`: the tracker's own per-session
+    // answer must match what header.js's identically-fed instance would say
+    // for the same session, and excluding the pinned orchestrator session
+    // here (it is never rendered as a row in this column) would only cost
+    // that one session's own tracked state for no benefit.
+    const stalledNow = new Set(stalledTracker.update(all, Date.now()).map((s) => s.short));
+
     const errorHtml = labelError ? `<div class="sname-edit-error">${escapeHtml(labelError)}</div>` : "";
     labelError = ""; // shown once; a later render must not keep repeating it
-    root.innerHTML = HEAD + errorHtml + ordered.map(rowHtml).join("");
+    // Never `ordered.map(rowHtml)`: Array.prototype.map passes (element,
+    // index, array) to its callback, and rowHtml's own second parameter
+    // would then receive the row's numeric index -- truthy for every row
+    // but the first, badging almost the whole list as Stalled regardless of
+    // stalledNow. The arrow below is required, not stylistic.
+    root.innerHTML =
+      HEAD + errorHtml + ordered.map((s) => rowHtml(s, stalledNow.has(s.short))).join("");
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
