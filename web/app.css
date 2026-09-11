@@ -2490,6 +2490,51 @@ body.is-resizing {
   color: var(--text-muted);
 }
 
+/* The wizard's own buttons are sized to their words and read as buttons: a
+   grey bar across the whole section looked switched off on the stand. The
+   actions that write are in the accent colour; skipping is not. */
+.wizard-create,
+.wizard-appoint,
+.wizard-open,
+.wizard-skip {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.wizard-create,
+.wizard-appoint,
+.wizard-open {
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent-strong);
+}
+
+.wizard-create:hover,
+.wizard-appoint:hover,
+.wizard-open:hover {
+  background: var(--accent-strong);
+}
+
+.wizard-skip {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+}
+
+.wizard-skip:hover {
+  background: var(--surface-hover);
+}
+
+.wizard-create:disabled,
+.wizard-appoint:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .wizard-rerun {
   margin: 0;
   color: var(--text-muted);
