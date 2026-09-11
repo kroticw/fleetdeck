@@ -8,6 +8,8 @@
 // rather than assume a snapshot is already there. `get()` already returns
 // `null` in the same situations, so callers had to handle it either way.
 
+import { fleetFromSearch, withFleet } from "./fleet.js";
+
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 5000;
 
@@ -42,7 +44,8 @@ function open() {
   // that refusal feeds onerror straight into the reconnect loop with no
   // visible cause.
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  const url = `${scheme}://${location.host}/ws`;
+  // The snapshot is of the fleet this tab's address names (see fleet.js).
+  const url = `${scheme}://${location.host}${withFleet("/ws", fleetFromSearch(location.search))}`;
 
   // Captured per attempt so a handler always knows which socket it belongs
   // to. socket itself changes as soon as this attempt's onclose fires and
