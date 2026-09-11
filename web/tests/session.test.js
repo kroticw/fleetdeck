@@ -2,9 +2,11 @@
 //
 // This is the part of the interface that writes into a live Claude Code session,
 // and what is worth pinning about it is wiring rather than any pure function:
-// that polling never multiplies, that a failure is retried instead of freezing a
-// tab, that a key button sends bytes rather than the word printed on it, and
-// that text which could not be sent is still in the box.
+// that the digest's polling never multiplies and the screen holds exactly one
+// socket, that every failure reaches the screen as words — a digest poll is
+// retried, a terminal stream deliberately is not — that a key button sends bytes
+// rather than the word printed on it, and that text which could not be sent is
+// still in the box.
 //
 // What none of it shows is that any of this looks right. No browser runs here.
 
@@ -85,7 +87,7 @@ function stubFetch(respond) {
 
 // The terminal the panel finds on the global object, which is where
 // web/vendor/xterm.js puts the real one.
-function installTerminal() {
+function installTerminal({ cols = 80, rows = 24 } = {}) {
   const made = [];
   globalThis.Terminal = class {
     constructor(options) {
@@ -94,10 +96,24 @@ function installTerminal() {
       this.resets = 0;
       this.disposed = 0;
       this.host = null;
+      // xterm's own default geometry, which is what the panel's terminal is built
+      // with while it has no fit to a container.
+      this.cols = cols;
+      this.rows = rows;
+      this.dataListeners = [];
       made.push(this);
     }
     open(host) {
       this.host = host;
+    }
+    onData(fn) {
+      this.dataListeners.push(fn);
+      return { dispose: () => (this.dataListeners = this.dataListeners.filter((f) => f !== fn)) };
+    }
+    // What xterm does when a person types into it: hands the characters to every
+    // onData listener.
+    type(data) {
+      for (const fn of this.dataListeners) fn(data);
     }
     reset() {
       this.resets += 1;
@@ -112,11 +128,72 @@ function installTerminal() {
   return made;
 }
 
+// The socket the screen tab opens for its live terminal: a browser's WebSocket
+// reduced to what the panel touches, with the server's side driven by hand.
+function installSocket() {
+  const opened = [];
+  globalThis.WebSocket = class {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    constructor(url) {
+      this.url = url;
+      this.readyState = 0;
+      this.binaryType = "blob";
+      this.sent = [];
+      this.closedWith = null;
+      this.onopen = null;
+      this.onmessage = null;
+      this.onclose = null;
+      opened.push(this);
+    }
+    send(data) {
+      this.sent.push(data);
+    }
+    close(code, reason) {
+      if (this.readyState === 3) return;
+      this.closedWith = { code, reason };
+      this.readyState = 3;
+    }
+    // The server's side.
+    serverOpen() {
+      this.readyState = 1;
+      this.onopen?.({});
+    }
+    serverSend(data) {
+      this.onmessage?.({ data });
+    }
+    serverClose(code, reason = "") {
+      this.readyState = 3;
+      this.onclose?.({ code, reason });
+    }
+  };
+  return opened;
+}
+
+// What the bridge says first on a socket it has attached.
+function ready(socket, writable = true) {
+  socket.serverOpen();
+  socket.serverSend(JSON.stringify({ type: "ready", writable }));
+}
+
+// A frame the panel sent, as text. Keystrokes go out as bytes.
+const asText = (data) => new TextDecoder().decode(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+
+// Bytes as the server sends them: an ArrayBuffer, because the panel asks for one.
+const frame = (s) => new TextEncoder().encode(s).buffer;
+
+let sockets;
+let realSocket;
+
 beforeEach(() => {
   dom = installDOM();
   calls = [];
   realFetch = globalThis.fetch;
   realTerminal = Object.hasOwn(globalThis, "Terminal") ? globalThis.Terminal : undefined;
+  realSocket = Object.hasOwn(globalThis, "WebSocket") ? globalThis.WebSocket : undefined;
+  sockets = installSocket();
 });
 
 afterEach(() => {
@@ -124,6 +201,8 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   if (realTerminal === undefined) delete globalThis.Terminal;
   else globalThis.Terminal = realTerminal;
+  if (realSocket === undefined) delete globalThis.WebSocket;
+  else globalThis.WebSocket = realSocket;
 });
 
 async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }) } = {}) {
@@ -174,18 +253,15 @@ test("the digest goes out under the full session id and everything else under th
   // nothing shorter. The panel showed "transcript not found: sess-1" on every
   // session until the two were told apart, and both routes are spelled
   // /api/sessions/{id}/… so nothing but a running panel would have said which
-  // id each wanted.
+  // id each wanted. The terminal socket reaches the daemon, so it is the short one.
   installTerminal();
-  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  stubFetch(answer({ body: [] }));
   const panel = await mount();
 
   assert.equal(calls[0].url, `/api/sessions/${FULL}/digest?limit=30`);
 
   await panel.openScreenTab();
-  assert.equal(calls[calls.length - 1].url, `/api/sessions/${SHORT}/screen`);
-
-  await panel.click("[data-key=enter]");
-  assert.equal(calls[calls.length - 1].url, `/api/sessions/${SHORT}/keys`);
+  assert.equal(new URL(sockets[0].url).pathname, `/api/sessions/${SHORT}/pty`);
 
   panel.input().value = "hello";
   await panel.pressEnter();
@@ -238,17 +314,6 @@ test("the digest tab keeps exactly one timer armed, however long it runs", async
   assert.equal(calls.length, 13);
 });
 
-test("the screen tab keeps exactly one timer armed too", async () => {
-  installTerminal();
-  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "ready" } }) : answer({ body: [] })));
-  const panel = await mount();
-  await panel.openScreenTab();
-
-  for (let tick = 1; tick <= 8; tick += 1) {
-    await panel.timers.tick();
-    assert.equal(panel.timers.count(), 1, `still one timer after ${tick} ticks`);
-  }
-});
 
 test("stopping the panel leaves nothing running", async () => {
   stubFetch(answer({ body: [] }));
@@ -275,16 +340,16 @@ test("the close button stops the panel and calls back exactly once", async () =>
 
 test("switching tabs stops the tab being left behind, and disposes its terminal", async () => {
   const terminals = installTerminal();
-  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "x" } }) : answer({ body: [] })));
+  stubFetch(answer({ body: [] }));
   const panel = await mount();
   await panel.openScreenTab();
 
-  assert.equal(panel.timers.count(), 1, "one timer, not one per tab visited");
+  assert.equal(panel.timers.count(), 0, "the digest's timer went with the digest tab");
   assert.equal(terminals.length, 1);
 
   fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
   await settle();
-  assert.equal(panel.timers.count(), 1);
+  assert.equal(panel.timers.count(), 1, "one timer, not one per tab visited");
   // xterm holds a renderer, listeners and an observer; dropping the reference
   // without disposing leaks all three for the life of the page.
   assert.equal(terminals[0].disposed, 1);
@@ -348,107 +413,283 @@ test("a route that answers with something that is not JSON still produces words"
   assert.equal(panel.errorText(), "Not Found");
 });
 
-test("a failed screen poll shows the failure and is tried again", async () => {
-  // The defect this pins: the plan's screen branch returned from its error path
-  // before arming the next timer, so one dropped request — a daemon restart, a
-  // lost attach — froze the tab until somebody closed and reopened the panel.
-  // Its digest branch did not have the bug, which is how it survived review: the
-  // two branches disagreed.
+
+
+
+// --- the live terminal -------------------------------------------------------
+//
+// The screen tab is a held terminal, not a polled picture. What it has to keep
+// from the polled one: one connection and no more, however long it stays open;
+// a failure the operator can read; whatever was drawn staying drawn. What it
+// adds: the session's bytes arrive as they happen, and typing goes straight in.
+
+test("the screen tab opens exactly one socket and arms no timer, however long it runs", async () => {
   installTerminal();
-  let attempt = 0;
-  stubFetch((url) => {
-    if (!url.includes("/screen")) return answer({ body: [] });
-    attempt += 1;
-    // A request that never completes: the failure a browser reports by
-    // rejecting, not by answering.
-    if (attempt === 1) throw new TypeError("daemon is not running");
-    return answer({ body: { screen: "back again" } });
-  });
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+
+  for (let tick = 1; tick <= 8; tick += 1) {
+    await panel.timers.tick();
+  }
+  assert.equal(sockets.length, 1, "one socket, not one per tick");
+  assert.equal(panel.timers.count(), 0, "a stream needs no timer");
+  assert.equal(calls.filter((c) => c.url.includes("/screen")).length, 0, "and no screen poll behind it");
+});
+
+test("the socket goes to this session's terminal route and asks for the terminal's own size", async () => {
+  // The size is the terminal's, not a number of the panel's own: attaching at it
+  // resizes the session for everyone watching, so it has to be what is drawn here.
+  // Not 80x24 on purpose — that is also the fallback the panel would reach for.
+  const terminals = installTerminal({ cols: 132, rows: 41 });
+  stubFetch(answer({ body: [] }));
   const panel = await mount();
   await panel.openScreenTab();
 
-  assert.equal(panel.errorText(), "daemon is not running");
-  assert.equal(panel.timers.count(), 1, "a transient screen failure must not freeze the tab");
-
-  await panel.timers.tick();
-  assert.equal(panel.errorText(), "", "the recovered poll clears the error");
+  const url = new URL(sockets[0].url);
+  assert.equal(url.protocol, "ws:");
+  assert.equal(url.pathname, `/api/sessions/${SHORT}/pty`);
+  assert.equal(url.searchParams.get("cols"), String(terminals[0].cols));
+  assert.equal(url.searchParams.get("rows"), String(terminals[0].rows));
+  assert.equal(sockets[0].binaryType, "arraybuffer", "terminal bytes are read as bytes, not as a Blob");
 });
 
-test("a screen read that failed part way still draws what it did read", async () => {
+test("the session's bytes are written to the terminal as they arrive, never by redrawing it", async () => {
   const terminals = installTerminal();
-  stubFetch((url) =>
-    url.includes("/screen")
-      ? answer({
-          status: 502,
-          statusText: "Bad Gateway",
-          body: { error: "attach evicted", screen: "half a line" },
-        })
-      : answer({ body: [] }),
-  );
+  stubFetch(answer({ body: [] }));
   const panel = await mount();
   await panel.openScreenTab();
+  ready(sockets[0]);
 
-  assert.deepEqual(terminals[0].writes, ["half a line"]);
-  assert.equal(panel.errorText(), "attach evicted");
+  sockets[0].serverSend(frame("[1mfirst"));
+  sockets[0].serverSend(frame(" second"));
+
+  const written = terminals[0].writes.map((w) => asText(w)).join("");
+  assert.equal(written, "[1mfirst second");
+  assert.equal(terminals[0].resets, 0, "a stream is appended to, not reset per frame");
 });
 
-test("a missing terminal library is a visible error, not a blank tab", async () => {
-  // A <script> tag that 404s reports nothing to anyone. The panel has to.
-  delete globalThis.Terminal;
-  stubFetch(answer({ body: { screen: "ready" } }));
+test("what the operator types into the terminal goes into the socket as bytes", async () => {
+  const terminals = installTerminal();
+  stubFetch(answer({ body: [] }));
   const panel = await mount();
   await panel.openScreenTab();
+  ready(sockets[0]);
 
-  assert.notEqual(panel.errorText(), "");
-  assert.equal(panel.timers.count(), 1);
+  terminals[0].type("ls -la\r");
+
+  assert.equal(sockets[0].sent.length, 1);
+  assert.equal(typeof sockets[0].sent[0], "object", "a keystroke is a binary frame; text frames are control messages");
+  assert.equal(asText(sockets[0].sent[0]), "ls -la\r");
 });
 
-// --- writing into the session ----------------------------------------------
-
-test("every key button sends its escape sequence, never the word on its face", async () => {
+test("every key button sends its escape sequence into the socket, and nothing through POST .../keys", async () => {
+  // POST .../keys opens an attach of its own on every press, and an attach
+  // resizes the session: with a live terminal open that would be a resize per
+  // key. The buttons go through the one connection the terminal already holds.
   installTerminal();
-  stubFetch((url) => (url.includes("/screen") ? answer({ body: { screen: "" } }) : answer({ status: 204 })));
+  stubFetch(answer({ body: [] }));
   const panel = await mount();
   await panel.openScreenTab();
+  ready(sockets[0]);
 
-  const expected = {
-    escape: "\u001b",
-    up: "\u001b[A",
-    down: "\u001b[B",
-    enter: "\r",
-  };
-
+  const expected = { escape: "", up: "[A", down: "[B", enter: "\r" };
   for (const key of KEYS) {
     await panel.click(`[data-key=${key.id}]`);
-
-    const { url, init } = calls[calls.length - 1];
-    assert.equal(url, `/api/sessions/${SHORT}/keys`);
-    assert.equal(init.headers["Content-Type"], "application/json");
-    const sent = JSON.parse(init.body).keys;
-    assert.equal(sent, expected[key.id], `${key.id} must send bytes`);
-    // internal/server hands this field to the daemon, which writes it into the
-    // session's terminal byte for byte. Sending the identifier would type the
-    // word into whatever the session is doing.
+    const sent = asText(sockets[0].sent[sockets[0].sent.length - 1]);
+    assert.equal(sent, expected[key.id], `${key.id} must send its bytes`);
     assert.notEqual(sent, key.id);
     assert.notEqual(sent, key.label);
   }
+  assert.equal(calls.filter((c) => c.url.includes("/keys")).length, 0, "no key went out as a request");
 });
 
-test("a key that could not be sent is reported", async () => {
+test("a terminal that cannot type says so as soon as it opens, and typing sends nothing", async () => {
+  const terminals = installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0], false);
+
+  const notice = panel.root.querySelector(".s-notice");
+  assert.equal(notice.hidden, false, "read-only is said before anybody types");
+  assert.equal(notice.textContent, t("terminal_read_only"));
+
+  terminals[0].type("x");
+  await panel.click("[data-key=enter]");
+  assert.equal(sockets[0].sent.length, 0, "nothing went into a session through a terminal without a key");
+  assert.equal(panel.errorText(), t("terminal_read_only"), "and the refusal is on screen");
+});
+
+test("a key pressed before the terminal is connected is refused where it can be seen", async () => {
   installTerminal();
-  stubFetch((url) => {
-    if (url.includes("/keys")) {
-      return answer({ status: 502, statusText: "Bad Gateway", body: { error: "session is gone" } });
-    }
-    return url.includes("/screen") ? answer({ body: { screen: "" } }) : answer({ body: [] });
-  });
+  stubFetch(answer({ body: [] }));
   const panel = await mount();
   await panel.openScreenTab();
 
   await panel.click("[data-key=enter]");
-
-  assert.equal(panel.errorText(), "session is gone");
+  assert.equal(sockets[0].sent.length, 0);
+  assert.equal(panel.errorText(), t("terminal_not_connected"));
 });
+
+test("an error the bridge reports is shown", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+
+  sockets[0].serverSend(JSON.stringify({ type: "error", error: "resize failed: session is gone" }));
+  assert.equal(panel.errorText(), "resize failed: session is gone");
+});
+
+test("a stream that ends says why, for every way it can end", async () => {
+  const cases = [
+    [4000, "", t("terminal_session_ended")],
+    [4001, "kicked: Session opened in another window", `${t("terminal_kicked")}: Session opened in another window`],
+    [4404, "no such session", t("terminal_no_session")],
+    [4401, "", t("terminal_key_refused")],
+    [4503, "", t("terminal_daemon_unavailable")],
+    [1006, "", t("terminal_connection_lost")],
+    [1011, "attach failed: boom", `${t("terminal_connection_lost")}: attach failed: boom`],
+  ];
+  for (const [code, reason, want] of cases) {
+    sockets.length = 0;
+    installTerminal();
+    stubFetch(answer({ body: [] }));
+    const panel = await mount();
+    await panel.openScreenTab();
+    ready(sockets[0]);
+    sockets[0].serverClose(code, reason);
+    assert.equal(panel.errorText(), want, `close ${code}`);
+    panel.stop();
+  }
+});
+
+// The polled screen used to retry by itself. A stream must not: on a daemon that
+// evicts the previous attacher (Windows), reconnecting on its own would take the
+// operator's terminal back from them, again and again. Coming back to the tab is
+// the reconnect.
+test("an ended stream is not reopened by itself, and coming back to the tab opens a new one", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+  sockets[0].serverClose(4001, "kicked: Session opened in another window");
+
+  await panel.timers.tick();
+  await settle();
+  assert.equal(sockets.length, 1, "no socket was opened behind the operator's back");
+
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  await panel.openScreenTab();
+  assert.equal(sockets.length, 2, "coming back to the tab is the reconnect");
+});
+
+test("what the stream drew before it ended stays on screen", async () => {
+  const terminals = installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+  sockets[0].serverSend(frame("the last thing the session said"));
+  sockets[0].serverClose(4000);
+
+  assert.equal(terminals[0].disposed, 0, "the terminal is kept, not thrown away with the stream");
+  assert.equal(terminals[0].resets, 0);
+  assert.equal(terminals[0].writes.map((w) => asText(w)).join(""), "the last thing the session said");
+});
+
+test("leaving the tab, closing the panel or stopping it closes the socket", async () => {
+  // A socket left open is an attach left open on the daemon, with this panel's
+  // geometry still set on somebody's session.
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+
+  let panel = await mount();
+  await panel.openScreenTab();
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  assert.notEqual(sockets[0].closedWith, null, "tab switch");
+
+  panel = await mount();
+  await panel.openScreenTab();
+  await panel.click(".s-close");
+  assert.notEqual(sockets[1].closedWith, null, "close button");
+
+  panel = await mount();
+  await panel.openScreenTab();
+  panel.stop();
+  assert.notEqual(sockets[2].closedWith, null, "stop");
+});
+
+test("a panel's own close is not reported as a lost connection", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+  const socket = sockets[0];
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  // A browser delivers onclose for a close the page asked for, too.
+  socket.serverClose(1000, "panel closed");
+  assert.equal(panel.errorText(), "", "switching away is not a failure");
+});
+
+// A socket the panel has let go of can still deliver what was already in
+// flight. None of it may reach a terminal: the one it was drawing into has been
+// disposed, and writing into a disposed xterm is an error in a real browser.
+test("bytes still in flight on a socket the panel has let go of go nowhere", async () => {
+  const terminals = installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0]);
+  const old = sockets[0];
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+
+  old.onmessage?.({ data: frame("late") });
+  assert.equal(terminals[0].writes.length, 0, "a late frame was written into a disposed terminal");
+});
+
+// The other end of the card panel's Escape rule (web/tests/card.test.js): that
+// test builds its own marked element, so it cannot tell whether the terminal
+// this panel draws is marked at all. Without the mark, Escape typed into the
+// session closes a card on its way to interrupting the session.
+test("the terminal is drawn inside an element marked as a terminal", async () => {
+  const terminals = installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  assert.notEqual(terminals[0].host, null, "the terminal was never opened into the page");
+  assert.notEqual(terminals[0].host.closest("[data-terminal]"), null, "what the terminal is drawn into carries no data-terminal mark");
+});
+
+test("a missing WebSocket or terminal library is a visible error, and opens nothing", async () => {
+  delete globalThis.Terminal;
+  stubFetch(answer({ body: [] }));
+  let panel = await mount();
+  await panel.openScreenTab();
+  assert.notEqual(panel.errorText(), "");
+  assert.equal(sockets.length, 0, "no socket for a terminal that could not be built");
+  panel.stop();
+
+  installTerminal();
+  delete globalThis.WebSocket;
+  panel = await mount();
+  await panel.openScreenTab();
+  assert.notEqual(panel.errorText(), "");
+});
+
+// --- writing into the session ----------------------------------------------
+
+
 
 test("Enter sends what was typed and clears the box", async () => {
   stubFetch((url) => (url.includes("/text") ? answer({ status: 204 }) : answer({ body: [] })));

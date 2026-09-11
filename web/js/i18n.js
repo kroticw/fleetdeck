@@ -88,6 +88,18 @@ const en = {
   no_steps: "no readable steps yet",
   terminal_missing: "the terminal library did not load",
 
+  // The live terminal on the screen tab (web/js/session.js). Each ending is
+  // named apart, because each asks something different of the operator: wait,
+  // look elsewhere, fix the key, start the daemon, or simply reopen the tab.
+  terminal_not_connected: "the terminal is not connected yet",
+  terminal_read_only: "this terminal only shows the session: the control key is unavailable, so typing is off",
+  terminal_session_ended: "the session has ended",
+  terminal_kicked: "the session was opened in another window",
+  terminal_no_session: "there is no such session any more",
+  terminal_key_refused: "the daemon refused the control key",
+  terminal_daemon_unavailable: "the daemon is not running",
+  terminal_connection_lost: "the terminal connection was lost — reopen the tab to reconnect",
+
   // Attaching an image to a session (web/js/session.js, web/js/imagefile.js).
   // Both refusals are worded as what the panel will accept rather than as what
   // was wrong, because the person is about to pick another file and that is the
@@ -173,6 +185,15 @@ const ru = {
   close_session: "закрыть",
   no_steps: "читаемых шагов пока нет",
   terminal_missing: "библиотека терминала не загрузилась",
+
+  terminal_not_connected: "терминал ещё не подключён",
+  terminal_read_only: "этот терминал только показывает сессию: ключа управления нет, поэтому набор выключен",
+  terminal_session_ended: "сессия завершилась",
+  terminal_kicked: "сессию открыли в другом окне",
+  terminal_no_session: "такой сессии больше нет",
+  terminal_key_refused: "демон отверг ключ управления",
+  terminal_daemon_unavailable: "демон не запущен",
+  terminal_connection_lost: "связь с терминалом потеряна — откройте вкладку заново, чтобы переподключиться",
 
   image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
   image_too_large: "эта картинка слишком велика, чтобы её прикрепить",
