@@ -104,16 +104,72 @@ func TestMakeUnderTheDockPathFindsGoOnlyThroughBuildEnv(t *testing.T) {
 	base := []string{"HOME=" + os.Getenv("HOME"), "PATH=" + systemPath}
 
 	// Control: the environment an app from the Dock has, with nothing added.
+	// Where some go already sits in the system directories -- the Linux CI
+	// runner keeps an older one in /usr/bin -- there is no "go not found" to
+	// show; that half is the macOS leg's, the operator's platform, and the
+	// older-go half is TestAnOlderGoOnTheDockPathDoesNotWin's, everywhere.
 	bare := exec.Command(makeBin, "-C", dir, "probe")
 	bare.Env = base
 	if out, err := bare.CombinedOutput(); err == nil {
-		t.Fatalf("make found go under the bare Dock PATH (%s): this test cannot see the trap on this machine", out)
+		t.Skipf("the bare Dock PATH finds a go here (%s), so there is no go-not-found trap to show", strings.TrimSpace(string(out)))
 	}
 
 	withEnv := exec.Command(makeBin, "-C", dir, "probe")
 	withEnv.Env = BuildEnv(Tools{Go: goBin, Make: makeBin}, base)
 	if out, err := withEnv.CombinedOutput(); err != nil {
 		t.Fatalf("make still could not run go through BuildEnv: %v\n%s", err, out)
+	}
+}
+
+// The other way the Dock's PATH goes wrong: a go is there, but not the one
+// the build needs -- an older one, left by the system or a package manager.
+// BuildEnv puts the found go's directory first, so it wins. Shown with a
+// stand-in "older go" placed on the PATH ahead of the system directories.
+func TestAnOlderGoOnTheDockPathDoesNotWin(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no go on this machine's PATH to point the test at")
+	}
+	makeBin, err := exec.LookPath("make")
+	if err != nil {
+		t.Skip("no make on this machine")
+	}
+
+	const older = "go version go1.0-stand-in"
+	oldDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(oldDir, "go"), []byte("#!/bin/sh\necho '"+older+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Makefile"), []byte("probe:\n\t@go version\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"HOME=" + os.Getenv("HOME"), "PATH=" + oldDir + ":" + systemPath}
+
+	realCmd := exec.Command(goBin, "version")
+	realCmd.Env = base
+	realOut, err := realCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimSpace(string(realOut))
+
+	// Control: without BuildEnv the stand-in wins. Were it not so, the case
+	// below would pass for any environment at all.
+	bare := exec.Command(makeBin, "-C", dir, "probe")
+	bare.Env = base
+	if out, _ := bare.CombinedOutput(); !strings.Contains(string(out), older) {
+		t.Fatalf("the stand-in did not win without BuildEnv (%s): this case cannot see the trap", out)
+	}
+
+	withEnv := exec.Command(makeBin, "-C", dir, "probe")
+	withEnv.Env = BuildEnv(Tools{Go: goBin, Make: makeBin}, base)
+	out, err := withEnv.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make failed under BuildEnv: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), want) || strings.Contains(string(out), older) {
+		t.Fatalf("make ran %q, want %q (%s)", strings.TrimSpace(string(out)), want, goBin)
 	}
 }
 
