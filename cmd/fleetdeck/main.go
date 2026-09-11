@@ -412,6 +412,15 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		SendText:   func(session, text string) error { return dc.SendText(ctx, session, text) },
 		SendKeys:   func(session, keys string) error { return dc.SendKeys(ctx, session, keys) },
 		ReadScreen: func(session string, tail int) daemon.ScreenResult { return dc.ReadScreen(ctx, session, tail) },
+		// Returned through a local, not directly: a nil *daemon.Attachment put straight
+		// into the interface would be a non-nil Terminal holding nothing.
+		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {
+			a, err := dc.Attach(actx, session, cols, rows)
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
 
 		SetCardField: setCardField,
 		// Without this the server has nothing to confine a card write to and answers

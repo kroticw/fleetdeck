@@ -17,6 +17,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -145,6 +146,11 @@ type Deps struct {
 	// rather than choosing a directory on its own.
 	ImageDir string
 
+	// Attach opens a held, two-way terminal on a session at the given geometry —
+	// daemon.Client.Attach. It backs GET /api/sessions/{id}/pty. ctx bounds opening
+	// only; the terminal lives until it is closed. Nil leaves the route answering 503.
+	Attach func(ctx context.Context, session string, cols, rows int) (Terminal, error)
+
 	// interval overrides the WebSocket's one-second push cadence. It exists for
 	// tests, which cannot afford to wait whole seconds to observe a cadence; zero
 	// means the one second the panel actually uses.
@@ -173,6 +179,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
 	mux.HandleFunc("POST /api/sessions/{id}/image", d.handleUploadImage)
 	mux.HandleFunc("GET /ws", d.handleWS)
+	mux.HandleFunc("GET /api/sessions/{id}/pty", d.handlePTY)
 	mux.Handle("GET /", staticHandler())
 	return guard(mux)
 }
