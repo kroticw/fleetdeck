@@ -3,17 +3,13 @@
 package main
 
 import (
-	"context"
 	"debug/macho"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDefaultURLMatchesTheStatusReporterConvention(t *testing.T) {
@@ -22,65 +18,6 @@ func TestDefaultURLMatchesTheStatusReporterConvention(t *testing.T) {
 	// silent way for one of them to go stale.
 	if defaultURL != "http://127.0.0.1:7777/" {
 		t.Fatalf("defaultURL = %q, want http://127.0.0.1:7777/", defaultURL)
-	}
-}
-
-func TestReachableIsTrueWhenSomethingAnswers(t *testing.T) {
-	// Any answer at all, including a non-2xx one, still means a server is
-	// listening -- reachable must not be mistaken for "answered successfully".
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if !reachable(ctx, srv.URL) {
-		t.Fatal("a server answering 404 must still count as reachable")
-	}
-}
-
-func TestReachableIsFalseWithNothingListening(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	// Port 1 is a reserved, never-listened-on port -- a connection to it is
-	// refused immediately rather than merely slow, so this does not depend on
-	// the timeout actually firing.
-	if reachable(ctx, "http://127.0.0.1:1/") {
-		t.Fatal("nothing is listening on port 1; this must not read as reachable")
-	}
-}
-
-func TestWaitingPageNamesTheURLAndSaysWhatToDo(t *testing.T) {
-	page := waitingPage("http://127.0.0.1:7777/")
-	if !strings.Contains(page, "http://127.0.0.1:7777/") {
-		t.Fatal("the waiting page must name the address it is waiting on")
-	}
-	// Regression for the actual complaint: "the panel isn't responding" alone
-	// leaves a person not knowing what to do next. The page must say the verb,
-	// not only the fact.
-	if !strings.Contains(page, "Запустите панель") {
-		t.Fatal("the waiting page must say what to do, not only that nothing answered")
-	}
-}
-
-func TestWaitingPageEscapesTheURLItInterpolates(t *testing.T) {
-	page := waitingPage(`http://x/"><script>alert(1)</script>`)
-	if strings.Contains(page, "<script>alert(1)</script>") {
-		t.Fatal("an unescaped URL could inject markup into the waiting page")
-	}
-}
-
-func TestWaitingPagePollsAndNavigatesOnItsOwn(t *testing.T) {
-	// The whole point of the waiting page is that nothing on the Go side has to
-	// notice recovery -- see main.go's comment on why there is no Go-side retry
-	// loop. This pins that the page's own script is what does the polling.
-	page := waitingPage("http://127.0.0.1:7777/")
-	if !strings.Contains(page, "fetch(url") {
-		t.Fatal("the waiting page must poll for the panel itself, in its own script")
-	}
-	if !strings.Contains(page, "window.location.href = url") {
-		t.Fatal("the waiting page must navigate itself to the panel once it answers")
 	}
 }
 

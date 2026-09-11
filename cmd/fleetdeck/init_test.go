@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"io"
 	"io/fs"
 	"os"
@@ -183,87 +182,6 @@ func TestWireStatuslineUpdatesOurOwnCommandInPlace(t *testing.T) {
 	}
 }
 
-func TestLaunchAgentContainsBinaryAndKeepAlive(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "agent.plist")
-	if _, err := writeLaunchAgent(p, "/usr/local/bin/fleetdeck", filepath.Join(dir, "logs", "fleetdeck.log"), false); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := os.ReadFile(p)
-	for _, want := range []string{"/usr/local/bin/fleetdeck", "KeepAlive", "RunAtLoad"} {
-		if !strings.Contains(string(raw), want) {
-			t.Fatalf("launch agent missing %q", want)
-		}
-	}
-}
-
-func TestLaunchAgentEscapesXMLSpecialCharacters(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "agent.plist")
-	binary := filepath.Join(dir, "tools & <utils>", "fleetdeck")
-	logPath := filepath.Join(dir, "logs & more", "fleetdeck.log")
-
-	if _, err := writeLaunchAgent(p, binary, logPath, false); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Parsed, not grepped: a path with & in it produces a document launchd
-	// rejects long before anyone reads the file, and only a parser sees that.
-	decoder := xml.NewDecoder(bytes.NewReader(raw))
-	decoder.Strict = true
-	var text strings.Builder
-	for {
-		token, err := decoder.Token()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatalf("launch agent is not well-formed XML: %v\n%s", err, raw)
-		}
-		if chars, ok := token.(xml.CharData); ok {
-			text.Write(chars)
-		}
-	}
-	for _, want := range []string{binary, logPath} {
-		if !strings.Contains(text.String(), want) {
-			t.Fatalf("parsed plist does not carry %q", want)
-		}
-	}
-}
-
-func TestLaunchAgentCreatesItsLogDirectory(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "Library", "Logs", "fleetdeck.log")
-	if _, err := writeLaunchAgent(filepath.Join(dir, "agent.plist"), "/bin/fleetdeck", logPath, false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Dir(logPath)); err != nil {
-		t.Fatalf("log directory was not created: %v", err)
-	}
-}
-
-func TestLaunchAgentRefusesToOverwriteAForeignAgent(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "agent.plist")
-	if err := os.WriteFile(p, []byte("<plist>someone else's agent</plist>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writeLaunchAgent(p, "/bin/fleetdeck", filepath.Join(dir, "fleetdeck.log"), false); err == nil {
-		t.Fatal("an agent file that is not ours must not be overwritten without --force")
-	}
-	raw, _ := os.ReadFile(p)
-	if !strings.Contains(string(raw), "someone else") {
-		t.Fatal("refused step rewrote the file anyway")
-	}
-	if _, err := writeLaunchAgent(p, "/bin/fleetdeck", filepath.Join(dir, "fleetdeck.log"), true); err != nil {
-		t.Fatalf("--force must replace it: %v", err)
-	}
-}
-
 func TestInitOnAFreshHomeCreatesBoardAndConfigNamingIt(t *testing.T) {
 	home := t.TempDir()
 	var out bytes.Buffer
@@ -288,12 +206,6 @@ func TestInitOnAFreshHomeCreatesBoardAndConfigNamingIt(t *testing.T) {
 	}
 	if got := statuslineCommand(t, settingsPathOf(home)); !strings.HasSuffix(got, statusBinaryName) {
 		t.Fatalf("statusline command = %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)); err != nil {
-		t.Fatalf("launch agent was not written: %v", err)
-	}
-	if !strings.Contains(out.String(), "launchctl") {
-		t.Fatalf("init must print the launchctl command it deliberately does not run:\n%s", out.String())
 	}
 }
 
@@ -447,9 +359,6 @@ func TestInitRefusesOnlyTheStatuslineStepWhenTheReporterIsMissing(t *testing.T) 
 	if _, statErr := os.Stat(filepath.Join(home, "fleetdeck", "board", "cards", exampleCardName)); statErr != nil {
 		t.Fatalf("the board step was skipped along with the statusline: %v", statErr)
 	}
-	if _, statErr := os.Stat(filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)); statErr != nil {
-		t.Fatalf("the launch agent step was skipped along with the statusline: %v", statErr)
-	}
 }
 
 func TestInitRefusesToReplaceAForeignStatusline(t *testing.T) {
@@ -507,22 +416,77 @@ func TestInitTwiceChangesNothing(t *testing.T) {
 	}
 }
 
-func TestInitPrintsTheCurrentLaunchctlSpelling(t *testing.T) {
+// The fleetdeck window starts the panel now; a launch agent starting a second
+// one at login would take the port first and leave the window watching a
+// panel it did not start (operator's decision, 2026-09-11).
+func TestInitWritesNoLaunchAgent(t *testing.T) {
 	home := t.TempDir()
+	var out bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: &out}); err != nil {
+		t.Fatalf("init on a fresh home must succeed: %v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents")); !os.IsNotExist(err) {
+		t.Fatalf("init touched ~/Library/LaunchAgents: %v", err)
+	}
+	if strings.Contains(out.String(), "launchctl") {
+		t.Fatalf("init still talks about launchctl on a machine that never had an agent:\n%s", out.String())
+	}
+}
+
+// An agent an earlier init wrote is the operator's to remove, as loading it
+// was: init names it and prints how, in the current spelling, and leaves the
+// file exactly as it was.
+func TestInitSaysHowToRemoveTheLaunchAgentAnEarlierInitWrote(t *testing.T) {
+	home := t.TempDir()
+	agent := filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)
+	if err := os.MkdirAll(filepath.Dir(agent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	earlier := []byte("<plist><dict><key>Label</key><string>" + launchAgentLabel + "</string></dict></plist>\n")
+	if err := os.WriteFile(agent, earlier, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: &out}); err != nil {
+		t.Fatalf("an old agent is not a failure of init: %v\n%s", err, out.String())
+	}
+	for _, want := range []string{
+		agent,
+		"launchctl bootout gui/$(id -u)/" + launchAgentLabel,
+		"rm '" + agent + "'",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("init output lacks %q:\n%s", want, out.String())
+		}
+	}
+	// unload is the legacy spelling on current macOS, and this line is the one
+	// an operator copies verbatim.
+	if strings.Contains(out.String(), "launchctl unload") {
+		t.Fatalf("init prints the legacy spelling:\n%s", out.String())
+	}
+	if raw, _ := os.ReadFile(agent); !bytes.Equal(raw, earlier) {
+		t.Fatalf("init changed the agent file:\n%s", raw)
+	}
+}
+
+// A file at that path that is not an agent init wrote is somebody else's, and
+// init has nothing to say about it.
+func TestInitSaysNothingAboutAnAgentFileItDidNotWrite(t *testing.T) {
+	home := t.TempDir()
+	agent := filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)
+	if err := os.MkdirAll(filepath.Dir(agent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agent, []byte("<plist>someone else's agent</plist>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
 	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: &out}); err != nil {
 		t.Fatal(err)
 	}
-	agent := filepath.Join(home, "Library", "LaunchAgents", launchAgentFile)
-
-	want := "launchctl bootstrap gui/$(id -u) " + agent
-	if !strings.Contains(out.String(), want) {
-		t.Fatalf("init must print %q, got:\n%s", want, out.String())
-	}
-	// load is a legacy subcommand on current macOS, and this line is the one an
-	// operator copies verbatim.
-	if strings.Contains(out.String(), "launchctl load") {
-		t.Fatalf("init still prints the legacy spelling:\n%s", out.String())
+	if strings.Contains(out.String(), "bootout") || strings.Contains(out.String(), agent) {
+		t.Fatalf("init offered to remove a file it did not write:\n%s", out.String())
 	}
 }
 

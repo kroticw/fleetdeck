@@ -75,4 +75,4 @@ server:
 
 ## Где живут остальные файлы
 
-`fleetdeck init` также записывает launchd-агент, который запускает пульт при входе в систему, по адресу `~/Library/LaunchAgents/dev.fleetdeck.panel.plist`, и указывает `StandardOutPath`/`StandardErrorPath` этого агента на `~/Library/Logs/fleetdeck.log`. Весь процесс — в [`getting-started.md`](getting-started.md#загрузка-launch-агента).
+Лог пульта — `~/Library/Logs/fleetdeck.log`: приложение fleetdeck дописывает туда оба потока вывода пульта, который запускает. Как приложение запускает и держит пульт — в [`getting-started.md`](getting-started.md#приложение-и-пульт).

@@ -1,12 +1,30 @@
 //go:build darwin
 
-// Command fleetdeck-window is a native window around the panel that already
-// runs as a separate, independently-managed process. It never starts, stops
-// or owns that process — it only opens a window pointed at the URL the panel
-// already answers on, exactly the way a browser tab does today. Closing the
-// window must not stop the panel; the panel keeps working, sessions keep
-// working, the operator can reopen the window later and find everything as
-// they left it.
+// Command fleetdeck-window is the fleetdeck app: a native window around the
+// panel, and the panel's owner.
+//
+// Owner is new. Until 2026-09-11 this command owned only itself: the panel ran
+// as a separate process, started at login by a launch agent `fleetdeck init`
+// installed, and the window never started, stopped or restarted it -- it only
+// opened a window on the URL the panel already answered on, the way a browser
+// tab does. The operator revoked that contract on 2026-09-11: the app is to
+// need no terminal and no ritual. So the app bundle carries the panel, beside
+// this binary in Contents/MacOS, and the window starts it. What the window
+// owns now:
+//
+//   - starting the panel when nothing answers at its URL, and starting it
+//     again when it dies, the way launchd's KeepAlive did for the agent -- and,
+//     like launchd, not over and over when it dies at once (see
+//     internal/supervisor's Keeper);
+//   - saying so in the window, with the end of the panel's log, when the panel
+//     will not start, and starting it again when asked.
+//
+// What stays as it was: the panel outlives the window. Closing the window, or
+// quitting it, does not stop the panel -- notifications keep coming, the
+// status line keeps finding where to report, and the window opened again later
+// finds everything as it was left. A panel that already answers at the URL --
+// from a launch agent still installed, from a terminal -- is used as it is,
+// and the window starts its own only once that one is gone.
 //
 // Why webview_go, and what the fallback is: this needed a native window
 // without a second build toolchain in a project that currently has only Go.
@@ -21,8 +39,8 @@
 // below is pinned to an exact commit, not a branch or a floating version.
 // If it stops working, the fallback is Tauri (the second-cheapest path, and
 // the one with an actively maintained toolchain) — and because this wrapper
-// is deliberately thin and owns nothing but the window itself, that rewrite
-// touches this one command, never the panel it points at.
+// is deliberately thin -- the panel's keeping lives in internal/supervisor,
+// with no cgo -- that rewrite touches this one command, never the panel.
 //
 // The //go:build darwin above is load-bearing, not decoration: this project's
 // own CI runs a ubuntu-latest leg too, and webview_go's cgo directives ask
@@ -38,16 +56,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"html"
 	"log"
-	"net/http"
-	"strings"
-	"time"
+	"os"
+	"path/filepath"
 
 	webview "github.com/webview/webview_go"
+
+	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
 
 // defaultURL matches cmd/fleetdeck-status's own default (see its FLEETDECK_ENDPOINT
@@ -77,99 +94,21 @@ func reloadBinding(dispatch func(func()), navigate func(string), url string) fun
 	}
 }
 
-// reachabilityTimeout bounds the one check this command makes before deciding
-// whether to open the panel directly or show the waiting page. A window that
-// hangs on a slow or absent network answer before it has even appeared would
-// read as the whole application being frozen, not as "the panel isn't up yet".
-const reachabilityTimeout = 800 * time.Millisecond
-
-// reachable reports whether the panel answers at url right now. Any answer at
-// all -- even an HTTP error status -- means a server is listening; only a
-// failure to connect at all (refused, timed out, no route) means it is not.
-func reachable(ctx context.Context, url string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return false
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	_ = resp.Body.Close()
-	return true
-}
-
-// waitingPage is shown instead of a browser's own "connection refused" when
-// the panel is not answering yet. It polls on its own, in the page itself,
-// and replaces itself the moment the panel responds -- there is deliberately
-// no Go-side retry loop for this: once the window has ever loaded the real
-// panel, the panel's own frontend (store.js) already reconnects with backoff
-// and shows its own offline state if the panel later goes away, the same way
-// it already does for a browser tab. This page only has to cover the one gap
-// that code does not: nothing has loaded yet for it to reconnect from.
-//
-// url is interpolated twice: once as page text (html.EscapeString covers
-// that) and once as a JS string literal inside <script> (jsStringLiteral
-// covers that -- Go's %q quotes for Go syntax, not for breaking out of an
-// HTML <script> block, and does nothing about a literal "</script>"
-// substring inside the value ending the tag early regardless of any string
-// quoting). Both forms are also what a person set on the command line
-// themselves, not input the panel received from anywhere untrusted.
-func waitingPage(url string) string {
-	escaped := html.EscapeString(url)
-	return fmt.Sprintf(`<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>fleetdeck</title>
-<style>
-  html, body { height: 100%%; margin: 0; }
-  body {
-    display: flex; align-items: center; justify-content: center;
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #14161a; color: #e7e9ec;
-  }
-  main { max-width: 28rem; text-align: center; padding: 2rem; }
-  h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 0.75rem; }
-  p { color: #9aa1ac; font-size: 0.9rem; line-height: 1.5; margin: 0; }
-  code { background: #21252c; padding: 0.1em 0.4em; border-radius: 4px; }
-</style>
-</head>
-<body>
-<main>
-  <h1>Панель не запущена</h1>
-  <p>Окно ждёт ответ на <code>%s</code> и пока его не получает. Запустите панель — тем же способом, каким вы её обычно поднимаете (бинарём <code>fleetdeck</code> или своим скриптом) — и это окно само откроет её, как только она ответит. Ничего здесь нажимать не нужно.</p>
-</main>
-<script>
-  const url = %s;
-  const check = () => {
-    fetch(url, { method: "GET", cache: "no-store" })
-      .then(() => { window.location.href = url; })
-      .catch(() => { setTimeout(check, 1500); });
-  };
-  setTimeout(check, 1500);
-</script>
-</body>
-</html>`, escaped, jsStringLiteral(url))
-}
-
-// jsStringLiteral turns a Go string into a JSON string literal (json.Marshal
-// on a string always produces one, and every JSON string literal is also a
-// valid JS one) and then neutralizes "</", the one sequence a JS string
-// quoting rule has no reason to escape but that ends the surrounding
-// <script> tag the moment an HTML parser sees it -- before any JS ever runs.
-func jsStringLiteral(s string) string {
-	quoted, err := json.Marshal(s)
-	if err != nil {
-		// s is a plain string; json.Marshal on a string cannot fail.
-		panic(err)
-	}
-	return strings.ReplaceAll(string(quoted), "</", "<\\/")
-}
-
 func main() {
 	url := flag.String("url", defaultURL, "URL the panel answers on")
 	flag.Parse()
+
+	exe, err := os.Executable()
+	if err != nil {
+		log.Fatalf("fleetdeck-window: locate own binary: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("fleetdeck-window: locate home directory: %v", err)
+	}
+	// The same log the launch agent wrote the panel's output to, so a panel's
+	// history does not split in two at the day the window took over.
+	logPath := filepath.Join(home, "Library", "Logs", "fleetdeck.log")
 
 	w := webview.New(false)
 	defer w.Destroy()
@@ -180,28 +119,68 @@ func main() {
 	// confirmed by timing, not assumed: SetTitle/SetSize above already rely
 	// on the same fact. installMenu is what makes Cmd+X/C/V/A/Z (and Cmd+Q)
 	// do anything at all; see menu_darwin.c for why. installCloseToHide
-	// keeps the window's "owns only itself" contract: the red button hides
-	// it rather than tearing down the engine underneath a still-running
-	// panel, the same way a browser tab survives being put away.
+	// makes the red button hide the window rather than tear down the engine
+	// underneath a panel that keeps running, the same way a browser tab
+	// survives being put away.
 	installMenu()
 	installCloseToHide(w.Window())
 
-	// Bound before the first navigation, so the page finds it from its very
-	// first load, including the load the waiting page hands over to.
+	scr := &screen{url: *url, logPath: logPath}
+	keeper := &supervisor.Keeper{
+		URL:          *url,
+		Bin:          panelBinary(exe),
+		Env:          os.Environ(),
+		LogPath:      logPath,
+		StartTimeout: panelStartTimeout,
+		MinUptime:    launchdThrottle,
+		Poll:         takenPanelPoll,
+	}
+	keeper.OnEvent = func(e supervisor.Event) {
+		log.Printf("fleetdeck-window: panel %s", describeEvent(e))
+		w.Dispatch(func() {
+			navigate, page := scr.on(e)
+			switch {
+			case navigate:
+				w.Navigate(*url)
+			case page != "":
+				w.SetHtml(page)
+			}
+		})
+	}
+
+	// Bound before the first navigation, so the page finds them from its very
+	// first load.
 	if err := w.Bind(reloadBindingName, reloadBinding(w.Dispatch, w.Navigate, *url)); err != nil {
 		log.Printf("fleetdeck-window: the page will not be able to reload itself: %v", err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), reachabilityTimeout)
-	up := reachable(ctx, *url)
-	cancel()
-
-	if up {
-		w.Navigate(*url)
-	} else {
-		log.Printf("fleetdeck-window: %s is not answering yet, showing the waiting page", *url)
-		w.SetHtml(waitingPage(*url))
+	if err := w.Bind(startBindingName, keeper.Retry); err != nil {
+		log.Printf("fleetdeck-window: the failure page will not be able to start the panel again: %v", err)
 	}
 
+	// The window's own ground until the keeper's first word, which comes within
+	// one look at the URL.
+	w.SetHtml(blankPage)
+	ctx, cancel := context.WithCancel(context.Background())
+	kept := make(chan struct{})
+	go func() {
+		keeper.Run(ctx)
+		close(kept)
+	}()
+
 	w.Run()
+	// The keeper stops; the panel does not. Waiting for the keeper keeps it
+	// from dispatching onto a window already destroyed.
+	cancel()
+	<-kept
+}
+
+func describeEvent(e supervisor.Event) string {
+	switch {
+	case e.Err != nil:
+		return fmt.Sprintf("%s: %v", e.State, e.Err)
+	case e.PID != 0:
+		return fmt.Sprintf("%s (pid %d, started by this window)", e.State, e.PID)
+	default:
+		return fmt.Sprintf("%s (not started by this window)", e.State)
+	}
 }

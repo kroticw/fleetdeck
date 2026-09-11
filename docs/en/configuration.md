@@ -75,4 +75,4 @@ A file containing more than one YAML document (separated by a `---` line partway
 
 ## Where other files live
 
-`fleetdeck init` also writes the launchd agent that starts the panel at login, to `~/Library/LaunchAgents/dev.fleetdeck.panel.plist`, and points that agent's `StandardOutPath`/`StandardErrorPath` at `~/Library/Logs/fleetdeck.log`. See [`getting-started.md`](getting-started.md#loading-the-launch-agent) for the whole flow.
+The panel's log is `~/Library/Logs/fleetdeck.log`: the fleetdeck app appends both output streams of a panel it starts there. See [`getting-started.md`](getting-started.md#the-app-and-the-panel) for how the app starts and keeps the panel.
