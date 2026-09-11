@@ -703,6 +703,20 @@ test("the column carries its remembered width from the first paint, not the firs
   assert.equal(c.root.style.getPropertyValue("--col-width"), "25%");
 });
 
+// The orchestrator column sits at the window's LEFT edge — its controls
+// belong on its own right (toward the centre), and its fold arrow points
+// left (away, toward the window's own edge) while its unfold arrow points
+// right (back, toward the centre). This is the side the mechanism has
+// always used; a session-list sibling test pins the mirrored case, and the
+// two together are what a bare existence check cannot tell apart.
+test("the column's controls sit on its left-hand side, with arrows pointing the left column's own way", async () => {
+  const c = await column(structuredClone(PIN));
+
+  assert.match(String(sizeButton(c, "fold")?.parentNode?.className), /\bcol-size-left\b/, "the strip is not marked as a left column's");
+  assert.equal(sizeButton(c, "fold").textContent, "«", "folding away must point toward this column's own edge, not the centre");
+  assert.equal(sizeButton(c, "unfold").textContent, "»", "coming back must point toward the centre");
+});
+
 // The storage keys are literal strings, not the exported constant, on
 // purpose: an operator who resized this column before columnresize.js
 // existed has these exact entries sitting in a real browser's storage right

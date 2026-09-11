@@ -168,6 +168,23 @@ test("the resize edge is painted and says which way it moves", () => {
   }
 });
 
+// A left column's fold/unfold controls belong on its own right (the edge
+// facing the centre of the screen); a right column's belong on its own
+// left, mirrored. This checks the two are actually opposite values, not
+// merely that both rules exist — two rules with the same justify-content
+// would pass a presence check while sitting both controls on the same side.
+test("a left column's controls and a right column's sit on opposite sides, not the same one", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector) => {
+    const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
+    assert.ok(match, `${selector} has no rule in web/app.css`);
+    return match[2];
+  };
+
+  assert.match(body("\\.col-size-left"), /justify-content:\s*flex-end/, "a left column's controls are not toward its centre-facing edge");
+  assert.match(body("\\.col-size-right"), /justify-content:\s*flex-start/, "a right column's controls are not toward its centre-facing edge");
+});
+
 // The orchestrator column is a terminal now, and a terminal is sized by what it
 // measures: the fit addon reads the width and height of the terminal's parent,
 // .o-term, and divides them into cells. Two ways that goes wrong without a

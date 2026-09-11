@@ -1897,10 +1897,23 @@ main {
 .col-size {
   flex: none;
   display: flex;
-  justify-content: flex-end;
   gap: 2px;
   padding: 4px var(--gap-sm);
   border-bottom: 1px solid var(--border);
+}
+
+/* Which side of the strip the buttons sit on has to follow which edge of
+ * the window the column itself is anchored to: a left column's controls
+ * belong on its own right — the edge facing the centre of the screen — and
+ * a right column's belong on its own left, for the same reason mirrored.
+ * Put either on the wrong side and a person reaches for it at the window's
+ * outer edge, where there is nothing past it to orient by. */
+.col-size-left {
+  justify-content: flex-end;
+}
+
+.col-size-right {
+  justify-content: flex-start;
 }
 
 .col-size-btn {
