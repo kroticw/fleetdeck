@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -303,6 +304,53 @@ func TestAppointRefusesASessionTheDaemonDoesNotList(t *testing.T) {
 		if _, statErr := os.Stat(BriefPath(p)); statErr == nil {
 			t.Errorf("%s: wrote the brief for a session it will not appoint", name)
 		}
+	}
+}
+
+// A session Vet refuses — another fleet's orchestrator, which cannot lead two
+// fleets — is refused before anything is written or sent: the pin at the end
+// would refuse it, after the session had already been handed this fleet's
+// working order.
+func TestAppointRefusesASessionVetRefusesBeforeAnythingIsDone(t *testing.T) {
+	p := workspace(t)
+	f := &fleet{sessions: []daemon.Session{{Short: "33333333"}}}
+	a := appointer(f, p)
+	var vetted []string
+	a.Vet = func(short string) error {
+		vetted = append(vetted, short)
+		return errors.New("33333333 is already the orchestrator of fleet A")
+	}
+	res, err := a.Appoint(context.Background(), Request{Session: "33333333"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || strings.Join(stepNames(res.Steps), ",") != "session (refused)" {
+		t.Fatalf("steps = %v", stepNames(res.Steps))
+	}
+	if !strings.Contains(res.Steps[0].Error, "already the orchestrator of fleet A") {
+		t.Fatalf("the refusal must say why: %q", res.Steps[0].Error)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("a refused session was still %v", f.calls)
+	}
+	if _, statErr := os.Stat(BriefPath(p)); statErr == nil {
+		t.Fatal("the brief was written for a session it will not appoint")
+	}
+	if strings.Join(vetted, ",") != "33333333" {
+		t.Fatalf("Vet was asked about %v", vetted)
+	}
+}
+
+func TestAppointVetsNoNewSession(t *testing.T) {
+	// A session started for the appointment has a short id no fleet can have
+	// pinned yet: there is nothing to ask.
+	p := workspace(t)
+	f := &fleet{startShort: "44444444"}
+	a := appointer(f, p)
+	a.Vet = func(short string) error { return fmt.Errorf("asked about %s", short) }
+	res, err := a.Appoint(context.Background(), Request{New: true})
+	if err != nil || !res.OK {
+		t.Fatalf("a new session was refused: %v %+v", err, res.Steps)
 	}
 }
 
