@@ -3,12 +3,9 @@ package supervisor
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -87,27 +84,8 @@ func StopHolder(ctx context.Context, panelURL string, grace time.Duration) error
 // isPanel reports whether panelURL answers as a fleetdeck panel: a snapshot
 // that carries a build fingerprint.
 func isPanel(ctx context.Context, panelURL string) bool {
-	u, err := url.Parse(panelURL)
-	if err != nil {
-		return false
-	}
-	u.Path = "/api/snapshot"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return false
-	}
-	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var snap struct {
-		Build *json.RawMessage `json:"build"`
-	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&snap) != nil {
-		return false
-	}
-	return snap.Build != nil
+	_, ok := holderBuild(ctx, panelURL)
+	return ok
 }
 
 func portOf(panelURL string) (int, error) {

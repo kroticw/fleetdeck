@@ -6,7 +6,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -392,6 +394,145 @@ func TestAnyHTTPAnswerCountsAsSomethingAnswering(t *testing.T) {
 	_ = srv.Close()
 	if answers(context.Background(), "http://"+addr+"/") {
 		t.Fatal("a closed port counts as answering")
+	}
+}
+
+// --- a panel found answering: whose is it? -----------------------------------
+//
+// The operator's rule: a panel lives as long as the window that started it. A
+// panel a window left behind is replaced by the next window; a panel started
+// any other way -- from a terminal -- is left alone, as is a panel of a window
+// still running, and anything that is not a fleetdeck panel at all.
+
+// foreignPanel starts a stand-in the keeper did not start, from exe, saying
+// owner is the window it belongs to.
+func foreignPanel(t *testing.T, addr, exe string, owner int) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(exe)
+	cmd.Env = append(helperEnvFor("listen", addr), reportOwnerEnv+"="+strconv.Itoa(owner))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = cmd.Wait() }()
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := WaitAnswer(ctx, "http://"+addr+"/"); err != nil {
+		t.Fatalf("the foreign stand-in never answered: %v", err)
+	}
+	return cmd
+}
+
+// deadPID is the PID of a process that has finished.
+func deadPID(t *testing.T) int {
+	t.Helper()
+	c := exec.Command("true")
+	if err := c.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return c.Process.Pid
+}
+
+// windowKeeper is a keeper as the window runs it: it knows its window.
+func windowKeeper(t *testing.T, addr string) *Keeper {
+	k := newKeeper(t, "listen", addr)
+	k.Owner = os.Getpid()
+	return k
+}
+
+func TestAPanelWhoseWindowIsGoneIsReplaced(t *testing.T) {
+	addr := freeAddr(t)
+	orphan := foreignPanel(t, addr, os.Args[0], deadPID(t))
+	r := run(t, windowKeeper(t, addr))
+
+	replacing := r.expect(t, Replacing, 5*time.Second)
+	if !strings.Contains(replacing.Detail, "window") {
+		t.Fatalf("Replacing detail %q, want it to say whose panel this was", replacing.Detail)
+	}
+	r.expect(t, Starting, 10*time.Second)
+	if up := r.expect(t, Answering, 10*time.Second); !up.Ours {
+		t.Fatalf("Answering %+v, want the keeper's own panel", up)
+	}
+	if alive(orphan.Process.Pid) {
+		t.Fatal("the orphan is still running")
+	}
+}
+
+// A panel started by a window from before panels reported their owner runs
+// from inside an app bundle and reports none. See Keeper.replaceable.
+func TestAPanelFromABundleThatReportsNoOwnerIsReplaced(t *testing.T) {
+	addr := freeAddr(t)
+	bundled := filepath.Join(t.TempDir(), "fleetdeck.app", "Contents", "MacOS", "fleetdeck")
+	self, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(bundled), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bundled, self, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orphan := foreignPanel(t, addr, bundled, 0)
+	r := run(t, windowKeeper(t, addr))
+
+	r.expect(t, Replacing, 5*time.Second)
+	r.expect(t, Starting, 10*time.Second)
+	if up := r.expect(t, Answering, 10*time.Second); !up.Ours {
+		t.Fatalf("Answering %+v, want the keeper's own panel", up)
+	}
+	if alive(orphan.Process.Pid) {
+		t.Fatal("the bundle's ownerless panel is still running")
+	}
+}
+
+// A panel started from a terminal -- no owner, not from a bundle -- is
+// somebody's on purpose.
+func TestAPanelStartedFromATerminalIsLeftAlone(t *testing.T) {
+	addr := freeAddr(t)
+	terminal := foreignPanel(t, addr, os.Args[0], 0)
+	r := run(t, windowKeeper(t, addr))
+
+	if up := r.expect(t, Answering, 5*time.Second); up.Ours {
+		t.Fatalf("Answering %+v, want the terminal's panel", up)
+	}
+	r.quiet(t, time.Second)
+	if !alive(terminal.Process.Pid) {
+		t.Fatal("the keeper stopped a panel started from a terminal")
+	}
+}
+
+func TestAPanelOfAWindowStillRunningIsLeftAlone(t *testing.T) {
+	addr := freeAddr(t)
+	window := exec.Command("sleep", "60")
+	if err := window.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = window.Process.Kill(); _ = window.Wait() })
+	theirs := foreignPanel(t, addr, os.Args[0], window.Process.Pid)
+	r := run(t, windowKeeper(t, addr))
+
+	if up := r.expect(t, Answering, 5*time.Second); up.Ours {
+		t.Fatalf("Answering %+v, want the other window's panel", up)
+	}
+	r.quiet(t, time.Second)
+	if !alive(theirs.Process.Pid) {
+		t.Fatal("the keeper stopped the panel of a window that is still running")
+	}
+}
+
+// A keeper that is not a window's replaces nothing.
+func TestAKeeperWithNoWindowReplacesNothing(t *testing.T) {
+	addr := freeAddr(t)
+	orphan := foreignPanel(t, addr, os.Args[0], deadPID(t))
+	r := run(t, newKeeper(t, "listen", addr))
+
+	if up := r.expect(t, Answering, 5*time.Second); up.Ours {
+		t.Fatalf("Answering %+v, want the panel already there", up)
+	}
+	r.quiet(t, time.Second)
+	if !alive(orphan.Process.Pid) {
+		t.Fatal("a keeper with no window replaced a panel")
 	}
 }
 

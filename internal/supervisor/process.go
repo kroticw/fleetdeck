@@ -34,12 +34,16 @@ func (p *Panel) Err() error {
 	return p.err
 }
 
-// StartPanel starts the panel binary in a session of its own.
+// StartPanel starts the panel binary in a session of its own, as the starter's
+// own direct child.
 //
-// Its own session is what lets the panel outlive the window that started it:
-// closing the window must not stop the panel -- notifications keep coming and
-// the status line keeps finding where to report. A child in the window's
-// session and process group would get the signals meant for the window.
+// Its own session keeps signals meant for the window -- a Ctrl+C in the
+// terminal a window was started from -- off the panel: a window's panel goes
+// when its window goes (the operator's rule, 2026-09-11), and it goes by its
+// own graceful shutdown, having watched its parent (cmd/fleetdeck, owner.go).
+// That is also why the panel is started directly, never through a shell: the
+// panel watches its parent, and a process in between would be the one it
+// watched. TestAStartedPanelIsTheStartersOwnChild holds this.
 //
 // Output goes to logPath, appended. The process is reaped in the background,
 // so an exited panel does not linger as a zombie while the window runs on.
