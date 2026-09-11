@@ -125,8 +125,15 @@ func TestOrchestratorAppointmentIsNotCancelledWithItsRequest(t *testing.T) {
 	r := jsonRequest(http.MethodPost, "/api/orchestrator", `{"new":true}`).WithContext(ctx)
 	cancel()
 	serveDeps(d, r)
-	if <-cancelled {
-		t.Error("the appointment was cancelled with its request")
+	// Bounded: a route that never reaches the appointment must fail this test,
+	// not hang it until the package's timeout.
+	select {
+	case was := <-cancelled:
+		if was {
+			t.Error("the appointment was cancelled with its request")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request never reached the appointment")
 	}
 }
 

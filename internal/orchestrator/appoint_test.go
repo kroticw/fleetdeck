@@ -461,7 +461,11 @@ func TestAppointRefusesASecondAppointmentWhileOneRuns(t *testing.T) {
 		_, err := a.Appoint(context.Background(), Request{Session: "22222222"})
 		done <- err
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first appointment never reached its message")
+	}
 	_, err := a.Appoint(context.Background(), Request{Session: "22222222"})
 	close(release)
 	if !errors.Is(err, ErrBusy) {
