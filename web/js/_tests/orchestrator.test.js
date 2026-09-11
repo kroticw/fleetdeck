@@ -166,7 +166,7 @@ let current = null;
 // Mount a column and give it its first snapshot. The snapshot goes into the
 // store BEFORE the column subscribes, so the column's first draw is of this
 // case's fleet and not of whatever the previous case left in the store.
-async function column(first, { pane = "own", observe = false } = {}) {
+async function column(first, { pane = "own", observe = false, links = null } = {}) {
   const dom = installDOM();
   const sockets = installSocket();
   const terminals = installTerminal();
@@ -186,7 +186,7 @@ async function column(first, { pane = "own", observe = false } = {}) {
   const main = dom.element("main");
   const root = dom.element("section");
   main.appendChild(root);
-  const stop = renderOrchestrator(root, { timers });
+  const stop = renderOrchestrator(root, { timers, links });
   await settle();
   await settle();
 
@@ -441,6 +441,13 @@ test("the empty column's sentence follows the pin as it changes", async () => {
   await c.push({ orchestratorSession: "", sessions: [] });
 
   assert.equal(text(c, ".o-screen-empty"), t("no_orchestrator_thread"), "the sentence about the old pin stayed");
+});
+
+test("the column's terminal is given the page's links", async () => {
+  const links = { resolve: () => null, open: () => {} };
+  const c = await column(structuredClone(PIN), { links });
+
+  assert.equal(c.terminals.at(-1).linkProviders?.length, 1, "the column's terminal links nothing");
 });
 
 test("putting the column away leaves no socket and nothing armed", async () => {

@@ -103,7 +103,9 @@ export function viewSignature(snap, connected) {
 // returns a function that puts it away — the subscription and the terminal
 // with its socket — which the page never needs, since the column lives as
 // long as the page; a test mounting one column after another does.
-export function renderOrchestrator(root, { timers = globalThis } = {}) {
+//
+// `links` is handed to the column's terminal as it is (see createLiveTerminal).
+export function renderOrchestrator(root, { timers = globalThis, links = null } = {}) {
   // How wide this column is, whether it is folded away, and the edge a
   // person drags to change either — the same mechanism the session list
   // shares (web/js/columnresize.js), not a second copy of it. onChange runs
@@ -402,6 +404,7 @@ export function renderOrchestrator(root, { timers = globalThis } = {}) {
     live = createLiveTerminal(host, short, {
       timers,
       reconnect: true,
+      links,
       report: {
         streamError: (message) => {
           streamError = message;

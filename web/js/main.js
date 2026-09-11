@@ -1,9 +1,9 @@
-import { connect, subscribe } from "./store.js";
+import { connect, subscribe, get } from "./store.js";
 import { renderSessions } from "./sessions.js";
 import { renderHeader } from "./header.js";
 import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
-import { createCardPanel } from "./card.js";
+import { createCardPanel, cardPathForLink } from "./card.js";
 import { createSections } from "./sections.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
@@ -37,13 +37,25 @@ function closeSession() {
   rememberOpenSession(storage, "");
 }
 
+// A [[link]] a session prints into a live terminal opens the card it names,
+// through the same panel the board opens and by the same rule a card's own
+// links follow. The session panel goes first: the two panels are overlays over
+// the same column, and only one of them may be up.
+const terminalLinks = {
+  resolve: (name) => cardPathForLink(get()?.cards, name),
+  open: (path) => {
+    closeSession();
+    cardPanel.open(path);
+  },
+};
+
 function openSession(short) {
   closeSession();
   // The session panel and the card panel are two overlays over the same column,
   // and the card panel is opened from the board underneath. Only one of them may
   // be up, or they cover each other in whichever order they happened to open.
   cardPanel.close();
-  stopSession = renderSession(sessionPanel, short, closeSession);
+  stopSession = renderSession(sessionPanel, short, closeSession, { links: terminalLinks });
   rememberOpenSession(storage, short);
 }
 
@@ -54,7 +66,7 @@ renderSessions(document.getElementById("sessions"), openSession, cardPanel.open)
 renderHeader(document.getElementById("header"));
 renderBuildBanner(document.getElementById("build-banner"), subscribe);
 renderBoard(document.getElementById("board"), cardPanel.open);
-renderOrchestrator(document.getElementById("orchestrator"));
+renderOrchestrator(document.getElementById("orchestrator"), { links: terminalLinks });
 
 // The centre column's two sections.
 //
