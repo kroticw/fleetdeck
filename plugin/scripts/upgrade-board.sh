@@ -14,7 +14,9 @@
 #   upgrade-board.sh [каталог]        по умолчанию ~/fleetdeck/board
 #
 # Доске, которая лежит в другом месте, каталог передают аргументом: он
-# записан в board.path файла ~/.config/fleetdeck/config.yaml.
+# записан в board.path файла ~/.config/fleetdeck/config.yaml, а у второго и
+# следующих флотов — в board.path их записи в списке fleets. Скрипт работает
+# с одной доской за раз; доски нескольких флотов обновляются по очереди.
 set -euo pipefail
 
 target="${1:-$HOME/fleetdeck/board}"
