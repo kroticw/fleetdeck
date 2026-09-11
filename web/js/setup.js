@@ -20,6 +20,7 @@
 
 import { t, langCode } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
+import { belongsTo, fleetFromSearch, withFleet } from "./fleet.js";
 
 // What the panel names the workspace folder inside a directory the person
 // picked with the window's chooser.
@@ -87,14 +88,20 @@ function showSteps(target, list) {
  */
 export function renderSetup(root, { fetch: get = globalThis.fetch, reload, wait, choose, every } = {}) {
   const pause = wait ?? (() => new Promise((resolve) => setTimeout(resolve, HANDOVER_PAUSE_MS)));
-  const open = reload ?? (() => globalThis.location.replace("/"));
+  // Run again from a fleet's orchestrator column the wizard is that fleet's:
+  // /setup.html?fleet=B asks for B's preview and sessions, appoints into B and
+  // goes back to B's tab (see fleet.js). The first launch has one fleet and no
+  // parameter, and is served as it always was.
+  const fleet = fleetFromSearch(globalThis.location?.search ?? "");
+  const fleetGet = (url, init) => get(withFleet(url, fleet), init);
+  const open = reload ?? (() => globalThis.location.replace(withFleet("/", fleet)));
   const repeat =
     every ??
     ((fn, ms) => {
       const id = setInterval(fn, ms);
       return () => clearInterval(id);
     });
-  const orchestratorStep = (made = []) => renderOrchestratorStep(root, { get, open, every: repeat, made });
+  const orchestratorStep = (made = []) => renderOrchestratorStep(root, { get: fleetGet, open, fleet, every: repeat, made });
   const workspaceStep = (proposed) => renderWorkspaceStep(root, { get, pause, choose, proposed, onReady: orchestratorStep });
 
   get("/api/setup")
@@ -219,7 +226,7 @@ function doing(s) {
   return envelopeText(s.detail || "");
 }
 
-function renderOrchestratorStep(root, { get, open, every, made = [] }) {
+function renderOrchestratorStep(root, { get, open, fleet = "", every, made = [] }) {
   let preview = null;
   let sessions = [];
   let current = "";
@@ -322,7 +329,9 @@ function renderOrchestratorStep(root, { get, open, every, made = [] }) {
 
   const drawSessions = (snapshot) => {
     current = snapshot?.orchestratorSession ?? "";
-    sessions = (snapshot?.sessions ?? []).filter((s) => s.short && !s.dying);
+    // Never a session another fleet claims: it is that fleet's work, and its
+    // orchestrator cannot lead this one (see fleet.js belongsTo).
+    sessions = (snapshot?.sessions ?? []).filter((s) => s.short && !s.dying && belongsTo(s, fleet));
     if (!sessions.some((s) => s.short === chosen)) chosen = "";
     listNote.textContent = snapshot?.daemonError
       ? fill(t("wizard_daemon_down"), { detail: snapshot.daemonError })

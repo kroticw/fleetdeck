@@ -66,6 +66,17 @@ export function groupSessions(snap) {
   return { own, unclaimed, others };
 }
 
+// belongsTo reports whether a session is the fleet's to take as its
+// orchestrator: the fleet claims it, or no fleet does. A session only another
+// fleet claims is that fleet's work, and its orchestrator cannot lead a second
+// fleet (the server refuses the pin), so neither the orchestrator column's
+// picker nor the wizard offers one. A snapshot from before fleets tags nothing,
+// so every session is offered, as it always was.
+export function belongsTo(session, fleet) {
+  const fleets = session.fleets ?? [];
+  return fleets.length === 0 || fleets.includes(fleet);
+}
+
 // headerSessions is what the header's counters count: this fleet's sessions
 // and the unclaimed ones. Another fleet's waiting session is counted on that
 // fleet's switcher entry instead, so it is neither lost nor mistaken for this

@@ -16,6 +16,7 @@ import {
   headerSessions,
   fleetEntries,
   switchFleet,
+  belongsTo,
 } from "../fleet.js";
 
 // The shape the server serves for fleet B of three: A, B, C.
@@ -98,6 +99,18 @@ test("the switcher lists every fleet with its own waiting count", () => {
     { name: "B", current: true, waiting: 1 },
     { name: "C", current: false, waiting: 1 },
   ]);
+});
+
+test("a session is this fleet's to take unless another fleet claims it alone", () => {
+  // The orchestrator column's picker and the wizard offer exactly these: a
+  // session only another fleet claims is that fleet's work, and its
+  // orchestrator cannot lead a second fleet.
+  assert.equal(belongsTo({ fleets: ["B"] }, "B"), true);
+  assert.equal(belongsTo({ fleets: ["A", "B"] }, "B"), true);
+  assert.equal(belongsTo({}, "B"), true, "an unclaimed session belongs to every fleet");
+  assert.equal(belongsTo({ fleets: [] }, "B"), true);
+  assert.equal(belongsTo({ fleets: ["A"] }, "B"), false);
+  assert.equal(belongsTo({}, ""), true, "a snapshot from before fleets tags nothing");
 });
 
 test("switching forgets the open session and navigates to the fleet", () => {

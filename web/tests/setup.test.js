@@ -294,6 +294,44 @@ test("wizard: a session whose work the daemon does not describe is said so, not 
   assert.ok(root.querySelector("div.wizard-warning").textContent.includes(t("wizard_doing_unknown")));
 });
 
+// Opened from fleet B's orchestrator column (/setup.html?fleet=B), the wizard
+// is B's: it asks for B's preview and sessions, appoints into B, offers no
+// session another fleet claims, and goes back to B's tab.
+test("wizard: opened for a fleet, it is that fleet's from preview to the way back", async () => {
+  const replaced = [];
+  globalThis.location = { search: "?fleet=B", replace: (url) => replaced.push(url) };
+  try {
+    routes["GET /api/setup"] = reply(404, { error: "not found" });
+    routes["GET /api/snapshot?fleet=B"] = reply(200, {
+      fleet: "B",
+      fleets: ["A", "B"],
+      orchestratorSession: "",
+      sessions: [
+        { short: "aaaaaaaa", name: "A's task", fleets: ["A"], state: "working" },
+        { short: "bbbbbbbb", name: "B's task", fleets: ["B"], state: "working" },
+        { short: "nnnnnnnn", name: "nobody's", state: "working" },
+      ],
+    });
+    routes[`GET /api/orchestrator?lang=${langCode}&fleet=B`] = reply(200, { ...PREVIEW, workspace: "/h/b-fleet" });
+    routes["POST /api/orchestrator?fleet=B"] = reply(200, { ok: true, session: "bbbbbbbb", steps: [] });
+    renderSetup(root, { fetch: fakeFetch, wait: async () => {}, every: () => () => {} });
+    await settle();
+    await settle();
+
+    assert.equal(sessionButton("aaaaaaaa"), null, "another fleet's session is offered");
+    assert.ok(sessionButton("bbbbbbbb") && sessionButton("nnnnnnnn"), "this fleet's and the unclaimed are not");
+    assert.ok(root.textContent.includes("/h/b-fleet"), "the preview is not B's");
+    fireEvent(sessionButton("bbbbbbbb"), "click");
+    fireEvent(root.querySelector("button.wizard-appoint"), "click");
+    await settle();
+    assert.deepEqual(posts().map((r) => r.url), ["/api/orchestrator?fleet=B"]);
+    fireEvent(root.querySelector("button.wizard-open"), "click");
+    assert.deepEqual(replaced, ["/?fleet=B"]);
+  } finally {
+    delete globalThis.location;
+  }
+});
+
 test("wizard: appointing an existing session sends its short id and the page's language", async () => {
   routes["POST /api/orchestrator"] = reply(200, {
     ok: true,
