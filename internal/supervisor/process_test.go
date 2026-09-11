@@ -96,6 +96,7 @@ func runHelper(mode string) {
 	}
 	exe, _ := os.Executable()
 	fmt.Printf("helper ppid: %d\n", os.Getppid())
+	fmt.Println("helper exe: " + exe)
 	fmt.Println("helper stdout: listening on " + addr)
 	fmt.Fprintln(os.Stderr, "helper stderr: listening on "+addr)
 	ln, err := net.Listen("tcp", addr)
