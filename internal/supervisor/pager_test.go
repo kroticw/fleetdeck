@@ -16,6 +16,12 @@ import (
 // the pager is switched off on every call, whoever calls, so the day someone
 // adds a git command, or runs one with a terminal attached, it cannot come
 // back.
+//
+// What these tests do NOT show: that nothing hangs when a person runs the
+// supervisor from a terminal. They check the switch, not the hang. The hang
+// lives in how the program is started -- terminal or not -- and no test here
+// starts it that way. "There is a pager test" is not "the hang cannot happen";
+// it is "the switch is on in every place the switch exists".
 
 // fakeGit writes every invocation's arguments to a log, one line each, and
 // answers the few commands Check asks with something plausible.
