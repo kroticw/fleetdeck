@@ -60,6 +60,46 @@ const KEYS = [
   "setup_opening",
   "setup_failed",
   "setup_no_handover",
+  // The orchestrator step of the same page. The wizard_warn_* lines above all:
+  // they are what a person reads before adding to a session's conversation, and
+  // a warning that fell through to its keys would warn nobody.
+  "wizard_setup_done",
+  "wizard_title",
+  "wizard_intro",
+  "wizard_message",
+  "wizard_brief",
+  "wizard_brief_show",
+  "wizard_new_title",
+  "wizard_new_text",
+  "wizard_new_button",
+  "wizard_new_unavailable",
+  "wizard_existing_title",
+  "wizard_existing_text",
+  "wizard_no_sessions",
+  "wizard_daemon_down",
+  "wizard_current",
+  "wizard_waiting_for_you",
+  "wizard_context",
+  "wizard_doing_unknown",
+  "wizard_warn_title",
+  "wizard_warn_lead",
+  "wizard_warn_kept",
+  "wizard_warn_context",
+  "wizard_warn_context_now",
+  "wizard_warn_busy",
+  "wizard_warn_final",
+  "wizard_warn_replaces",
+  "wizard_warn_again",
+  "wizard_appoint_button",
+  "wizard_skip",
+  "wizard_rerun_hint",
+  "wizard_working",
+  "wizard_starting",
+  "wizard_done",
+  "wizard_failed",
+  "wizard_open",
+  "orchestrator_wizard",
+  "orchestrator_wizard_hint",
   "pick_doc",
   "doc_opening",
   "docs_empty",
@@ -176,6 +216,16 @@ test("a missing key renders as the key, never as nothing", async () => {
   for (const language of ["en-GB", "ru-RU"]) {
     const { t } = await loadWith(language);
     assert.equal(t("no_such_key_anywhere"), "no_such_key_anywhere");
+  }
+});
+
+// The orchestrator wizard asks the panel for the working order in this code, so
+// a Russian page must say "ru": otherwise the person reads the wizard in Russian
+// and the session is sent the English file.
+test("the page's language code follows the dictionary it speaks", async () => {
+  for (const [language, code] of [["ru-RU", "ru"], ["ru", "ru"], ["en-GB", "en"], ["de-DE", "en"]]) {
+    const { langCode } = await loadWith(language);
+    assert.equal(langCode, code, `${language} speaks ${code}`);
   }
 });
 

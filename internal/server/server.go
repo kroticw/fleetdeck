@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
+	"github.com/kroticw/fleetdeck/internal/orchestrator"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 )
@@ -143,6 +144,13 @@ type Deps struct {
 	// (state.SessionView.Label) but rendered nowhere.
 	SetSessionLabel func(sessionID, label string) error
 
+	// OrchestratorPreview and Appoint are the orchestrator wizard's two routes
+	// (orchestrator.go): what an appointment would write and send, and the
+	// appointment itself — internal/orchestrator.Appointer's Preview and
+	// Appoint. Nil leaves both answering 503.
+	OrchestratorPreview func(lang string) (orchestrator.Preview, error)
+	Appoint             func(ctx context.Context, req orchestrator.Request) (orchestrator.Result, error)
+
 	// ImageDir is where an image attached to a session is written, under a
 	// subdirectory named after that session. It is the panel's own directory,
 	// deliberately outside any repository the operator works in: a file left in
@@ -229,6 +237,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}/digest", d.handleDigest)
 	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
 	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
+	mux.HandleFunc("GET /api/orchestrator", d.handleOrchestratorPreview)
+	mux.HandleFunc("POST /api/orchestrator", d.handleAppoint)
 	mux.HandleFunc("POST /api/sessions/{id}/image", d.handleUploadImage)
 	mux.HandleFunc("GET /ws", d.handleWS)
 	mux.HandleFunc("GET /api/sessions/{id}/pty", d.handlePTY)
