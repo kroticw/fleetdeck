@@ -97,6 +97,8 @@ tmp=$(mktemp -d) && HOME="$tmp/home" fleetdeck -port 7799 -stand-socket "$tmp/no
 
 Open `http://127.0.0.1:7799/` and the setup page proposes `$tmp/home/fleetdeck`. Everything setup writes lands under `$tmp/home`.
 
+The orchestrator wizard can start a session, and a socket does not stop that: it starts one with `claude --bg`, and a real claude reaches the real daemon whatever socket the panel reads. So a stand starts sessions only with the claude it is given in `--stand-claude`, and without one it starts none — the wizard's new-session button is off and says why. The panel never looks a claude up on a stand, the same way it never discovers the daemon there. `--stand-claude` without `--stand-socket`, or given empty, is refused at startup. A stand claude is anything that prints what `claude --bg` prints — a line `backgrounded · <short id> · <name>` — and makes the stand's daemon list that session.
+
 The cost of this isolation, so it is not found only by hitting it: a client bound to `--stand-socket` does not notice a daemon behind it restarting under a new socket, unlike ordinary discovery (`cmd/fleetdeck/main.go`'s own `daemonClient`). A one-shot acceptance stand never runs long enough to care; a long-lived test fleet built on this flag would need restarting alongside its daemon.
 
 ## Where other files live
