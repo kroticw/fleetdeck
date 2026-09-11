@@ -152,3 +152,76 @@ func TestWebSocketPushCarriesTheBuild(t *testing.T) {
 		t.Fatalf("pushed build = %+v, want web %s", snap.Build, testWebHash)
 	}
 }
+
+// The window reloads the page by itself when the panel under it changes. The
+// document is fetched afresh, but the modules come in separate requests, and
+// the embedded files carry no validator of their own. A module taken from
+// cache would put the old code under a new document -- and nobody would see
+// it: the new fingerprint in the document matches the snapshot. Every static
+// file therefore carries the build's web hash as its ETag and must be
+// revalidated before use.
+//
+// Both ends matter. An unchanged build must answer 304, or caching has simply
+// been switched off and every load carries everything again; a changed build
+// must answer with the new bytes.
+
+func TestEveryStaticFileMustBeRevalidated(t *testing.T) {
+	for _, path := range []string{"/", "/app.css", "/js/main.js", "/vendor/xterm.js"} {
+		rec := get(t, depsWithBuild(), path)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", path, rec.Code)
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Errorf("%s: Cache-Control = %q, want no-cache", path, got)
+		}
+		if got := rec.Header().Get("ETag"); got != `"`+testWebHash+`"` {
+			t.Errorf("%s: ETag = %q, want the web hash", path, got)
+		}
+	}
+}
+
+func conditionalGet(t *testing.T, d Deps, path, etag string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("If-None-Match", etag)
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, req)
+	return rec
+}
+
+func TestAnUnchangedBuildAnswersNotModified(t *testing.T) {
+	for _, path := range []string{"/", "/app.css", "/js/main.js"} {
+		rec := conditionalGet(t, depsWithBuild(), path, `"`+testWebHash+`"`)
+		if rec.Code != http.StatusNotModified {
+			t.Errorf("%s: status %d with the current ETag, want 304 -- otherwise caching is simply off", path, rec.Code)
+		}
+		if rec.Body.Len() != 0 {
+			t.Errorf("%s: a 304 carried a body of %d bytes", path, rec.Body.Len())
+		}
+	}
+}
+
+func TestAChangedBuildAnswersWithTheNewBytes(t *testing.T) {
+	for _, path := range []string{"/", "/app.css", "/js/main.js"} {
+		rec := conditionalGet(t, depsWithBuild(), path, `"an-older-build"`)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status %d with a stale ETag, want 200", path, rec.Code)
+		}
+		if rec.Body.Len() == 0 {
+			t.Errorf("%s: empty body for a stale ETag", path)
+		}
+	}
+}
+
+// Without a fingerprint there is nothing to validate against. The files are
+// still never used from cache unasked, and no ETag is invented.
+func TestWithoutAFingerprintThereIsNoETagButStillNoCache(t *testing.T) {
+	d, _ := testDeps()
+	rec := get(t, d, "/app.css")
+	if got := rec.Header().Get("ETag"); got != "" {
+		t.Errorf("ETag = %q with no fingerprint to base it on", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", got)
+	}
+}

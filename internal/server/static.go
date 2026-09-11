@@ -58,29 +58,62 @@ const contentSecurityPolicy = "default-src 'self'; connect-src 'self' ws: wss:; 
 // embed rooted one directory higher.
 //
 // The document itself is the one exception to serving files as embedded: it
-// carries the build fingerprint, see indexWithFingerprint. It is also sent
-// with Cache-Control: no-cache. The embedded files have no modification time,
-// so the file server sends no validator either, and what a WebView does with
-// such a response on reload is not something to leave to it -- a document
-// taken from cache after the banner's "reload" would bring the old
-// fingerprint back, and the banner with it.
+// carries the build fingerprint, see indexWithFingerprint.
+//
+// Every file -- the document and everything it loads -- is sent with
+// Cache-Control: no-cache and, when the build has a fingerprint, its web hash
+// as the ETag. The embedded files have no modification time, so without this
+// the file server sends no validator at all, and what a WebView does with such
+// a response is not something to leave to it. It matters twice over now that
+// the window reloads the page by itself: the document is fetched afresh, but
+// the modules arrive in separate requests, and a module taken from cache would
+// put the old code under the new document with nothing anywhere to show it --
+// the document's fingerprint would match the snapshot. The one hash for every
+// file is deliberate: any change to the interface invalidates all of it at
+// once, and an unchanged build answers 304 to all of it, so caching still
+// works rather than being switched off.
 func staticHandler(build *buildinfo.Fingerprint) http.Handler {
 	fileServer := http.FileServerFS(web.FS)
 	index := indexWithFingerprint(build)
+	etag := ""
+	if build != nil && build.Web != "" {
+		etag = `"` + build.Web + `"`
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
-		if r.URL.Path != "/" {
+		w.Header().Set("Cache-Control", "no-cache")
+		if etag != "" {
+			// Set before the file server runs: http.ServeContent reads a
+			// preset ETag and answers If-None-Match with 304 on its own.
+			w.Header().Set("ETag", etag)
+		}
+		if r.URL.Path != "/" || index == nil {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-cache")
-		if index == nil {
-			fileServer.ServeHTTP(w, r)
+		if etagMatches(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
 	})
+}
+
+// etagMatches reports whether an If-None-Match header names etag. The header
+// may list several tags and mark any of them weak; a weak match is enough for
+// a GET, which is the only thing this route answers.
+func etagMatches(header, etag string) bool {
+	if etag == "" || header == "" {
+		return false
+	}
+	for _, tag := range strings.Split(header, ",") {
+		tag = strings.TrimPrefix(strings.TrimSpace(tag), "W/")
+		if tag == etag || tag == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 // headTag is where the fingerprint is inserted. The page reads it back with a
