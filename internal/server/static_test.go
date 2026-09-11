@@ -159,6 +159,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/columnwidth.js":    true,
 		"js/buildcheck.js":     true,
 		"js/liveterminal.js":   true,
+		"js/terminallinks.js":  true,
 		"vendor/xterm.js":      true,
 		"vendor/xterm.css":     true,
 		"vendor/LICENSE.xterm": true,

@@ -107,7 +107,7 @@ function fakeStorage() {
   };
 }
 
-async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }), storage = fakeStorage(), short = SHORT } = {}) {
+async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }), storage = fakeStorage(), short = SHORT, links = null } = {}) {
   const root = dom.element("div");
   // In the page before the panel draws into it, as it is in a browser: a node
   // outside the document has no layout, and anything measured against it reads
@@ -117,7 +117,7 @@ async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }), stora
   let closed = 0;
   const stop = renderSession(root, short, () => {
     closed += 1;
-  }, { timers, lookup, storage });
+  }, { timers, lookup, storage, links });
   await settle(); // let the first poll land
 
   const errorText = () => {
@@ -1390,4 +1390,17 @@ test("the thread's scrolling boxes are measured after they are in the page", asy
     "measured before the step was in the page",
   );
   assert.ok(searches.length > 0, "and measured at all");
+});
+
+// A [[link]] a session prints on the screen tab opens the card it names, the
+// same as in the orchestrator column: the panel hands its terminal the page's
+// links, which web/js/main.js builds.
+test("the screen tab's terminal is given the page's links", async () => {
+  const terminals = installTerminal();
+  stubFetch(answer({ body: [] }));
+  const links = { resolve: () => null, open: () => {} };
+  const panel = await mount({ links });
+  await panel.openScreenTab();
+
+  assert.equal(terminals.at(-1).linkProviders?.length, 1, "the screen tab's terminal links nothing");
 });

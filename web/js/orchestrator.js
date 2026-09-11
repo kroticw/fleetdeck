@@ -102,7 +102,9 @@ export function viewSignature(snap, connected) {
 // returns a function that puts it away — the subscription and the terminal
 // with its socket — which the page never needs, since the column lives as
 // long as the page; a test mounting one column after another does.
-export function renderOrchestrator(root, { timers = globalThis } = {}) {
+//
+// `links` is handed to the column's terminal as it is (see createLiveTerminal).
+export function renderOrchestrator(root, { timers = globalThis, links = null } = {}) {
   // How wide this column is and whether it is folded away. applyWidth is the
   // only place that touches the column element itself, and it is called at
   // startup as well as on every change — a state that is only applied when it
@@ -499,6 +501,7 @@ export function renderOrchestrator(root, { timers = globalThis } = {}) {
     live = createLiveTerminal(host, short, {
       timers,
       reconnect: true,
+      links,
       report: {
         streamError: (message) => {
           streamError = message;

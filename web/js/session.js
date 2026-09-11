@@ -188,6 +188,8 @@ export function renderSession(
     timers = globalThis,
     lookup = (id) => (get()?.sessions ?? []).find((s) => s.short === id),
     storage = pageStorage(),
+    // Handed to the screen tab's terminal as it is (see createLiveTerminal).
+    links = null,
   } = {},
 ) {
 
@@ -401,6 +403,7 @@ export function renderSession(
     body.replaceChildren(host);
     live = createLiveTerminal(host, short, {
       timers,
+      links,
       report: {
         streamError: showPollError,
         actionError: showError,

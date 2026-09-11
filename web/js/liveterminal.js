@@ -25,6 +25,7 @@
 
 import { fetchTerminalToken } from "./api.js";
 import { t } from "./i18n.js";
+import { wikiLinkProvider } from "./terminallinks.js";
 
 // The close codes GET /api/sessions/{id}/pty ends a stream with
 // (internal/server/pty.go), each turned into what the operator should read.
@@ -272,7 +273,11 @@ const RETRIED_ENDINGS = { 4403: "terminal_token_stale", 4503: "terminal_daemon_u
 //                          key goes through.
 //   standing()           — readOnly or unfitted may have changed; read them.
 //   ready()              — the bridge has attached.
-export function createLiveTerminal(host, short, { timers = globalThis, report = {}, reconnect = false } = {}) {
+//
+// `links`, when given, makes the wiki links a session prints into something to
+// click (web/js/terminallinks.js): { resolve(name) → card path or null,
+// open(path) }. Without it, which is the default, the terminal links nothing.
+export function createLiveTerminal(host, short, { timers = globalThis, report = {}, reconnect = false, links = null } = {}) {
   const say = {
     streamError: report.streamError ?? (() => {}),
     actionError: report.actionError ?? (() => {}),
@@ -365,6 +370,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     }
     terminal = made;
     followWheel(made);
+    if (links && typeof made.registerLinkProvider === "function") made.registerLinkProvider(wikiLinkProvider(made, links));
     refit = terminalFitter(made);
     // Before the socket exists, because the socket asks for this size.
     unfitted = !(refit && refit());
