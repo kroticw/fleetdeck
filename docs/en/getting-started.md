@@ -57,6 +57,20 @@ rm ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
 
 `bootout` is the current spelling; `launchctl unload` still works but is listed under legacy subcommands in `man launchctl`.
 
+## Updating the app
+
+An app built with `make window-app` from a git checkout has an Update button in its header. It is there only in the app: a browser tab has nothing to run an update with.
+
+Pressing it brings the checkout forward and hands over to the new build:
+
+1. The checkout is fetched and fast-forwarded to its remote's `master`. A checkout on another branch, with uncommitted edits to tracked files, or with commits of its own is left exactly as it is, and the button says why.
+2. The new app is built into `.fleetdeck-update/` beside the installed `fleetdeck.app` — never over it.
+3. The new version's window opens, stops the running panel, starts its own from the new build, and checks that the panel answers with the build it expects. Only then does it put the new `fleetdeck.app` in place of the old one, in one step: there is no moment with nothing at that path. It starts its panel again from there, and the old window closes.
+
+A step that takes longer than two seconds shows how long it has taken. A second press while an update runs does nothing, and a second window or a terminal cannot start another update of the same checkout alongside it. If you have typed a message and not sent it, the first press asks whether to update anyway: the page reloads into the new version at the end.
+
+If the new version's panel does not start, or answers with another build, nothing is replaced: the installed app stays, its panel is started again, and the button says what went wrong. The version an update replaces stays in `.fleetdeck-update/` until the next update.
+
 ## Opening the panel
 
 The panel listens on `http://127.0.0.1:7777` — the loopback interface only, on the port `server.port` sets (see [`configuration.md`](configuration.md)). Open the fleetdeck app to have it started for you, or run `fleetdeck` in a terminal.
