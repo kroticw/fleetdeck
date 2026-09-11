@@ -36,11 +36,11 @@ Two cases end in a refusal rather than an edit, both for the same reason — `in
 
 ## The app and the panel
 
-The fleetdeck app starts the panel itself. When it opens, it looks at the panel's address. A panel that already answers there — started from a terminal, or left running by an earlier window — is shown as it is. When nothing answers, the app starts the panel it carries, sends both of the panel's output streams to `~/Library/Logs/fleetdeck.log`, and opens it as soon as it answers.
+The fleetdeck app starts the panel itself, and the panel lives exactly as long as the app. When the app opens, it looks at the panel's address. A panel that already answers there and was started from a terminal is shown as it is, and so is the panel of another fleetdeck window that is still open. A panel whose window is gone — one left behind by an older app that did not stop its panel, or by an app that ended some way its panel did not notice — is stopped, and the window says so while it starts its own. When nothing answers, the app starts the panel it carries, sends both of the panel's output streams to `~/Library/Logs/fleetdeck.log`, and opens it as soon as it answers.
 
 While the app is open, a panel it started that stops is started again. One that stops within ten seconds of starting is not: a panel that dies at once dies at once again. The window then says the panel did not start, shows the last lines of its log, and has a button to start it again. The same page appears when the panel runs but does not answer at the address the app looks at within a third of a second — most often a `server.port` in the configuration other than 7777; the window's `--url` flag must then name the same port.
 
-Closing the window, or quitting the app, leaves the panel running: notifications keep coming, and opening the app again finds everything as it was. To stop the panel, stop the process that listens on its port:
+Closing the window with the red button only hides it: the app and its panel keep running, notifications keep coming, and clicking the app in the Dock brings the window back as it was. Quitting the app with Cmd+Q stops the panel with it, and so does the app ending any other way, a crash or `kill -9` included: the panel watches the app's process, notices at once that it has ended, and shuts down, which takes at most five seconds. Opening the app again starts a fresh panel. A panel started from a terminal does not belong to any app and runs until it is stopped. To stop it, stop the process that listens on its port:
 
 ```bash
 kill $(lsof -t -iTCP:7777 -sTCP:LISTEN)
