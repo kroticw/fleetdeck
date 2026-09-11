@@ -75,7 +75,10 @@ func newUpdateRig(t *testing.T) *updateRig {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(PanelIn(r.canonical)), "revision"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r.env = append(os.Environ(), helperEnv+"=listen@"+r.addr)
+	// Through helperEnvFor, like every stand-in: a stand-in whose test
+	// process is gone exits by itself, and a test binary killed by its
+	// -timeout runs no Cleanup.
+	r.env = helperEnvFor("listen", r.addr)
 	// MinUptime zero: the old window's panel has been up for hours, so its
 	// keeper would start it again the moment it stops -- unless paused.
 	r.oldKeeper = &Keeper{
@@ -126,7 +129,7 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 	events := make(chan Event, 16)
 	k := &Keeper{
 		URL: r.url, Bin: PanelIn(staged),
-		Env:     append(os.Environ(), helperEnv+"="+r.newKind+"@"+r.addr),
+		Env:     helperEnvFor(r.newKind, r.addr),
 		LogPath: filepath.Join(r.t.TempDir(), "new.log"), StartTimeout: 5 * time.Second,
 		MinUptime: time.Minute, Poll: 100 * time.Millisecond,
 		OnEvent: func(e Event) { events <- e },
