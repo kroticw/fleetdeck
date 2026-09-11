@@ -2,6 +2,7 @@ package usage
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,5 +153,173 @@ func TestAppendTraceAppendsRatherThanOverwrites(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "first line") || !strings.Contains(string(body), "second line") {
 		t.Fatalf("expected both lines preserved, got %q", body)
+	}
+}
+
+// countLines is a small helper: a trace log is a plain text file, one
+// occurrence per line, and every test below asserts on how many there are.
+func countLines(t *testing.T, path string) int {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	trimmed := strings.TrimRight(string(body), "\n")
+	if trimmed == "" {
+		return 0
+	}
+	return strings.Count(trimmed, "\n") + 1
+}
+
+// TestAppendTraceOnceControlCase is the number the orchestrator asked for
+// directly: without the fix, the same recurring cause called 20 times (the
+// real machine saw one call roughly every 15 seconds, unboundedly, for as
+// long as the cause held) writes 20 lines with plain AppendTrace; with the
+// fix, the identical 20 calls through AppendTraceOnce write exactly 1.
+func TestAppendTraceOnceControlCase(t *testing.T) {
+	const calls = 20
+	const cause = "rate_limits present on stdin but no -rate-limits-path is configured"
+
+	without := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	for i := 0; i < calls; i++ {
+		if err := AppendTrace(without, cause); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := countLines(t, without); got != calls {
+		t.Fatalf("plain AppendTrace: got %d lines for %d identical calls, want %d (this is the growth the fix removes)", got, calls, calls)
+	}
+
+	with := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	for i := 0; i < calls; i++ {
+		if err := AppendTraceOnce(with, cause); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := countLines(t, with); got != 1 {
+		t.Fatalf("AppendTraceOnce: got %d lines for %d identical calls, want 1", got, calls)
+	}
+}
+
+// TestAppendTraceOnceIsSilentWithNoIssueAndNoPriorStreak is the ordinary,
+// healthy-invocation case, which must cost nothing at all -- not even an
+// empty file.
+func TestAppendTraceOnceIsSilentWithNoIssueAndNoPriorStreak(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	for i := 0; i < 5; i++ {
+		if err := AppendTraceOnce(path, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("no issue and nothing ever open must never create the log file, stat err=%v", err)
+	}
+}
+
+// TestAppendTraceOnceClosesOnRecoveryWithACount is the other half of the
+// orchestrator's requirement: the fact that a streak held must not be lost
+// entirely, only compressed to one line, written when the cause changes.
+func TestAppendTraceOnceClosesOnRecoveryWithACount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	const cause = "no -rate-limits-path configured"
+
+	for i := 0; i < 7; i++ {
+		if err := AppendTraceOnce(path, cause); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := countLines(t, path); got != 1 {
+		t.Fatalf("mid-streak: got %d lines, want 1 (still open, nothing new to say)", got)
+	}
+
+	if err := AppendTraceOnce(path, ""); err != nil { // the cause resolves
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countLines(t, path); got != 2 {
+		t.Fatalf("after recovery: got %d lines, want 2 (the opening line plus one closing summary)", got)
+	}
+	if !strings.Contains(string(body), "7 time(s)") {
+		t.Fatalf("closing line does not name how many times the cause fired: %q", body)
+	}
+	if _, err := os.Stat(path + ".state.json"); !os.IsNotExist(err) {
+		t.Fatalf("state must be cleared once the streak closes, stat err=%v", err)
+	}
+}
+
+// TestAppendTraceOnceClosesTheOldCauseAndOpensTheNewOne covers a streak
+// changing to a genuinely different cause without ever passing through "no
+// issue" in between -- the two rate_limits problems writeRateLimitsTo can
+// report (no path configured, incomplete pair) are mutually exclusive per
+// call, so this is the shape a real transition between them takes.
+func TestAppendTraceOnceClosesTheOldCauseAndOpensTheNewOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+
+	if err := AppendTraceOnce(path, "cause A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendTraceOnce(path, "cause A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendTraceOnce(path, "cause B"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countLines(t, path); got != 3 {
+		t.Fatalf("got %d lines, want 3: cause A's opening line, its closing summary, cause B's opening line; got body %q", got, body)
+	}
+	if !strings.Contains(string(body), `resolved (was "cause A"`) {
+		t.Fatalf("missing cause A's closing summary: %q", body)
+	}
+	if !strings.HasSuffix(strings.TrimRight(string(body), "\n"), "cause B") {
+		t.Fatalf("cause B's own opening line must be the last line: %q", body)
+	}
+}
+
+// TestAppendTraceOnceLeavesAnUnrelatedExistingLogUntouched is the fix the
+// orchestrator asked to be proven against a real, pre-existing log with a
+// real history and no state file of its own (exactly the shape the
+// operator's own machine was in the moment this fix was deployed): reading
+// it must never error, and a healthy invocation (no issue) with nothing
+// open must never append to it or otherwise change it.
+func TestAppendTraceOnceLeavesAnUnrelatedExistingLogUntouched(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	var preexisting strings.Builder
+	for i := 0; i < 68; i++ {
+		fmt.Fprintf(&preexisting,
+			"2026-09-11T13:%02d:%02d+05:00 rate_limits present on stdin but no -rate-limits-path (or statusline.rate_limits_path in config.yaml) is configured; nothing captured\n",
+			17+i/60, i%60,
+		)
+	}
+	if err := os.WriteFile(path, []byte(preexisting.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AppendTraceOnce(path, ""); err != nil {
+		t.Fatalf("AppendTraceOnce must not fail against a pre-existing log with no matching state file: %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("a pre-existing log must be left byte-identical when there is nothing to report: %d bytes before, %d after", len(before), len(after))
+	}
+	if got := countLines(t, path); got != 68 {
+		t.Fatalf("got %d lines, want the original 68 preserved exactly", got)
 	}
 }
