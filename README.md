@@ -83,3 +83,4 @@ For configuration, see [`docs/en/configuration.md`](docs/en/configuration.md).
 - [`docs/en/getting-started.md`](docs/en/getting-started.md) — installing the panel and connecting a board card to a session.
 - [`docs/en/board-convention.md`](docs/en/board-convention.md) — the card file format, its frontmatter fields, and who is allowed to write what.
 - [`docs/en/configuration.md`](docs/en/configuration.md) — every configuration key, its default, and what happens when it is set wrong.
+- [`docs/engineering/live-terminal.md`](docs/engineering/live-terminal.md) — for whoever changes the live terminal, the window, or builds a test stand: measured facts about the terminal bridge, the session's shared size, kicks, Claude Code and xterm.js inside a terminal, WKWebView, and the traps each of them sets. Read it before changing `web/js/liveterminal.js`, `internal/server/pty.go` or `cmd/fleetdeck-window`.

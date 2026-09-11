@@ -83,3 +83,4 @@ make lint     # go vet, gofmt -l, golangci-lint run
 - [`docs/ru/getting-started.md`](docs/ru/getting-started.md) — установка пульта и подключение карточки доски к сессии.
 - [`docs/ru/board-convention.md`](docs/ru/board-convention.md) — формат файла карточки, его поля фронтматтера и кому что разрешено писать.
 - [`docs/ru/configuration.md`](docs/ru/configuration.md) — каждый ключ конфигурации, его значение по умолчанию и что происходит, если он задан неверно.
+- [`docs/engineering/live-terminal.md`](docs/engineering/live-terminal.md) — для того, кто меняет живой терминал или окно либо собирает тестовый стенд: намеренные факты о мосте терминала, общем размере сессии, выселении, о Claude Code и xterm.js внутри терминала, о WKWebView, и ловушки каждого из них. Прочитать до правок в `web/js/liveterminal.js`, `internal/server/pty.go` и `cmd/fleetdeck-window`. Документ на английском, как и описание протокола.
