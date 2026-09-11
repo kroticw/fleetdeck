@@ -15,9 +15,11 @@
 // terminal's size: an attach sets it for the whole session, so the socket asks
 // for exactly the size drawn here, and later sizes follow the pane.
 //
-// It draws nothing but the terminal. What it has to say — a stream that ended,
-// a key that could not be sent, that the terminal cannot type — goes to the
-// caller through `report`, because each caller has its own lines to say it in.
+// It draws nothing but the terminal, and for a moment after its type changes
+// size, the size over it (see showSize). What it has to say — a stream that
+// ended, a key that could not be sent, that the terminal cannot type — goes to
+// the caller through `report`, because each caller has its own lines to say it
+// in.
 //
 // The document, fetch, WebSocket, ResizeObserver and the terminal and fit addon
 // constructors are read from the global object, which is where the browser puts
@@ -26,6 +28,7 @@
 import { fetchTerminalToken } from "./api.js";
 import { t } from "./i18n.js";
 import { wikiLinkProvider } from "./terminallinks.js";
+import { DEFAULT_FONT_SIZE, clampFontSize, fontStep, rememberFontSize, storedFontSize } from "./terminalfont.js";
 
 // The close codes GET /api/sessions/{id}/pty ends a stream with
 // (internal/server/pty.go), each turned into what the operator should read.
@@ -101,12 +104,12 @@ function terminalTheme() {
 // tag that 404s reports nothing to anyone, which is precisely the kind of
 // silent failure this project keeps finding, so its absence is turned into a
 // message on the screen instead of a terminal that stays mysteriously blank.
-function defaultTerminalFactory(host) {
+function defaultTerminalFactory(host, fontSize) {
   const Terminal = globalThis.Terminal;
   if (typeof Terminal !== "function") return null;
   const terminal = new Terminal({
     convertEol: true,
-    fontSize: 12,
+    fontSize,
     scrollback: 2000,
     theme: terminalTheme(),
     // A Claude Code session turns on mouse tracking (the stream carries
@@ -228,6 +231,11 @@ function followWheel(terminal) {
 // than a blink for the terminal to follow.
 const PANE_SETTLE_MS = 150;
 
+// How long the size stays over the terminal after its type last changed:
+// long enough to read a line of a dozen characters, short enough to be gone
+// before the next thing on screen needs reading.
+const SIZE_NOTE_MS = 2000;
+
 // How long a terminal that reconnects waits before each attempt, by attempt;
 // the last value repeats. The first is short because the common case is the
 // panel restarting under the page — replaced by a newer build, or brought back
@@ -277,7 +285,17 @@ const RETRIED_ENDINGS = { 4403: "terminal_token_stale", 4503: "terminal_daemon_u
 // `links`, when given, makes the wiki links a session prints into something to
 // click (web/js/terminallinks.js): { resolve(name) → card path or null,
 // open(path) }. Without it, which is the default, the terminal links nothing.
-export function createLiveTerminal(host, short, { timers = globalThis, report = {}, reconnect = false, links = null } = {}) {
+//
+// `fontKey` is where the size of the type is remembered (FONT_KEYS in
+// web/js/terminalfont.js, one per place a terminal is drawn). Cmd with = / + /
+// - / 0 inside the terminal changes it. A bigger type in the same pane is fewer
+// columns, and the columns are the session's, shared with everyone watching it
+// — the operator's own Terminal.app included. A step therefore goes the way a
+// pane that changed size goes: the terminal is refitted and the session is
+// told once the keys stop, and the size the session now has is shown over the
+// terminal, so it is never changed without a word. Without a key, which is the
+// default, the keys still work and nothing is remembered.
+export function createLiveTerminal(host, short, { timers = globalThis, report = {}, reconnect = false, links = null, fontKey = null } = {}) {
   const say = {
     streamError: report.streamError ?? (() => {}),
     actionError: report.actionError ?? (() => {}),
@@ -303,6 +321,14 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   let paneWatcher = null;
   let settle = null;
   let sessionSize = null;
+  // The size over the terminal (see showSize): its element, the timer that
+  // hides it, and whether the next time the terminal follows its pane is one
+  // a change of type asked for, which is the time to show it — and whether the
+  // last key of that change went past the end of the range.
+  let sizeNote = null;
+  let sizeNoteTimer = null;
+  let sizeNoteDue = false;
+  let sizeNoteAtLimit = false;
   // What the terminal says about itself, for as long as it holds a stream and
   // a terminal: that the stream cannot type, and that the terminal is not the
   // size of its pane.
@@ -335,6 +361,12 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     paneWatcher = null;
     if (settle !== null) timers.clearTimeout(settle);
     settle = null;
+    if (sizeNoteTimer !== null) timers.clearTimeout(sizeNoteTimer);
+    sizeNoteTimer = null;
+    if (sizeNote) sizeNote.remove();
+    sizeNote = null;
+    sizeNoteDue = false;
+    sizeNoteAtLimit = false;
   };
 
   // closeStream ends this terminal's own socket. Its handlers go first: a
@@ -363,13 +395,14 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
 
   const ensureTerminal = () => {
     if (terminal) return terminal;
-    const made = defaultTerminalFactory(host);
+    const made = defaultTerminalFactory(host, storedFontSize(fontKey));
     if (!made) {
       say.streamError(t("terminal_missing"));
       return null;
     }
     terminal = made;
     followWheel(made);
+    followFontKeys(made);
     if (links && typeof made.registerLinkProvider === "function") made.registerLinkProvider(wikiLinkProvider(made, links));
     refit = terminalFitter(made);
     // Before the socket exists, because the socket asks for this size.
@@ -403,19 +436,80 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     unfitted = !(refit && refit());
     say.standing();
     if (!unfitted) tellSession();
+    if (sizeNoteDue) {
+      sizeNoteDue = false;
+      showSize(sizeNoteAtLimit);
+    }
+  };
+
+  // settleThenFollow restarts the settle timer, so a run of changes becomes
+  // one resize when it stops, however many there were.
+  const settleThenFollow = () => {
+    if (settle !== null) timers.clearTimeout(settle);
+    settle = timers.setTimeout(followPane, PANE_SETTLE_MS);
   };
 
   // watchPane follows the terminal's element for as long as the terminal
-  // lives. Every change restarts the settle timer, so a drag becomes one
-  // resize when it stops, however many pointer moves it took.
+  // lives: a drag becomes one resize when it stops, however many pointer moves
+  // it took.
   const watchPane = () => {
     const Observer = globalThis.ResizeObserver;
     if (typeof Observer !== "function") return;
-    paneWatcher = new Observer(() => {
-      if (settle !== null) timers.clearTimeout(settle);
-      settle = timers.setTimeout(followPane, PANE_SETTLE_MS);
-    });
+    paneWatcher = new Observer(settleThenFollow);
     paneWatcher.observe(host);
+  };
+
+  // showSize puts the type's size and the session's over the terminal for
+  // SIZE_NOTE_MS, the way Terminal.app shows a window's size while it is
+  // resized. Over the terminal and not in a row beside it: a row that comes
+  // and goes would make the pane shorter and taller again, and every change of
+  // the pane is a resize of the session. `atLimit` says the step asked for
+  // went past the end of the range, which is why nothing changed.
+  const showSize = (atLimit) => {
+    if (!terminal) return;
+    if (!sizeNote) {
+      sizeNote = globalThis.document.createElement("div");
+      sizeNote.className = "term-size";
+      host.appendChild(sizeNote);
+    }
+    const type = `${terminal.options.fontSize} px${atLimit ? ` (${t("terminal_font_limit")})` : ""}`;
+    sizeNote.textContent = `${type} · ${t("terminal_font_session")} ${terminal.cols} × ${terminal.rows}`;
+    sizeNote.hidden = false;
+    if (sizeNoteTimer !== null) timers.clearTimeout(sizeNoteTimer);
+    sizeNoteTimer = timers.setTimeout(() => {
+      sizeNoteTimer = null;
+      if (sizeNote) sizeNote.hidden = true;
+    }, SIZE_NOTE_MS);
+  };
+
+  // followFontKeys makes Cmd with = / + / - / 0 change the type (see fontStep).
+  // The key is taken from xterm, which would send the session nothing for it
+  // anyway, and from the page, which in a browser would zoom everything on it.
+  // The new size is on screen at once; the terminal is refitted and the
+  // session told once the keys stop, as for a pane that changed size.
+  const followFontKeys = (made) => {
+    if (typeof made.attachCustomKeyEventHandler !== "function") return;
+    made.attachCustomKeyEventHandler((event) => {
+      const step = fontStep(event);
+      if (step === null) return true;
+      event.preventDefault();
+      const size = made.options.fontSize;
+      const next = step === 0 ? DEFAULT_FONT_SIZE : clampFontSize(size + step);
+      if (next === size) {
+        // Nothing changes. While earlier steps still wait to be fitted, the
+        // columns on screen are not the ones they will leave, so the note
+        // waits for them and says the end when it goes up.
+        if (sizeNoteDue) sizeNoteAtLimit = step !== 0;
+        else showSize(step !== 0);
+        return false;
+      }
+      made.options.fontSize = next;
+      rememberFontSize(fontKey, next);
+      sizeNoteDue = true;
+      sizeNoteAtLimit = false;
+      settleThenFollow();
+      return false;
+    });
   };
 
   // sendBytes puts bytes into the session through the stream — typed keys and

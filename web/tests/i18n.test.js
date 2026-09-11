@@ -100,6 +100,12 @@ const KEYS = [
   "column_drag",
   "column_fold",
   "column_unfold",
+
+  // The size shown over a terminal whose type changed (web/js/liveterminal.js).
+  // It is the one word saying the session changed for everyone watching it;
+  // falling through to its own key would print "terminal_font_session" there.
+  "terminal_font_session",
+  "terminal_font_limit",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup
