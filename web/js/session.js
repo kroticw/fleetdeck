@@ -23,65 +23,24 @@
 // terminal constructor are read from the global object, which is where the
 // browser puts them and where a test can put its own.
 
-import { fetchDigest, fetchTerminalToken, sendText } from "./api.js";
+import { fetchDigest, sendText } from "./api.js";
 import { get } from "./store.js";
 import { t } from "./i18n.js";
 import { syncSteps } from "./steps.js";
 import { createPending } from "./pending.js";
 import { wireImagePaste } from "./pasteimage.js";
 import { pageStorage } from "./buildcheck.js";
+import { createLiveTerminal } from "./liveterminal.js";
 
 // How many transcript steps the digest asks for, and how often it refreshes.
 // The digest is polled: it only changes when a session speaks.
 //
-// The screen is not polled. It is one socket to GET /api/sessions/{id}/pty,
-// which holds one attach on the daemon for as long as the tab is open and
-// passes bytes both ways as they happen. A daemon on macOS lets several
-// attachers read one session at once — the operator's own `claude attach`
-// included — so holding the stream takes nothing from anyone; only a daemon on
-// Windows evicts the previous attacher, and for that case the socket closes
-// with its own code and is not reopened by itself (see closeMessage). What a
-// held stream does share with every other viewer is the terminal's size: an
-// attach sets it for the whole session, so the socket asks for exactly the size
-// drawn here, once.
+// The screen is not polled. It is the session's live terminal, from
+// web/js/liveterminal.js — the same one the orchestrator column draws — held
+// for as long as the tab is open. It is never reopened by itself: coming back to
+// the tab is what reconnects.
 const DIGEST_LIMIT = 30;
 const DIGEST_INTERVAL_MS = 3000;
-
-// The close codes GET /api/sessions/{id}/pty ends a stream with
-// (internal/server/pty.go), each turned into what the operator should read.
-const STREAM_ENDINGS = {
-  4000: "terminal_session_ended",
-  4001: "terminal_kicked",
-  4002: "terminal_stream_dropped",
-  4003: "terminal_stream_unexplained",
-  4403: "terminal_token_refused",
-  4404: "terminal_no_session",
-  4401: "terminal_key_refused",
-  4503: "terminal_daemon_unavailable",
-};
-
-// closeMessage is what a stream's end says on screen. A kick carries the
-// daemon's own words; any code this table does not name is a lost connection,
-// with whatever reason came with it.
-export function closeMessage(code, reason) {
-  const known = STREAM_ENDINGS[code];
-  if (code === 4001) {
-    const words = String(reason ?? "").replace(/^kicked:\s*/, "");
-    return words ? `${t(known)}: ${words}` : t(known);
-  }
-  if (known) return t(known);
-  return reason ? `${t("terminal_connection_lost")}: ${reason}` : t("terminal_connection_lost");
-}
-
-// socketURL is the page's own origin with a WebSocket scheme. A page with no
-// location (the tests) gets a fixed loopback one; the path is what matters.
-function socketURL(path) {
-  const loc = globalThis.location;
-  if (!loc || !loc.host) return `ws://localhost${path}`;
-  return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}${path}`;
-}
-
-const encoder = new TextEncoder();
 
 // The key buttons send bytes, not names.
 //
@@ -164,96 +123,6 @@ export function createPoller(pass, delayMs, { timers = globalThis, onError = () 
   };
 }
 
-// terminalTheme reads the panel's own colour tokens (app.css's :root custom
-// properties, already resolved for whichever theme is current) and turns
-// them into the object xterm.js's `theme` constructor option wants.
-//
-// Without this xterm falls back to its own default palette — a light grey on
-// black regardless of what the rest of the page is doing — which is
-// invisible as a defect for as long as the whole app is dark-only, and is
-// exactly what a live run surfaced once light became a real, chosen theme:
-// the terminal stayed a solid black rectangle inside an otherwise light
-// panel. Read once, at the moment the terminal is built (the panel is torn
-// down and rebuilt on every open, so this does not need to react to a theme
-// switch mid-session — only a fresh open needs to start on the right one).
-//
-// getComputedStyle and document.documentElement are both real-browser-only:
-// web/tests/fake-dom.js's FakeDocument has neither, on purpose — it is a
-// wiring test double, not a layout engine. Returning undefined here rather
-// than throwing lets those tests construct a terminal exactly as they did
-// before this function existed; the real page always has both.
-function terminalTheme() {
-  if (typeof getComputedStyle !== "function" || !document.documentElement) return undefined;
-  const style = getComputedStyle(document.documentElement);
-  const token = (name) => style.getPropertyValue(name).trim();
-  return {
-    background: token("--surface"),
-    foreground: token("--text"),
-    cursor: token("--accent"),
-    cursorAccent: token("--surface"),
-    selectionBackground: token("--surface-hover"),
-  };
-}
-
-// defaultTerminalFactory builds an xterm.js terminal in `host`.
-//
-// window.Terminal is what web/vendor/xterm.js assigns when index.html loads it
-// with a plain <script> tag — the UMD bundle exports exactly one name. A script
-// tag that 404s reports nothing to anyone, which is precisely the kind of
-// silent failure this project keeps finding, so its absence is turned into a
-// message on the screen instead of a tab that stays mysteriously blank.
-function defaultTerminalFactory(host) {
-  const Terminal = globalThis.Terminal;
-  if (typeof Terminal !== "function") return null;
-  const terminal = new Terminal({
-    convertEol: true,
-    fontSize: 12,
-    scrollback: 2000,
-    theme: terminalTheme(),
-    // A Claude Code session turns on mouse tracking (the stream carries
-    // ?1000h/?1002h/?1003h/?1006h), so a plain drag is reported to the session
-    // instead of selecting text. Option+drag is the way to select on macOS.
-    macOptionClickForcesSelection: true,
-  });
-  terminal.open(host);
-  return terminal;
-}
-
-// terminalFitter loads the fit addon into an opened terminal and returns a
-// function that sizes the terminal to the element it was opened into, reporting
-// whether it could — or null when the addon is not there at all.
-//
-// The measuring is web/vendor/addon-fit.js's, not this file's: the addon reads
-// the cell size from xterm's own renderer, which is why it is pinned to the
-// same xterm release (web/vendor/README.md). It is loaded the way xterm is,
-// with a plain script tag that assigns FitAddon.FitAddon onto the global object.
-//
-// Two ways it cannot, and both must be said rather than swallowed. The script
-// did not load; or the addon has nothing to measure — an element with no
-// layout — in which case proposeDimensions answers nothing and fit() on its own
-// would return without a word, leaving the terminal at whatever size it had in
-// a pane that no longer matches it.
-function terminalFitter(terminal) {
-  const Fit = globalThis.FitAddon?.FitAddon;
-  if (typeof Fit !== "function") return null;
-  const addon = new Fit();
-  terminal.loadAddon(addon);
-  return () => {
-    if (!addon.proposeDimensions()) return false;
-    addon.fit();
-    return true;
-  };
-}
-
-// How long the pane must stay still before the terminal follows it and the
-// session is told its new size. A drag of the column's edge moves the pane on
-// every pointer event — one per display frame, 8 to 17 ms apart at 120 or
-// 60 Hz — and every resize reshapes the session for everyone watching it and
-// makes it repaint. 150 ms is nine frames even at 60 Hz: a hand still moving
-// never goes that long between events, and a person who has let go waits less
-// than a blink for the terminal to follow.
-const PANE_SETTLE_MS = 150;
-
 // Which tab a session panel was on, kept across a reload of the page.
 //
 // The window reloads the page by itself, and main.js opens the session that was
@@ -324,25 +193,8 @@ export function renderSession(
 
   let tab = recalledTab(storage, short);
   let poller = null;
-  let terminal = null;
-  // The screen tab's stream, and whether it may type. A socket that is not this
-  // one — closed on the way out, answering late — is ignored when it speaks.
-  let socket = null;
-  let writable = false;
-  let typing = null;
-  // Which opening of the screen tab is current. Opening reads the token first,
-  // which takes a round trip; closing, or opening again, inside it moves this on,
-  // and the opening that was waiting finds it has been superseded and opens
-  // nothing.
-  let opening = 0;
-  // Following the pane: the fitter from terminalFitter, the observer watching
-  // the terminal's element, the settle timer, and the size the session was last
-  // given — at attach, then by each resize
-  // message — so a pane that settles where it started sends nothing.
-  let refit = null;
-  let paneWatcher = null;
-  let settle = null;
-  let sessionSize = null;
+  // The screen tab's live terminal, while the tab is open.
+  let live = null;
   let body = null;
   let errorLine = null;
   let noticeLine = null;
@@ -406,11 +258,11 @@ export function renderSession(
   // its pane. Kept apart from noticeText for the same reason the two errors are
   // kept apart: a sent message clears the notice line, and these two sentences
   // are still true afterwards. They are shown when nothing else is, and they go
-  // with the stream and the terminal they describe.
-  let readOnly = false;
-  let unfitted = false;
+  // with the terminal they describe.
   const standingNotice = () =>
-    [readOnly ? t("terminal_read_only") : "", unfitted ? t("terminal_not_fitted") : ""].filter(Boolean).join("; ");
+    [live?.readOnly ? t("terminal_read_only") : "", live?.unfitted ? t("terminal_not_fitted") : ""]
+      .filter(Boolean)
+      .join("; ");
 
   // paintError and paintNotice write into a line of their own above the input,
   // rather than replacing what the tab is showing. Replacing it would throw away
@@ -457,17 +309,11 @@ export function renderSession(
   // more than whole mebibytes and no rounding rules worth arguing about.
   const formatBytes = (bytes) => `${Math.round(bytes / (1024 * 1024))} MiB`;
 
-  const disposeTerminal = () => {
-    // xterm holds a renderer, listeners and a resize observer. Dropping the
-    // reference without disposing leaks all three for the life of the page.
-    if (terminal && typeof terminal.dispose === "function") terminal.dispose();
-    terminal = null;
-    unfitted = false;
-    refit = null;
-    if (paneWatcher) paneWatcher.disconnect();
-    paneWatcher = null;
-    if (settle !== null) timers.clearTimeout(settle);
-    settle = null;
+  // The terminal goes with the tab: its socket, its attach on the daemon and
+  // everything xterm holds.
+  const stopTerminal = () => {
+    if (live) live.stop();
+    live = null;
   };
 
   const stopPolling = () => {
@@ -475,33 +321,9 @@ export function renderSession(
     poller = null;
   };
 
-  // closeStream ends this panel's own socket. Its handlers go first: a browser
-  // reports a close the page asked for exactly like one it did not, and the
-  // panel leaving a tab is not a lost connection.
-  const closeStream = () => {
-    opening += 1;
-    if (typing) typing.dispose();
-    typing = null;
-    readOnly = false;
-    sessionSize = null;
-    if (!socket) return;
-    const ws = socket;
-    socket = null;
-    writable = false;
-    ws.onopen = null;
-    ws.onmessage = null;
-    ws.onclose = null;
-    try {
-      ws.close(1000, "panel closed");
-    } catch {
-      // Already closed or never opened; either way it is gone.
-    }
-  };
-
   const stop = () => {
     stopPolling();
-    closeStream();
-    disposeTerminal();
+    stopTerminal();
     // The paste handler goes with the panel. Left attached, it would keep
     // uploading into a session nobody is looking at any more.
     if (disposePaste) {
@@ -568,167 +390,30 @@ export function renderSession(
     showPollError("");
   };
 
-  const ensureTerminal = () => {
-    if (terminal) return terminal;
+  // openTerminal is the screen tab's whole life: one live terminal for as long
+  // as the tab is open, drawn into an element of the tab's body.
+  const openTerminal = () => {
     const host = el("div", "s-term");
     // Marks the element keys typed into a live session come from, so the rest of
     // the page can leave them alone — Escape above all, which interrupts a Claude
     // Code session's turn (see onKey in web/js/card.js).
     host.dataset.terminal = "";
     body.replaceChildren(host);
-    const made = defaultTerminalFactory(host);
-    if (!made) {
-      showPollError(t("terminal_missing"));
-      return null;
-    }
-    terminal = made;
-    refit = terminalFitter(made);
-    // Before the socket exists, because the socket asks for this size.
-    unfitted = !(refit && refit());
-    paintNotice();
-    watchPane(host);
-    return terminal;
-  };
-
-  // tellSession sends the terminal's size to the session when it differs from
-  // the size the session was last given, through an open socket. One that is
-  // still connecting cannot carry it, so ready calls this again. One that is
-  // open but not yet attached can: the bridge reads the token first and the
-  // rest only once it has attached, so the resize lands after the attach — the
-  // order the session needs.
-  const tellSession = () => {
-    const open = globalThis.WebSocket?.OPEN ?? 1;
-    if (!terminal || !socket || socket.readyState !== open) return;
-    const cols = terminal.cols;
-    const rows = terminal.rows;
-    if (sessionSize && sessionSize[0] === cols && sessionSize[1] === rows) return;
-    socket.send(JSON.stringify({ type: "resize", cols, rows }));
-    sessionSize = [cols, rows];
-  };
-
-  // followPane runs once the pane has stopped moving: refit, say whether that
-  // worked, and tell the session.
-  const followPane = () => {
-    settle = null;
-    if (!terminal) return;
-    unfitted = !(refit && refit());
-    paintNotice();
-    if (!unfitted) tellSession();
-  };
-
-  // watchPane follows the terminal's element for as long as the terminal
-  // lives. Every change restarts the settle timer, so a drag becomes one
-  // resize when it stops, however many pointer moves it took.
-  const watchPane = (host) => {
-    const Observer = globalThis.ResizeObserver;
-    if (typeof Observer !== "function") return;
-    paneWatcher = new Observer(() => {
-      if (settle !== null) timers.clearTimeout(settle);
-      settle = timers.setTimeout(followPane, PANE_SETTLE_MS);
+    live = createLiveTerminal(host, short, {
+      timers,
+      report: {
+        streamError: showPollError,
+        actionError: showError,
+        standing: paintNotice,
+        ready: refreshName,
+      },
     });
-    paneWatcher.observe(host);
-  };
-
-  // sendBytes puts bytes into the session through the stream — typed keys and
-  // the key buttons alike. Refused on screen when there is nothing to send
-  // through, never dropped in silence.
-  const sendBytes = (bytes) => {
-    const open = globalThis.WebSocket?.OPEN ?? 1;
-    if (!socket || socket.readyState !== open) {
-      showError(t("terminal_not_connected"));
-      return;
-    }
-    if (!writable) {
-      showError(t("terminal_read_only"));
-      return;
-    }
-    socket.send(bytes);
-    showError("");
-  };
-
-  const onControl = (text) => {
-    let msg;
-    try {
-      msg = JSON.parse(text);
-    } catch {
-      return;
-    }
-    if (msg?.type === "ready") {
-      writable = msg.writable === true;
-      readOnly = !writable;
-      showPollError("");
-      paintNotice();
-      refreshName();
-      // The pane may have moved while the bridge was attaching.
-      tellSession();
-    } else if (msg?.type === "error") {
-      showError(String(msg.error ?? ""));
-    }
-  };
-
-  // openStream is the screen tab's whole life: one socket for as long as the tab
-  // is open. It is never reopened by itself — see closeMessage and the note at
-  // the top of this file — and coming back to the tab is what reconnects.
-  //
-  // The socket must prove the panel's terminal token before the bridge attaches
-  // to anything (internal/server/pty.go), so the token is read first, fresh for
-  // this socket (see fetchTerminalToken), and sent as the first message the
-  // moment the socket opens.
-  const openStream = async () => {
-    const term = ensureTerminal();
-    if (!term) return; // the library is missing; ensureTerminal already said so
-    const Socket = globalThis.WebSocket;
-    if (typeof Socket !== "function") {
-      showPollError(t("terminal_missing"));
-      return;
-    }
-    const mine = ++opening;
-    let token;
-    try {
-      token = await fetchTerminalToken();
-    } catch (err) {
-      if (mine === opening) showPollError(`${t("terminal_token_unavailable")}: ${err.message}`);
-      return;
-    }
-    if (mine !== opening) return;
-    // The terminal's own size — fitted to the pane by ensureTerminal — because
-    // attaching at it sets the size of the session for everyone watching it.
-    const cols = term.cols || 80;
-    const rows = term.rows || 24;
-    const ws = new Socket(socketURL(`/api/sessions/${encodeURIComponent(short)}/pty?cols=${cols}&rows=${rows}`));
-    ws.binaryType = "arraybuffer";
-    socket = ws;
-    sessionSize = [cols, rows];
-    ws.onopen = () => {
-      if (socket !== ws) return;
-      ws.send(JSON.stringify({ type: "auth", token }));
-    };
-    ws.onmessage = (event) => {
-      if (socket !== ws) return;
-      if (typeof event.data === "string") {
-        onControl(event.data);
-        return;
-      }
-      // Appended, never redrawn: what arrived is the session's own output, in order.
-      term.write(new Uint8Array(event.data));
-    };
-    ws.onclose = (event) => {
-      if (socket !== ws) return;
-      socket = null;
-      writable = false;
-      readOnly = false;
-      sessionSize = null;
-      // The terminal stays as it was: the last thing the session said is often
-      // exactly what the operator needs while reading why it stopped.
-      showPollError(closeMessage(event.code, event.reason));
-      paintNotice();
-    };
-    typing = term.onData((data) => sendBytes(encoder.encode(data)));
+    live.open();
   };
 
   const startPolling = () => {
     if (tab === "screen") {
-      void openStream();
+      openTerminal();
       return;
     }
     poller = createPoller(
@@ -758,7 +443,10 @@ export function renderSession(
 
   // Through the stream the terminal already holds. POST .../keys would open an
   // attach of its own on every press, and every attach resizes the session.
-  const pressKey = (key) => sendBytes(encoder.encode(key.bytes));
+  const pressKey = (key) => {
+    if (live) live.type(key.bytes);
+    else showError(t("terminal_not_connected"));
+  };
 
   const submitTyped = async () => {
     // The raw value, not the trimmed one: if the send fails this is what goes
