@@ -67,7 +67,9 @@ What you send appears in the thread at once, before the session has read it, and
 
 Next to the name in the header is the commit the running panel was built from, with an asterisk when it was built from a tree with changes not yet committed. Hover over it for the full commit, when that commit was made, when the binary was built, and the path of the binary — which is how to tell which of several installs is the one answering on the port.
 
-A page stays open while the panel under it is rebuilt and restarted, and it keeps running the code it arrived with. When the new panel serves a different interface, a bar above the header says so and offers to reload. A rebuild that leaves the interface as it was — the same commit again, or a change only in the server's own code — raises nothing. If reloading brings back the same page, the bar says the reload did not help and asks you to quit the window with Cmd+Q and open it again.
+A page stays open while the panel under it is rebuilt and restarted, and it keeps running the code it arrived with. When the new panel serves a different interface, the page catches up. In the fleetdeck window it reloads by itself, and a session panel that was open opens again; the one thing that holds it back is text you have typed and not sent, and then a bar above the header says the page will reload once the text is sent, with a button to reload now. In a browser the bar appears instead, with a button to reload. A rebuild that leaves the interface as it was — the same commit again, or a change only in the server's own code — changes nothing on the page. If reloading brings back the same page, the window tries once more; after that, or straight away in a browser, the bar says the reload did not help and asks you to quit the window with Cmd+Q and open it again.
+
+The window's View menu has Reload, on Cmd+R, for reloading the page by hand.
 
 To check that it is up:
 
