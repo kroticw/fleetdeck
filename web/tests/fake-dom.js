@@ -53,6 +53,12 @@ class FakeEvent {
   preventDefault() {
     this.defaultPrevented = true;
   }
+
+  // Recorded, and honoured by a node's dispatch: an event stopped on its way up
+  // reaches no ancestor after the one that stopped it.
+  stopPropagation() {
+    this.propagationStopped = true;
+  }
 }
 
 class FakeNode {
@@ -334,6 +340,7 @@ class FakeNode {
     event.target = event.target ?? this;
     for (let walk = this; walk; walk = walk.parentNode) {
       for (const fn of walk.listeners.get(event.type) ?? []) fn(event);
+      if (event.propagationStopped) break;
     }
     return !event.defaultPrevented;
   }

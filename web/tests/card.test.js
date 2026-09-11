@@ -307,23 +307,82 @@ test("Escape, the close button and a click outside all close the panel", () => {
   assert.equal(third.closed.length, 1);
 });
 
-// Escape inside a live terminal belongs to the session: in a Claude Code session
-// it interrupts the turn. Closing a card must not be that same keystroke — with
-// the orchestrator's terminal on screen all the time, it would be one press that
-// closes the card and interrupts the orchestrator.
-test("Escape pressed inside a live terminal does not close the panel, anywhere else it still does", () => {
-  const { closed } = open(snapshot());
+// Escape inside a live terminal belongs to the session — in a Claude Code
+// session it interrupts the turn — except while a card is open. Then it closes
+// the card and nothing else.
+//
+// Measured before this was written, by pressing: a click into a terminal
+// already closes an open card (the click-outside rule), so the one way to have
+// a card open and the focus in a terminal is a [[link]] clicked in the terminal
+// itself, which opens the card and leaves the focus where it was. The next
+// Escape — the natural way back from a link just followed — interrupted the
+// session's turn and left the card open: one keystroke, the wrong one of two
+// things, and the card saying nothing had happened.
+//
+// So while a card is open, Escape closes it and is taken before the terminal
+// ever sees it. The session can still be interrupted from the keyboard: with
+// the card closed, the next Escape reaches it.
+function terminalTarget() {
   const host = dom.element("div");
   host.dataset.terminal = "";
   const typedInto = dom.element("textarea");
   host.appendChild(typedInto);
   dom.document.body.appendChild(host);
+  return typedInto;
+}
 
-  fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: typedInto });
-  assert.equal(closed.length, 0, "an Escape meant for the session closed the card");
+test("while a card is open, Escape pressed inside a live terminal closes the card and never reaches the terminal", () => {
+  const { closed } = open(snapshot());
 
-  fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: dom.element("div") });
-  assert.equal(closed.length, 1, "an Escape from anywhere else must still close it");
+  const event = fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: terminalTarget() });
+
+  assert.equal(closed.length, 1, "the card stayed open under an Escape meant to close it");
+  assert.equal(event.propagationStopped, true, "the terminal still receives the Escape and sends it into the session");
+  assert.equal(event.defaultPrevented, true);
+});
+
+test("an Escape from anywhere else closes the card and is left to its own target too", () => {
+  const { closed } = open(snapshot());
+
+  const event = fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: dom.element("input") });
+
+  assert.equal(closed.length, 1);
+  assert.notEqual(event.propagationStopped, true, "an Escape an input handles itself was taken from it");
+});
+
+// The listener has to run before the terminal's own: xterm turns a keydown on
+// its textarea into bytes for the session in that element's handler, so a
+// listener on the document's way back up would close the card after the Escape
+// had already gone into the session. Capture is what puts it first — and the
+// same flag has to be given to take it off again, or a closed card keeps
+// listening.
+test("the panel hears Escape before anything in the page does, and stops hearing it when it goes", () => {
+  const calls = [];
+  const add = dom.document.addEventListener.bind(dom.document);
+  const remove = dom.document.removeEventListener.bind(dom.document);
+  dom.document.addEventListener = (type, fn, options) => {
+    calls.push(["add", type, options]);
+    add(type, fn, options);
+  };
+  dom.document.removeEventListener = (type, fn, options) => {
+    calls.push(["remove", type, options]);
+    remove(type, fn, options);
+  };
+  const { dispose } = open(snapshot());
+  dispose();
+
+  const capture = (o) => o === true || o?.capture === true;
+  const keydown = calls.filter(([, type]) => type === "keydown");
+  assert.deepEqual(keydown.map(([op, , o]) => [op, capture(o)]), [["add", true], ["remove", true]]);
+});
+
+test("with no card open, an Escape in a live terminal is the terminal's", () => {
+  const { dispose } = open(snapshot());
+  dispose();
+
+  const event = fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: terminalTarget() });
+
+  assert.notEqual(event.propagationStopped, true, "a closed card still took the Escape from the terminal");
 });
 
 test("a click inside the panel does not close it", () => {
