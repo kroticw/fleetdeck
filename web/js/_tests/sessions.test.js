@@ -10,6 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rowHtml, renderSessions } from "../sessions.js";
+import { createStalledTracker, BLOCKED_SETTLE_MS } from "../header.js";
 
 // sessions.js reaches for navigator.language at import time through i18n.js.
 globalThis.navigator ??= { language: "en" };
@@ -23,14 +24,14 @@ test("a waiting session's reason keeps its full text in the title", () => {
 
 test("a stalled session with no needs carries detail, in full, in the title", () => {
   const detail = "waiting on my own subagents\nsecond line\nthird line";
-  const html = rowHtml({ short: "bb22", name: "n", needs: "", state: "blocked", detail });
+  const html = rowHtml({ short: "bb22", name: "n", needs: "", state: "blocked", detail }, true);
   const title = html.match(/class="sreason" title="([^"]*)"/)?.[1];
   assert.equal(title, detail);
 });
 
 test("a quote or a tag in the reason cannot break out of the title attribute", () => {
   const nasty = 'he said "go" <img src=x onerror=alert(1)>';
-  const html = rowHtml({ short: "cc33", name: "n", needs: "", state: "blocked", detail: nasty });
+  const html = rowHtml({ short: "cc33", name: "n", needs: "", state: "blocked", detail: nasty }, true);
   assert.ok(!html.includes("<img"), "the reason must never reach the DOM as markup");
   assert.ok(!html.includes('="go"'), "an unescaped quote would end the attribute early");
   assert.ok(html.includes("&quot;go&quot;"));
@@ -113,6 +114,31 @@ const FLEET = {
   ],
 };
 
+// Array.prototype.map passes (element, index, array) to its callback.
+// ordered.map(rowHtml) would hand rowHtml's own second parameter the row's
+// numeric index -- 0 for the first row (falsy, harmless by accident) but
+// truthy for every row after it, badging almost the whole list as Stalled
+// regardless of stalledNow. Two fresh flag-only blocked sessions at
+// positions 1 and 2 catch exactly that, through the real renderSessions
+// pipeline rather than a direct rowHtml call.
+test("a fresh flag-only blocked session is not badged Stalled wherever it sits in the list", async () => {
+  const fleet = {
+    sessions: [
+      { short: "aa11", name: "first", state: "working" },
+      { short: "bb22", name: "second", needs: "", state: "blocked" },
+      { short: "cc33", name: "third", needs: "", state: "blocked" },
+    ],
+  };
+  const { root, dom } = await list(fleet);
+  const html = root.innerHTML;
+  assert.equal(
+    (html.match(/sbadge-stalled/g) ?? []).length,
+    0,
+    "no fresh flag-only stall is badged, wherever it sits in the list",
+  );
+  dom.restore();
+});
+
 test("the pinned orchestrator is not listed among the tasks", async () => {
   const { root, dom } = await list(structuredClone(FLEET));
   const html = root.innerHTML;
@@ -152,7 +178,7 @@ test("a genuinely empty fleet still says there are no sessions", async () => {
 
 test("a reason wrapped in an envelope loses the tag and keeps its words", () => {
   const wrapped = '<agent-message id="m-9" from="06a1f607" at="2026-09-10T15:00:00+05:00">approve the **three** MRs</agent-message>';
-  const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped });
+  const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped }, true);
 
   // The visible text only: the title keeps the envelope on purpose.
   const shown = html.match(/class="sreason" title="[^"]*">([^<]*)</)?.[1] ?? "";
@@ -164,7 +190,7 @@ test("a reason wrapped in an envelope loses the tag and keeps its words", () => 
 
 test("the title still holds the reason exactly as the daemon wrote it", () => {
   const wrapped = '<agent-message id="m-9" from="06a1f607" at="t">body</agent-message>';
-  const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped });
+  const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped }, true);
   const title = html.match(/class="sreason" title="([^"]*)"/)?.[1];
   assert.ok(title.includes("&lt;agent-message"), "stripping the tag must not put it out of reach");
 });
@@ -261,3 +287,70 @@ test("a card path cannot break out of the attribute it lands in", () => {
 // function. The interactive behavior (Enter/Esc/blur, the freeze-while-
 // editing guard, the visible failure message) was verified by hand against
 // a real running panel in a real browser instead.
+
+// --- the row's Stalled badge and the header's counter agree ---------------
+//
+// This is the fix itself: rowHtml's own badge decision now comes from
+// createStalledTracker, the exact function header.js's counter uses,
+// instead of a fresh per-row isStalled() check. The three cases below are
+// the acceptance the orchestrator required by name -- a fresh flag-only
+// block and a settled one must read the same in both places, and a
+// needs-based stall must fire immediately in both, with a mutation proof
+// that "immediately" is actually being tested and not merely asserted.
+
+function isBadgedStalled(html) {
+  return html.includes("srow-stalled") && html.includes("sbadge-stalled");
+}
+
+// Two independent tracker instances, not one shared between the two
+// checks: this mirrors production exactly (header.js and sessions.js each
+// own their own instance -- see sessions.js's own comment for why) and
+// proves the agreement holds without smuggling a shared closure into the
+// test that neither file actually has at runtime.
+test("control case: a fresh flag-only blocked session reads the same in the header counter and the row", () => {
+  const headerTracker = createStalledTracker();
+  const rowTracker = createStalledTracker();
+  const s = { short: "aa11", name: "n", needs: "", state: "blocked" };
+  const nowMs = 0;
+
+  const headerCountsIt = headerTracker.update([s], nowMs).length > 0;
+  const stalledNow = new Set(rowTracker.update([s], nowMs).map((x) => x.short));
+  const html = rowHtml(s, stalledNow.has(s.short));
+
+  assert.equal(headerCountsIt, false, "a fresh flag-only stall must not be counted by the header yet");
+  assert.equal(isBadgedStalled(html), false, "the row must agree with the header: not yet Stalled");
+});
+
+test("control case: a flag-only blocked session held past the threshold reads the same in both places", () => {
+  const headerTracker = createStalledTracker();
+  const rowTracker = createStalledTracker();
+  const s = { short: "aa11", name: "n", needs: "", state: "blocked" };
+
+  headerTracker.update([s], 0);
+  rowTracker.update([s], 0);
+  const nowMs = BLOCKED_SETTLE_MS + 1;
+
+  const headerCountsIt = headerTracker.update([s], nowMs).length > 0;
+  const stalledNow = new Set(rowTracker.update([s], nowMs).map((x) => x.short));
+  const html = rowHtml(s, stalledNow.has(s.short));
+
+  assert.equal(headerCountsIt, true, "a flag-only stall held past BLOCKED_SETTLE_MS must be counted");
+  assert.equal(isBadgedStalled(html), true, "the row must agree with the header: Stalled");
+});
+
+// The case the orchestrator named explicitly: a needs-based stall is the
+// daemon naming a real reason, and must read Stalled at age zero, in both
+// places, with no threshold at all -- unlike the flag-only case above.
+test("a needs-based stall fires immediately, at age zero, in both the header and the row", () => {
+  const headerTracker = createStalledTracker();
+  const rowTracker = createStalledTracker();
+  const s = { short: "aa11", name: "n", needs: "login required: run `claude login`" };
+  const nowMs = 0; // this session was seen for the very first time, right now
+
+  const headerCountsIt = headerTracker.update([s], nowMs).length > 0;
+  const stalledNow = new Set(rowTracker.update([s], nowMs).map((x) => x.short));
+  const html = rowHtml(s, stalledNow.has(s.short));
+
+  assert.equal(headerCountsIt, true, "a needs-based stall must be counted immediately, no threshold");
+  assert.equal(isBadgedStalled(html), true, "the row must agree: Stalled immediately, no threshold");
+});
