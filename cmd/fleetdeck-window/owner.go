@@ -73,6 +73,9 @@ type screen struct {
 	// showingPanel: the web view has the panel's own page, as opposed to one
 	// of the window's pages below.
 	showingPanel bool
+	// takingOver: this window was started by an update to take the panel over
+	// from the previous version, rather than because nothing answered.
+	takingOver bool
 }
 
 // on returns what to do for e: navigate to the panel, or show html, or --
@@ -92,7 +95,7 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 			// open. Covering it with a page of the window's would lose that.
 			return false, ""
 		}
-		return false, startingPage(s.url)
+		return false, startingPage(s.url, s.takingOver)
 	case supervisor.Replacing:
 		// Covers the panel's page too: that page belongs to the panel being
 		// stopped, and it would only go offline under the person.
@@ -136,7 +139,11 @@ const pageStyle = `<style>
 // startingPage is shown while a panel the window started has not answered
 // yet. Usually for a fraction of a second; past waitShownAfter it shows how
 // long it has been.
-func startingPage(url string) string {
+func startingPage(url string, takingOver bool) string {
+	heading, text := "Запускаю панель", "На <code>"+html.EscapeString(url)+"</code> никто не отвечал, и окно запустило панель само. Обычно это доли секунды."
+	if takingOver {
+		heading, text = "Принимаю пульт", "Это новая версия приложения: она останавливает пульт прежней и запускает свой на <code>"+html.EscapeString(url)+"</code>."
+	}
 	return fmt.Sprintf(`<!doctype html>
 <html>
 <head>
@@ -146,8 +153,8 @@ func startingPage(url string) string {
 </head>
 <body>
 <main>
-  <h1>Запускаю панель</h1>
-  <p>На <code>%s</code> никто не отвечал, и окно запустило панель само. Обычно это доли секунды.</p>
+  <h1>%s</h1>
+  <p>%s</p>
   <p id="elapsed" hidden>Прошло <span id="seconds"></span> с.</p>
 </main>
 <script>
@@ -163,7 +170,7 @@ func startingPage(url string) string {
   }, 250);
 </script>
 </body>
-</html>`, pageStyle, html.EscapeString(url), waitShownAfter.Milliseconds())
+</html>`, pageStyle, heading, text, waitShownAfter.Milliseconds())
 }
 
 // replacingPage is shown while a panel an earlier window left behind is being
