@@ -72,7 +72,19 @@ export function installTerminal({ cols = 80, rows = 24 } = {}) {
       this.cols = cols;
       this.rows = rows;
       this.dataListeners = [];
+      // What xterm's public `modes` says about mouse tracking: "none" until
+      // the application in the terminal turns it on, as Claude Code does.
+      this.modes = { mouseTrackingMode: "none" };
+      // The handler a caller hands attachCustomWheelEventHandler, which the
+      // real terminal runs first on every wheel event it receives.
+      this.wheelHandler = null;
+      // The real terminal's own element, with .xterm-screen inside it. A
+      // case that needs one gives it one.
+      this.element = null;
       made.push(this);
+    }
+    attachCustomWheelEventHandler(fn) {
+      this.wheelHandler = fn;
     }
     open(host) {
       this.host = host;
@@ -207,6 +219,24 @@ export function installSocket() {
     }
   };
   return opened;
+}
+
+// The browser's WheelEvent, reduced to the fields a wheel handler reads. The
+// constructor keeps its init dictionary the way the real one does.
+export function installWheelEvent() {
+  globalThis.WheelEvent = class {
+    static DOM_DELTA_PIXEL = 0;
+    static DOM_DELTA_LINE = 1;
+    static DOM_DELTA_PAGE = 2;
+    constructor(type, init = {}) {
+      Object.assign(this, { deltaX: 0, deltaY: 0, deltaMode: 0, clientX: 0, clientY: 0 }, init, { type });
+      this.target = null;
+      this.defaultPrevented = false;
+    }
+    preventDefault() {
+      this.defaultPrevented = true;
+    }
+  };
 }
 
 // What the bridge says first on a socket it has attached.

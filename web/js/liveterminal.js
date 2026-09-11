@@ -143,6 +143,81 @@ function terminalFitter(terminal) {
   };
 }
 
+// wheelLines is how far a wheel event asks to move, in terminal lines: the
+// distance the browser would scroll any page by for the same event, measured
+// in the terminal's own cells. deltaMode says what deltaY counts — pixels (0),
+// lines (1) or pages (2). The browser has already put the device's own
+// acceleration and a trackpad's inertia into deltaY, so nothing here needs to
+// know which device sent it.
+export function wheelLines(event, cellHeight, rows) {
+  if (event.deltaMode === 1) return event.deltaY;
+  if (event.deltaMode === 2) return event.deltaY * rows;
+  return event.deltaY / cellHeight;
+}
+
+// followWheel makes the wheel over a terminal whose application tracks the
+// mouse move that application's view by the distance the event asks for.
+//
+// Claude Code turns mouse tracking on, so xterm does not scroll anything when
+// the wheel turns over its terminal: it sends the session a wheel report, and
+// the session moves its own view one line per report (measured). xterm sends
+// at most ONE report per wheel event, however far the event asks to go, and
+// damps pixel steps under 50 px to a third. Measured on a live session, a
+// 100 px step — a wheel notch — moved the view one line where a page moves
+// seven, and a stream of small steps — a trackpad — moved it a third of the
+// way. That is the sluggishness the operator felt.
+//
+// So the event is taken over: its distance is counted in lines, what is left
+// of a line is kept for the next event, and xterm is handed one single-line
+// wheel event per whole line, which it turns into one report each — in
+// whatever encoding the application asked for, at the pointer, with the keys
+// held. One event moves a screen at most.
+//
+// Left to xterm: a terminal whose application does not track the mouse (xterm
+// scrolls its own scrollback, by the event's distance already), shift held
+// (xterm reports nothing for it), and a terminal with nothing to measure.
+function followWheel(terminal) {
+  if (typeof terminal.attachCustomWheelEventHandler !== "function") return;
+  const Wheel = globalThis.WheelEvent;
+  if (typeof Wheel !== "function") return;
+  // The single-line events this makes itself, which xterm hands back to this
+  // handler on their way to becoming reports.
+  const replayed = new WeakSet();
+  // The part of a line asked for and not yet moved, signed.
+  let owed = 0;
+  terminal.attachCustomWheelEventHandler((event) => {
+    if (replayed.has(event)) return true;
+    if (terminal.modes?.mouseTrackingMode === "none" || event.shiftKey || !event.deltaY) return true;
+    const screen = terminal.element?.querySelector?.(".xterm-screen");
+    const cellHeight = screen ? screen.getBoundingClientRect().height / terminal.rows : 0;
+    if (!(cellHeight > 0)) return true;
+    const asked = wheelLines(event, cellHeight, terminal.rows);
+    // A hand that turns back starts from nothing: what was owed the other
+    // way is not a debt the new direction has to pay off first.
+    if (Math.sign(asked) !== Math.sign(owed)) owed = 0;
+    owed += asked;
+    const whole = Math.trunc(owed);
+    owed -= whole;
+    const count = Math.min(Math.abs(whole), terminal.rows);
+    for (let i = 0; i < count; i += 1) {
+      const line = new Wheel("wheel", {
+        deltaY: Math.sign(whole),
+        deltaMode: 1,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+        bubbles: true,
+        cancelable: true,
+      });
+      replayed.add(line);
+      event.target.dispatchEvent(line);
+    }
+    return false;
+  });
+}
+
 // How long the pane must stay still before the terminal follows it and the
 // session is told its new size. A drag of the column's edge moves the pane on
 // every pointer event — one per display frame, 8 to 17 ms apart at 120 or
@@ -289,6 +364,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       return null;
     }
     terminal = made;
+    followWheel(made);
     refit = terminalFitter(made);
     // Before the socket exists, because the socket asks for this size.
     unfitted = !(refit && refit());
