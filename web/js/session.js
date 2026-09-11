@@ -215,6 +215,29 @@ function defaultTerminalFactory(host) {
   return terminal;
 }
 
+// fitTerminal sizes an opened terminal to the element it was opened into, and
+// reports whether it could.
+//
+// The measuring is web/vendor/addon-fit.js's, not this file's: the addon reads
+// the cell size from xterm's own renderer, which is why it is pinned to the
+// same xterm release (web/vendor/README.md). It is loaded the way xterm is,
+// with a plain script tag that assigns FitAddon.FitAddon onto the global object.
+//
+// Two ways it cannot, and both must be said rather than swallowed. The script
+// did not load; or the addon has nothing to measure — an element with no
+// layout — in which case proposeDimensions answers nothing and fit() on its own
+// would return without a word, leaving the terminal at its default 80x24 in a
+// larger pane and the session reshaped to match.
+function fitTerminal(terminal) {
+  const Fit = globalThis.FitAddon?.FitAddon;
+  if (typeof Fit !== "function") return false;
+  const fit = new Fit();
+  terminal.loadAddon(fit);
+  if (!fit.proposeDimensions()) return false;
+  fit.fit();
+  return true;
+}
+
 // renderSession draws the panel for one session into `root` and starts polling.
 // It returns a stop function; calling it, or the panel's own close button,
 // leaves no timer and no terminal behind.
@@ -311,6 +334,17 @@ export function renderSession(
   let pollError = "";
   let noticeText = "";
 
+  // What the screen tab says about its own terminal, for as long as it holds
+  // one: that the stream cannot type, and that the terminal is not the size of
+  // its pane. Kept apart from noticeText for the same reason the two errors are
+  // kept apart: a sent message clears the notice line, and these two sentences
+  // are still true afterwards. They are shown when nothing else is, and they go
+  // with the stream and the terminal they describe.
+  let readOnly = false;
+  let unfitted = false;
+  const standingNotice = () =>
+    [readOnly ? t("terminal_read_only") : "", unfitted ? t("terminal_not_fitted") : ""].filter(Boolean).join("; ");
+
   // paintError and paintNotice write into a line of their own above the input,
   // rather than replacing what the tab is showing. Replacing it would throw away
   // the terminal or the last digest that did arrive, and a transient failure
@@ -324,8 +358,9 @@ export function renderSession(
 
   const paintNotice = () => {
     if (!noticeLine) return;
-    noticeLine.textContent = noticeText;
-    noticeLine.hidden = !noticeText;
+    const message = noticeText || standingNotice();
+    noticeLine.textContent = message;
+    noticeLine.hidden = !message;
   };
 
   // What the operator's own action reported — a send, a key, a pasted image.
@@ -360,6 +395,7 @@ export function renderSession(
     // reference without disposing leaks all three for the life of the page.
     if (terminal && typeof terminal.dispose === "function") terminal.dispose();
     terminal = null;
+    unfitted = false;
   };
 
   const stopPolling = () => {
@@ -373,6 +409,7 @@ export function renderSession(
   const closeStream = () => {
     if (typing) typing.dispose();
     typing = null;
+    readOnly = false;
     if (!socket) return;
     const ws = socket;
     socket = null;
@@ -470,6 +507,9 @@ export function renderSession(
       return null;
     }
     terminal = made;
+    // Before the socket exists, because the socket asks for this size.
+    unfitted = !fitTerminal(made);
+    paintNotice();
     return terminal;
   };
 
@@ -499,8 +539,9 @@ export function renderSession(
     }
     if (msg?.type === "ready") {
       writable = msg.writable === true;
+      readOnly = !writable;
       showPollError("");
-      showNotice(writable ? "" : t("terminal_read_only"));
+      paintNotice();
       refreshName();
     } else if (msg?.type === "error") {
       showError(String(msg.error ?? ""));
@@ -518,8 +559,8 @@ export function renderSession(
       showPollError(t("terminal_missing"));
       return;
     }
-    // The terminal's own size, because attaching at it sets the size of the
-    // session for everyone watching it.
+    // The terminal's own size — fitted to the pane by ensureTerminal — because
+    // attaching at it sets the size of the session for everyone watching it.
     const cols = term.cols || 80;
     const rows = term.rows || 24;
     const ws = new Socket(socketURL(`/api/sessions/${encodeURIComponent(short)}/pty?cols=${cols}&rows=${rows}`));
@@ -538,9 +579,11 @@ export function renderSession(
       if (socket !== ws) return;
       socket = null;
       writable = false;
+      readOnly = false;
       // The terminal stays as it was: the last thing the session said is often
       // exactly what the operator needs while reading why it stopped.
       showPollError(closeMessage(event.code, event.reason));
+      paintNotice();
     };
     typing = term.onData((data) => sendBytes(encoder.encode(data)));
   };

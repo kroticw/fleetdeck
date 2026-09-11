@@ -106,6 +106,14 @@ function installTerminal({ cols = 80, rows = 24 } = {}) {
     open(host) {
       this.host = host;
     }
+    // xterm hands the terminal to an addon's activate() when it is loaded.
+    loadAddon(addon) {
+      addon.activate(this);
+    }
+    resize(cols, rows) {
+      this.cols = cols;
+      this.rows = rows;
+    }
     onData(fn) {
       this.dataListeners.push(fn);
       return { dispose: () => (this.dataListeners = this.dataListeners.filter((f) => f !== fn)) };
@@ -124,6 +132,38 @@ function installTerminal({ cols = 80, rows = 24 } = {}) {
     dispose() {
       this.disposed += 1;
     }
+  };
+  return made;
+}
+
+// The fit addon the panel finds on the global object, which is where
+// web/vendor/addon-fit.js puts the real one. `pane` is the size the real addon
+// would measure the terminal's element at: "own" answers with the terminal's
+// current size, so every test that is not about fitting sees no change; null is
+// a pane with nothing to measure yet, which the real addon answers with nothing.
+function installFit(pane = "own") {
+  const made = [];
+  globalThis.FitAddon = {
+    FitAddon: class {
+      constructor() {
+        this.terminal = null;
+        made.push(this);
+      }
+      activate(terminal) {
+        this.terminal = terminal;
+      }
+      dispose() {}
+      proposeDimensions() {
+        // Like the real one: a terminal not yet opened into an element has no
+        // size to propose.
+        if (!this.terminal?.host || pane === null) return undefined;
+        return pane === "own" ? { cols: this.terminal.cols, rows: this.terminal.rows } : { ...pane };
+      }
+      fit() {
+        const dims = this.proposeDimensions();
+        if (dims) this.terminal.resize(dims.cols, dims.rows);
+      }
+    },
   };
   return made;
 }
@@ -186,6 +226,7 @@ const frame = (s) => new TextEncoder().encode(s).buffer;
 
 let sockets;
 let realSocket;
+let realFit;
 
 beforeEach(() => {
   dom = installDOM();
@@ -193,7 +234,9 @@ beforeEach(() => {
   realFetch = globalThis.fetch;
   realTerminal = Object.hasOwn(globalThis, "Terminal") ? globalThis.Terminal : undefined;
   realSocket = Object.hasOwn(globalThis, "WebSocket") ? globalThis.WebSocket : undefined;
+  realFit = Object.hasOwn(globalThis, "FitAddon") ? globalThis.FitAddon : undefined;
   sockets = installSocket();
+  installFit();
 });
 
 afterEach(() => {
@@ -203,6 +246,8 @@ afterEach(() => {
   else globalThis.Terminal = realTerminal;
   if (realSocket === undefined) delete globalThis.WebSocket;
   else globalThis.WebSocket = realSocket;
+  if (realFit === undefined) delete globalThis.FitAddon;
+  else globalThis.FitAddon = realFit;
 });
 
 async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }) } = {}) {
@@ -222,11 +267,16 @@ async function mount({ lookup = () => ({ short: SHORT, sessionId: FULL }) } = {}
     const line = root.querySelector(".s-error");
     return line.hidden ? "" : line.textContent;
   };
+  const noticeText = () => {
+    const line = root.querySelector(".s-notice");
+    return line.hidden ? "" : line.textContent;
+  };
   return {
     root,
     timers,
     stop,
     errorText,
+    noticeText,
     closes: () => closed,
     input: () => root.querySelector(".s-input"),
     async click(selector) {
@@ -453,6 +503,92 @@ test("the socket goes to this session's terminal route and asks for the terminal
   assert.equal(url.searchParams.get("cols"), String(terminals[0].cols));
   assert.equal(url.searchParams.get("rows"), String(terminals[0].rows));
   assert.equal(sockets[0].binaryType, "arraybuffer", "terminal bytes are read as bytes, not as a Blob");
+});
+
+// Attaching sets the session's size for everyone watching it, so the size the
+// socket asks for has to be the pane's, measured before the socket exists —
+// resizing after the attach would reshape the session twice.
+test("the terminal is fitted to its pane before the socket asks for a size", async () => {
+  const terminals = installTerminal();
+  const fits = installFit({ cols: 173, rows: 52 });
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  assert.equal(fits.length, 1, "one fit addon for the one terminal");
+  assert.equal(fits[0].terminal, terminals[0], "loaded into the terminal it measures");
+  assert.equal(terminals[0].cols, 173);
+  assert.equal(terminals[0].rows, 52);
+  const url = new URL(sockets[0].url);
+  assert.equal(url.searchParams.get("cols"), "173", "the attach asked for the fitted width");
+  assert.equal(url.searchParams.get("rows"), "52", "the attach asked for the fitted height");
+  assert.equal(panel.noticeText(), "", "a fitted terminal has nothing to say about its size");
+});
+
+// The real addon's fit() returns without a word when it has nothing to measure,
+// and a missing script tag reports nothing to anybody. Either would leave a
+// terminal at its default size in a larger pane, with the session reshaped to
+// match, and nothing on screen saying why.
+test("a terminal the fit addon cannot size is drawn at its own size, says so, and still connects", async () => {
+  for (const [label, setup] of [
+    ["addon missing", () => delete globalThis.FitAddon],
+    ["nothing to measure", () => installFit(null)],
+  ]) {
+    sockets.length = 0;
+    const terminals = installTerminal({ cols: 80, rows: 24 });
+    setup();
+    stubFetch(answer({ body: [] }));
+    const panel = await mount();
+    await panel.openScreenTab();
+
+    assert.equal(sockets.length, 1, `${label}: the terminal still connects`);
+    const url = new URL(sockets[0].url);
+    assert.equal(url.searchParams.get("cols"), String(terminals[0].cols), `${label}: the attach asked for the size drawn`);
+    assert.ok(panel.noticeText().includes(t("terminal_not_fitted")), `${label}: and it says why`);
+    panel.stop();
+  }
+});
+
+// What the terminal says about itself — that it cannot type, that it is not
+// the size of its pane — holds for as long as the stream does. A sent message
+// clears the notice line (web/js/session.js, submitTyped), and a ready frame
+// used to overwrite it; neither may take these two sentences with it. And they
+// belong to the screen tab, so they leave with it.
+test("what the terminal says about itself outlasts a sent message and leaves with the tab", async () => {
+  installTerminal();
+  installFit(null);
+  stubFetch((url) => (url.includes("/text") ? answer({ status: 204 }) : answer({ body: [] })));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0], false);
+
+  const standing = () => {
+    const text = panel.noticeText();
+    return { readOnly: text.includes(t("terminal_read_only")), notFitted: text.includes(t("terminal_not_fitted")) };
+  };
+  assert.deepEqual(standing(), { readOnly: true, notFitted: true }, "both are said once the stream is ready");
+
+  panel.input().value = "hello";
+  await panel.pressEnter();
+  assert.equal(calls.filter((c) => c.url.includes("/text")).length, 1, "the message was sent");
+  assert.deepEqual(standing(), { readOnly: true, notFitted: true }, "a sent message took them off screen");
+
+  fireEvent(panel.root.querySelector('[data-tab="digest"]'), "click");
+  await settle();
+  assert.equal(panel.noticeText(), "", "the digest tab has no terminal to talk about");
+});
+
+test("a stream that has ended no longer says it cannot type", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+  ready(sockets[0], false);
+  assert.equal(panel.noticeText(), t("terminal_read_only"));
+
+  sockets[0].serverClose(4000);
+  assert.equal(panel.noticeText(), "", "there is no stream left to be read-only");
+  assert.equal(panel.errorText(), t("terminal_session_ended"), "the ending is what is said instead");
 });
 
 test("the session's bytes are written to the terminal as they arrive, never by redrawing it", async () => {
