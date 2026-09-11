@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/state"
 )
 
 const (
@@ -93,12 +94,26 @@ func decodeFailed(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-func (d Deps) handleSnapshot(w http.ResponseWriter, _ *http.Request) {
+func (d Deps) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	if d.Snapshot == nil {
 		unavailable(w, "a snapshot source")
 		return
 	}
-	writeJSON(w, http.StatusOK, d.Snapshot())
+	view, err := d.fleetView(r)
+	if err != nil {
+		fail(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// fleetView is the snapshot of the fleet the request names in its fleet
+// query parameter, the first fleet when it names none. The fleet lives in the
+// tab's address, not in the server: two tabs on two fleets are served side by
+// side, and switching one of them changes nothing for the other. The only
+// error is a fleet no configuration has, which the caller answers with 404.
+func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
+	return state.ForFleet(d.Snapshot(), r.URL.Query().Get("fleet"))
 }
 
 func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {
