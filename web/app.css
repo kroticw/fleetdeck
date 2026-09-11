@@ -1403,6 +1403,25 @@ main {
   border-bottom: none;
   font-weight: 600;
   font-size: var(--fs-md);
+  /* A size container, for the rule below. */
+  container-type: inline-size;
+}
+
+/* On the screen tab the header holds the terminal's font buttons too
+ * (web/js/fontcontrols.js). Found live: in a narrow centre the tabs, the
+ * buttons and the close button were wider than the panel, the centre scrolled
+ * sideways, and the close button went off its edge. Below the width they fit
+ * in beside the tabs and the close button — measured at 354 px with the name
+ * squeezed to nothing, and this leaves the name some room — the header gives
+ * them up; Cmd+= / Cmd+- / Cmd+0 still work, and the column keeps its own.
+ * Letting the header wrap instead was rejected: a flex line breaks on the
+ * name's full width, the name arrives after the terminal has attached, and a
+ * header that grows then makes the pane shorter and reshapes the session. The
+ * header's width changes only with the panel's, which reshapes it anyway. */
+@container (max-width: 420px) {
+  .session-panel .term-font {
+    display: none;
+  }
 }
 
 .session-panel .s-tabs {
@@ -1423,6 +1442,17 @@ main {
 
 .session-panel button:hover {
   background: var(--surface);
+}
+
+/* A font button at the end of the range is off, and says so by looking off
+ * rather than by doing nothing when pressed. */
+.session-panel .s-font-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.session-panel .s-font-btn:disabled:hover {
+  background: var(--surface-hover);
 }
 
 .session-panel .s-close {
@@ -1970,6 +2000,47 @@ main {
 .col-size-btn:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+/* A live terminal's font buttons (web/js/fontcontrols.js): A−, the size, A+.
+ * In the orchestrator column they sit in this strip beside the fold button;
+ * in the session panel, in its header beside the tabs. Never shrunk or
+ * wrapped: a row that wraps grows, and a row that grows above a terminal makes
+ * its pane shorter, which reshapes the session. */
+.term-font {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* In the column's strip, a gap between the terminal's controls and the
+ * column's own fold button, so the two groups read as two. */
+.col-size .term-font {
+  margin-right: var(--gap-sm);
+}
+
+/* The size between the two buttons runs from "9 px" to "24 px". Kept one
+ * width, so A+ does not move from under the pointer as it is pressed. The
+ * width is of the text alone (content-box), not of the text plus a padding
+ * each place sets differently; 3em holds "24 px" in either place's type. */
+.term-font-reset {
+  box-sizing: content-box;
+  min-width: 3em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.col[data-folded="1"] .term-font {
+  display: none;
+}
+
+/* A browser sends no mousedown to a disabled button, and a mousedown nobody
+ * cancels moves the focus — out of the terminal, found live after a press on
+ * A+ at 24 px. Letting the pointer through puts the press on .term-font,
+ * which cancels it (web/js/fontcontrols.js). */
+.term-font button:disabled {
+  pointer-events: none;
 }
 
 /* Only one of the two is ever on screen at a time, and which one is the whole

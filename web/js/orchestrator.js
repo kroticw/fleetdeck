@@ -5,6 +5,7 @@ import { ORCHESTRATOR_KEYS } from "./columnwidth.js";
 import { mountColumnResize } from "./columnresize.js";
 import { createLiveTerminal } from "./liveterminal.js";
 import { FONT_KEYS } from "./terminalfont.js";
+import { buildFontControls } from "./fontcontrols.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column.
@@ -145,6 +146,9 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
   // and a repaint of the whole screen.
   let live = null;
   let terminalFor = null;
+  // The font buttons in the strip (web/js/fontcontrols.js), painted from what
+  // the terminal says about its size.
+  let fontButtons = null;
 
   // Set while the pinned session's own name is being edited in place. draw()
   // must not touch .o-name while this is true: it has been replaced by an
@@ -244,8 +248,16 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     // a button because it is a state rather than a size, and because dragging to
     // nothing is a bad way to reach it: a column dragged to nothing has no edge
     // left to grab.
+    //
+    // The terminal's font buttons sit here too, beside the fold button and on
+    // its side of the strip — the side facing the centre, which .col-size-left
+    // already decides. Built with the frame, before any terminal exists: the
+    // strip is the same height with them as without, and nothing is added
+    // above the terminal when it comes, so they never make its pane shorter.
+    fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "col-size-btn" });
     strip.append(
       button("col-size-btn col-size-unfold", "»", t("column_unfold"), () => width.unfold()),
+      fontButtons.node,
       button("col-size-btn col-size-fold", "«", t("column_fold"), () => width.fold()),
     );
     return strip;
@@ -417,6 +429,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
           paintRows();
         },
         standing: paintRows,
+        fontSize: (size) => fontButtons?.paint(size),
       },
     });
     terminalFor = short;

@@ -32,6 +32,7 @@ import { wireImagePaste } from "./pasteimage.js";
 import { pageStorage } from "./buildcheck.js";
 import { createLiveTerminal } from "./liveterminal.js";
 import { FONT_KEYS } from "./terminalfont.js";
+import { buildFontControls } from "./fontcontrols.js";
 
 // How many transcript steps the digest asks for, and how often it refreshes.
 // The digest is polled: it only changes when a session speaks.
@@ -196,8 +197,10 @@ export function renderSession(
 
   let tab = recalledTab(storage, short);
   let poller = null;
-  // The screen tab's live terminal, while the tab is open.
+  // The screen tab's live terminal, while the tab is open, and the font buttons
+  // in the header that size it, painted from what it says about its size.
   let live = null;
+  let fontButtons = null;
   let body = null;
   let errorLine = null;
   let noticeLine = null;
@@ -411,6 +414,7 @@ export function renderSession(
         actionError: showError,
         standing: paintNotice,
         ready: refreshName,
+        fontSize: (size) => fontButtons?.paint(size),
       },
     });
     live.open();
@@ -537,10 +541,18 @@ export function renderSession(
       onClose();
     });
 
-    // The header holds the two controls that act on this panel and nothing
-    // else: the tabs, and the button that closes it. Both are undone by
-    // reopening the panel.
+    // The header holds the controls that act on this panel and nothing else:
+    // the tabs, the button that closes it, and on the screen tab the size of
+    // its terminal's type (web/js/fontcontrols.js, the same buttons as the
+    // orchestrator column's). They are built here, before the tab's terminal
+    // is, and are the same height as the tabs beside them, so the header does
+    // not grow under a terminal that has already been fitted.
     head.appendChild(tabs);
+    fontButtons = null;
+    if (tab === "screen") {
+      fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "s-font-btn" });
+      head.appendChild(fontButtons.node);
+    }
     head.appendChild(nameLine);
     head.appendChild(close);
 

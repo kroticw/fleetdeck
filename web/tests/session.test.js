@@ -1405,6 +1405,97 @@ test("the screen tab's terminal is given the page's links", async () => {
   assert.equal(terminals.at(-1).linkProviders?.length, 1, "the screen tab's terminal links nothing");
 });
 
+// --- the font buttons -------------------------------------------------------
+//
+// The screen tab has the same three buttons as the orchestrator column, from
+// the same builder, in its header beside the tabs. The header is built before
+// the tab's terminal is, and holds the buttons from then on, so they never
+// make the terminal's pane shorter after it has been fitted.
+
+async function withFontStorage(entries, body) {
+  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
+  const map = new Map(Object.entries(entries));
+  globalThis.localStorage = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+  try {
+    await body(map);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+}
+
+// Looked for inside the header, so buttons anywhere else are not found.
+const headFontButtons = (root) => {
+  const head = root.querySelector(".s-head");
+  return {
+    group: head?.querySelector(".term-font") ?? null,
+    smaller: head?.querySelector(".term-font-smaller") ?? null,
+    reset: head?.querySelector(".term-font-reset") ?? null,
+    bigger: head?.querySelector(".term-font-bigger") ?? null,
+  };
+};
+
+test("the screen tab's header has the font buttons right after the tabs, and the digest tab's has none", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  assert.equal(headFontButtons(panel.root).group, null, "the digest tab, which has no terminal, shows font buttons");
+
+  await panel.openScreenTab();
+
+  const head = panel.root.querySelector(".s-head");
+  const { group } = headFontButtons(panel.root);
+  assert.ok(group, "the screen tab has no font buttons");
+  const at = head.children.indexOf(group);
+  assert.ok(String(head.children[at - 1].className).split(" ").includes("s-tabs"), "the buttons are not beside the tabs");
+  for (const b of group.children) assert.ok(String(b.className).split(" ").includes("s-font-btn"));
+});
+
+test("the screen tab's buttons are in the page before its terminal is built", async () => {
+  const terminals = installTerminal();
+  const Built = globalThis.Terminal;
+  let buttonsAtBuild = null;
+  globalThis.Terminal = class extends Built {
+    constructor(options) {
+      super(options);
+      buttonsAtBuild = Boolean(headFontButtons(dom.document.body).group);
+    }
+  };
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+  await panel.openScreenTab();
+
+  assert.equal(terminals.length, 1, "the screen tab built no terminal");
+  assert.equal(buttonsAtBuild, true, "the buttons came after the terminal was built, and push its pane down after it was fitted");
+});
+
+test("the screen tab's buttons show the screen tab's size and press its terminal", async () => {
+  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "20", "fleetdeck-terminal-font-screen": "10" }, async (map) => {
+    const terminals = installTerminal();
+    stubFetch(answer({ body: [] }));
+    const panel = await mount();
+    await panel.openScreenTab();
+    const terminal = terminals.at(-1);
+    const { smaller, reset, bigger } = headFontButtons(panel.root);
+    assert.equal(reset.textContent, "10 px");
+
+    fireEvent(bigger, "click");
+    assert.equal(terminal.options.fontSize, 11);
+    assert.equal(map.get("fleetdeck-terminal-font-screen"), "11");
+    assert.equal(map.get("fleetdeck-terminal-font-orchestrator"), "20", "the screen tab's button changed the column's size");
+    assert.equal(reset.textContent, "11 px");
+
+    fireEvent(smaller, "click");
+    fireEvent(smaller, "click");
+    assert.equal(terminal.options.fontSize, 9);
+    assert.equal(smaller.disabled, true, "A− at 9 px looked like it would do something");
+  });
+});
+
 // The screen tab keeps the size of its type under its own key, not the
 // orchestrator column's: the two are different widths, and what a bigger type
 // costs is columns. The column's entry is set too, so reading it shows.

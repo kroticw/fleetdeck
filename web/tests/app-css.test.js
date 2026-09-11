@@ -258,6 +258,46 @@ test("a terminal's element keeps a terminal bigger than itself from scrolling wh
   }
 });
 
+// The font buttons (web/js/fontcontrols.js) sit in rows above a terminal: the
+// column's strip of controls and the session panel's header. Neither row may
+// grow because of them — a row that wraps onto a second line makes the pane
+// under it shorter, and that reshapes the session. A folded column hides them
+// with everything else, and a button that is off has to look off.
+test("the font buttons never grow their row, go away with a folded column, and look off when they are off", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector) => {
+    const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
+    assert.ok(match, `${selector} has no rule in web/app.css`);
+    return match[2];
+  };
+
+  for (const selector of ["\\.col-size", "\\.session-panel \\.s-head"]) {
+    assert.doesNotMatch(body(selector), /flex-wrap:\s*wrap/, `${selector} wraps, and a wrapped row takes height from the terminal`);
+  }
+  assert.match(body("\\.term-font"), /flex:\s*none/, ".term-font shrinks or wraps inside its row");
+  assert.match(body('\\.col\\[data-folded="1"\\] \\.term-font'), /display:\s*none/, "a folded column still shows its font buttons");
+  assert.match(body("\\.session-panel \\.s-font-btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off in the session panel looks on");
+  assert.match(body("\\.col-size-btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off in the column looks on");
+  // Found live: in a narrow centre the header with the buttons was wider than
+  // the panel, the centre scrolled sideways and the close button went off the
+  // edge. The header is a size container and gives the buttons up below the
+  // width they fit in — a width that changes only with the panel's, never with
+  // the session's name, so this never moves the terminal's pane on its own.
+  assert.match(body("\\.session-panel \\.s-head"), /container-type:\s*inline-size/, "the panel header is no container, so nothing can give the font buttons up when it is narrow");
+  assert.match(
+    stripped,
+    /@container\s*\(max-width:\s*\d+px\)\s*\{\s*\.session-panel \.term-font\s*\{\s*display:\s*none;?\s*\}\s*\}/,
+    "a narrow panel header keeps the font buttons and pushes the close button off the edge",
+  );
+  // A browser sends no mousedown to a disabled button; the press has to reach
+  // the group around it, which keeps the focus in the terminal.
+  assert.match(body("\\.term-font button:disabled"), /pointer-events:\s*none/, "a press on a font button that is off takes the focus from the terminal");
+  // The size between the buttons changes from "9 px" to "24 px"; a label
+  // that changes width moves the button beside it from under the pointer.
+  assert.match(body("\\.term-font-reset"), /font-variant-numeric:\s*tabular-nums/);
+  assert.match(body("\\.term-font-reset"), /min-width:/, "the size label changes width, and A+ moves from under the pointer");
+});
+
 // The mark on the operator's own messages is the whole of the distinction
 // between their words and an agent's, in both themes. One pane draws steps now:
 // the orchestrator column is a terminal, and the session panel's digest tab is
