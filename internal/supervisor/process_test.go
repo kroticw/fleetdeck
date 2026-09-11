@@ -64,7 +64,13 @@ func runHelper(mode string) {
 	if err != nil {
 		os.Exit(3)
 	}
-	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/snapshot" {
+			// What a real panel's snapshot carries, as far as telling a panel
+			// from any other program goes.
+			fmt.Fprint(w, `{"build":{"web":"stand-in"}}`)
+			return
+		}
 		fmt.Fprint(w, "panel")
 	}))
 }
