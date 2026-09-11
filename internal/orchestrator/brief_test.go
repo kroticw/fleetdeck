@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -173,5 +174,38 @@ func TestMessageIsOneLineNamingTheBrief(t *testing.T) {
 	}
 	if Message("ru", "/p") == Message("en", "/p") {
 		t.Error("the Russian and English messages are the same text")
+	}
+}
+
+// The preview is what the wizard shows before anything is done, and it is
+// built from the same functions the appointment uses: the page cannot promise
+// one message and the panel send another.
+func TestPreviewIsWhatAnAppointmentWillDo(t *testing.T) {
+	p := workspace(t)
+	a := &Appointer{Paths: p, Start: func(context.Context, string, string) (string, error) { return "", nil }}
+	for _, lang := range []string{"en", "ru"} {
+		got, err := a.Preview(lang)
+		if err != nil {
+			t.Fatal(err)
+		}
+		brief, _ := Brief(lang, p)
+		want := Preview{
+			Path:      BriefPath(p),
+			Message:   Message(lang, BriefPath(p)),
+			Brief:     string(brief),
+			Workspace: filepath.Dir(p.Board),
+			Name:      words[lang].sessionName,
+			CanStart:  true,
+		}
+		if got != want {
+			t.Errorf("%s: Preview = %+v\nwant %+v", lang, got, want)
+		}
+	}
+	a.Start = nil
+	if got, _ := a.Preview("en"); got.CanStart {
+		t.Error("a panel that cannot start sessions previews that it can")
+	}
+	if _, err := os.Stat(BriefPath(p)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a preview wrote the brief: %v", err)
 	}
 }

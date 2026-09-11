@@ -159,6 +159,38 @@ func (a *Appointer) Appoint(ctx context.Context, req Request) (Result, error) {
 	return res, nil
 }
 
+// Preview is what an appointment will do, for the wizard to show before the
+// person chooses: where the brief goes and what it says, the one line the
+// session is sent, and where and under which name a new session starts.
+type Preview struct {
+	Path      string `json:"path"`
+	Message   string `json:"message"`
+	Brief     string `json:"brief"`
+	Workspace string `json:"workspace"`
+	Name      string `json:"name"`
+	// CanStart is false on a panel that does not start sessions.
+	CanStart bool `json:"canStart"`
+}
+
+// Preview builds, in lang, what Appoint would write and send. It writes
+// nothing.
+func (a *Appointer) Preview(lang string) (Preview, error) {
+	lang = Lang(lang)
+	brief, err := Brief(lang, a.Paths)
+	if err != nil {
+		return Preview{}, err
+	}
+	path := BriefPath(a.Paths)
+	return Preview{
+		Path:      path,
+		Message:   Message(lang, path),
+		Brief:     string(brief),
+		Workspace: filepath.Dir(a.Paths.Board),
+		Name:      words[lang].sessionName,
+		CanStart:  a.Start != nil,
+	}, nil
+}
+
 func (a *Appointer) wait(d, fallback time.Duration) time.Duration {
 	if d > 0 {
 		return d
