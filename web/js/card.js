@@ -315,14 +315,29 @@ export function renderCard(root, path, onClose, options = {}) {
     draw(latest);
   };
 
-  // Escape closes the panel — except when it was pressed inside a live
-  // terminal. There it belongs to the session, and in a Claude Code session it
-  // interrupts the turn: closing a card must never be the same keystroke as
-  // interrupting the orchestrator. The terminal's host carries data-terminal
-  // (web/js/session.js) for exactly this.
+  // Escape closes the panel, and while the panel is open that is all it does —
+  // even pressed inside a live terminal, where it would otherwise go to the
+  // session and, in a Claude Code session, interrupt the turn.
+  //
+  // A terminal is where the focus is left by the one way to have a card open
+  // and the focus in a terminal at once: a [[link]] clicked in the terminal
+  // (web/js/terminallinks.js), which opens the card without moving the focus.
+  // A click into a terminal otherwise closes an open card first (onOutside,
+  // below). Measured, the Escape that followed interrupted the session's turn
+  // and left the card open — one keystroke, the wrong one of two things.
+  //
+  // So an Escape from a terminal (its host carries data-terminal) is taken
+  // before the terminal sees it: this listener is on the capture phase, ahead
+  // of xterm's own handler on its textarea, which is where the keystroke turns
+  // into bytes for the session. With the card closed, the next Escape reaches
+  // the session as it always did. An Escape from anywhere else closes the card
+  // and goes on to its own target, as it did before.
   const onKey = (event) => {
     if (event.key !== "Escape") return;
-    if (event.target?.closest?.("[data-terminal]")) return;
+    if (event.target?.closest?.("[data-terminal]")) {
+      event.stopPropagation?.();
+      event.preventDefault?.();
+    }
     onClose();
   };
 
@@ -341,7 +356,7 @@ export function renderCard(root, path, onClose, options = {}) {
   // render would accumulate one per card ever opened, each holding a body that
   // left the document long ago.
   watchScrollables(root, ".md-table, pre");
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", onKey, true);
   document.addEventListener("mousedown", onOutside);
   // Wrapped, not passed straight in: subscribe calls its listener with
   // (snapshot, connected), and draw's second parameter is a field name.
@@ -350,7 +365,7 @@ export function renderCard(root, path, onClose, options = {}) {
   return () => {
     unsubscribe();
     root.removeEventListener("click", onLinkClick);
-    document.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("mousedown", onOutside);
   };
 }
