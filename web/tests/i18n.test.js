@@ -52,6 +52,8 @@ const KEYS = [
   "setup_outside",
   "setup_path",
   "setup_choose",
+  "setup_choose_message",
+  "setup_choose_prompt",
   "setup_create",
   "setup_path_required",
   "setup_skipped",

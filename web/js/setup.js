@@ -63,7 +63,9 @@ export function renderSetup(root, { fetch: get = globalThis.fetch, reload, wait,
     const chooseButton = el("button", "setup-choose", t("setup_choose"));
     chooseButton.setAttribute("type", "button");
     chooseButton.addEventListener("click", async () => {
-      const picked = String((await choose()) ?? "").replace(/\/+$/, "");
+      // The window has no dictionary of its own, so the chooser's words go
+      // with the call.
+      const picked = String((await choose(t("setup_choose_message"), t("setup_choose_prompt"))) ?? "").replace(/\/+$/, "");
       if (picked !== "") path.value = `${picked}/${WORKSPACE_NAME}`;
     });
     row.append(chooseButton);
@@ -155,6 +157,6 @@ if (typeof document !== "undefined" && typeof document.getElementById === "funct
   const root = document.getElementById("setup");
   if (root) {
     const chooser = globalThis.fleetdeckChooseFolder;
-    renderSetup(root, { choose: typeof chooser === "function" ? () => chooser() : undefined });
+    renderSetup(root, { choose: typeof chooser === "function" ? (message, prompt) => chooser(message, prompt) : undefined });
   }
 }

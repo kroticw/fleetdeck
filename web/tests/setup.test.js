@@ -83,10 +83,21 @@ test("setup: no folder chooser in a browser, where nothing provides one", async 
 });
 
 test("setup: the window's chooser picks the folder the workspace is made in", async () => {
-  await render({ choose: async () => "/Users/me/Documents/" });
+  const asked = [];
+  await render({
+    choose: async (...args) => {
+      asked.push(args);
+      return "/Users/me/Documents/";
+    },
+  });
   fireEvent(root.querySelector("button.setup-choose"), "click");
   await settle();
   assert.equal(root.querySelector("input.setup-path").value, "/Users/me/Documents/fleetdeck");
+  // The window has no dictionary of its own: the chooser's words come from here.
+  assert.equal(asked.length, 1);
+  const [message, prompt] = asked[0];
+  assert.ok(message && !message.startsWith("setup_"), `the chooser's message is a sentence, not a key: ${message}`);
+  assert.ok(prompt && !prompt.startsWith("setup_"), `the chooser's button is a word, not a key: ${prompt}`);
 });
 
 test("setup: a chooser closed without a folder leaves the path as it was", async () => {
