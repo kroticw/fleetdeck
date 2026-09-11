@@ -439,33 +439,54 @@ main {
   border-radius: var(--radius);
 }
 
+/* --col-width and [data-folded] are the resizable-column mechanism, shared
+ * by whichever columns have it (currently the orchestrator and the session
+ * list — web/js/columnresize.js). Kept as two separate rules rather than one
+ * comma-joined selector: web/tests/app-css.test.js finds a rule's own body by
+ * its selector text, and a joined selector's body is not addressable by
+ * either name alone. Both columns carry the same four declarations for the
+ * same reason each did on its own: see the orchestrator's own history below.
+ */
 .col-orchestrator {
   /* 25% is what this column was before it could be resized, so a person who
      never touches the controls sees exactly what they saw. The custom property
-     is set by web/js/columnwidth.js from a ladder of steps; a percentage rather
-     than a pixel width, so the three zones keep their proportions when the
-     window changes. */
+     is set by web/js/columnwidth.js by way of web/js/columnresize.js; a
+     percentage rather than a pixel width, so the three zones keep their
+     proportions when the window changes. */
   /* 0 0, not 1 1. While this column grew and shrank alongside its neighbours,
      free space was shared out afterwards and the column ended up somewhere near
      its basis rather than at it — measured, a 260px drag moved the edge 161px,
      and an edge that does not keep up with the pointer feels broken however
      correct the arithmetic is. Pinned to its basis, the column is exactly as
-     wide as it is told and the other two divide what is left. */
-  flex: 0 0 var(--o-width, 25%);
+     wide as it is told, and .col-center — the only one of the three still
+     growing (flex: 2 1 50% below) — is what takes up or gives back the rest. */
+  flex: 0 0 var(--col-width, 25%);
   display: flex;
   flex-direction: column;
   /* The pixel floor, alongside the percentage one in web/js/columnwidth.js.
      A percentage minimum on a narrow window is a handful of pixels — "not
      zero" and practically zero — so the two are applied together and whichever
-     is stricter wins. This overrides .col's own min-width: 0, which the other
-     two columns still need in order to give way. */
+     is stricter wins. This overrides .col's own min-width: 0, which .col-center
+     still needs in order to give way. */
+  min-width: 220px;
+}
+
+.col-sessions {
+  /* Same mechanism, same reasons, as .col-orchestrator above — this column's
+     own resize/fold was added second, by way of the same
+     web/js/columnresize.js, so nothing here is a fresh decision. */
+  flex: 0 0 var(--col-width, 25%);
+  display: flex;
+  flex-direction: column;
   min-width: 220px;
 }
 
 /* Folded away: a strip just wide enough for the one control that brings it
    back. Not `display: none` — a column that vanishes takes the way back with
-   it, and a person is left with two zones and no idea there were three. */
-.col-orchestrator[data-folded="1"] {
+   it, and a person is left with two zones and no idea there were three.
+   Written against any .col rather than .col-orchestrator alone, so a second
+   resizable column gets the same treatment without a second copy of it. */
+.col[data-folded="1"] {
   flex: 0 0 auto;
   overflow: hidden;
   /* The floor above is about a column being read; a folded one is not being
@@ -473,7 +494,7 @@ main {
   min-width: 0;
 }
 
-.col-orchestrator[data-folded="1"] > *:not(.o-size) {
+.col[data-folded="1"] > *:not(.col-size) {
   display: none;
 }
 
@@ -592,10 +613,9 @@ main {
   min-height: 0;
 }
 
+/* The resize/fold properties live in the earlier .col-sessions rule, next to
+   .col-orchestrator's; this is the column's own remaining, unshared style. */
 .col-sessions {
-  flex: 1 1 25%;
-  display: flex;
-  flex-direction: column;
   padding-bottom: var(--gap);
 }
 
@@ -1856,7 +1876,13 @@ main {
   word-break: break-word;
 }
 
-/* The controls that size the orchestrator column.
+/* The controls that size a resizable column: fold/unfold buttons and the
+ * drag edge. Shared by every column web/js/columnresize.js mounts onto —
+ * currently the orchestrator's and the session list's — under one set of
+ * class names and one [data-folded] state, rather than a second, near-copy
+ * of each: two implementations of the same control drift apart on the next
+ * edit to either one, in a way no test catches and a person feels under
+ * their hand before anyone reads a diff.
  *
  * Own block at the end, so a task rewriting this stylesheet moves one piece.
  *
@@ -1868,7 +1894,7 @@ main {
  * They are always visible, never on hover. A control that shows itself only to
  * a pointer already resting on it does not exist for a person who has not found
  * it yet — the same rule the edit pencil was fixed for. */
-.o-size {
+.col-size {
   flex: none;
   display: flex;
   justify-content: flex-end;
@@ -1877,7 +1903,7 @@ main {
   border-bottom: 1px solid var(--border);
 }
 
-.o-size-btn {
+.col-size-btn {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
@@ -1888,7 +1914,7 @@ main {
   cursor: pointer;
 }
 
-.o-size-btn:hover:not(:disabled) {
+.col-size-btn:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text);
 }
@@ -1896,25 +1922,25 @@ main {
 /* Disabled at the ends of the ladder rather than removed: a control that
    disappears takes its own explanation with it, and a person is left wondering
    whether they imagined it. */
-.o-size-btn:disabled {
+.col-size-btn:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
-/* Only one of the four is ever on screen at a time, and which one is the whole
+/* Only one of the two is ever on screen at a time, and which one is the whole
    difference between a column a person can put aside and a column they lose.
-   Unfolded: the three that size it. Folded: the one that brings it back. */
-.o-size-unfold {
+   Unfolded: the one that sizes it. Folded: the one that brings it back. */
+.col-size-unfold {
   display: none;
 }
 
-.col-orchestrator[data-folded="1"] .o-size {
+.col[data-folded="1"] .col-size {
   justify-content: center;
   border-bottom: none;
   padding: var(--gap-sm) 2px;
 }
 
-.col-orchestrator[data-folded="1"] .o-size-unfold {
+.col[data-folded="1"] .col-size-unfold {
   display: block;
   /* Drawn as a button, not as a glyph left behind.
    *
@@ -1932,18 +1958,18 @@ main {
   padding: 10px 6px;
 }
 
-.col-orchestrator[data-folded="1"] .o-size-unfold:hover {
+.col[data-folded="1"] .col-size-unfold:hover {
   background: var(--surface-hover);
   border-color: var(--accent-strong);
 }
 
-.col-orchestrator[data-folded="1"] .o-size-fold {
+.col[data-folded="1"] .col-size-fold {
   display: none;
 }
 
-/* The edge a person drags to resize the orchestrator column.
+/* The edge a person drags to resize a column.
  *
- * Created by web/js/orchestrator.js as a sibling of the column inside <main>,
+ * Created by web/js/columnresize.js as a sibling of the column inside <main>,
  * not as a child of it: .col carries overflow: auto, and an absolutely
  * positioned child of a scrolling box scrolls away with the content. Nothing
  * else in the page looks for this element.
@@ -1957,7 +1983,7 @@ main {
  *
  * The gutter is var(--gap) wide and this fills it, so nothing else on the page
  * moves to make room. */
-.o-grip {
+.col-grip {
   flex: 0 0 var(--gap);
   align-self: stretch;
   position: relative;
@@ -1972,7 +1998,7 @@ main {
 
 /* The grip mark: three short lines down the middle, which is the shape a person
    already reads as "this can be dragged" without being told. */
-.o-grip::after {
+.col-grip::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -1983,17 +2009,17 @@ main {
   border-left: 2px dotted var(--text-faint);
 }
 
-.o-grip:hover,
-.o-grip.is-dragging {
+.col-grip:hover,
+.col-grip.is-dragging {
   background: var(--accent);
 }
 
-.o-grip:hover::after,
-.o-grip.is-dragging::after {
+.col-grip:hover::after,
+.col-grip.is-dragging::after {
   border-left-color: var(--surface);
 }
 
-.o-grip[hidden] {
+.col-grip[hidden] {
   display: none;
 }
 

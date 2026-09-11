@@ -1,7 +1,8 @@
 import { subscribe, get } from "./store.js";
 import { setOrchestratorSession, setSessionLabel } from "./api.js";
 import { t } from "./i18n.js";
-import { createColumnWidth, MIN_PIXELS } from "./columnwidth.js";
+import { ORCHESTRATOR_KEYS } from "./columnwidth.js";
+import { mountColumnResize } from "./columnresize.js";
 import { createLiveTerminal } from "./liveterminal.js";
 
 // The orchestrator is not one session among many: it is the standing place of
@@ -103,113 +104,15 @@ export function viewSignature(snap, connected) {
 // with its socket — which the page never needs, since the column lives as
 // long as the page; a test mounting one column after another does.
 export function renderOrchestrator(root, { timers = globalThis } = {}) {
-  // How wide this column is and whether it is folded away. applyWidth is the
-  // only place that touches the column element itself, and it is called at
-  // startup as well as on every change — a state that is only applied when it
-  // changes is a state a reload does not restore.
-  const applyWidth = ({ width: value, folded }) => {
-    root.style.setProperty("--o-width", value);
-    // An attribute rather than a class, so the stylesheet says what a folded
-    // column looks like in one place and this module never decides that.
-    if (folded) root.dataset.folded = "1";
-    else delete root.dataset.folded;
-    // The grip is not a child of the column — see wireResizeGrip — so it is
-    // told separately, and it is what hides itself when there is no edge to
-    // pull.
-    if (grip) grip.hidden = folded;
-    // After the attribute: a terminal opened on unfolding measures the pane it
-    // is opened into, and a pane still marked folded has no size to measure.
-    syncTerminal();
-  };
-
-  // The strip a person grabs to resize the column.
-  //
-  // WHO MAKES IT AND WHO READS IT, said here because it is not in index.html
-  // and half a wiring living in markup while the other half lives in a script
-  // is how this project has produced the same defect seven times:
-  //   • created by wireResizeGrip below, in this module, as a SIBLING of the
-  //     column inside <main>. It cannot live inside the column: .col carries
-  //     overflow: auto, and an absolutely positioned child of a scrolling box
-  //     scrolls away with the content;
-  //   • styled by .o-grip in web/app.css, which is the only place that decides
-  //     what it looks like;
-  //   • nothing else looks for it. If this module stops creating it, it stops
-  //     existing, and the column simply loses its handle rather than half of
-  //     something staying behind.
-  let grip = null;
-
-  const wireResizeGrip = () => {
-    const main = root.parentElement;
-    if (!main) return; // nothing to hang a sibling on; the column still works
-
-    grip = document.createElement("div");
-    grip.className = "o-grip";
-    grip.setAttribute("role", "separator");
-    grip.setAttribute("aria-orientation", "vertical");
-    grip.setAttribute("aria-label", t("column_drag"));
-    grip.setAttribute("title", t("column_drag"));
-    main.insertBefore(grip, root.nextSibling);
-
-    // A drag that never ends is the classic failure here: the pointer is
-    // released over another window, no "up" arrives, and the interface stays in
-    // drag mode for good. Pointer capture is what prevents it — the element
-    // keeps receiving events wherever the pointer goes, and it gets pointerup
-    // and pointercancel both. `finish` is idempotent so every one of the three
-    // ways a drag can end lands in the same place.
-    let dragging = false;
-
-    const widthFrom = (clientX) => {
-      const bounds = main.getBoundingClientRect();
-      const available = bounds.width;
-      if (available <= 0) return null;
-      // Where the column's right edge would be if it followed the pointer.
-      const pixels = clientX - root.getBoundingClientRect().left;
-      // The pixel floor as well as the percentage one. On a narrow window a
-      // percentage floor is a handful of pixels — "not zero" and useless — so
-      // the two are applied together and the stricter one wins.
-      const floored = Math.max(MIN_PIXELS, pixels);
-      return (floored / available) * 100;
-    };
-
-    const finish = (event) => {
-      if (!dragging) return;
-      dragging = false;
-      grip.classList.remove("is-dragging");
-      document.body.classList.remove("is-resizing");
-      if (event && grip.hasPointerCapture?.(event.pointerId)) grip.releasePointerCapture(event.pointerId);
-      // Storage is written once, at the end. A drag across the screen is a
-      // hundred moves and one outcome.
-      width.remember();
-    };
-
-    grip.addEventListener("pointerdown", (event) => {
-      if (event.button !== undefined && event.button !== 0) return; // left button only
-      dragging = true;
-      grip.classList.add("is-dragging");
-      // On <body> rather than on the grip: the cursor has to stay col-resize
-      // while the pointer is anywhere on the page, and text must not select
-      // under it mid-drag.
-      document.body.classList.add("is-resizing");
-      grip.setPointerCapture?.(event.pointerId);
-      event.preventDefault?.();
-    });
-
-    grip.addEventListener("pointermove", (event) => {
-      if (!dragging) return;
-      const percent = widthFrom(event.clientX);
-      if (percent !== null) width.setPercent(percent);
-      event.preventDefault?.();
-    });
-
-    grip.addEventListener("pointerup", finish);
-    grip.addEventListener("pointercancel", finish);
-    // Belt and braces for the case pointer capture does not cover: the window
-    // itself losing focus mid-drag. Ending the drag is always safe — the width
-    // on screen is already the width being kept.
-    window.addEventListener("blur", () => finish(null));
-  };
-
-  const width = createColumnWidth(applyWidth);
+  // How wide this column is, whether it is folded away, and the edge a
+  // person drags to change either — the same mechanism the session list
+  // shares (web/js/columnresize.js), not a second copy of it. onChange runs
+  // after the DOM already reflects the new width and fold state, which is
+  // the order syncTerminal needs: a terminal opened on unfolding measures
+  // the pane it is opened into, and a pane still marked folded has no size
+  // to measure.
+  const resize = mountColumnResize(root, ORCHESTRATOR_KEYS, () => syncTerminal());
+  const width = resize.width;
 
   // Set by the store subscription on every push (including the initial
   // synchronous one) and read by draw() whenever it runs — including the
@@ -322,7 +225,7 @@ export function renderOrchestrator(root, { timers = globalThis } = {}) {
   // what remains has to be the way back. A control a person cannot see is a
   // control they do not have — the same rule the edit pencil was fixed for.
   const buildWidthControls = () => {
-    const strip = el("div", "o-size");
+    const strip = el("div", "col-size");
 
     const button = (className, glyph, label, onClick) => {
       const b = el("button", className, glyph);
@@ -334,13 +237,13 @@ export function renderOrchestrator(root, { timers = globalThis } = {}) {
     };
 
     // Two, not four. The operator looked at "wider" and "narrower" as buttons
-    // and asked for the edge instead — that is what .o-grip is. Folding stays a
-    // button because it is a state rather than a size, and because dragging to
+    // and asked for the edge instead — that is what .col-grip is. Folding stays
+    // a button because it is a state rather than a size, and because dragging to
     // nothing is a bad way to reach it: a column dragged to nothing has no edge
     // left to grab.
     strip.append(
-      button("o-size-btn o-size-unfold", "»", t("column_unfold"), () => width.unfold()),
-      button("o-size-btn o-size-fold", "«", t("column_fold"), () => width.fold()),
+      button("col-size-btn col-size-unfold", "»", t("column_unfold"), () => width.unfold()),
+      button("col-size-btn col-size-fold", "«", t("column_fold"), () => width.fold()),
     );
     return strip;
   };
@@ -544,13 +447,12 @@ export function renderOrchestrator(root, { timers = globalThis } = {}) {
     if (!built) {
       built = true;
       buildFrame();
-      // The grip before the width: applyWidth tells the grip whether to show
-      // itself, and a grip that does not exist yet cannot be told. The
-      // remembered width has to be on screen from the first paint, not from
-      // the first click — a reload that showed the default for a moment and
-      // then jumped would be its own small defect.
-      wireResizeGrip();
-      applyWidth(width.state());
+      // The grip already exists — mountColumnResize created it above, before
+      // buildFrame even ran. What happens here is the first paint: the
+      // remembered width has to be on screen from it, not from the first
+      // click — a reload that showed the default for a moment and then
+      // jumped would be its own small defect.
+      resize.paint();
     }
 
     const head = root.querySelector(".o-head");
