@@ -109,6 +109,40 @@ func TestResolveWrapCmdIsEmptyWithNeitherFlagNorConfig(t *testing.T) {
 	}
 }
 
+// --- resolveRateLimitsPath: the same precedence, for a more consequential
+// value -- see this package's own doc comment for why there is no third
+// fallback to some other default when both of these are empty.
+
+func TestResolveRateLimitsPathPrefersTheFlagOverConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("statusline:\n  rate_limits_path: /from/config.json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveRateLimitsPath("/from/flag.json", path)
+	if got != "/from/flag.json" {
+		t.Fatalf("got %q, want the flag value even though config.yaml has one too", got)
+	}
+}
+
+func TestResolveRateLimitsPathFallsBackToConfigWhenFlagIsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("statusline:\n  rate_limits_path: /from/config.json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveRateLimitsPath("", path)
+	if got != "/from/config.json" {
+		t.Fatalf("got %q, want config.yaml's value when the flag was not given", got)
+	}
+}
+
+func TestResolveRateLimitsPathIsEmptyWithNeitherFlagNorConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.yaml")
+	got := resolveRateLimitsPath("", path)
+	if got != "" {
+		t.Fatalf("got %q, want empty -- no flag, no config file, and no other default", got)
+	}
+}
+
 // TestParseReadsRateLimits is the fix this command exists for: Claude Code's
 // own statusline schema, captured rather than silently dropped the way an
 // unmarshal into a struct with no matching field already would.
@@ -205,6 +239,51 @@ func TestWriteRateLimitsTracesAPartialWindow(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "five_hour=true") || !strings.Contains(string(body), "seven_day=false") {
 		t.Fatalf("trace does not name which windows arrived: %q", body)
+	}
+}
+
+// TestWriteRateLimitsTracesWhenNoPathIsConfigured is the fix for the second
+// real incident this task exists to stop repeating: real rate_limits data
+// arrives, but neither -rate-limits-path nor config.yaml's
+// statusline.rate_limits_path was given (exactly what an already-deployed
+// settings.json line looks like right after the binary behind it is
+// upgraded to this version, before the line is also updated). Nothing may
+// be written under any default -- that is the whole point -- but the gap
+// must leave a trace, or the day someone upgrades the binary without the
+// line, the rate-limit gauges freeze with nothing anywhere saying why.
+func TestWriteRateLimitsTracesWhenNoPathIsConfigured(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	in, err := parse([]byte(sampleInputWithRateLimits))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRateLimitsTo("", tracePath, in); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("expected a trace file to exist when a full pair arrived with no path configured, got: %v", err)
+	}
+	if !strings.Contains(string(body), "no -rate-limits-path") {
+		t.Fatalf("trace does not say the path was never configured: %q", body)
+	}
+}
+
+// TestWriteRateLimitsWithNoPathAndNoRateLimitsIsNotTraced is the control
+// case for the test above and for the ordinary-non-subscriber skip: an
+// empty path with nothing at all on the rate_limits side must not fabricate
+// a trace either -- there is nothing to report missing.
+func TestWriteRateLimitsWithNoPathAndNoRateLimitsIsNotTraced(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	in, err := parse([]byte(sampleInput)) // no rate_limits at all
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRateLimitsTo("", tracePath, in); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tracePath); !os.IsNotExist(err) {
+		t.Fatalf("no rate_limits and no path configured must not be traced: stat err=%v", err)
 	}
 }
 
@@ -340,17 +419,62 @@ func TestEndToEndSurvivesAnUnwritableRateLimitsPath(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(readOnlyDir, 0o700) }) // let t.TempDir() clean up after itself
 
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, "-rate-limits-path", filepath.Join(readOnlyDir, "rate_limits.json"))
 	cmd.Stdin = strings.NewReader(sampleInputWithRateLimits)
-	cmd.Env = append(os.Environ(),
-		"FLEETDECK_ENDPOINT=http://127.0.0.1:1",
-		"FLEETDECK_RATE_LIMITS_PATH="+filepath.Join(readOnlyDir, "rate_limits.json"),
-	)
+	cmd.Env = append(os.Environ(), "FLEETDECK_ENDPOINT=http://127.0.0.1:1")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("exited with an error: %v", err)
 	}
 	if !strings.Contains(string(out), "Opus 5") {
 		t.Fatalf("status line missing with an unwritable rate-limits path: %q", out)
+	}
+}
+
+// TestEndToEndNeverWritesRateLimitsWithoutExplicitConfiguration is the fix
+// this whole redesign exists for: a hand run of the real binary, fed a real
+// rate_limits pair, with neither -rate-limits-path nor a config.yaml
+// statusline.rate_limits_path entry, must not write anything reachable from
+// HOME -- not to the well-known conventional location, not anywhere else.
+// HOME is pointed at a scratch directory so a regression that silently
+// reintroduces a HOME-relative default is caught here rather than on a real
+// machine a second time.
+func TestEndToEndNeverWritesRateLimitsWithoutExplicitConfiguration(t *testing.T) {
+	bin := buildFleetdeckStatusBinary(t)
+	scratchHome := t.TempDir()
+
+	cmd := exec.Command(bin)
+	cmd.Stdin = strings.NewReader(sampleInputWithRateLimits)
+	cmd.Env = append(os.Environ(), "FLEETDECK_ENDPOINT=http://127.0.0.1:1", "HOME="+scratchHome)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("exited with an error: %v", err)
+	}
+	if !strings.Contains(string(out), "Opus 5") {
+		t.Fatalf("status line missing with no rate-limits path configured: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(scratchHome, ".config", "fleetdeck", "rate_limits.json")); !os.IsNotExist(err) {
+		t.Fatalf("a real rate_limits pair with nothing configured must never write under HOME, stat err=%v", err)
+	}
+}
+
+// TestEndToEndWritesRateLimitsWhenTheFlagIsGiven is
+// TestEndToEndNeverWritesRateLimitsWithoutExplicitConfiguration's control
+// case: the same real binary, the same real payload, differing only in
+// whether -rate-limits-path was given, must produce a file in the one case
+// and not the other -- proving the flag is what the decision actually turns
+// on, not something else that happened to differ between the two tests.
+func TestEndToEndWritesRateLimitsWhenTheFlagIsGiven(t *testing.T) {
+	bin := buildFleetdeckStatusBinary(t)
+	path := filepath.Join(t.TempDir(), "rate_limits.json")
+
+	cmd := exec.Command(bin, "-rate-limits-path", path)
+	cmd.Stdin = strings.NewReader(sampleInputWithRateLimits)
+	cmd.Env = append(os.Environ(), "FLEETDECK_ENDPOINT=http://127.0.0.1:1")
+	if out, err := cmd.Output(); err != nil {
+		t.Fatalf("exited with an error: %v\n%s", err, out)
+	}
+	if _, err := usage.ReadLocal(path); err != nil {
+		t.Fatalf("a real rate_limits pair with -rate-limits-path given must produce a readable file: %v", err)
 	}
 }

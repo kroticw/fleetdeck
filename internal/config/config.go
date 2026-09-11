@@ -90,6 +90,14 @@ type Config struct {
 	// here only when the same-named command-line flag was not given. Empty
 	// means no wrapping: fleetdeck-status prints its own plain render.
 	StatuslineWrap string
+	// StatuslineRateLimitsPath is where cmd/fleetdeck-status writes the
+	// rate-limit windows it captures from stdin, read from here only when
+	// its own command-line flag was not given. Empty means nothing is
+	// written at all -- there is deliberately no fallback default path:
+	// two real incidents in one evening (see cmd/fleetdeck-status's own
+	// package doc) came from that file having an implicit default that a
+	// hand-run invocation touched without meaning to.
+	StatuslineRateLimitsPath string
 }
 
 // configDuration is time.Duration decoded from YAML with its own validation-shaped
@@ -177,7 +185,8 @@ type file struct {
 		Port int `yaml:"port"`
 	} `yaml:"server"`
 	Statusline struct {
-		Wrap string `yaml:"wrap"`
+		Wrap           string `yaml:"wrap"`
+		RateLimitsPath string `yaml:"rate_limits_path"`
 	} `yaml:"statusline"`
 }
 
@@ -222,6 +231,7 @@ func configToFile(c Config) file {
 	f.Usage.Enabled = c.UsageEnabled
 	f.Server.Port = c.ServerPort
 	f.Statusline.Wrap = c.StatuslineWrap
+	f.Statusline.RateLimitsPath = c.StatuslineRateLimitsPath
 	return f
 }
 
@@ -239,10 +249,11 @@ func fileToConfig(f file) Config {
 			CardBlocked:  f.Notify.Enabled.CardBlocked,
 			SilenceAfter: time.Duration(f.Notify.SilenceAfter),
 		},
-		DaemonPollInterval: time.Duration(f.Daemon.PollInterval),
-		UsageEnabled:       f.Usage.Enabled,
-		ServerPort:         f.Server.Port,
-		StatuslineWrap:     f.Statusline.Wrap,
+		DaemonPollInterval:       time.Duration(f.Daemon.PollInterval),
+		UsageEnabled:             f.Usage.Enabled,
+		ServerPort:               f.Server.Port,
+		StatuslineWrap:           f.Statusline.Wrap,
+		StatuslineRateLimitsPath: f.Statusline.RateLimitsPath,
 	}
 }
 
