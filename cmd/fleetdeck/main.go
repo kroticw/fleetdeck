@@ -191,6 +191,23 @@ func setCardField(path, field, value string) error {
 	}
 }
 
+// createCard is server.Deps.CreateCard: start a card on the board, then record it
+// in the board's git history — the same two steps as setCardField, with the same
+// rule for the second: once the file exists, a commit that did not happen is
+// wrapped in server.ErrCardWrittenNotCommitted and returned with the path, so the
+// operator is not invited to create the card a second time.
+func createCard(boardDir, title, zone string, now time.Time) (string, error) {
+	path, err := board.CreateCard(boardDir, title, zone, now)
+	if err != nil {
+		return "", err
+	}
+	msg := "chore(board): add card " + filepath.Base(path)
+	if err := board.Commit(filepath.Dir(path), filepath.Base(path), msg); err != nil {
+		return path, fmt.Errorf("%w: %w", server.ErrCardWrittenNotCommitted, err)
+	}
+	return path, nil
+}
+
 // setOrchestratorSession is server.Deps.SetOrchestratorSession: pin, or
 // given an empty string unpin, the session shown in the orchestrator
 // column, persisting the choice before the running collector reports it.
@@ -516,6 +533,14 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
 func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
+	// Left nil without a board: the route then answers that this panel has no
+	// board, instead of creating cards relative to wherever the panel started.
+	var create func(title, zone string) (string, error)
+	if cfg.BoardPath != "" {
+		create = func(title, zone string) (string, error) {
+			return createCard(cfg.BoardPath, title, zone, time.Now())
+		}
+	}
 	return server.Deps{
 		Snapshot: p.snapshot,
 		SendText: func(session, text string) error { return dc.SendText(ctx, session, text) },
@@ -543,6 +568,7 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		TerminalToken: rand.Text(),
 
 		SetCardField: setCardField,
+		CreateCard:   create,
 		// Without this the server has nothing to confine a card write to and answers
 		// every one of them 503 — deliberately, since the path arrives from the
 		// browser and internal/board will rewrite a frontmatter line in any file
