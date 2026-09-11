@@ -51,10 +51,53 @@ curl --silent https://registry.npmjs.org/@xterm/xterm | \
   python3 -c 'import json,sys; print(json.load(sys.stdin)["dist-tags"]["latest"])'
 ```
 
-Then re-run the download block above with the new version, update the digests
-here, and check that the bundle still exports `Terminal`:
+Then re-run the download block above with the new version, update the digests here, and check that the bundle still exports `Terminal`:
 
 ```bash
-node --input-type=commonjs --eval \
-  'console.log(Object.keys(require("./web/vendor/xterm.js")))'
+node --eval 'const m = { exports: {} };
+  new Function("module", "exports", require("node:fs").readFileSync("web/vendor/xterm.js", "utf8"))(m, m.exports);
+  console.log(Object.keys(m.exports))'
+```
+
+It prints `[ 'Terminal' ]`. A plain `require("./web/vendor/xterm.js")` is not a check: `web/package.json` declares `"type": "module"`, so node loads the file as an ES module, the UMD wrapper finds no `module` to export into, and `require` returns an empty object — `[]`, printed without an error.
+
+## @xterm/addon-fit 0.11.0
+
+Sizes the terminal to the element it is drawn in. Not wired into the page yet.
+
+| File | Source |
+| --- | --- |
+| `addon-fit.js` | `https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.js` |
+| `LICENSE.addon-fit` | `https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/LICENSE` |
+
+Licence: MIT (`LICENSE.addon-fit`), vendored alongside for the same reason as xterm's.
+
+The version is pinned to xterm's, not chosen on its own. The addon reads xterm's private render service (`_core._renderService`) to measure a cell, so it is only known to work against the xterm build it was released with. `0.11.0` and xterm `6.0.0` were published from the same commit (`f447274f430fd22513f6adbf9862d19524471c04`, the `commit` field of both `package.json` files on the npm registry), within the same minute on 2025-12-22. Bump the two together or not at all.
+
+`lib/addon-fit.js` is the UMD build: loaded with a plain `<script>` tag it assigns `FitAddon` onto the global object, and the class is `FitAddon.FitAddon`.
+
+### Reproducing this exact set
+
+```bash
+version=0.11.0
+curl --silent --show-error --location --fail \
+  --output web/vendor/addon-fit.js      "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${version}/lib/addon-fit.js"
+curl --silent --show-error --location --fail \
+  --output web/vendor/LICENSE.addon-fit "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${version}/LICENSE"
+shasum --algorithm 256 web/vendor/addon-fit.js web/vendor/LICENSE.addon-fit
+```
+
+Expected digests. They match the files inside the registry tarball (`addon-fit-0.11.0.tgz`, SHA-1 `ba4778b69fcc9044a060c2176bbe077657d7b37e` as the registry lists it), not only what the CDN served:
+
+```text
+ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527  web/vendor/addon-fit.js
+e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f  web/vendor/LICENSE.addon-fit
+```
+
+Check the export the same way as xterm's; it prints `[ 'FitAddon' ]`:
+
+```bash
+node --eval 'const m = { exports: {} };
+  new Function("module", "exports", require("node:fs").readFileSync("web/vendor/addon-fit.js", "utf8"))(m, m.exports);
+  console.log(Object.keys(m.exports))'
 ```
