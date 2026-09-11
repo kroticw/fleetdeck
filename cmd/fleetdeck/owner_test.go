@@ -61,11 +61,19 @@ func TestOwnerGoneOfAProcessAlreadyGoneFiresAtOnce(t *testing.T) {
 // the window starts the panel itself, directly, and anything in between -- a
 // shell wrapping the start for its environment, say -- would leave the panel
 // watching the wrong process and outliving the window. Said, not guessed.
+//
+// run is called in this process, so a run that did not refuse would start a
+// whole panel here. It would do so on a home and a board of its own, never
+// the machine's: a broken check -- a mutation run makes exactly that -- must
+// not reach the operator's ~/.claude or board.
 func TestAPanelWhoseOwnerIsNotItsParentRefusesToStart(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	dir := t.TempDir()
+	t.Setenv("HOME", filepath.Join(dir, "home"))
+	cfgPath := filepath.Join(dir, "config.yaml")
 	cfg := config.Default()
 	cfg.ServerPort = freePort(t)
 	cfg.UsageEnabled = false
+	cfg.BoardPath = filepath.Join(dir, "board")
 	if err := config.Save(cfgPath, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -124,9 +132,14 @@ func newPanelRig(t *testing.T) *panelRig {
 // window starts a shell that starts the panel as its own direct child with
 // --owner-pid of the shell -- the shape the window gives it -- and prints the
 // panel's PID.
+//
+// The shell stays until it is signalled, like a window, or until this test
+// process is gone: a test binary killed by its -timeout runs no Cleanup, and
+// a shell left behind would keep its panel alive -- by the very rule under
+// test.
 func (r *panelRig) window() (shell *exec.Cmd, panelPID int) {
 	r.t.Helper()
-	script := fmt.Sprintf(`%q --config %q --owner-pid $$ >/dev/null 2>&1 & echo $!; wait`, r.bin, r.cfg)
+	script := fmt.Sprintf(`%q --config %q --owner-pid $$ >/dev/null 2>&1 & echo $!; while kill -0 %d 2>/dev/null; do sleep 0.2; done`, r.bin, r.cfg, os.Getpid())
 	shell = exec.Command("sh", "-c", script)
 	shell.Env = append(os.Environ(), "HOME="+r.home)
 	out, err := shell.StdoutPipe()
