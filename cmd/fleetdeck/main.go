@@ -404,6 +404,18 @@ func run(configPath string) error {
 	return nil
 }
 
+// listedAlive reports whether short is in the daemon's list and not dying. A dying
+// session is being stopped: the daemon marks it so about a second before its
+// terminal stream ends, which is exactly when the bridge asks.
+func listedAlive(sessions []daemon.Session, short string) bool {
+	for _, s := range sessions {
+		if s.Short == short {
+			return !s.Dying
+		}
+	}
+	return false
+}
+
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
 func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
@@ -420,6 +432,15 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 				return nil, err
 			}
 			return a, nil
+		},
+		// Asked of the daemon itself, never of p.snapshot: the bridge asks the moment
+		// a stream ends, and the snapshot can be a whole poll behind that moment.
+		SessionListed: func(lctx context.Context, session string) (bool, error) {
+			sessions, err := dc.ListSessions(lctx)
+			if err != nil {
+				return false, err
+			}
+			return listedAlive(sessions, session), nil
 		},
 
 		SetCardField: setCardField,

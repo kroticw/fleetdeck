@@ -51,6 +51,8 @@ const DIGEST_INTERVAL_MS = 3000;
 const STREAM_ENDINGS = {
   4000: "terminal_session_ended",
   4001: "terminal_kicked",
+  4002: "terminal_stream_dropped",
+  4003: "terminal_stream_unexplained",
   4404: "terminal_no_session",
   4401: "terminal_key_refused",
   4503: "terminal_daemon_unavailable",

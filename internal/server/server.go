@@ -151,6 +151,14 @@ type Deps struct {
 	// only; the terminal lives until it is closed. Nil leaves the route answering 503.
 	Attach func(ctx context.Context, session string, cols, rows int) (Terminal, error)
 
+	// SessionListed reports whether the daemon lists session as alive right now —
+	// present in its list and not dying. The terminal bridge asks it when a stream
+	// ends with no reason attached, because that alone does not say the session
+	// ended (see streamEnding in pty.go). It must ask the daemon, not the cached
+	// Snapshot, which can be a whole poll behind. Nil leaves such an ending
+	// unexplained rather than guessed.
+	SessionListed func(ctx context.Context, session string) (bool, error)
+
 	// interval overrides the WebSocket's one-second push cadence. It exists for
 	// tests, which cannot afford to wait whole seconds to observe a cadence; zero
 	// means the one second the panel actually uses.

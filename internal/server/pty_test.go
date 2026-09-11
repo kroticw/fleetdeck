@@ -380,9 +380,62 @@ func TestPTYKickClosesWithItsOwnCodeAndTheReason(t *testing.T) {
 	}
 }
 
-func TestPTYSessionEndClosesWithItsOwnCode(t *testing.T) {
+// A stream that simply stops is not evidence that the session ended. The daemon
+// also closes an attach whose reader fell behind, with no marker, and then the
+// session is still running; saying "the session has ended" there would be a
+// false sentence on the operator's screen. So the bridge asks the daemon, and
+// only the daemon's answer decides — including the answer that it cannot say.
+func TestPTYStreamEndIsExplainedByAskingTheDaemon(t *testing.T) {
+	cases := []struct {
+		name   string
+		listed func(context.Context, string) (bool, error)
+		want   websocket.StatusCode
+	}{
+		{"session no longer listed", func(context.Context, string) (bool, error) { return false, nil }, statusSessionEnded},
+		{"session still listed", func(context.Context, string) (bool, error) { return true, nil }, statusStreamDropped},
+		{"daemon gone", func(context.Context, string) (bool, error) { return false, daemon.ErrDaemonUnavailable }, statusDaemonUnavailable},
+		{"daemon could not answer", func(context.Context, string) (bool, error) { return false, errors.New("list: boom") }, statusStreamEndUnexplained},
+		{"nothing to ask", nil, statusStreamEndUnexplained},
+	}
+	for _, c := range cases {
+		term := newFakeTerminal(true)
+		d, _ := ptyDeps(term, nil)
+		asked := make(chan string, 1)
+		if c.listed != nil {
+			d.SessionListed = func(ctx context.Context, session string) (bool, error) {
+				asked <- session
+				return c.listed(ctx, session)
+			}
+		}
+		url, _ := wsServer(t, d)
+		conn, _, err := dialPTY(t, url+"/api/sessions/abc/pty?cols=80&rows=24", nil)
+		if err != nil {
+			t.Fatalf("%s: dial: %v", c.name, err)
+		}
+		readControl(t, conn)
+		close(term.out)
+		if code, reason := closeStatus(t, conn); code != c.want {
+			t.Errorf("%s: closed with %d %q, want %d", c.name, code, reason, c.want)
+		}
+		if c.listed != nil {
+			select {
+			case s := <-asked:
+				if s != "abc" {
+					t.Errorf("%s: asked about %q, want the session the stream was on", c.name, s)
+				}
+			default:
+				t.Errorf("%s: the daemon was never asked", c.name)
+			}
+		}
+	}
+}
+
+// A kick explains itself; there is nothing to ask the daemon about.
+func TestPTYKickIsNotSecondGuessed(t *testing.T) {
 	term := newFakeTerminal(true)
+	term.endErr = &daemon.ErrKicked{Detail: "Session opened in another window"}
 	d, _ := ptyDeps(term, nil)
+	d.SessionListed = func(context.Context, string) (bool, error) { return true, nil }
 	url, _ := wsServer(t, d)
 	conn, _, err := dialPTY(t, url+"/api/sessions/abc/pty?cols=80&rows=24", nil)
 	if err != nil {
@@ -390,8 +443,8 @@ func TestPTYSessionEndClosesWithItsOwnCode(t *testing.T) {
 	}
 	readControl(t, conn)
 	close(term.out)
-	if code, _ := closeStatus(t, conn); code != statusSessionEnded {
-		t.Errorf("closed with %d, want %d", code, statusSessionEnded)
+	if code, _ := closeStatus(t, conn); code != statusKicked {
+		t.Errorf("closed with %d, want %d", code, statusKicked)
 	}
 }
 

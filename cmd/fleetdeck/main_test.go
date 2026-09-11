@@ -602,3 +602,17 @@ func TestSetSessionLabelEmptyRemovesTheEntryFromTheCollector(t *testing.T) {
 		t.Fatalf("want the entry gone from disk too, got %+v", got.SessionLabels)
 	}
 }
+
+// The terminal bridge's question "is this session still running?" is answered
+// by the daemon's own list: present and not dying. A dying session is on its way
+// out — the daemon marks it so about a second before its stream ends — and
+// counting it as running would tell the operator a stopped session merely lost
+// its connection.
+func TestListedAliveCountsOnlyAPresentSessionThatIsNotDying(t *testing.T) {
+	sessions := []daemon.Session{{Short: "aaaa1111"}, {Short: "bbbb2222", Dying: true}}
+	for short, want := range map[string]bool{"aaaa1111": true, "bbbb2222": false, "cccc3333": false} {
+		if got := listedAlive(sessions, short); got != want {
+			t.Errorf("listedAlive(%q) = %v, want %v", short, got, want)
+		}
+	}
+}

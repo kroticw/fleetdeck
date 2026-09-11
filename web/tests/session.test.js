@@ -684,6 +684,10 @@ test("a stream that ends says why, for every way it can end", async () => {
   const cases = [
     [4000, "", t("terminal_session_ended")],
     [4001, "kicked: Session opened in another window", `${t("terminal_kicked")}: Session opened in another window`],
+    // A stream the daemon closed while the session kept running is not the
+    // session ending, and one nobody could explain is neither.
+    [4002, "", t("terminal_stream_dropped")],
+    [4003, "", t("terminal_stream_unexplained")],
     [4404, "no such session", t("terminal_no_session")],
     [4401, "", t("terminal_key_refused")],
     [4503, "", t("terminal_daemon_unavailable")],

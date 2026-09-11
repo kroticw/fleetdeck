@@ -43,13 +43,22 @@ const ptyOpenTimeout = 10 * time.Second
 // Close codes the browser can tell apart. The 4000 range is the one RFC 6455
 // leaves to applications; the reason text goes alongside in the close frame.
 const (
-	statusSessionEnded      websocket.StatusCode = 4000 // the session exited, or the daemon closed the stream
-	statusKicked            websocket.StatusCode = 4001 // another attacher evicted this one; reason carries the daemon's words
-	statusBadControl        websocket.StatusCode = 4400 // a text frame the bridge does not accept
-	statusKeyRefused        websocket.StatusCode = 4401 // the daemon refused the control key
-	statusNoSuchSession     websocket.StatusCode = 4404 // no session by that id
-	statusDaemonUnavailable websocket.StatusCode = 4503 // no daemon to attach through
+	statusSessionEnded         websocket.StatusCode = 4000 // the stream ended and the daemon no longer lists the session
+	statusKicked               websocket.StatusCode = 4001 // another attacher evicted this one; reason carries the daemon's words
+	statusStreamDropped        websocket.StatusCode = 4002 // the stream ended while the daemon still lists the session as alive
+	statusStreamEndUnexplained websocket.StatusCode = 4003 // the stream ended and the daemon could not be asked why
+	statusBadControl           websocket.StatusCode = 4400 // a text frame the bridge does not accept
+	statusKeyRefused           websocket.StatusCode = 4401 // the daemon refused the control key
+	statusNoSuchSession        websocket.StatusCode = 4404 // no session by that id
+	statusDaemonUnavailable    websocket.StatusCode = 4503 // no daemon to attach through, or to ask
 )
+
+// endingCheckTimeout bounds asking the daemon why a stream ended. A `list` on the
+// local socket took 1.64 ms at worst over 300 calls (median 0.07 ms, CLI
+// 2.1.263), so this only matters when the daemon is wedged — and then the close
+// frame waits on it, which is why it is seconds and not the ten ptyOpenTimeout
+// allows for attaching.
+const endingCheckTimeout = 2 * time.Second
 
 // maxCloseReason is what fits in a close frame's reason: 125 bytes of payload,
 // two of them taken by the status code.
@@ -122,11 +131,12 @@ func (d Deps) handlePTY(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session := r.PathValue("id")
 	streamDone := make(chan struct{})
 	go func() {
 		defer close(streamDone)
 		defer cancel()
-		pumpToBrowser(ctx, conn, term)
+		pumpToBrowser(ctx, conn, term, func() (websocket.StatusCode, string) { return d.streamEnding(ctx, session) })
 	}()
 	pumpToSession(ctx, conn, term)
 
@@ -167,8 +177,9 @@ func boundedInt(s, name string, maxValue int) (int, error) {
 }
 
 // pumpToBrowser copies the session's bytes into binary frames until the stream ends,
-// then closes the socket with a code that says how it ended.
-func pumpToBrowser(ctx context.Context, conn *websocket.Conn, term Terminal) {
+// then closes the socket with a code that says how it ended. A kick names itself;
+// a plain end of stream does not, and explainEOF is asked what it meant.
+func pumpToBrowser(ctx context.Context, conn *websocket.Conn, term Terminal, explainEOF func() (websocket.StatusCode, string)) {
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := term.Read(buf)
@@ -192,7 +203,8 @@ func pumpToBrowser(ctx context.Context, conn *websocket.Conn, term Terminal) {
 		case errors.As(err, &kicked):
 			closeWith(conn, statusKicked, "kicked: "+kicked.Detail)
 		case errors.Is(err, io.EOF):
-			closeWith(conn, statusSessionEnded, "session ended")
+			code, reason := explainEOF()
+			closeWith(conn, code, reason)
 		default:
 			closeWith(conn, websocket.StatusInternalError, "terminal stream failed")
 		}
@@ -242,6 +254,40 @@ func pumpToSession(ctx context.Context, conn *websocket.Conn, term Terminal) {
 				return
 			}
 		}
+	}
+}
+
+// streamEnding says why a stream that reached end of file ended, by asking the
+// daemon whether it still lists the session.
+//
+// The end of the stream alone does not say. The daemon closes an attach when the
+// session is stopped or removed, but also, with no marker at all, when more than
+// 1 MiB is queued for a reader that fell behind (docs/protocol/daemon-control-
+// socket.md, section 1) — and then the session is still running. That second
+// cause is read from the CLI 2.1.263 binary and has not been produced live; the
+// check below does not depend on it being exactly that, only on the list.
+//
+// The list is a trustworthy answer at this moment, measured on two stops of live
+// sessions: the daemon marked the session dying 0.84 s and 1.04 s before the
+// stream ended, and no longer listed it 4 ms after. A session whose process
+// crashed did not end its stream at all — the daemon restarted it and the attach
+// stayed open — so a crash never reaches this function.
+func (d Deps) streamEnding(ctx context.Context, session string) (websocket.StatusCode, string) {
+	if d.SessionListed == nil {
+		return statusStreamEndUnexplained, "the stream ended and the daemon could not be asked why"
+	}
+	cctx, cancel := context.WithTimeout(ctx, endingCheckTimeout)
+	defer cancel()
+	listed, err := d.SessionListed(cctx, session)
+	switch {
+	case errors.Is(err, daemon.ErrDaemonUnavailable):
+		return statusDaemonUnavailable, "daemon unavailable"
+	case err != nil:
+		return statusStreamEndUnexplained, "the stream ended and the daemon could not be asked why"
+	case listed:
+		return statusStreamDropped, "the daemon closed the stream; the session is still running"
+	default:
+		return statusSessionEnded, "session ended"
 	}
 }
 
