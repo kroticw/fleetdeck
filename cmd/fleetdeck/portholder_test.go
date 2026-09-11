@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
+	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/state"
 )
 
@@ -128,6 +130,40 @@ func TestNobodyHoldingThePortIsSaidSo(t *testing.T) {
 	got := portHolder(context.Background(), addr)
 	if !strings.HasPrefix(got, "nothing that answers HTTP") {
 		t.Fatalf("portHolder = %q, want it to say nothing answers there", got)
+	}
+}
+
+// The whole panel, not just the helper: run() on a taken port stops with the
+// holder named. portHolder being right is no use if run never asks it.
+func TestAPanelThatCannotTakeItsPortNamesWhatHoldsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		serve func(t *testing.T, ln net.Listener)
+		want  string
+	}{
+		{"another fleetdeck panel", func(t *testing.T, ln net.Listener) {
+			body, _ := json.Marshal(state.Snapshot{Build: &buildinfo.Fingerprint{Web: "w", Executable: "/app/fleetdeck", Revision: "97f564b0c1d2"}})
+			serveOn(t, ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+		}, "the port is held by fleetdeck 97f564b running from /app/fleetdeck"},
+		// Takes the connection from the backlog and never answers.
+		{"something silent", func(*testing.T, net.Listener) {}, "the port is held by something that took the connection and did not answer within " + holderTimeout.String()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ln := listenLoopback(t)
+			tc.serve(t, ln)
+
+			cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+			cfg := config.Default()
+			cfg.ServerPort = ln.Addr().(*net.TCPAddr).Port
+			cfg.UsageEnabled = false
+			if err := config.Save(cfgPath, cfg); err != nil {
+				t.Fatal(err)
+			}
+			err := run(cfgPath)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("run on a taken port: %v; want it to say %q", err, tc.want)
+			}
+		})
 	}
 }
 
