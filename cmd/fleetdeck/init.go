@@ -11,10 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
+	"github.com/kroticw/fleetdeck/internal/workspace"
 )
 
 const (
@@ -29,20 +28,17 @@ const (
 	launchAgentLabel = "dev.fleetdeck.panel"
 	launchAgentFile  = launchAgentLabel + ".plist"
 
-	// exampleCardName is the one card init writes into a board that has nothing in
-	// it. An empty board directory is an error to internal/board.Scan, so a new
-	// operator who is given an empty directory is given a panel that reports a
-	// broken board.
-	exampleCardName = "example.md"
-
-	dateLayout = "2006-01-02"
+	// defaultWorkspaceName is the directory under the home directory a new
+	// workspace goes to when none is named.
+	defaultWorkspaceName = "fleetdeck"
 )
 
 // initCommand parses the flags of `fleetdeck init` and runs it against this
 // machine's own home directory and this binary's own location.
 func initCommand(args []string) error {
 	flags := flag.NewFlagSet("init", flag.ExitOnError)
-	boardPath := flags.String("board", "", "board directory to record in the configuration file this command creates")
+	workspacePath := flags.String("workspace", "", "directory to make the board and the docs in, recorded in the configuration file this command creates (default ~/fleetdeck)")
+	boardPath := flags.String("board", "", "board directory alone, with no workspace around it, to record in the configuration file this command creates")
 	force := flags.Bool("force", false, "replace a statusline that init would otherwise refuse to touch")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -56,7 +52,7 @@ func initCommand(args []string) error {
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
-	return runInit(initEnv{home: home, binary: binary, board: *boardPath, force: *force, out: os.Stdout})
+	return runInit(initEnv{home: home, binary: binary, workspace: *workspacePath, board: *boardPath, force: *force, out: os.Stdout})
 }
 
 // initEnv is everything runInit is allowed to touch. It is a struct, and every
@@ -69,7 +65,10 @@ type initEnv struct {
 	// binary is the path of the running fleetdeck binary; the statusline reporter
 	// is looked for beside it.
 	binary string
-	// board is the --board flag: empty means "decide for me".
+	// workspace is the --workspace flag: the directory the board and the docs
+	// are made in. Empty means ~/fleetdeck, unless board is given.
+	workspace string
+	// board is the --board flag: a board directory with no workspace around it.
 	board string
 	// force allows the statusline step to replace a statusline the operator
 	// configured themselves.
@@ -99,14 +98,12 @@ func runInit(env initEnv) error {
 	if out == nil {
 		out = os.Stdout
 	}
-
-	cfgPath := filepath.Join(env.home, ".config", "fleetdeck", "config.yaml")
-	cfg, cfgCreated, cfgStep := ensureConfig(cfgPath, env)
-	steps := []initStep{
-		cfgStep,
-		ensureBoard(cfgPath, cfg, cfgCreated, cfgStep.err, env),
-		ensureStatusline(env),
+	if env.workspace != "" && env.board != "" {
+		// Both name the board, and whichever lost would do so silently.
+		return errors.New("--workspace and --board both say where the board goes; give one of them")
 	}
+
+	steps := initSteps(env)
 
 	failed := 0
 	var report strings.Builder
@@ -132,6 +129,22 @@ func runInit(env initEnv) error {
 	return nil
 }
 
+// initSteps performs every step of init and returns what each did. The steps
+// are independent — one refused step does not stop the ones after it — except
+// that the permissions step lets agents into whatever the board step settled
+// on, and has nothing to allow when that step was refused.
+func initSteps(env initEnv) []initStep {
+	cfgPath := filepath.Join(env.home, ".config", "fleetdeck", "config.yaml")
+	cfg, cfgCreated, cfgStep := ensureConfig(cfgPath, env)
+	boardStep, allow := ensureBoard(cfgPath, cfg, cfgCreated, cfgStep.err, env)
+	return []initStep{
+		cfgStep,
+		boardStep,
+		ensureStatusline(env),
+		ensurePermissions(env, allow),
+	}
+}
+
 // ensureConfig loads the configuration init will work from, and writes one only
 // when there is no file at all. An existing file is read and left byte for byte
 // as it is: it is hand-written YAML, and marshalling a struct back over it drops
@@ -154,13 +167,16 @@ func ensureConfig(path string, env initEnv) (config.Config, bool, initStep) {
 		return config.Config{}, false, s
 	}
 
-	boardPath, err := chosenBoard(env)
+	layout, err := chosenLayout(env)
 	if err != nil {
 		s.err = err
 		return config.Config{}, false, s
 	}
 	cfg := config.Default()
-	cfg.BoardPath = boardPath
+	cfg.BoardPath = layout.board
+	if layout.root != "" {
+		cfg.DocsPaths = []string{workspace.DocsDir(layout.root)}
+	}
 	if err := config.Save(path, cfg); err != nil {
 		s.err = err
 		return config.Config{}, false, s
@@ -169,127 +185,129 @@ func ensureConfig(path string, env initEnv) (config.Config, bool, initStep) {
 	return cfg, true, s
 }
 
-// chosenBoard resolves the board directory for a machine that has no
-// configuration yet: the --board flag if it was given, and otherwise a directory
-// under the home directory init was handed. Nothing here is allowed to name a
-// path belonging to any particular machine.
-func chosenBoard(env initEnv) (string, error) {
-	if env.board == "" {
-		return filepath.Join(env.home, "fleetdeck", "board"), nil
-	}
-	abs, err := filepath.Abs(env.board)
-	if err != nil {
-		return "", fmt.Errorf("resolve --board %s: %w", env.board, err)
-	}
-	return abs, nil
+// layout is where a machine with no configuration gets its board: a workspace
+// root holding the board and the docs, or — with --board — a board alone, and
+// then root is empty.
+type layout struct {
+	root, board string
 }
 
-// ensureBoard creates the board directory and, when that directory is absent or
-// empty, creates its cards subdirectory (board.CardsDir) and writes one example
-// card into it — board.Scan reads cards from there, not from the board directory
-// itself. A directory that already holds files is somebody's board and is not
-// touched, cards subdirectory included: nothing is created inside it either.
-func ensureBoard(cfgPath string, cfg config.Config, cfgCreated bool, cfgErr error, env initEnv) initStep {
+// chosenLayout resolves the layout for a machine that has no configuration yet:
+// the --board flag if it was given, and otherwise the --workspace flag or a
+// workspace under the home directory init was handed. Nothing here is allowed
+// to name a path belonging to any particular machine.
+func chosenLayout(env initEnv) (layout, error) {
+	if env.board != "" {
+		abs, err := filepath.Abs(env.board)
+		if err != nil {
+			return layout{}, fmt.Errorf("resolve --board %s: %w", env.board, err)
+		}
+		return layout{board: abs}, nil
+	}
+	root := filepath.Join(env.home, defaultWorkspaceName)
+	if env.workspace != "" {
+		abs, err := filepath.Abs(env.workspace)
+		if err != nil {
+			return layout{}, fmt.Errorf("resolve --workspace %s: %w", env.workspace, err)
+		}
+		root = abs
+	}
+	return layout{root: root, board: workspace.BoardDir(root)}, nil
+}
+
+// ensureBoard makes the board, and on a machine init just configured, the
+// workspace around it: the board template (plugin/templates/board) with an empty
+// cards directory, under git, and a docs directory beside it. A board directory
+// that already holds files is somebody's board and is not touched; an existing
+// configuration's board is made only when its directory is absent or empty, and
+// no docs directory is made for it — that configuration names its own docs.
+//
+// It returns the directory agents must be allowed to write in: the workspace
+// root, or the board alone when there is no workspace. Empty when refused.
+func ensureBoard(cfgPath string, cfg config.Config, cfgCreated bool, cfgErr error, env initEnv) (initStep, string) {
 	s := initStep{name: "board"}
 	if cfgErr != nil {
 		s.err = fmt.Errorf("the configured board is unknown while %s cannot be read", cfgPath)
-		return s
+		return s, ""
 	}
 
 	dir := cfg.BoardPath
 	if !cfgCreated {
-		// An existing config names the board, and init does not edit an existing
-		// config — so a flag that disagrees with it has nowhere to be recorded.
-		switch {
-		case dir == "":
-			s.err = fmt.Errorf("%s sets no board.path, and init does not rewrite a configuration file it did not create: set board.path there and re-run", cfgPath)
-			return s
-		case env.board != "":
-			given, err := filepath.Abs(env.board)
-			if err != nil {
-				s.err = fmt.Errorf("resolve --board %s: %w", env.board, err)
-				return s
-			}
-			if given != dir {
-				s.err = fmt.Errorf("--board %s contradicts board.path %s already set in %s; init does not rewrite that file, so change it there or drop the flag", given, dir, cfgPath)
-				return s
-			}
+		if err := flagsAgreeWithConfig(cfgPath, dir, env); err != nil {
+			s.err = err
+			return s, ""
 		}
 	}
 
-	empty, existed, err := dirIsEmpty(dir)
+	if cfgCreated && env.board == "" {
+		s.name = "workspace"
+		lay, err := chosenLayout(env)
+		if err != nil {
+			s.err = err
+			return s, ""
+		}
+		res, err := workspace.Create(lay.root, workspace.Options{})
+		if err != nil {
+			s.err = err
+			return s, ""
+		}
+		s.note = fmt.Sprintf("%s (board %s, docs %s)", res.Root, createdOrKept(res.BoardCreated), createdOrKept(res.DocsCreated))
+		s.detail = repoDetail(res.RepoErr)
+		return s, res.Root
+	}
+
+	created, repoErr, err := workspace.CreateBoard(dir, workspace.Options{})
 	if err != nil {
 		s.err = err
-		return s
+		return s, ""
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		s.err = fmt.Errorf("create board dir: %w", err)
-		return s
-	}
-	if !empty {
+	if !created {
 		s.note = dir + " (kept, it already holds files)"
-		return s
+		return s, dir
 	}
-	cardsDir := board.CardsDir(dir)
-	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
-		s.err = fmt.Errorf("create board cards dir: %w", err)
-		return s
-	}
-	card := filepath.Join(cardsDir, exampleCardName)
-	if err := os.WriteFile(card, []byte(exampleCard(time.Now().Format(dateLayout))), 0o600); err != nil {
-		s.err = fmt.Errorf("write example card: %w", err)
-		return s
-	}
-	if existed {
-		s.note = fmt.Sprintf("%s (was empty, wrote cards/%s)", dir, exampleCardName)
-		return s
-	}
-	s.note = fmt.Sprintf("%s (created, wrote cards/%s)", dir, exampleCardName)
-	return s
+	s.note = dir + " (created from the board template)"
+	s.detail = repoDetail(repoErr)
+	return s, dir
 }
 
-// dirIsEmpty reports whether dir holds no entries at all, and whether it existed
-// in the first place. A path that is not a directory is an error here rather than
-// something to create over.
-func dirIsEmpty(dir string) (empty, existed bool, err error) {
-	entries, err := os.ReadDir(dir)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return true, false, nil
-	case err != nil:
-		return false, false, fmt.Errorf("read board dir %s: %w", dir, err)
+// flagsAgreeWithConfig refuses a --board or --workspace that puts the board
+// somewhere other than an existing configuration does: init does not edit a
+// configuration it did not create, so the flag has nowhere to be recorded.
+func flagsAgreeWithConfig(cfgPath, dir string, env initEnv) error {
+	if dir == "" {
+		return fmt.Errorf("%s sets no board.path, and init does not rewrite a configuration file it did not create: set board.path there and re-run", cfgPath)
 	}
-	return len(entries) == 0, true, nil
+	if env.board == "" && env.workspace == "" {
+		return nil
+	}
+	lay, err := chosenLayout(env)
+	if err != nil {
+		return err
+	}
+	if lay.board == dir {
+		return nil
+	}
+	flagName, given := "--board", lay.board
+	if env.workspace != "" {
+		flagName, given = "--workspace", lay.root
+	}
+	return fmt.Errorf("%s %s puts the board at %s, which contradicts board.path %s already set in %s; init does not rewrite that file, so change it there or drop the flag", flagName, given, lay.board, dir, cfgPath)
 }
 
-// exampleCard is the board template of spec line 277: a card that parses, that
-// passes the board's own schema, and that shows a new operator what the fields
-// mean. Its field conventions are documented in docs/en/board-convention.md.
-func exampleCard(today string) string {
-	return `---
-zone: unplanned
-stage: new
-progress: 0
-created: ` + today + `
----
+func createdOrKept(created bool) string {
+	if created {
+		return "created"
+	}
+	return "kept"
+}
 
-# An example card
-
-## Context
-
-This card was written by ` + "`fleetdeck init`" + ` because the board was empty, and an
-empty board is indistinguishable from a broken one. Replace it with a real task,
-or delete it once the board has cards of its own.
-
-A card is an ordinary markdown file. The frontmatter above is what the panel
-reads: ` + "`zone`" + `, ` + "`stage`" + `, ` + "`progress`" + `, ` + "`created`" + `, and — once a session is working the
-task — ` + "`session`" + `. The allowed values of each field, and the rules connecting them,
-are in docs/en/board-convention.md.
-
-## Log
-
-- ` + today + `: created by fleetdeck init.
-`
+// repoDetail is the second line of a board step whose board could not be put
+// under git — said, because the panel's card writes then cannot be committed.
+func repoDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("the board is not under git (%v); the panel will write card fields but cannot commit them", err)
 }
 
 // ensureStatusline points Claude Code's statusline at the reporter, having first
@@ -338,28 +356,9 @@ type statuslineResult struct {
 // feature work is not a trade we get to make. Neither is replacing a statusline
 // the operator configured themselves — that needs force, and says so.
 func wireStatusline(settingsPath, binary string, force bool) (statuslineResult, error) {
-	settings := map[string]any{}
-	existed := false
-	raw, err := os.ReadFile(settingsPath)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-	case err != nil:
-		return statuslineResult{}, fmt.Errorf("read settings: %w", err)
-	default:
-		if err := json.Unmarshal(raw, &settings); err != nil {
-			return statuslineResult{}, fmt.Errorf("%s is malformed, refusing to overwrite it: %w", settingsPath, err)
-		}
-		existed = true
-	}
-
-	// Measured before the map is touched: re-encoding the settings exactly as they
-	// are and comparing that to the file on disk is what separates "this write will
-	// reindent and reorder your file" from "your file is already in that shape".
-	reformatted := false
-	if existed {
-		if canonical, cErr := json.MarshalIndent(settings, "", "  "); cErr == nil {
-			reformatted = string(raw) != string(append(canonical, '\n'))
-		}
+	settings, reformatted, err := loadSettings(settingsPath)
+	if err != nil {
+		return statuslineResult{}, err
 	}
 
 	what := "written"
@@ -390,17 +389,131 @@ func wireStatusline(settingsPath, binary string, force bool) (statuslineResult, 
 	}
 
 	settings["statusLine"] = line
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return statuslineResult{}, fmt.Errorf("encode settings: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
-		return statuslineResult{}, fmt.Errorf("create settings dir: %w", err)
-	}
-	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o600); err != nil {
-		return statuslineResult{}, fmt.Errorf("write settings: %w", err)
+	if err := saveSettings(settingsPath, settings); err != nil {
+		return statuslineResult{}, err
 	}
 	return statuslineResult{what: what, reformatted: reformatted}, nil
+}
+
+// loadSettings reads Claude Code's settings. A missing file is an empty set of
+// settings; a malformed one stops the step that asked, since overwriting
+// someone's settings to make our own feature work is not a trade we get to
+// make.
+//
+// reformatted is measured before anything is changed: re-encoding the settings
+// exactly as they are and comparing that to the file on disk is what separates
+// "this write will reindent and reorder your file" from "your file is already in
+// that shape".
+func loadSettings(settingsPath string) (settings map[string]any, reformatted bool, err error) {
+	settings = map[string]any{}
+	raw, err := os.ReadFile(settingsPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return settings, false, nil
+	case err != nil:
+		return nil, false, fmt.Errorf("read settings: %w", err)
+	}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return nil, false, fmt.Errorf("%s is malformed, refusing to overwrite it: %w", settingsPath, err)
+	}
+	if canonical, cErr := json.MarshalIndent(settings, "", "  "); cErr == nil {
+		reformatted = string(raw) != string(append(canonical, '\n'))
+	}
+	return settings, reformatted, nil
+}
+
+func saveSettings(settingsPath string, settings map[string]any) error {
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode settings: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+		return fmt.Errorf("create settings dir: %w", err)
+	}
+	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write settings: %w", err)
+	}
+	return nil
+}
+
+// ensurePermissions lets Claude Code sessions write in dir — the workspace, or
+// the board alone — through permissions.additionalDirectories. An agent keeps
+// its card on the board, which is outside its own working directory; without
+// this entry every card write is a permission prompt nobody is there to answer.
+func ensurePermissions(env initEnv, dir string) initStep {
+	s := initStep{name: "permissions"}
+	if dir == "" {
+		s.err = errors.New("the board step was refused, so there is no directory to let agents into")
+		return s
+	}
+	settingsPath := filepath.Join(env.home, ".claude", "settings.json")
+	what, reformatted, err := allowDirectory(settingsPath, dir, env.home)
+	if err != nil {
+		s.err = err
+		return s
+	}
+	s.note = fmt.Sprintf("%s additionalDirectories -> %s (%s)", settingsPath, dir, what)
+	if reformatted {
+		s.detail = "that file was reformatted: two-space indent, keys in alphabetical order — JSON carries no comments to lose, but a hand-ordered file does not come back in its own order"
+	}
+	return s
+}
+
+// allowDirectory adds dir to permissions.additionalDirectories unless it, or a
+// directory holding it, is already there. Then the file is not opened for
+// writing at all. An entry may start with "~/", which is read against home.
+func allowDirectory(settingsPath, dir, home string) (what string, reformatted bool, err error) {
+	settings, reformatted, err := loadSettings(settingsPath)
+	if err != nil {
+		return "", false, err
+	}
+	perms := map[string]any{}
+	if existing, present := settings["permissions"]; present {
+		m, ok := existing.(map[string]any)
+		if !ok {
+			return "", false, fmt.Errorf("%s has a permissions value that is not an object; refusing to replace it", settingsPath)
+		}
+		perms = m
+	}
+	var dirs []any
+	if existing, present := perms["additionalDirectories"]; present {
+		list, ok := existing.([]any)
+		if !ok {
+			return "", false, fmt.Errorf("%s has an additionalDirectories value that is not a list; refusing to replace it", settingsPath)
+		}
+		dirs = list
+	}
+	for _, entry := range dirs {
+		allowed, _ := entry.(string)
+		if covers(expandHome(allowed, home), dir) {
+			return "kept, already allowed by " + allowed, false, nil
+		}
+	}
+	perms["additionalDirectories"] = append(dirs, dir)
+	settings["permissions"] = perms
+	if err := saveSettings(settingsPath, settings); err != nil {
+		return "", false, err
+	}
+	return "added", reformatted, nil
+}
+
+func expandHome(p, home string) string {
+	if p == "~" {
+		return home
+	}
+	if rest, ok := strings.CutPrefix(p, "~/"); ok {
+		return filepath.Join(home, rest)
+	}
+	return p
+}
+
+// covers reports whether dir is allowed or inside it.
+func covers(allowed, dir string) bool {
+	if allowed == "" || !filepath.IsAbs(allowed) {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(allowed), dir)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // statuslineCommandOf digs the command out of a statusLine setting, which Claude

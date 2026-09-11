@@ -80,16 +80,10 @@ func Create(root string, opt Options) (Result, error) {
 		return res, fmt.Errorf("create workspace %s: %w", root, err)
 	}
 
-	empty, err := emptyOrAbsent(res.Board)
+	var err error
+	res.BoardCreated, res.RepoErr, err = CreateBoard(res.Board, opt)
 	if err != nil {
 		return res, err
-	}
-	if empty {
-		if err := placeBoard(root, res.Board, opt.Template); err != nil {
-			return res, err
-		}
-		res.BoardCreated = true
-		res.RepoErr = opt.InitRepo(res.Board)
 	}
 
 	switch _, err := os.Stat(res.Docs); {
@@ -102,6 +96,36 @@ func Create(root string, opt Options) (Result, error) {
 		return res, fmt.Errorf("read docs %s: %w", res.Docs, err)
 	}
 	return res, nil
+}
+
+// CreateBoard makes a board at dir, which must be absolute, when dir is absent
+// or empty, and reports whether it did. A dir that holds anything is kept as it
+// is. repoErr is why a board it made is not under git (see Result.RepoErr).
+// Create calls it for a workspace's board; `fleetdeck init --board` calls it
+// for a board with no workspace around it.
+func CreateBoard(dir string, opt Options) (created bool, repoErr error, err error) {
+	if !filepath.IsAbs(dir) {
+		return false, nil, fmt.Errorf("board path %q is not absolute", dir)
+	}
+	dir = filepath.Clean(dir)
+	if opt.Template == nil {
+		opt.Template = templates.Board()
+	}
+	if opt.InitRepo == nil {
+		opt.InitRepo = board.InitRepo
+	}
+	empty, err := emptyOrAbsent(dir)
+	if err != nil || !empty {
+		return false, nil, err
+	}
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, dirMode); err != nil {
+		return false, nil, fmt.Errorf("create %s: %w", parent, err)
+	}
+	if err := placeBoard(parent, dir, opt.Template); err != nil {
+		return false, nil, err
+	}
+	return true, opt.InitRepo(dir), nil
 }
 
 // emptyOrAbsent reports whether dir holds nothing at all. A path that exists and
@@ -117,14 +141,14 @@ func emptyOrAbsent(dir string) (bool, error) {
 	return len(entries) == 0, nil
 }
 
-// placeBoard copies the template into a staging directory under root and
+// placeBoard copies the template into a staging directory under parent and
 // renames it to dest. An existing dest is an empty directory (Create checked);
 // it is removed first, because os.Rename on Unix refuses to replace a
 // directory even where rename(2) itself would. os.Remove removes only an empty
 // directory, so a file that arrived there in between fails this rather than
 // being lost.
-func placeBoard(root, dest string, tmpl fs.FS) error {
-	staging, err := os.MkdirTemp(root, "."+boardName+".tmp-")
+func placeBoard(parent, dest string, tmpl fs.FS) error {
+	staging, err := os.MkdirTemp(parent, "."+filepath.Base(dest)+".tmp-")
 	if err != nil {
 		return fmt.Errorf("stage board: %w", err)
 	}
