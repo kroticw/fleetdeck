@@ -449,10 +449,13 @@ async function sized(stored = {}, { fontKey = "fleetdeck-terminal-font-orchestra
   const timers = fakeTimers();
   const host = dom.element("div");
   dom.document.body.appendChild(host);
-  const live = createLiveTerminal(host, "sess-1", { timers, fontKey });
+  const told = [];
+  const live = createLiveTerminal(host, "sess-1", { timers, fontKey, report: { fontSize: (size) => told.push(size) } });
   live.open();
   await settle();
-  ready(sockets[0]);
+  // This terminal's own socket: a case may make two terminals.
+  const socket = sockets.at(-1);
+  ready(socket);
   const terminal = terminals[0];
   const press = (over) => {
     const event = keyEvent({ metaKey: true, ...over });
@@ -464,8 +467,96 @@ async function sized(stored = {}, { fontKey = "fleetdeck-terminal-font-orchestra
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
   };
-  return { live, terminal, terminals, timers, host, store, press, badge, restore, socket: sockets[0] };
+  return { live, terminal, terminals, timers, host, store, press, badge, restore, told, socket };
 }
+
+// The buttons (web/js/fontcontrols.js) ask the terminal through stepFont, the
+// function Cmd+= / Cmd+- / Cmd+0 go through, so a press and a key are the same
+// thing from here on: the same size, the same memory, one resize, the same note.
+test("a step asked for by a button goes exactly the way Cmd+= goes", async () => {
+  const byKey = await sized();
+  let keyed;
+  try {
+    byKey.press({ key: "=" });
+    await byKey.timers.tick();
+    keyed = {
+      size: byKey.terminal.options.fontSize,
+      stored: byKey.store.map.get("fleetdeck-terminal-font-orchestrator"),
+      resizes: sentResizes(byKey.socket),
+      note: byKey.badge()?.textContent,
+    };
+  } finally {
+    byKey.restore();
+  }
+
+  const byButton = await sized();
+  try {
+    byButton.live.stepFont(1);
+    assert.deepEqual(sentResizes(byButton.socket), [], "a press reshaped the session before the steps settled");
+    await byButton.timers.tick();
+
+    assert.deepEqual(
+      {
+        size: byButton.terminal.options.fontSize,
+        stored: byButton.store.map.get("fleetdeck-terminal-font-orchestrator"),
+        resizes: sentResizes(byButton.socket),
+        note: byButton.badge()?.textContent,
+      },
+      keyed,
+    );
+    assert.deepEqual(keyed.resizes, [{ type: "resize", cols: 76, rows: 25 }], "the key itself did nothing, so the two agreeing proves nothing");
+  } finally {
+    byButton.restore();
+  }
+});
+
+test("a button's reset and a button past the end go the way Cmd+0 and the end go", async () => {
+  const s = await sized({ "fleetdeck-terminal-font-orchestrator": "24" });
+  try {
+    s.live.stepFont(1);
+    await s.timers.tick();
+    assert.equal(s.terminal.options.fontSize, 24);
+    assert.equal(s.badge()?.textContent, `24 px (${t("terminal_font_limit")}) · ${t("terminal_font_session")} 41 × 13`);
+
+    s.live.stepFont(0);
+    await s.timers.tick();
+    assert.equal(s.terminal.options.fontSize, 12);
+    assert.equal(s.store.map.has("fleetdeck-terminal-font-orchestrator"), false);
+  } finally {
+    s.restore();
+  }
+});
+
+// What paints the buttons: the size when the terminal is built, every change
+// by either way in, and nothing once the terminal is gone.
+test("the terminal says its size when it is built, when it changes, and when it goes away", async () => {
+  const s = await sized({ "fleetdeck-terminal-font-orchestrator": "15" });
+  try {
+    assert.deepEqual(s.told, [15], "a built terminal did not say its size");
+
+    s.press({ key: "=" });
+    s.live.stepFont(-1);
+    s.live.stepFont(-1);
+    assert.deepEqual(s.told, [15, 16, 15, 14], "a change was not said at once, where the buttons show it");
+
+    s.live.stop();
+    assert.deepEqual(s.told, [15, 16, 15, 14, null], "a stopped terminal left its buttons claiming a size");
+  } finally {
+    s.restore();
+  }
+});
+
+test("a step with no terminal to size does nothing and throws nothing", async () => {
+  const s = await sized();
+  try {
+    s.live.stop();
+    assert.doesNotThrow(() => s.live.stepFont(1));
+    assert.equal(s.timers.count(), 0);
+    assert.equal(s.store.map.has("fleetdeck-terminal-font-orchestrator"), false);
+  } finally {
+    s.restore();
+  }
+});
 
 test("a terminal starts at the size remembered for its place, and attaches at the columns that size leaves", async () => {
   const s = await sized({ "fleetdeck-terminal-font-orchestrator": "15", "fleetdeck-terminal-font-screen": "10" });

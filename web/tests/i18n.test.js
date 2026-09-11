@@ -106,6 +106,11 @@ const KEYS = [
   // falling through to its own key would print "terminal_font_session" there.
   "terminal_font_session",
   "terminal_font_limit",
+  // The font buttons' own names (web/js/fontcontrols.js): a button whose
+  // tooltip reads "terminal_font_bigger" says nothing about what it does.
+  "terminal_font_smaller",
+  "terminal_font_bigger",
+  "terminal_font_reset",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

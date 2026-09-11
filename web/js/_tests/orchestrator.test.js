@@ -868,6 +868,132 @@ test("the column's terminal is the size remembered for the column, and Cmd+= cha
   }
 });
 
+// --- the font buttons -------------------------------------------------------
+//
+// A−, the size, A+ in the strip of the column's own controls, on the side the
+// fold button is on — the side facing the centre. They press the terminal's
+// stepFont, the function Cmd+= goes through, and they are there before the
+// terminal is: a row that grows under a terminal makes its pane shorter, and
+// that reshapes the session.
+
+async function withFontStorage(entries, body) {
+  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
+  const map = new Map(Object.entries(entries));
+  globalThis.localStorage = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+  try {
+    await body(map);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+}
+
+// Looked for inside the strip, so buttons that ended up anywhere else in the
+// column are not found at all.
+const fontButtons = (root) => {
+  const strip = root.querySelector(".col-size");
+  return {
+    group: strip?.querySelector(".term-font") ?? null,
+    smaller: strip?.querySelector(".term-font-smaller") ?? null,
+    reset: strip?.querySelector(".term-font-reset") ?? null,
+    bigger: strip?.querySelector(".term-font-bigger") ?? null,
+  };
+};
+
+test("the column's font buttons sit in its strip of column controls, right before the fold button", async () => {
+  const c = await column(structuredClone(PIN));
+  const strip = c.root.querySelector(".col-size");
+  const { group } = fontButtons(c.root);
+
+  assert.ok(group, "the column's strip has no font buttons");
+  assert.equal(group.parentNode, strip);
+  const order = strip.children.map((n) => String(n.className));
+  const at = order.findIndex((name) => name.split(" ").includes("term-font"));
+  assert.ok(order[at + 1].split(" ").includes("col-size-fold"), `strip order ${JSON.stringify(order)}`);
+  for (const b of group.children) assert.ok(String(b.className).split(" ").includes("col-size-btn"), "the buttons do not look like the strip's own");
+});
+
+test("the column's buttons show the column's size and press the column's terminal", async () => {
+  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "16", "fleetdeck-terminal-font-screen": "10" }, async (map) => {
+    const c = await column(structuredClone(PIN));
+    const terminal = c.terminals.at(-1);
+    const { reset, bigger, smaller } = fontButtons(c.root);
+    assert.equal(reset.textContent, "16 px");
+
+    fireEvent(bigger, "click");
+
+    assert.equal(terminal.options.fontSize, 17, "A+ did not reach the column's terminal");
+    assert.equal(map.get("fleetdeck-terminal-font-orchestrator"), "17");
+    assert.equal(map.get("fleetdeck-terminal-font-screen"), "10");
+    assert.equal(reset.textContent, "17 px", "the buttons kept claiming the old size");
+
+    fireEvent(smaller, "click");
+    fireEvent(smaller, "click");
+    assert.equal(terminal.options.fontSize, 15);
+
+    fireEvent(reset, "click");
+    assert.equal(terminal.options.fontSize, 12);
+    assert.equal(reset.disabled, true, "at 12 px there is nothing to put back");
+  });
+});
+
+test("a size changed by the keys is shown on the column's buttons too", async () => {
+  await withFontStorage({}, async () => {
+    const c = await column(structuredClone(PIN));
+    const terminal = c.terminals.at(-1);
+
+    terminal.keyHandler({ type: "keydown", key: "=", metaKey: true, preventDefault() {} });
+
+    assert.equal(fontButtons(c.root).reset.textContent, "13 px");
+  });
+});
+
+test("at the end of the range the column's button for that end is off", async () => {
+  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "24" }, async () => {
+    const c = await column(structuredClone(PIN));
+    const { smaller, bigger } = fontButtons(c.root);
+    assert.equal(bigger.disabled, true, "A+ at 24 px looked like it would do something");
+    assert.equal(smaller.disabled, false);
+  });
+  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "9" }, async () => {
+    const c = await column(structuredClone(PIN));
+    const { smaller, bigger } = fontButtons(c.root);
+    assert.equal(smaller.disabled, true, "A− at 9 px looked like it would do something");
+    assert.equal(bigger.disabled, false);
+  });
+});
+
+test("the column's buttons are there before its terminal is, and the same ones after", async () => {
+  const c = await column({ orchestratorSession: "", sessions: PIN.sessions });
+  const before = fontButtons(c.root);
+  const rowsBefore = c.root.children.length;
+  assert.ok(before.group, "with nothing pinned the strip has no font buttons, so they would appear later");
+  assert.deepEqual([before.smaller.disabled, before.reset.disabled, before.bigger.disabled], [true, true, true], "buttons with no terminal to size looked usable");
+
+  await c.push(structuredClone(PIN));
+  assert.ok(c.terminals.length > 0, "the pin did not open a terminal");
+
+  const after = fontButtons(c.root);
+  assert.equal(after.group, before.group, "the buttons were rebuilt when the terminal came");
+  assert.equal(c.root.children.length, rowsBefore, "a row was added above the terminal when it came");
+  assert.equal(after.reset.disabled, true, "at 12 px there is nothing to put back");
+  assert.equal(after.bigger.disabled, false, "the column's terminal came and its buttons stayed off");
+});
+
+test("a column whose terminal goes away turns its buttons off", async () => {
+  const c = await column(structuredClone(PIN));
+  assert.equal(fontButtons(c.root).bigger.disabled, false);
+
+  await c.push({ orchestratorSession: "", sessions: PIN.sessions });
+
+  const { smaller, reset, bigger } = fontButtons(c.root);
+  assert.deepEqual([smaller.disabled, reset.disabled, bigger.disabled], [true, true, true]);
+});
+
 // Last on purpose: closing the socket leaves the real store in its reconnect
 // backoff, and every case in this file shares that one store.
 test("the disconnected marker shows even with nothing pinned, once the socket drops", async () => {

@@ -114,6 +114,11 @@ const en = {
   // watching it, not only the picture here.
   terminal_font_session: "session",
   terminal_font_limit: "the limit",
+  // The font buttons (web/js/fontcontrols.js). Each names the key that does
+  // the same, so the buttons also teach the keys.
+  terminal_font_smaller: "smaller type (⌘−)",
+  terminal_font_bigger: "bigger type (⌘+)",
+  terminal_font_reset: "back to 12 px (⌘0)",
 
   // Attaching an image to a session (web/js/session.js, web/js/imagefile.js).
   // Both refusals are worded as what the panel will accept rather than as what
@@ -229,6 +234,9 @@ const ru = {
   terminal_token_stale: "пульт не принял токен этого терминала",
   terminal_font_session: "сессия",
   terminal_font_limit: "предел",
+  terminal_font_smaller: "шрифт мельче (⌘−)",
+  terminal_font_bigger: "шрифт крупнее (⌘+)",
+  terminal_font_reset: "вернуть 12 px (⌘0)",
 
   image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
   image_too_large: "эта картинка слишком велика, чтобы её прикрепить",

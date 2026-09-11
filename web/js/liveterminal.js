@@ -281,6 +281,9 @@ const RETRIED_ENDINGS = { 4403: "terminal_token_stale", 4503: "terminal_daemon_u
 //                          key goes through.
 //   standing()           — readOnly or unfitted may have changed; read them.
 //   ready()              — the bridge has attached.
+//   fontSize(size)       — the size of the type: when the terminal is built,
+//                          at every step, and null once it is gone. What the
+//                          caller's font buttons are painted from.
 //
 // `links`, when given, makes the wiki links a session prints into something to
 // click (web/js/terminallinks.js): { resolve(name) → card path or null,
@@ -301,6 +304,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     actionError: report.actionError ?? (() => {}),
     standing: report.standing ?? (() => {}),
     ready: report.ready ?? (() => {}),
+    fontSize: report.fontSize ?? (() => {}),
   };
 
   let terminal = null;
@@ -355,6 +359,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     // xterm holds a renderer, listeners and a resize observer. Dropping the
     // reference without disposing leaks all three for the life of the page.
     if (terminal && typeof terminal.dispose === "function") terminal.dispose();
+    if (terminal) say.fontSize(null);
     terminal = null;
     refit = null;
     if (paneWatcher) paneWatcher.disconnect();
@@ -401,6 +406,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       return null;
     }
     terminal = made;
+    say.fontSize(made.options.fontSize);
     followWheel(made);
     followFontKeys(made);
     if (links && typeof made.registerLinkProvider === "function") made.registerLinkProvider(wikiLinkProvider(made, links));
@@ -482,32 +488,43 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     }, SIZE_NOTE_MS);
   };
 
-  // followFontKeys makes Cmd with = / + / - / 0 change the type (see fontStep).
-  // The key is taken from xterm, which would send the session nothing for it
-  // anyway, and from the page, which in a browser would zoom everything on it.
-  // The new size is on screen at once; the terminal is refitted and the
-  // session told once the keys stop, as for a pane that changed size.
+  // stepFont changes the type by one step: 1 bigger, -1 smaller, 0 back to the
+  // default. It is the one way the type changes — Cmd+= / Cmd+- / Cmd+0 come
+  // here through followFontKeys, the buttons (web/js/fontcontrols.js) through
+  // the terminal's own stepFont — so a key and a press cannot come to differ.
+  // The new size is on screen, and said to the caller, at once; the terminal
+  // is refitted and the session told once the steps stop, as for a pane that
+  // changed size.
+  const stepFont = (step) => {
+    if (!terminal) return;
+    const size = terminal.options.fontSize;
+    const next = step === 0 ? DEFAULT_FONT_SIZE : clampFontSize(size + step);
+    if (next === size) {
+      // Nothing changes. While earlier steps still wait to be fitted, the
+      // columns on screen are not the ones they will leave, so the note waits
+      // for them and says the end when it goes up.
+      if (sizeNoteDue) sizeNoteAtLimit = step !== 0;
+      else showSize(step !== 0);
+      return;
+    }
+    terminal.options.fontSize = next;
+    rememberFontSize(fontKey, next);
+    say.fontSize(next);
+    sizeNoteDue = true;
+    sizeNoteAtLimit = false;
+    settleThenFollow();
+  };
+
+  // followFontKeys makes Cmd with = / + / - / 0 a step (see fontStep). The key
+  // is taken from xterm, which would send the session nothing for it anyway,
+  // and from the page, which in a browser would zoom everything on it.
   const followFontKeys = (made) => {
     if (typeof made.attachCustomKeyEventHandler !== "function") return;
     made.attachCustomKeyEventHandler((event) => {
       const step = fontStep(event);
       if (step === null) return true;
       event.preventDefault();
-      const size = made.options.fontSize;
-      const next = step === 0 ? DEFAULT_FONT_SIZE : clampFontSize(size + step);
-      if (next === size) {
-        // Nothing changes. While earlier steps still wait to be fitted, the
-        // columns on screen are not the ones they will leave, so the note
-        // waits for them and says the end when it goes up.
-        if (sizeNoteDue) sizeNoteAtLimit = step !== 0;
-        else showSize(step !== 0);
-        return false;
-      }
-      made.options.fontSize = next;
-      rememberFontSize(fontKey, next);
-      sizeNoteDue = true;
-      sizeNoteAtLimit = false;
-      settleThenFollow();
+      stepFont(step);
       return false;
     });
   };
@@ -629,6 +646,11 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     // Text typed into the session through the stream, as a key button does.
     type(text) {
       sendBytes(encoder.encode(text));
+    },
+    // One step of the type, as Cmd+= / Cmd+- / Cmd+0 take (see stepFont): what
+    // the caller's font buttons press.
+    stepFont(step) {
+      stepFont(step);
     },
     get readOnly() {
       return readOnly;
