@@ -65,6 +65,10 @@ The column is resized by dragging: put the pointer on the strip to its right —
 
 What you send appears in the thread at once, before the session has read it, and in the same place the transcript's own copy will take — so nothing shifts when one replaces the other. If the send failed, the line goes off the screen, the text returns to the input box, and the reason appears in a line above it. The session panel does the same.
 
+Next to the name in the header is the commit the running panel was built from, with an asterisk when it was built from a tree with changes not yet committed. Hover over it for the full commit, when that commit was made, when the binary was built, and the path of the binary — which is how to tell which of several installs is the one answering on the port.
+
+A page stays open while the panel under it is rebuilt and restarted, and it keeps running the code it arrived with. When the new panel serves a different interface, a bar above the header says so and offers to reload. A rebuild that leaves the interface as it was — the same commit again, or a change only in the server's own code — raises nothing. If reloading brings back the same page, the bar says the reload did not help and asks you to quit the window with Cmd+Q and open it again.
+
 To check that it is up:
 
 ```bash

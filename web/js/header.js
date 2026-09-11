@@ -3,6 +3,7 @@ import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
+import { brandHTML } from "./buildcheck.js";
 
 // Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
 // Keep both lists and both functions in sync with that file if it ever
@@ -409,7 +410,7 @@ export function renderHeader(root) {
     const usageStale = isUsageStale(snap, nowMs);
 
     root.innerHTML = `
-      <div class="brand">fleetdeck</div>
+      ${brandHTML(snap.build)}
       ${themeButtonHTML()}
       <div class="limits">
         ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour, usageStale, snap.limits.fetchedAt) : gauge(t("limit_5h"), null)}

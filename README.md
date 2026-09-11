@@ -62,6 +62,7 @@ For configuration, see [`docs/en/configuration.md`](docs/en/configuration.md).
 
 ## Packages
 
+- `internal/buildinfo` — says which build of the panel is running: a hash of the embedded web interface, the path of the binary, the commit it was built from and when the binary was built. The page compares the web hash with the one its own document arrived with, which is how it learns that the panel under it has been replaced by one serving a different interface.
 - `internal/board` — reads and writes the fleet board: markdown cards with YAML frontmatter. The panel owns exactly two fields, `stage` and `progress`; everything else belongs to the agents. Depends on `github.com/fsnotify/fsnotify` for watching the board directory and `gopkg.in/yaml.v3` for the frontmatter, in addition to the standard library.
 - `internal/config` — loads and saves the YAML configuration file described in [`docs/en/configuration.md`](docs/en/configuration.md). A missing file is a set of defaults, not a failure; a malformed file is a failure.
 - `internal/daemon` — a client for the daemon's Unix control socket: discovery, ownership/security checks on the socket and the control key file, and the `ping`, `list`, `reply`, and `attach` (screen read / key send) operations. The full wire protocol it implements is documented in [`docs/protocol/daemon-control-socket.md`](docs/protocol/daemon-control-socket.md) — read that first before changing anything in this package.
