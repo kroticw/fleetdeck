@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/kroticw/fleetdeck/internal/board"
-	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 )
@@ -29,14 +28,6 @@ func testDeps() (Deps, *[]string) {
 		SendText: func(session, text string) error {
 			calls = append(calls, "text:"+session+":"+text)
 			return nil
-		},
-		SendKeys: func(session, keys string) error {
-			calls = append(calls, "keys:"+session+":"+keys)
-			return nil
-		},
-		ReadScreen: func(session string, tail int) daemon.ScreenResult {
-			calls = append(calls, fmt.Sprintf("screen:%s:%d", session, tail))
-			return daemon.ScreenResult{Screen: "screen"}
 		},
 		SetCardField: func(path, field, value string) error {
 			calls = append(calls, "card:"+path+":"+field+":"+value)
@@ -137,90 +128,6 @@ func TestSendTextReportsADaemonFailure(t *testing.T) {
 	rec := do(d, http.MethodPost, "/api/sessions/abc/text", `{"text":"hi"}`)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("want 502, got %d", rec.Code)
-	}
-}
-
-func TestSendKeysReachesTheSession(t *testing.T) {
-	d, calls := testDeps()
-	rec := do(d, http.MethodPost, "/api/sessions/abc123/keys", `{"keys":"\u001b"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(*calls) != 1 || (*calls)[0] != "keys:abc123:\x1b" {
-		t.Fatalf("unexpected calls: %q", *calls)
-	}
-}
-
-func TestScreenIsServedWithTheRequestedTail(t *testing.T) {
-	d, calls := testDeps()
-	rec := do(d, http.MethodGet, "/api/sessions/abc/screen?tail=512", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(*calls) != 1 || (*calls)[0] != "screen:abc:512" {
-		t.Fatalf("unexpected calls: %v", *calls)
-	}
-	if !strings.Contains(rec.Body.String(), `"screen"`) {
-		t.Fatalf("screen body missing: %s", rec.Body.String())
-	}
-}
-
-func TestScreenTailDefaultsToAWholeScreen(t *testing.T) {
-	d, calls := testDeps()
-	if rec := do(d, http.MethodGet, "/api/sessions/abc/screen", ""); rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	if len(*calls) != 1 || (*calls)[0] != fmt.Sprintf("screen:abc:%d", defaultTailBytes) {
-		t.Fatalf("unexpected calls: %v", *calls)
-	}
-}
-
-func TestScreenTailIsCappedAtTheDocumentedMaximum(t *testing.T) {
-	d, calls := testDeps()
-	if rec := do(d, http.MethodGet, "/api/sessions/abc/screen?tail=99999999", ""); rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	if len(*calls) != 1 || (*calls)[0] != fmt.Sprintf("screen:abc:%d", maxTailBytes) {
-		t.Fatalf("tail must be capped, got %v", *calls)
-	}
-}
-
-func TestScreenRefusesATailThatIsNotANumber(t *testing.T) {
-	d, calls := testDeps()
-	rec := do(d, http.MethodGet, "/api/sessions/abc/screen?tail=abc", "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("a non-numeric tail must be refused with 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(*calls) != 0 {
-		t.Fatalf("nothing must reach the daemon, got %v", *calls)
-	}
-}
-
-func TestScreenRefusesANegativeTail(t *testing.T) {
-	d, calls := testDeps()
-	rec := do(d, http.MethodGet, "/api/sessions/abc/screen?tail=-5", "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("a negative tail must be refused with 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(*calls) != 0 {
-		t.Fatalf("nothing must reach the daemon, got %v", *calls)
-	}
-}
-
-// ScreenResult bundles Screen and Err precisely so a failed read does not throw
-// away the bytes it did collect (a kicked attach carries the prefix read before
-// the eviction). The handler must pass that prefix on rather than drop it.
-func TestScreenReportsAFailureWithoutDroppingWhatItRead(t *testing.T) {
-	d, _ := testDeps()
-	d.ReadScreen = func(string, int) daemon.ScreenResult {
-		return daemon.ScreenResult{Screen: "partial output", Err: errors.New("kicked")}
-	}
-	rec := do(d, http.MethodGet, "/api/sessions/abc/screen", "")
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("want 502, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "partial output") {
-		t.Fatalf("the partial screen must survive the error: %s", rec.Body.String())
 	}
 }
 
@@ -453,8 +360,6 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 	}{
 		{"snapshot", func(d *Deps) { d.Snapshot = nil }, http.MethodGet, "/api/snapshot", ""},
 		{"text", func(d *Deps) { d.SendText = nil }, http.MethodPost, "/api/sessions/a/text", `{"text":"hi"}`},
-		{"keys", func(d *Deps) { d.SendKeys = nil }, http.MethodPost, "/api/sessions/a/keys", `{"keys":"x"}`},
-		{"screen", func(d *Deps) { d.ReadScreen = nil }, http.MethodGet, "/api/sessions/a/screen", ""},
 		{"cards", func(d *Deps) { d.SetCardField = nil }, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"stage","value":"new"}`},
 		{"status", func(d *Deps) { d.PutStatus = nil }, http.MethodPost, "/api/status", `{"sessionId":"a","model":"m","costUSD":0,"contextPercent":0}`},
 		{"digest", func(d *Deps) { d.Digest = nil }, http.MethodGet, "/api/sessions/a/digest", ""},

@@ -29,20 +29,38 @@ const attachReadChunk = 32 * 1024
 const attachWriteTimeout = 5 * time.Second
 
 // Attachment is a held attach connection: a live, two-way view of one session's
-// terminal. Unlike ReadScreen, which opens an attach, waits for the stream to go
-// quiet and closes it again, an Attachment stays open and hands bytes to its reader
-// as they arrive. That is the whole difference between a keystroke echoing in about
-// ten milliseconds and a snapshot arriving 300ms to 2s later.
+// terminal. It stays open and hands bytes to its reader as they arrive, which is what
+// lets a keystroke echo in about ten milliseconds.
 //
 // Read is meant for one goroutine at a time; Write, Resize and Close may be called
 // from others while it runs.
 //
 // Its geometry is set once, when it is opened, and after that only by Resize. Both
-// travel into the session's real PTY and every other viewer of the session sees them
-// — see attachResizesSessionToCols for what the daemon does with a size. Resize
-// reaches the daemon as a separate request addressed to this attacher by its own id,
-// so it never reconnects, and never costs a second attach that would itself resize
-// the session.
+// travel into the session's real PTY and every other viewer of the session sees them.
+// On this daemon, asking for a size is resizing. Measured against CLI 2.1.263 by
+// reading the session's own tty device (`stty -a < /dev/ttysNNN`) rather than the
+// frames it sends, because a frame is rendered per attacher and says nothing about the
+// PTY behind it:
+//
+//   - a freshly created background session runs at 200x50;
+//   - an attach at a size puts the session's PTY at that size, and every other
+//     attacher's stream turns that wide at that moment;
+//   - when an attacher disconnects, the daemon restores the size from whoever is still
+//     attached; with nobody left, the last size stays.
+//
+// The size is required, and zero is not a way to opt out: an attach without cols and
+// rows, or with zeros, is answered {"ok":false,"error":"malformed request: Invalid
+// input","code":"EUNKNOWN"}. Nor can a client ask for the size the session already
+// has, because the daemon reports it nowhere — not in a `list` record, and not in the
+// attach header, which carries in full:
+//
+//	{"ok":true,"op":"attach","decModes":[1000,1002,1003,1006,2004,2031,1004],
+//	 "via":"spare","booting":false,"tempo":"active","state":"running",
+//	 "cached":false,"stale":false,"workerCliVersion":"2.1.263"}
+//
+// Resize reaches the daemon as a separate request addressed to this attacher by its
+// own id, so it never reconnects, and never costs a second attach that would itself
+// resize the session.
 type Attachment struct {
 	client  *Client
 	session string
@@ -151,7 +169,7 @@ func (c *Client) attachOnce(ctx context.Context, session string, cols, rows int)
 // Read returns the session's terminal bytes as they arrive.
 //
 // When the stream ends it returns io.EOF (the session exited or the daemon closed the
-// connection), a *ErrKicked (another attacher evicted this one — see detectKick for
+// connection), a *ErrKicked (another attacher evicted this one — see parseKickedMarker for
 // the two conditions that make a close a kick), or the read error itself. A kick's
 // marker text never reaches the reader; the screen written before it does.
 //
@@ -186,7 +204,7 @@ func (a *Attachment) Read(p []byte) (int, error) {
 		a.pending = append(a.pending, a.buf[:n]...)
 		if err != nil {
 			a.gone.Store(true)
-			if prefix, detail, kicked := detectKick(a.pending, true); kicked {
+			if prefix, detail, kicked := parseKickedMarker(a.pending); kicked {
 				a.ready, a.end = prefix, &ErrKicked{Detail: detail}
 			} else {
 				a.ready, a.end = a.pending, err

@@ -199,30 +199,6 @@ func (e *ErrUnknown) Error() string {
 	return "unknown error: " + e.Code
 }
 
-// ErrKeysNotDelivered indicates that SendKeys's write to the attach connection itself
-// failed, before the daemon can be assumed to have received the key bytes. Unlike a
-// connection that closes normally right after a successful write (which SendKeys treats
-// as delivered, per the protocol's own contract — see docs/protocol/daemon-control-socket.md
-// section 3), this means delivery could not be confirmed at all.
-//
-// This must still never be retried blindly: a net.Conn.Write can write a partial prefix
-// of its argument before failing, so some of the keys may already have reached the
-// daemon even when this error is returned.
-type ErrKeysNotDelivered struct {
-	Err error
-}
-
-func (e *ErrKeysNotDelivered) Error() string {
-	if e.Err == nil {
-		return "keys not confirmed delivered"
-	}
-	return "keys not confirmed delivered: " + e.Err.Error()
-}
-
-func (e *ErrKeysNotDelivered) Unwrap() error {
-	return e.Err
-}
-
 // ErrKicked indicates that an attach connection was evicted: the daemon writes a
 // plain-text "EKICKED: <reason>" marker into the stream instead of PTY bytes and then
 // closes the connection, because another attacher took over or the daemon otherwise

@@ -743,6 +743,9 @@ test("every key button sends its escape sequence into the socket, and nothing th
   ready(sockets[0]);
 
   const expected = { escape: "", up: "[A", down: "[B", enter: "\r" };
+  // Every button, and no fewer: a row lost from KEYS would otherwise shrink this
+  // loop rather than fail it.
+  assert.deepEqual(KEYS.map((k) => k.id).sort(), Object.keys(expected).sort(), "the key buttons are not the four this checks");
   for (const key of KEYS) {
     await panel.click(`[data-key=${key.id}]`);
     const sent = asText(sockets[0].sent[sockets[0].sent.length - 1]);

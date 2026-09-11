@@ -1,11 +1,11 @@
-// The panel's write client, and the two reads that cannot come from the
-// snapshot.
+// The panel's write client, and the reads that cannot come from the snapshot.
 //
 // Almost every module renders from the snapshot the socket pushes into
-// store.js. The session panel is the exception: a transcript digest and a
-// terminal screen are far too large to push to every open tab once a second,
-// and are wanted only while somebody is looking at one session, so they are
-// fetched here on demand — see fetchDigest and fetchScreen at the bottom.
+// store.js. The session panel is the exception: a transcript digest is far too
+// large to push to every open tab once a second, and is wanted only while
+// somebody is looking at one session, so it is fetched here on demand — see
+// fetchDigest at the bottom. A session's screen is not read here at all: it is
+// the live terminal (web/js/liveterminal.js).
 //
 // application/json is mandatory on every route with a body, not a habit: the
 // server's guard answers 415 to anything else, and that requirement is one of
@@ -31,9 +31,6 @@ async function readJSON(response) {
 // does not register falls through to the static file server, whose 404 body is
 // plain text and parses as nothing — the status line is then all there is, and
 // it is still words rather than "undefined".
-//
-// Split out from refusal because a response body can only be read once, and
-// fetchScreen needs both the body and the message from a single read.
 function messageFor(response, body) {
   const detail = typeof body?.error === "string" && body.error !== "" ? body.error : response.statusText;
   return detail || `HTTP ${response.status}`;
@@ -98,10 +95,6 @@ async function post(url, body) {
 // parameter exists because the call site reads better with the submission stated.
 export function sendText(sessionId, text, submit = true) {
   return post(`/api/sessions/${encodeURIComponent(sessionId)}/text`, { text, submit });
-}
-
-export function sendKeys(sessionId, keys) {
-  return post(`/api/sessions/${encodeURIComponent(sessionId)}/keys`, { keys });
 }
 
 // uploadSessionImage writes an image into the panel's own store and returns the
@@ -193,29 +186,6 @@ export async function fetchDigest(sessionId, limit) {
   }
   const steps = await readJSON(response);
   return Array.isArray(steps) ? steps : [];
-}
-
-// fetchScreen reads the tail of a session's terminal.
-//
-// Alone among these, it returns its failure instead of throwing it, because the
-// server deliberately sends both: a read that ends in an eviction still carries
-// every byte that arrived before it failed, and that prefix is often exactly
-// what the operator was looking at (internal/server/api.go, handleScreen).
-// Throwing would discard it. The caller gets {screen, error} and shows both.
-//
-// No ?tail= is sent. It is a byte count, and how many bytes a terminal screen
-// costs is a fact the server already holds (defaultTailBytes, 64 KiB); naming a
-// number here would be a second copy of it, free to drift — and a number chosen
-// as though it were a line count would silently truncate the screen to a
-// fragment.
-export async function fetchScreen(sessionId) {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/screen`);
-  const body = await readJSON(response);
-  const screen = typeof body?.screen === "string" ? body.screen : "";
-  if (response.ok) {
-    return { screen, error: "" };
-  }
-  return { screen, error: messageFor(response, body) };
 }
 
 // fetchTerminalToken reads the token a terminal socket must send as its first

@@ -44,11 +44,11 @@ const DIGEST_INTERVAL_MS = 3000;
 
 // The key buttons send bytes, not names.
 //
-// internal/server hands the `keys` field straight to daemon.Client.SendKeys,
-// which writes it into the session's PTY with conn.Write([]byte(keys)). There
-// is no translation layer anywhere between this table and the terminal, so
-// sending "up" would type the letters u and p into a live session instead of
-// moving its selection.
+// A button's bytes go into the live terminal's socket exactly as a keystroke
+// does, and from there into the session's PTY (internal/server/pty.go). There is
+// no translation layer anywhere between this table and the terminal, so sending
+// "up" would type the letters u and p into a live session instead of moving its
+// selection.
 export const KEYS = [
   { id: "escape", label: "Esc", bytes: "\u001b" },
   { id: "up", label: "\u2191", bytes: "\u001b[A" },
@@ -441,8 +441,9 @@ export function renderSession(
     startPolling();
   };
 
-  // Through the stream the terminal already holds. POST .../keys would open an
-  // attach of its own on every press, and every attach resizes the session.
+  // Through the stream the terminal already holds, like any keystroke: a
+  // connection of its own per press would be an attach per press, and every
+  // attach resizes the session.
   const pressKey = (key) => {
     if (live) live.type(key.bytes);
     else showError(t("terminal_not_connected"));

@@ -23,6 +23,7 @@ type fakeTerminal struct {
 	out      chan []byte
 	endErr   error
 	writable bool
+	writeErr error // what every Write fails with, when set
 
 	written chan []byte
 	resized chan [2]int
@@ -57,6 +58,9 @@ func (f *fakeTerminal) Read(p []byte) (int, error) {
 }
 
 func (f *fakeTerminal) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
 	f.written <- append([]byte(nil), p...)
 	return len(p), nil
 }
@@ -302,6 +306,33 @@ func TestPTYTypesBinaryFramesIntoTheSession(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("nothing reached the session")
+	}
+}
+
+// Keys the daemon connection would not take are said to the browser, which puts
+// them where the operator sees them. This is the one place left that can tell
+// the operator a keystroke did not reach the session: POST .../keys, whose
+// failed write was its own typed error, is gone, and the terminal socket is how
+// keys travel now.
+func TestPTYKeysThatDidNotReachTheSessionAreSaidSo(t *testing.T) {
+	term := newFakeTerminal(true)
+	term.writeErr = errors.New("write unix: broken pipe")
+	d, _ := ptyDeps(term, nil)
+	url, _ := wsServer(t, d)
+	conn, _, err := dialPTY(t, url+"/api/sessions/abc/pty?cols=80&rows=24", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	readControl(t, conn)
+	if err := conn.Write(context.Background(), websocket.MessageBinary, []byte("y")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	msg := readControl(t, conn)
+	if msg["type"] != "error" {
+		t.Fatalf("a keystroke the session never got answered %v, want an error message", msg)
+	}
+	if text, _ := msg["error"].(string); !strings.Contains(text, "not delivered") || !strings.Contains(text, "broken pipe") {
+		t.Errorf("error = %q, want it to say the keys were not delivered, and why", text)
 	}
 }
 
