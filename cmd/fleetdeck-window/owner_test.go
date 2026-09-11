@@ -63,6 +63,23 @@ func TestTheAppBundleCarriesThePanelWhereTheWindowLooksForIt(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(out)) != probe {
 		t.Fatalf("%s version = %q (%v), want %q from this build", panelBinary(window), out, err, probe)
 	}
+
+	// The window knows the tree it was built from and the tools that built it
+	// -- the update button's half of the same agreement. Read from the binary's
+	// own build record, not by running it.
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := exec.Command("go", "version", "-m", window).CombinedOutput()
+	if err != nil {
+		t.Fatalf("go version -m: %v\n%s", err, info)
+	}
+	for _, want := range []string{"main.treeDir=" + root, "main.gitPath=/", "main.goPath=/", "main.makePath=/"} {
+		if !strings.Contains(string(info), want) {
+			t.Errorf("the window was not built with %s; its build record:\n%s", want, info)
+		}
+	}
 }
 
 func TestTheScreenOpensThePanelOnceItAnswers(t *testing.T) {
@@ -112,7 +129,7 @@ func TestTheScreenShowsAFailureEvenOverThePanelAndOpensThePanelAgainAfter(t *tes
 }
 
 func TestTheStartingPageShowsAWaitLongerThanTwoSeconds(t *testing.T) {
-	page := startingPage(testURL)
+	page := startingPage(testURL, false)
 	if !strings.Contains(page, testURL) {
 		t.Fatal("the starting page does not name the address")
 	}
@@ -149,7 +166,8 @@ func TestTheFailurePageSaysWhyShowsTheLogAndOffersToStartAgain(t *testing.T) {
 func TestPagesEscapeEverythingTheyInterpolate(t *testing.T) {
 	const evil = `"><script>alert(1)</script>`
 	for name, page := range map[string]string{
-		"starting": startingPage("http://x/" + evil),
+		"starting":    startingPage("http://x/"+evil, false),
+		"taking over": startingPage("http://x/"+evil, true),
 		"failed": failedPage("http://x/"+evil, supervisor.Event{
 			State: supervisor.Failed, Err: errors.New(evil), LogTail: evil,
 		}, "/log/"+evil),
