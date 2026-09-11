@@ -63,7 +63,7 @@ It prints `[ 'Terminal' ]`. A plain `require("./web/vendor/xterm.js")` is not a 
 
 ## @xterm/addon-fit 0.11.0
 
-Sizes the terminal to the element it is drawn in. Not wired into the page yet.
+Sizes the terminal to the element it is drawn in (`web/js/liveterminal.js`).
 
 | File | Source |
 | --- | --- |

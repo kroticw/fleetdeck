@@ -37,6 +37,15 @@ function baseName(path) {
     .replace(/\.md$/, "");
 }
 
+// cardPathForLink is which card a wiki link names: the one whose file name,
+// without its directory and ".md", is the link's note name — or null when no
+// card is called that. Exported for the live terminal's links
+// (web/js/terminallinks.js, wired in web/js/main.js), so that a [[link]] in a
+// session's output opens the same card it would open on a card.
+export function cardPathForLink(cards, name) {
+  return (cards ?? []).find((c) => baseName(c.path) === name)?.path ?? null;
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -287,10 +296,10 @@ export function renderCard(root, path, onClose, options = {}) {
   const onLinkClick = (event) => {
     const link = event.target?.closest?.("[data-link]");
     if (!link || !root.contains(link)) return;
-    const target = (latest?.cards ?? []).find((c) => baseName(c.path) === link.dataset.link);
+    const target = cardPathForLink(latest?.cards, link.dataset.link);
     if (!target) return;
     event.preventDefault?.();
-    current = target.path;
+    current = target;
     // None of this belongs to the card being opened. Answers still in flight
     // find `current` changed and discard themselves.
     //

@@ -86,6 +86,10 @@ export function installTerminal({ cols = 80, rows = 24 } = {}) {
     attachCustomWheelEventHandler(fn) {
       this.wheelHandler = fn;
     }
+    registerLinkProvider(provider) {
+      (this.linkProviders ??= []).push(provider);
+      return { dispose: () => {} };
+    }
     open(host) {
       this.host = host;
     }

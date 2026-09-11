@@ -345,3 +345,45 @@ test("a terminal that cannot be measured is left to xterm", async () => {
   assert.equal(wheel(terminal, row, { deltaY: -100 }), true);
   assert.equal(replayed.length, 0);
 });
+
+// --- links ---------------------------------------------------------------------
+
+// A terminal made with the given links, opened, and the link provider it
+// registered (or none).
+async function linked(links) {
+  const terminals = installTerminal();
+  const host = dom.element("div");
+  dom.document.body.appendChild(host);
+  const live = createLiveTerminal(host, "sess-1", { timers: fakeTimers(), links });
+  live.open();
+  await settle();
+  return { live, terminal: terminals[0] };
+}
+
+test("a terminal given links makes the session's wiki links open what they name", async () => {
+  const opened = [];
+  const { terminal } = await linked({
+    resolve: (name) => (name === "plan-a" ? "/cards/plan-a.md" : null),
+    open: (path) => opened.push(path),
+  });
+  assert.equal(terminal.linkProviders?.length, 1, "no link provider was registered");
+
+  // A row as the terminal's buffer hands it out, with one link on it.
+  const text = "see [[plan-a]] here";
+  terminal.cols = text.length;
+  terminal.buffer = {
+    active: {
+      getLine: (y) => (y === 0 ? { getCell: (x) => (x < text.length ? { getChars: () => text[x], getWidth: () => 1 } : undefined) } : undefined),
+    },
+  };
+  let links;
+  terminal.linkProviders[0].provideLinks(1, (found) => (links = found));
+  assert.equal(links?.length, 1);
+  links[0].activate();
+  assert.deepEqual(opened, ["/cards/plan-a.md"], "the link did not open the card through the links it was given");
+});
+
+test("a terminal given no links links nothing", async () => {
+  const { terminal } = await linked(null);
+  assert.equal(terminal.linkProviders?.length ?? 0, 0);
+});
