@@ -68,6 +68,14 @@ test("pickableSessions offers every session that has a short id", () => {
   assert.deepEqual(list.map((s) => s.short), ["a", "b"]);
 });
 
+test("pickableSessions offers this fleet's sessions and the unclaimed, never another fleet's", () => {
+  const list = pickableSessions(
+    [{ short: "a", fleets: ["A"] }, { short: "b", fleets: ["B"] }, { short: "n" }, { short: "ab", fleets: ["A", "B"] }],
+    "B",
+  );
+  assert.deepEqual(list.map((s) => s.short), ["b", "n", "ab"]);
+});
+
 test("pickableSessions on nothing at all is an empty list, not a crash", () => {
   assert.deepEqual(pickableSessions(undefined), []);
 });
@@ -402,6 +410,21 @@ test("the column's head leads to the orchestrator wizard, pinned or not", async 
     current.stop();
     current.dom.restore();
     current = null;
+  }
+});
+
+test("in a fleet's tab the wizard is that fleet's", async () => {
+  // The wizard writes a working order into a fleet's documentation and pins
+  // that fleet's orchestrator; opened from fleet B's tab it must be B's.
+  globalThis.location.search = "?fleet=B";
+  try {
+    const c = await column(structuredClone(PIN));
+    assert.equal(c.root.querySelector("a.o-wizard").getAttribute("href"), "/setup.html?fleet=B");
+    current.stop();
+    current.dom.restore();
+    current = null;
+  } finally {
+    delete globalThis.location.search;
   }
 });
 

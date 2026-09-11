@@ -4,6 +4,7 @@ import { t } from "./i18n.js";
 import { ORCHESTRATOR_KEYS } from "./columnwidth.js";
 import { mountColumnResize } from "./columnresize.js";
 import { createLiveTerminal } from "./liveterminal.js";
+import { belongsTo, withFleet, fleetFromSearch } from "./fleet.js";
 import { FONT_KEYS } from "./terminalfont.js";
 import { buildFontControls } from "./fontcontrols.js";
 
@@ -61,8 +62,8 @@ export function contextPercent(ctx) {
 // pickableSessions is the list the picker offers: every session that has a
 // short id, because the short id is what a pin points at — a session without
 // one cannot be pinned to and so cannot be offered.
-export function pickableSessions(sessions) {
-  return (sessions ?? []).filter((s) => s.short);
+export function pickableSessions(sessions, fleet = "") {
+  return (sessions ?? []).filter((s) => s.short && belongsTo(s, fleet));
 }
 
 // pickerLabel is what a session's button reads. label is the operator's own
@@ -94,7 +95,7 @@ export function viewSignature(snap, connected) {
     connected,
     short,
     hasSnapshot: snap != null,
-    sessions: pickableSessions(sessions).map((s) => [s.short, s.name ?? "", s.label ?? ""]),
+    sessions: pickableSessions(sessions, snap?.fleet).map((s) => [s.short, s.name ?? "", s.label ?? ""]),
     session: session
       ? [session.short, session.name ?? "", session.label ?? "", session.sessionId, contextPercent(session.context)]
       : null,
@@ -313,7 +314,8 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     // sent to the session, then the pin — is the wizard's, and this is where
     // it is run again: the first-run page at its orchestrator step.
     const wizard = el("a", "o-wizard", t("orchestrator_wizard"));
-    wizard.setAttribute("href", "/setup.html");
+    // The wizard of this tab's fleet (see fleet.js).
+    wizard.setAttribute("href", withFleet("/setup.html", fleetFromSearch(globalThis.location?.search ?? "")));
     wizard.setAttribute("title", t("orchestrator_wizard_hint"));
     head.append(wizard);
 
@@ -468,7 +470,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
   };
 
   const draw = () => {
-    const { sessions, short, session } = resolve();
+    const { snap, sessions, short, session } = resolve();
 
     if (!built) {
       built = true;
@@ -508,7 +510,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     // failure, same as before it — is what reverts the control to what is
     // actually pinned, with nothing extra to track.
     const select = head.querySelector(".o-pick-select");
-    syncSelectOptions(select, [["", t("not_pinned")], ...pickableSessions(sessions).map((s) => [s.short, pickerLabel(s)])]);
+    syncSelectOptions(select, [["", t("not_pinned")], ...pickableSessions(sessions, snap?.fleet).map((s) => [s.short, pickerLabel(s)])]);
     if (select.value !== short) select.value = short;
 
     // A pin with no session behind it — nothing pinned, or the daemon no

@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, sendText, fetchDigest, fetchTerminalToken, createCard } from "../js/api.js";
+import { setCardField, sendText, fetchDigest, fetchTerminalToken, createCard, setOrchestratorSession } from "../js/api.js";
 
 let calls = [];
 let realFetch;
@@ -201,4 +201,28 @@ test("a new card that reached the board but not its history says so", async () =
 test("a refused new card throws the server's words", async () => {
   stubFetch(answer({ status: 400, body: { error: 'invalid card: unknown zone "someday"' } }));
   await assert.rejects(createCard("A task", "someday"), /unknown zone/);
+});
+
+// A card started, a card edited and an orchestrator pinned land in the fleet
+// the tab's address names: the server reads it from the same parameter the
+// snapshot does.
+test("card and pin writes carry the tab's fleet", async () => {
+  globalThis.location = { search: "?fleet=%D0%BE%D1%81%D0%BD%D0%BE%D0%B2%D0%BD%D0%BE%D0%B9" };
+  try {
+    stubFetch((url, init) => answer({ status: init.method === "POST" ? 201 : 204, body: { path: "/b/cards/x.md", committed: true } }));
+    await createCard("A task", "planned");
+    await setCardField("/b/cards/x.md", "stage", "review");
+    await setOrchestratorSession("cafe0001");
+    const fleet = "fleet=%D0%BE%D1%81%D0%BD%D0%BE%D0%B2%D0%BD%D0%BE%D0%B9";
+    assert.deepEqual(calls.map((c) => c.url), [`/api/cards?${fleet}`, `/api/cards?${fleet}`, `/api/config?${fleet}`]);
+  } finally {
+    delete globalThis.location;
+  }
+});
+
+test("without a fleet in the address the writes go where they always did", async () => {
+  stubFetch((url, init) => answer({ status: init.method === "POST" ? 201 : 204, body: { path: "/b/cards/x.md", committed: true } }));
+  await createCard("A task", "planned");
+  await setOrchestratorSession("cafe0001");
+  assert.deepEqual(calls.map((c) => c.url), ["/api/cards", "/api/config"]);
 });

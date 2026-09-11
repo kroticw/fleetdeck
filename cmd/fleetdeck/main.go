@@ -495,20 +495,32 @@ func serve(parent context.Context, o runOpts) error {
 		func(err error) { log.Printf("notify: %v", err) },
 	)
 
+	d := deps(ctx, p, dc, collector, cfg, o.configPath)
+	// Every fleet's board, docs, pin and wizard, the first fleet's also in
+	// d's own fields, so a request naming no fleet is served as before. Made
+	// before anything below is started, so there is nothing to stop if it fails.
+	d.Fleet = newFleets(o, cfg, dc, collector)
+	first, err := d.Fleet("")
+	if err != nil {
+		return err
+	}
+	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession
+
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		poll(ctx, cfg.DaemonPollInterval, p.refresh)
 	}()
-	go func() {
-		defer wg.Done()
-		watchBoard(ctx, cfg.BoardPath, func() { p.refresh(ctx) })
-	}()
-
-	d := deps(ctx, p, dc, collector, cfg, o.configPath)
-	a := appointer(o, cfg, dc, collector)
-	d.OrchestratorPreview, d.Appoint = a.Preview, a.Appoint
+	// Every fleet's board is watched, not only the first: a card moved on any
+	// of them raises its banner at once rather than at the next poll.
+	for _, f := range cfg.FleetList() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			watchBoard(ctx, f.BoardPath, func() { p.refresh(ctx) })
+		}()
+	}
 	if d.Build != nil {
 		// Which window this panel belongs to, for a window that finds it answering.
 		d.Build.Owner = o.owner

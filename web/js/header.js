@@ -3,7 +3,8 @@ import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
-import { brandHTML, hasUnsentText } from "./buildcheck.js";
+import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
+import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
 import { UPDATE_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
 
 // Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
@@ -379,6 +380,33 @@ export function usageProblemHTML(severity, kind) {
   return "";
 }
 
+// fleetSwitcherHTML is the row of fleets a panel with more than one shows:
+// each fleet, this tab's marked, and on each the number of its own sessions
+// waiting for an answer, so a question in a fleet not on screen is still seen.
+// A panel with one fleet has no switcher: it looks as it did before fleets.
+export function fleetSwitcherHTML(entries) {
+  if (entries.length < 2) return "";
+  const buttons = entries.map((e) => {
+    const cls = e.current ? "fleet-entry fleet-entry-current" : "fleet-entry";
+    const current = e.current ? ' aria-current="page"' : "";
+    const waiting = e.waiting ? ` <span class="fleet-entry-waiting">${e.waiting}</span>` : "";
+    return `<button type="button" class="${cls}" data-fleet="${escapeHTML(e.name)}"${current}>${escapeHTML(e.name)}${waiting}</button>`;
+  });
+  return `<nav class="fleet-switch" aria-label="${escapeHTML(t("fleet_switch"))}">${buttons.join("")}</nav>`;
+}
+
+// headerCounts is what the header's two counters count: this fleet's sessions
+// and the sessions no fleet claims. Another fleet's waiting sessions are
+// counted on its switcher entry instead, so they are neither lost nor taken
+// for this fleet's. stalled is the tracker's answer for every session.
+export function headerCounts(snap, stalled) {
+  const counted = new Set(headerSessions(snap));
+  return {
+    waiting: [...counted].filter(isWaiting),
+    stalled: stalled.filter((s) => counted.has(s)),
+  };
+}
+
 export function renderHeader(root) {
   initTheme();
 
@@ -426,6 +454,13 @@ export function renderHeader(root) {
       if (pressed.start) hostUpdate();
       return;
     }
+    const entry = event.target.closest(".fleet-entry");
+    if (entry) {
+      if (!entry.classList.contains("fleet-entry-current")) {
+        switchFleet(entry.dataset.fleet, { storage: pageStorage() });
+      }
+      return;
+    }
     const button = event.target.closest(".theme-toggle");
     if (!button) return;
     button.textContent = t(themeLabelKey(cycleTheme()));
@@ -435,14 +470,19 @@ export function renderHeader(root) {
     const snap = rawSnap ?? {};
     const sessions = snap.sessions ?? [];
     const nowMs = Date.now();
-    const waitingCount = sessions.filter(isWaiting).length;
-    const stalledSessions = stalledTracker.update(sessions, nowMs);
+    // The tracker sees every session, so a session's stall clock does not
+    // restart because a fleet claimed or released it; headerCounts then keeps
+    // what this fleet's counters count.
+    const counts = headerCounts(snap, stalledTracker.update(sessions, nowMs));
+    const waitingCount = counts.waiting.length;
+    const stalledSessions = counts.stalled;
     const stalledCount = stalledSessions.length;
     const usageSeverity = usageTracker.update(!!snap.usageError, nowMs);
     const usageStale = isUsageStale(snap, nowMs);
 
     root.innerHTML = `
       ${brandHTML(snap.build)}
+      ${fleetSwitcherHTML(fleetEntries(snap, isWaiting))}
       ${themeButtonHTML()}
       ${hostUpdate ? updateHTML(update, nowMs) : ""}
       <div class="limits">

@@ -200,6 +200,12 @@ const en = {
   // override (web/js/theme.js's button, rendered by header.js). "auto" is
   // the no-override state — the panel follows the system theme.
   sessions_title: "Sessions",
+  // --- fleets (web/js/fleet.js, header.js's switcher, sessions.js's groups) ---
+  fleet_switch: "fleets",
+  fleet_none: "No fleet",
+  fleet_sessions: "sessions",
+  fleet_waiting: "waiting",
+  // --- end of fleets ---
   theme_auto: "theme: auto",
   theme_light: "theme: light",
   theme_dark: "theme: dark",
@@ -386,6 +392,12 @@ const ru = {
   image_may_ask_permission: "при первом чтении отсюда сессия спросит вашего разрешения — ответьте ей в этом же пульте",
 
   sessions_title: "Сессии",
+  // --- fleets (web/js/fleet.js, header.js's switcher, sessions.js's groups) ---
+  fleet_switch: "флоты",
+  fleet_none: "Без флота",
+  fleet_sessions: "сессий",
+  fleet_waiting: "ждут ответа",
+  // --- end of fleets ---
   theme_auto: "тема: авто",
   theme_light: "тема: светлая",
   theme_dark: "тема: тёмная",

@@ -142,6 +142,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/api.js":            true,
 		"js/i18n.js":           true,
 		"js/sessions.js":       true,
+		"js/fleet.js":          true,
 		"js/header.js":         true,
 		"js/board.js":          true,
 		"js/orchestrator.js":   true,

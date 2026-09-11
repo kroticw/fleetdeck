@@ -33,6 +33,13 @@ const KEYS = [
   // "tab_docs" in the interface.
   "tab_board",
   "tab_docs",
+  // web/js/header.js's fleet switcher and web/js/sessions.js's fleet groups.
+  // "fleet_none" above all: it heads the sessions no fleet claims, and a
+  // heading reading its own key would hide what the group is.
+  "fleet_switch",
+  "fleet_none",
+  "fleet_sessions",
+  "fleet_waiting",
   // web/js/newcard.js. The missing-commit note especially: it is the one line
   // that says the card is on the board and not in its history, and falling
   // through to its own key would print "new_card_not_committed" instead.

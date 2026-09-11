@@ -48,6 +48,12 @@ func (d Deps) handleWS(w http.ResponseWriter, r *http.Request) {
 		refuseForeignOrigin(w)
 		return
 	}
+	// A fleet no configuration has is refused before the upgrade, as a plain
+	// 404 the page can read, not as a socket that opens and says nothing.
+	if _, err := d.fleetView(r); err != nil {
+		fail(w, http.StatusNotFound, err.Error())
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
@@ -65,7 +71,7 @@ func (d Deps) handleWS(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(d.pushInterval())
 	defer ticker.Stop()
 	for {
-		if !d.push(ctx, conn) {
+		if !d.push(ctx, conn, r) {
 			return
 		}
 		select {
@@ -102,13 +108,22 @@ func readOnly(ctx context.Context, cancel context.CancelFunc, conn *websocket.Co
 	_ = conn.Close(websocket.StatusPolicyViolation, "this socket is read-only: write through the HTTP API")
 }
 
-// push sends one snapshot and reports whether the connection is still usable. A
-// failed write ends the loop: the connection is gone, or the browser stopped
-// reading, and either way there is nobody left to push to.
-func (d Deps) push(ctx context.Context, conn *websocket.Conn) bool {
+// push sends one snapshot of the fleet the socket was opened for and reports
+// whether the connection is still usable. A failed write ends the loop: the
+// connection is gone, or the browser stopped reading, and either way there is
+// nobody left to push to. The fleets are the ones the panel started with, so
+// one checked at the upgrade stays configured for as long as the socket lives;
+// should that ever stop holding, the socket is closed rather than pushed
+// another fleet's view.
+func (d Deps) push(ctx context.Context, conn *websocket.Conn, r *http.Request) bool {
+	view, err := d.fleetView(r)
+	if err != nil {
+		_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
+		return false
+	}
 	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
-	return wsjson.Write(ctx, conn, d.Snapshot()) == nil
+	return wsjson.Write(ctx, conn, view) == nil
 }
 
 func (d Deps) pushInterval() time.Duration {

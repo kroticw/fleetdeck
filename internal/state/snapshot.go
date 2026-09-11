@@ -17,6 +17,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/fleet"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
 )
@@ -67,6 +68,12 @@ type SessionView struct {
 	// browser-side caller to pair with the neighbouring frontend restructure
 	// this change deliberately does not touch.
 	Label string `json:"label,omitempty"`
+
+	// Fleets names the fleets claiming this session — the fleet it is the
+	// orchestrator of, and every fleet whose board has a card naming it — in
+	// configuration order. Empty means no fleet claims it. Filled by ForFleet;
+	// see internal/fleet for why this is derived and never stored.
+	Fleets []string `json:"fleets,omitempty"`
 }
 
 // Snapshot is everything the panel shows at one moment, assembled from
@@ -120,6 +127,26 @@ type Snapshot struct {
 	// the server knows what it is serving. Nil when the panel was wired
 	// without one, which the page reads as "nothing to compare".
 	Build *buildinfo.Fingerprint `json:"build,omitempty"`
+
+	// Fleet is the fleet this snapshot shows and Fleets every configured
+	// fleet, in configuration order. Both are set by ForFleet, which cuts the
+	// view one browser tab asked for out of the whole snapshot.
+	Fleet  string   `json:"fleet,omitempty"`
+	Fleets []string `json:"fleets,omitempty"`
+
+	// Boards is every fleet's board as this cycle read it. Only the whole
+	// snapshot a collect cycle produces carries it; Cards then holds the cards
+	// of every board together, which is what the notification rules diff, so a
+	// card moving to review raises its banner whichever fleet a tab shows.
+	// Never served: a view carries its own fleet's cards in Cards.
+	Boards []FleetBoard `json:"-"`
+}
+
+// FleetBoard is one fleet's board as a collect cycle read it.
+type FleetBoard struct {
+	Fleet      fleet.Fleet
+	Cards      []board.Card
+	BoardError string
 }
 
 // Link attaches each session to the card that names it. A card names a

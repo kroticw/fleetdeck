@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -150,7 +151,27 @@ func (c *Collector) Config() config.Config {
 	defer c.cfgMu.RUnlock()
 	cfg := c.cfg
 	cfg.SessionLabels = maps.Clone(cfg.SessionLabels)
+	// The same holds for the fleets list, which SetFleetOrchestrator edits
+	// in place.
+	cfg.Fleets = slices.Clone(cfg.Fleets)
 	return cfg
+}
+
+// SetFleetOrchestrator is SetOrchestratorSession for a fleet of the fleets
+// list, found by name; the top-level fleet goes through
+// SetOrchestratorSession. It reports whether such a fleet is configured. The
+// caller persists the pin first (config.SetFleetOrchestrator), for the same
+// reason.
+func (c *Collector) SetFleetOrchestrator(name, id string) bool {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	for i := range c.cfg.Fleets {
+		if c.cfg.Fleets[i].Name == name {
+			c.cfg.Fleets[i].Orchestrator = id
+			return true
+		}
+	}
+	return false
 }
 
 // SetOrchestratorSession updates the pinned orchestrator session id kept in
@@ -374,19 +395,31 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		}
 	}
 
+	// Every fleet's board is read on every cycle, not only the one some tab
+	// shows: the notification rules diff the cards of all of them, so a card
+	// moving to review raises its banner whichever fleet is on screen. The
+	// top-level fields stay the first fleet's, so a panel with one fleet
+	// produces exactly the snapshot it always did; state.ForFleet cuts any
+	// other fleet's view out of Boards.
 	var cards []board.Card
-	if cfg.BoardPath != "" {
-		var err error
-		cards, err = board.Scan(cfg.BoardPath)
-		if err != nil {
-			snap.BoardError = err.Error()
-			cards = nil
+	for _, f := range cfg.FleetList() {
+		fb := state.FleetBoard{Fleet: f}
+		if f.BoardPath != "" {
+			scanned, err := board.Scan(f.BoardPath)
+			if err != nil {
+				fb.BoardError = err.Error()
+			} else {
+				fb.Cards = scanned
+			}
 		}
+		snap.Boards = append(snap.Boards, fb)
+		cards = append(cards, fb.Cards...)
 	}
+	snap.BoardError = snap.Boards[0].BoardError
 
 	snap.Cards = cards
 	snap.Sessions = state.Link(sessions, cards)
-	snap.OrphanCards = state.OrphanCards(sessions, cards)
+	snap.OrphanCards = state.OrphanCards(sessions, snap.Boards[0].Cards)
 	c.pruneContextCache(c.enrich(snap.Sessions, cfg.SessionLabels))
 
 	if cfg.UsageEnabled && c.usage != nil {

@@ -517,3 +517,93 @@ test("a stall held past the threshold while the session list is folded is badged
 
   dom.restore();
 });
+
+// --- several fleets: this fleet's sessions, the unclaimed, and the others ---
+//
+// The server sends every session with the fleets claiming it; the column shows
+// this fleet's tasks as rows, the sessions no fleet claims under their own
+// heading (they belong to every fleet until a card claims them, so hiding them
+// would leave a waiting question where no tab looks), and each other fleet as
+// one line with its count, never as its sessions' rows.
+
+const TWO_FLEETS = {
+  fleet: "B",
+  fleets: ["A", "B"],
+  orchestratorSession: "borch",
+  sessions: [
+    { short: "borch", name: "B's orchestrator", sessionId: "u-0", fleets: ["B"] },
+    { short: "bb22", name: "a task of B", sessionId: "u-1", fleets: ["B"] },
+    { short: "nn33", name: "nobody's session", sessionId: "u-2" },
+    { short: "aa11", name: "a task of A", sessionId: "u-3", fleets: ["A"], needs: "answer: which one?" },
+    { short: "aa12", name: "another task of A", sessionId: "u-4", fleets: ["A"] },
+  ],
+};
+
+test("several fleets: this fleet's tasks are rows, the other fleet is one line", async () => {
+  const { root, dom } = await list(structuredClone(TWO_FLEETS));
+  const html = root.innerHTML;
+  assert.ok(html.includes('data-short="bb22"'), "this fleet's task is a row");
+  assert.ok(!html.includes('data-short="borch"'), "its orchestrator still has a column of its own");
+  assert.ok(!html.includes('data-short="aa11"') && !html.includes('data-short="aa12"'), "the other fleet's sessions are not rows here");
+  const other = html.match(/<button type="button" class="fleet-other" data-fleet="A">(.*?)<\/button>/s)?.[1];
+  assert.ok(other, "the other fleet is one line that switches to it");
+  assert.match(other, /fleet-other-count">[^<]*: 2</, "with how many sessions it has");
+  assert.match(other, /fleet-other-waiting">[^<]*: 1</, "and how many of them wait for an answer");
+  dom.restore();
+});
+
+test("several fleets: an unclaimed session is listed under its own heading", async () => {
+  const { root, dom } = await list(structuredClone(TWO_FLEETS));
+  const html = root.innerHTML;
+  const head = html.indexOf('class="fleet-group-head"');
+  assert.ok(head > 0, "the unclaimed sessions have a heading");
+  assert.ok(html.indexOf('data-short="bb22"') < head, "this fleet's tasks come first");
+  assert.ok(html.indexOf('data-short="nn33"') > head, "the unclaimed session is under the heading");
+  dom.restore();
+});
+
+test("several fleets: a fleet that is only its orchestrator still shows the rest", async () => {
+  const snap = structuredClone(TWO_FLEETS);
+  snap.sessions = snap.sessions.filter((s) => s.short !== "bb22");
+  const { root, dom } = await list(snap);
+  const html = root.innerHTML;
+  assert.ok(html.includes("besides the orchestrator") || html.includes("Кроме оркестратора"));
+  assert.ok(html.includes('data-short="nn33"'), "the unclaimed session is still there");
+  assert.ok(html.includes('data-fleet="A"'), "and so is the other fleet");
+  dom.restore();
+});
+
+test("several fleets: a fleet with no sessions of its own says so, whatever the others have", async () => {
+  const snap = {
+    fleet: "C",
+    fleets: ["A", "C"],
+    orchestratorSession: "",
+    sessions: [
+      { short: "aa11", name: "a task of A", sessionId: "u-3", fleets: ["A"] },
+      { short: "nn33", name: "nobody's session", sessionId: "u-2" },
+    ],
+  };
+  const { root, dom } = await list(snap);
+  const html = root.innerHTML;
+  assert.ok(html.includes("No sessions") || html.includes("Нет сессий"), "this fleet has no sessions at all");
+  assert.ok(!html.includes("besides the orchestrator") && !html.includes("Кроме оркестратора"),
+    "an orchestrator it does not have is not what its column is missing");
+  dom.restore();
+});
+
+test("one fleet: the column looks exactly as it did before there were fleets", async () => {
+  const snap = {
+    fleet: "A",
+    fleets: ["A"],
+    orchestratorSession: "",
+    sessions: [
+      { short: "aa11", name: "a task", sessionId: "u-1", fleets: ["A"] },
+      { short: "nn33", name: "nobody's session", sessionId: "u-2" },
+    ],
+  };
+  const { root, dom } = await list(snap);
+  const html = root.innerHTML;
+  assert.ok(!html.includes("fleet-group-head") && !html.includes("fleet-other"), "nothing is grouped");
+  assert.ok(html.includes('data-short="aa11"') && html.includes('data-short="nn33"'), "every session is a row");
+  dom.restore();
+});

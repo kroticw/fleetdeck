@@ -89,6 +89,18 @@ test("the list is built from the server's documents", async () => {
   );
 });
 
+test("in a fleet's tab the documentation is that fleet's", async () => {
+  globalThis.location = { search: "?fleet=B" };
+  try {
+    const calls = stubFetch([["/api/docs", ok(DOCS)]]);
+    renderDocs(root);
+    await settle();
+    assert.deepEqual(calls, ["/api/docs?fleet=B"]);
+  } finally {
+    delete globalThis.location;
+  }
+});
+
 test("nothing is selected until a document is opened", async () => {
   stubFetch([["/api/docs", ok(DOCS)]]);
 

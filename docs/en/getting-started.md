@@ -66,6 +66,18 @@ A refused step does not stop the others, and the command exits non-zero when any
 
 Two cases end in a refusal rather than an edit, both for the same reason — `init` does not rewrite a configuration file it did not create. A configuration that names no `board.path` is left for you to fill in; a `--board` or `--workspace` that puts the board somewhere other than the configured board is refused rather than silently ignored.
 
+## Adding a second fleet
+
+A fleet is a board, its documentation and its orchestrator. The first one is the workspace the first launch or `fleetdeck init` makes. Another one is added to the same configuration:
+
+```bash
+fleetdeck init --fleet clining --workspace ~/clining-fleet
+```
+
+This makes the workspace — a board and docs, as above — adds the fleet to `fleets` in the configuration only once its board exists, and lets Claude Code sessions write in the new folder. `--board <path>` makes a board alone instead. A name or a board another fleet already has is refused before anything is made; running the same command again keeps what the first run added.
+
+Restart the panel, and the header shows a switcher: one entry per fleet, each with how many of its sessions wait for an answer. Appoint the new fleet's orchestrator from its own tab: the wizard opened from a fleet's orchestrator column writes that fleet's working order and pins that fleet's orchestrator. See [Several fleets](configuration.md#several-fleets) for what the fleets share and how a session comes to be in one.
+
 ## The app and the panel
 
 The fleetdeck app starts the panel itself, and the panel lives exactly as long as the app. When the app opens, it looks at the panel's address. A panel that already answers there and was started from a terminal is shown as it is, and so is the panel of another fleetdeck window that is still open. A panel whose window is gone — one left behind by an older app that did not stop its panel, or by an app that ended some way its panel did not notice — is stopped, and the window says so while it starts its own. When nothing answers, the app starts the panel it carries, sends both of the panel's output streams to `~/Library/Logs/fleetdeck.log`, and opens it as soon as it answers.
@@ -143,7 +155,7 @@ A card does not need the panel either: it is a markdown file with YAML frontmatt
 
 ## Linking a card to a session
 
-A card is connected to a running session through one frontmatter field: `session`. The orchestrator fills this field in when it starts a session for a card, and from that point the card's `session` value is the identifier the panel uses to find that session's live state on the daemon.
+A card is connected to a running session through one frontmatter field: `session`. The orchestrator fills this field in when it starts a session for a card, and from that point the card's `session` value is the identifier the panel uses to find that session's live state on the daemon. With several fleets, the same field is what puts the session in the fleet whose board the card is on.
 
 ## Why `session` is the only connecting field
 

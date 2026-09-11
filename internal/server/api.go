@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/state"
 )
 
 const (
@@ -93,12 +94,26 @@ func decodeFailed(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-func (d Deps) handleSnapshot(w http.ResponseWriter, _ *http.Request) {
+func (d Deps) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	if d.Snapshot == nil {
 		unavailable(w, "a snapshot source")
 		return
 	}
-	writeJSON(w, http.StatusOK, d.Snapshot())
+	view, err := d.fleetView(r)
+	if err != nil {
+		fail(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// fleetView is the snapshot of the fleet the request names in its fleet
+// query parameter, the first fleet when it names none. The fleet lives in the
+// tab's address, not in the server: two tabs on two fleets are served side by
+// side, and switching one of them changes nothing for the other. The only
+// error is a fleet no configuration has, which the caller answers with 404.
+func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
+	return state.ForFleet(d.Snapshot(), r.URL.Query().Get("fleet"))
 }
 
 func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +145,10 @@ func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.SetCardField == nil {
 		unavailable(w, "a board")
 		return
@@ -196,6 +215,10 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 // two fields and nothing else: a card is started here and written by whoever
 // takes the task on, so anything more is refused rather than half obeyed.
 func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.CreateCard == nil {
 		unavailable(w, "a board")
 		return
@@ -352,6 +375,10 @@ func (d Deps) handleDigest(w http.ResponseWriter, r *http.Request) {
 // empty string (204: unpin, a legal request) are different outcomes — the
 // same device handleSendText uses for Submit *bool.
 func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.SetOrchestratorSession == nil {
 		unavailable(w, "a configuration store")
 		return
@@ -367,7 +394,11 @@ func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.SetOrchestratorSession(*body.OrchestratorSession); err != nil {
-		fail(w, http.StatusInternalServerError, err.Error())
+		code := http.StatusInternalServerError
+		if errors.Is(err, ErrOrchestratorTaken) {
+			code = http.StatusConflict
+		}
+		fail(w, code, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

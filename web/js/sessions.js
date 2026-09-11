@@ -26,6 +26,8 @@ import { setSessionLabel } from "./api.js";
 import { createStalledTracker } from "./header.js";
 import { SESSIONS_KEYS } from "./columnwidth.js";
 import { mountColumnResize } from "./columnresize.js";
+import { isMultiFleet, groupSessions, switchFleet } from "./fleet.js";
+import { pageStorage } from "./buildcheck.js";
 
 // Closed vocabulary of "no person needed" needs strings, copied verbatim
 // (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
@@ -244,6 +246,33 @@ export function rowHtml(s, stalledNow) {
     </article>`;
 }
 
+// Waiting sessions float to the top; everything else (stalled and running)
+// keeps its relative order. Stalled must NOT be promoted here — conflating it
+// with Waiting throws away the distinction the whole task exists to draw.
+function waitingFirst(sessions) {
+  const waitingRows = [];
+  const otherRows = [];
+  for (const s of sessions) {
+    (isWaiting(s) ? waitingRows : otherRows).push(s);
+  }
+  return [...waitingRows, ...otherRows];
+}
+
+// fleetOtherHtml is another fleet in this fleet's column: one line, never its
+// sessions' rows, saying how many sessions it has and how many of them wait
+// for an answer — so a question there is seen from here — and switching to
+// that fleet when pressed.
+function fleetOtherHtml({ name, sessions }) {
+  const waiting = sessions.filter(isWaiting).length;
+  const waitingHtml = waiting
+    ? `<span class="fleet-other-waiting">${escapeHtml(t("fleet_waiting"))}: ${waiting}</span>`
+    : "";
+  return `<button type="button" class="fleet-other" data-fleet="${escapeHtml(name)}">`
+    + `<span class="fleet-other-name">${escapeHtml(name)}</span>`
+    + `<span class="fleet-other-count">${escapeHtml(t("fleet_sessions"))}: ${sessions.length}</span>`
+    + `${waitingHtml}</button>`;
+}
+
 // The column's own name, shown in every state including the empty and error
 // ones: the other two columns name themselves through what they show (the
 // board's tab, the orchestrator's open session), and this one otherwise
@@ -386,27 +415,30 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
     // columns was the operator's own complaint. While nothing is pinned there
     // is no orchestrator to leave out, and this is simply every session.
     const pinned = snap.orchestratorSession ?? "";
-    const sessions = pinned ? all.filter((s) => s.short !== pinned) : all;
+    const withoutPinned = (list) => (pinned ? list.filter((s) => s.short !== pinned) : list);
 
-    if (sessions.length === 0) {
-      // "Every session there is, is the orchestrator" and "there are no
-      // sessions" are different facts, and a person reading an empty column
-      // needs to know which one they are looking at.
-      const message = all.length === 0 ? t("no_sessions") : t("only_orchestrator");
-      setBody(`${HEAD}<div class="sempty">${escapeHtml(message)}</div>`);
+    // With several fleets the column is this fleet's tasks, then the sessions
+    // no fleet claims, then one line per other fleet (see fleet.js).
+    const multi = isMultiFleet(snap);
+    const groups = multi ? groupSessions(snap) : null;
+    const scope = multi ? groups.own : all;
+    const sessions = withoutPinned(scope);
+    const unclaimed = multi ? groups.unclaimed : [];
+    const others = multi ? groups.others : [];
+
+    // "Every session there is, is the orchestrator" and "there are no
+    // sessions" are different facts, and a person reading an empty column
+    // needs to know which one they are looking at.
+    const emptyHtml = sessions.length === 0
+      ? `<div class="sempty">${escapeHtml(scope.length === 0 ? t("no_sessions") : t("only_orchestrator"))}</div>`
+      : "";
+    if (sessions.length === 0 && unclaimed.length === 0 && others.length === 0) {
+      setBody(HEAD + emptyHtml);
       return;
     }
 
-    // Waiting sessions float to the top; everything else (stalled and
-    // running) keeps its relative order. Stalled must NOT be promoted here —
-    // conflating it with Waiting throws away the distinction the whole task
-    // exists to draw.
-    const waitingRows = [];
-    const otherRows = [];
-    for (const s of sessions) {
-      (isWaiting(s) ? waitingRows : otherRows).push(s);
-    }
-    const ordered = [...waitingRows, ...otherRows];
+    const ordered = waitingFirst(sessions);
+    const orderedUnclaimed = waitingFirst(unclaimed);
 
     // Fed `all`, not the pinned-out `sessions`: the tracker's own per-session
     // answer must match what header.js's identically-fed instance would say
@@ -422,11 +454,18 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
     // would then receive the row's numeric index -- truthy for every row
     // but the first, badging almost the whole list as Stalled regardless of
     // stalledNow. The arrow below is required, not stylistic.
-    setBody(HEAD + errorHtml + ordered.map((s) => rowHtml(s, stalledNow.has(s.short))).join(""));
+    const rows = (list) => list.map((s) => rowHtml(s, stalledNow.has(s.short))).join("");
+    const unclaimedHtml = orderedUnclaimed.length
+      ? `<div class="fleet-group-head">${escapeHtml(t("fleet_none"))}</div>${rows(orderedUnclaimed)}`
+      : "";
+    setBody(HEAD + errorHtml + emptyHtml + rows(ordered) + unclaimedHtml + others.map(fleetOtherHtml).join(""));
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
       el.addEventListener("click", () => onSelect(el.dataset.short));
+    }
+    for (const el of root.querySelectorAll(".fleet-other")) {
+      el.addEventListener("click", () => switchFleet(el.dataset.fleet, { storage: pageStorage() }));
     }
     for (const el of root.querySelectorAll(".scard")) {
       el.addEventListener("click", (event) => {
@@ -444,7 +483,7 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
         // two controls sit on top of each other and must not fire together.
         event.stopPropagation();
         const row = btn.closest(".srow");
-        const session = ordered.find((s) => s.short === row.dataset.short);
+        const session = [...ordered, ...orderedUnclaimed].find((s) => s.short === row.dataset.short);
         if (session) startEditing(row, session);
       });
     }

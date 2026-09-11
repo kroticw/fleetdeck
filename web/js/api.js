@@ -13,6 +13,8 @@
 // session (see internal/server/guard.go). Never send a body without this
 // header.
 
+import { withFleet, fleetFromSearch } from "./fleet.js";
+
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
 // readJSON never throws. A 204 has no body at all and a failing route may answer
@@ -54,8 +56,17 @@ async function refusal(response) {
 //
 // Everything else throws, carrying the server's own error text. A thrown error
 // means nothing was written.
+
+// inFleet is a panel path in the fleet this tab's address names (see
+// fleet.js): a card started or edited and an orchestrator pinned land in that
+// fleet, which the server reads from the same parameter as the snapshot. No
+// fleet in the address leaves the path as it always was.
+export function inFleet(path) {
+  return withFleet(path, fleetFromSearch(globalThis.location?.search ?? ""));
+}
+
 export async function setCardField(path, field, value) {
-  const response = await fetch("/api/cards", {
+  const response = await fetch(inFleet("/api/cards"), {
     method: "PATCH",
     headers: JSON_HEADERS,
     // The route takes three strings; progress arrives here as a number from a
@@ -82,7 +93,7 @@ export async function setCardField(path, field, value) {
 // commit, because the card exists either way and creating it again would make a
 // second one. A thrown error means no card was made.
 export async function createCard(title, zone) {
-  const response = await fetch("/api/cards", {
+  const response = await fetch(inFleet("/api/cards"), {
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify({ title: String(title), zone: String(zone) }),
@@ -159,7 +170,7 @@ export async function uploadSessionImage(sessionId, base64) {
 // pointer, so an absent key is a 400 and an explicit empty string is the unpin.
 // Which is why this sends the key unconditionally rather than omitting it.
 export async function setOrchestratorSession(id) {
-  const response = await fetch("/api/config", {
+  const response = await fetch(inFleet("/api/config"), {
     method: "PATCH",
     headers: JSON_HEADERS,
     body: JSON.stringify({ orchestratorSession: String(id ?? "") }),

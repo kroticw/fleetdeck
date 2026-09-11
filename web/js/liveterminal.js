@@ -298,7 +298,7 @@ const RETRIED_ENDINGS = { 4403: "terminal_token_stale", 4503: "terminal_daemon_u
 // told once the keys stop, and the size the session now has is shown over the
 // terminal, so it is never changed without a word. Without a key, which is the
 // default, the keys still work and nothing is remembered.
-export function createLiveTerminal(host, short, { timers = globalThis, report = {}, reconnect = false, links = null, fontKey = null } = {}) {
+export function createLiveTerminal(host, short, { timers = globalThis, report = {}, reconnect = false, links = null, fontKey = null, page = globalThis } = {}) {
   const say = {
     streamError: report.streamError ?? (() => {}),
     actionError: report.actionError ?? (() => {}),
@@ -635,11 +635,21 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     typing = term.onData((data) => sendBytes(encoder.encode(data)));
   };
 
+  // A page the browser keeps in its back/forward cache keeps its sockets open:
+  // measured on a stand, switching fleets left both terminals of the fleet
+  // left attached to their sessions, still holding the sessions' size, until
+  // Chrome restored that page. So the terminal lets go when the page is hidden
+  // and does not come back by itself; a page restored from the cache reloads
+  // (store.js), and the reload opens the terminals afresh.
+  const onPageHide = () => closeStream();
+
   return {
     open() {
+      page.addEventListener?.("pagehide", onPageHide);
       void openStream();
     },
     stop() {
+      page.removeEventListener?.("pagehide", onPageHide);
       closeStream();
       disposeTerminal();
     },

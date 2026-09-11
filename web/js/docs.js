@@ -23,6 +23,7 @@
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
+import { inFleet } from "./api.js";
 
 // The documentation section has no cards to resolve wiki links against, so every
 // link in a document renders as one that does not work. Shared and frozen: it is
@@ -127,7 +128,7 @@ export function renderDocs(root) {
     markSelected();
     paintBody({ text: t("doc_opening") });
     try {
-      const response = await fetch(`/api/docs/content?path=${encodeURIComponent(path)}`);
+      const response = await fetch(inFleet(`/api/docs/content?path=${encodeURIComponent(path)}`));
       if (!response.ok) throw await refusal(response);
       const { body } = await response.json();
       if (token !== mine) return;
@@ -151,7 +152,7 @@ export function renderDocs(root) {
 
   (async () => {
     try {
-      const response = await fetch("/api/docs");
+      const response = await fetch(inFleet("/api/docs"));
       if (!response.ok) throw await refusal(response);
       const body = await response.json();
       paintList(Array.isArray(body) ? body : [], "");

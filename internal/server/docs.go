@@ -46,7 +46,11 @@ type Doc struct {
 //     behind an empty list sends the operator looking for the wrong problem.
 //   - roots readable — 200 with the documents, an empty array included. That
 //     really does mean "these directories hold no markdown".
-func (d Deps) handleDocsList(w http.ResponseWriter, _ *http.Request) {
+func (d Deps) handleDocsList(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if len(d.DocsRoots) == 0 {
 		fail(w, http.StatusNotFound, "no documentation roots are configured")
 		return
@@ -104,6 +108,10 @@ func (d Deps) handleDocsList(w http.ResponseWriter, _ *http.Request) {
 // without that, a crafted path reads any file the process can open (spec section
 // 8, the same rule the card write follows).
 func (d Deps) handleDocsContent(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if len(d.DocsRoots) == 0 {
 		// Nothing to confine a path to. Reading it anyway is the whole hole.
 		fail(w, http.StatusNotFound, "no documentation roots are configured")

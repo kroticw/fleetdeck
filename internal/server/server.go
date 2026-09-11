@@ -151,6 +151,15 @@ type Deps struct {
 	OrchestratorPreview func(lang string) (orchestrator.Preview, error)
 	Appoint             func(ctx context.Context, req orchestrator.Request) (orchestrator.Result, error)
 
+	// Fleet answers, for a fleet name from a request's fleet query parameter
+	// ("" being the first fleet), the capabilities that fleet has in place of
+	// BoardDir, DocsRoots, CreateCard, SetOrchestratorSession,
+	// OrchestratorPreview and Appoint above, which are then the first
+	// fleet's. An error wrapping fleet.ErrUnknown is a fleet no configuration
+	// has, answered 404. Nil is a panel with one fleet, served from the fields
+	// above as it always was. See fleetdeps.go.
+	Fleet func(name string) (FleetDeps, error)
+
 	// ImageDir is where an image attached to a session is written, under a
 	// subdirectory named after that session. It is the panel's own directory,
 	// deliberately outside any repository the operator works in: a file left in

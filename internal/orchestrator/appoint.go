@@ -72,6 +72,12 @@ type Appointer struct {
 	Start func(ctx context.Context, cwd, name string) (string, error)
 	// Pin makes short the panel's orchestrator: configuration and column.
 	Pin func(short string) error
+	// Vet refuses an existing session this appointment must not take, before
+	// anything is written or sent — another fleet's orchestrator, which cannot
+	// lead two fleets and which Pin would refuse only after the session had
+	// been handed this fleet's working order. Nil refuses nothing. A session
+	// started for the appointment is not vetted: no fleet can have pinned it.
+	Vet func(short string) error
 
 	// Poll is the pause between two asks of the daemon. StartWait bounds the
 	// wait for a started session to be listed and take its message; SendWait
@@ -117,6 +123,11 @@ func (a *Appointer) Appoint(ctx context.Context, req Request) (Result, error) {
 	if !req.New {
 		if err := a.listed(ctx, req.Session); err != nil {
 			return refuse("session", err)
+		}
+		if a.Vet != nil {
+			if err := a.Vet(req.Session); err != nil {
+				return refuse("session", err)
+			}
 		}
 	}
 
