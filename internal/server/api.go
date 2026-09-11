@@ -145,6 +145,10 @@ func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.SetCardField == nil {
 		unavailable(w, "a board")
 		return
@@ -211,6 +215,10 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 // two fields and nothing else: a card is started here and written by whoever
 // takes the task on, so anything more is refused rather than half obeyed.
 func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.CreateCard == nil {
 		unavailable(w, "a board")
 		return
@@ -367,6 +375,10 @@ func (d Deps) handleDigest(w http.ResponseWriter, r *http.Request) {
 // empty string (204: unpin, a legal request) are different outcomes — the
 // same device handleSendText uses for Submit *bool.
 func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.SetOrchestratorSession == nil {
 		unavailable(w, "a configuration store")
 		return
@@ -382,7 +394,11 @@ func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.SetOrchestratorSession(*body.OrchestratorSession); err != nil {
-		fail(w, http.StatusInternalServerError, err.Error())
+		code := http.StatusInternalServerError
+		if errors.Is(err, ErrOrchestratorTaken) {
+			code = http.StatusConflict
+		}
+		fail(w, code, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

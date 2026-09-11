@@ -19,6 +19,10 @@ const appointTimeout = 3 * time.Minute
 // in the language the page asks for, so the wizard can show it before the
 // person chooses.
 func (d Deps) handleOrchestratorPreview(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.OrchestratorPreview == nil {
 		unavailable(w, "an orchestrator wizard")
 		return
@@ -40,6 +44,10 @@ func (d Deps) handleOrchestratorPreview(w http.ResponseWriter, r *http.Request) 
 // page closed while a new session is starting must not leave that session
 // started and never sent its message.
 func (d Deps) handleAppoint(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
 	if d.Appoint == nil {
 		unavailable(w, "an orchestrator wizard")
 		return
