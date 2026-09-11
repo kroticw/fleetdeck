@@ -135,6 +135,7 @@ func TestEmbeddedFSIsNotEmpty(t *testing.T) {
 func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 	want := map[string]bool{
 		"index.html":           true,
+		"setup.html":           true,
 		"app.css":              true,
 		"js/store.js":          true,
 		"js/main.js":           true,
@@ -165,6 +166,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/terminalfont.js":   true,
 		"js/fontcontrols.js":   true,
 		"js/newcard.js":        true,
+		"js/setup.js":          true,
 		"vendor/xterm.js":      true,
 		"vendor/xterm.css":     true,
 		"vendor/LICENSE.xterm": true,
@@ -250,6 +252,12 @@ func TestStaticReferencesResolveWithinEmbeddedFS(t *testing.T) {
 		t.Fatalf("read index.html: %v", err)
 	}
 	checkRootRefs("index.html", string(index))
+
+	setupPage, err := fs.ReadFile(web.FS, "setup.html")
+	if err != nil {
+		t.Fatalf("read setup.html: %v", err)
+	}
+	checkRootRefs("setup.html", string(setupPage))
 
 	css, err := fs.ReadFile(web.FS, "app.css")
 	if err != nil {

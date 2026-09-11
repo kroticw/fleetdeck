@@ -2274,3 +2274,72 @@ body.is-resizing {
   user-select: none;
 }
 
+/* The setup page (setup.html, web/js/setup.js): one column of text and one row
+   of controls, for a panel that has no configuration yet. */
+.setup {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--gap-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  color: var(--text);
+}
+
+.setup-title {
+  font-size: var(--fs-md);
+  margin: var(--gap-lg) 0 0;
+}
+
+.setup-intro,
+.setup-outside,
+.setup-made {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.setup-outside {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.setup-row {
+  display: flex;
+  gap: var(--gap);
+}
+
+.setup-path {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.setup-error {
+  color: var(--danger);
+}
+
+.setup-error:empty,
+.setup-status:empty {
+  display: none;
+}
+
+.setup-steps {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.setup-step-skipped {
+  color: var(--attn);
+}
+
+.setup-step-detail {
+  color: var(--text-muted);
+}
+
