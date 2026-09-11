@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kroticw/fleetdeck/internal/fleet"
 )
 
 // fileMu serialises every read-modify-write-and-atomic-rename cycle this
@@ -98,6 +100,70 @@ type Config struct {
 	// package doc) came from that file having an implicit default that a
 	// hand-run invocation touched without meaning to.
 	StatuslineRateLimitsPath string
+
+	// Name names the fleet the top-level board, docs and orchestrator keys
+	// describe. Empty means the folder above its board (fleet.DefaultName).
+	Name string
+	// Fleets are the fleets after the top-level one, in the order the file
+	// lists them. The top-level keys stay the first fleet's and are never
+	// moved onto this list: a configuration written before there were
+	// several fleets is read, and written, exactly as it was.
+	Fleets []fleet.Fleet
+}
+
+// FleetList is every configured fleet, the top-level one first, with the
+// top-level fleet's default name filled in.
+func (c Config) FleetList() []fleet.Fleet {
+	name := c.Name
+	if name == "" {
+		name = fleet.DefaultName(c.BoardPath)
+	}
+	first := fleet.Fleet{
+		Name:         name,
+		BoardPath:    c.BoardPath,
+		DocsPaths:    c.DocsPaths,
+		Orchestrator: c.OrchestratorSession,
+	}
+	return append([]fleet.Fleet{first}, c.Fleets...)
+}
+
+// fleetPlace says where in the file the fleet at position i of FleetList is
+// written.
+func fleetPlace(i int) string {
+	if i == 0 {
+		return "the top-level fleet"
+	}
+	return fmt.Sprintf("fleets[%d]", i-1)
+}
+
+// validateFleets refuses fleets the panel could not tell apart, saying where
+// in the file each one it names is written.
+func validateFleets(c Config) error {
+	err := fleet.Validate(c.FleetList())
+	var fe *fleet.Error
+	if !errors.As(err, &fe) {
+		return err
+	}
+	msg := fe.Describe(fleetPlace)
+	if fe.Field == "name" && fe.Other == 0 && c.Name == "" {
+		msg += "; give the top-level fleet a name with the top-level name key"
+	}
+	return errors.New(msg)
+}
+
+// fleetFile is one entry of the file's fleets list, shaped like the
+// top-level keys it repeats.
+type fleetFile struct {
+	Name  string `yaml:"name"`
+	Board struct {
+		Path string `yaml:"path"`
+	} `yaml:"board"`
+	Docs struct {
+		Paths []string `yaml:"paths,omitempty"`
+	} `yaml:"docs,omitempty"`
+	Orchestrator struct {
+		Session string `yaml:"session,omitempty"`
+	} `yaml:"orchestrator,omitempty"`
 }
 
 // configDuration is time.Duration decoded from YAML with its own validation-shaped
@@ -188,6 +254,11 @@ type file struct {
 		Wrap           string `yaml:"wrap"`
 		RateLimitsPath string `yaml:"rate_limits_path"`
 	} `yaml:"statusline"`
+	// Name and Fleets came after every key above and are omitted when unused,
+	// so a file that does not use them is written exactly as before they
+	// existed (pinned by TestSaveOutputOfASingleFleetConfigIsPinned).
+	Name   string      `yaml:"name,omitempty"`
+	Fleets []fleetFile `yaml:"fleets,omitempty"`
 }
 
 // Default returns the configuration used when no file exists.
@@ -232,6 +303,15 @@ func configToFile(c Config) file {
 	f.Server.Port = c.ServerPort
 	f.Statusline.Wrap = c.StatuslineWrap
 	f.Statusline.RateLimitsPath = c.StatuslineRateLimitsPath
+	f.Name = c.Name
+	for _, fl := range c.Fleets {
+		var ff fleetFile
+		ff.Name = fl.Name
+		ff.Board.Path = fl.BoardPath
+		ff.Docs.Paths = fl.DocsPaths
+		ff.Orchestrator.Session = fl.Orchestrator
+		f.Fleets = append(f.Fleets, ff)
+	}
 	return f
 }
 
@@ -254,7 +334,22 @@ func fileToConfig(f file) Config {
 		ServerPort:               f.Server.Port,
 		StatuslineWrap:           f.Statusline.Wrap,
 		StatuslineRateLimitsPath: f.Statusline.RateLimitsPath,
+		Name:                     f.Name,
+		Fleets:                   fleetsFromFile(f.Fleets),
 	}
+}
+
+func fleetsFromFile(entries []fleetFile) []fleet.Fleet {
+	var out []fleet.Fleet
+	for _, ff := range entries {
+		out = append(out, fleet.Fleet{
+			Name:         ff.Name,
+			BoardPath:    ff.Board.Path,
+			DocsPaths:    ff.Docs.Paths,
+			Orchestrator: ff.Orchestrator.Session,
+		})
+	}
+	return out
 }
 
 // Load reads the config file. A missing file yields defaults; so does a file that
@@ -408,7 +503,7 @@ func validate(c Config) error {
 	if c.Notify.SilenceAfter < 0 {
 		return fmt.Errorf("notify.silence_after must not be negative, got %s", c.Notify.SilenceAfter)
 	}
-	return nil
+	return validateFleets(c)
 }
 
 // missingAncestorDirs returns, ordered from the outermost missing ancestor down to dir
