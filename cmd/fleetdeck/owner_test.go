@@ -63,12 +63,15 @@ func TestOwnerGoneOfAProcessAlreadyGoneFiresAtOnce(t *testing.T) {
 // watching the wrong process and outliving the window. Said, not guessed.
 //
 // run is called in this process, so a run that did not refuse would start a
-// whole panel here. It would do so on a home and a board of its own, never
-// the machine's: a broken check -- a mutation run makes exactly that -- must
-// not reach the operator's ~/.claude or board.
+// whole panel here. It would do so on a home, a board and a daemon socket of
+// its own, never the machine's: a broken check -- a mutation run makes exactly
+// that -- must not reach the operator's ~/.claude, board or fleet daemon (the
+// daemon is found by uid, not by HOME; only -stand-socket keeps a panel off
+// it).
 func TestAPanelWhoseOwnerIsNotItsParentRefusesToStart(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", filepath.Join(dir, "home"))
+	noDaemon := filepath.Join(dir, "no-daemon.sock")
 	cfgPath := filepath.Join(dir, "config.yaml")
 	cfg := config.Default()
 	cfg.ServerPort = freePort(t)
@@ -78,7 +81,7 @@ func TestAPanelWhoseOwnerIsNotItsParentRefusesToStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	notParent := os.Getppid() + 1_000_000
-	err := run(cfgPath, "", notParent)
+	err := run(cfgPath, noDaemon, notParent)
 	if err == nil || !strings.Contains(err.Error(), "--owner-pid "+strconv.Itoa(notParent)) || !strings.Contains(err.Error(), "parent") {
 		t.Fatalf("run with a foreign owner: %v; want a refusal naming the owner and the parent", err)
 	}
@@ -102,6 +105,9 @@ type panelRig struct {
 	cfg  string
 	home string
 	port int
+	// noDaemon is the -stand-socket the rig's panels get: a path nothing
+	// listens on, so they never find the machine's fleet daemon.
+	noDaemon string
 }
 
 func newPanelRig(t *testing.T) *panelRig {
@@ -126,7 +132,7 @@ func newPanelRig(t *testing.T) *panelRig {
 	if err := config.Save(cfgPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	return &panelRig{t: t, bin: bin, cfg: cfgPath, home: home, port: cfg.ServerPort}
+	return &panelRig{t: t, bin: bin, cfg: cfgPath, home: home, port: cfg.ServerPort, noDaemon: filepath.Join(dir, "no-daemon.sock")}
 }
 
 // window starts a shell that starts the panel as its own direct child with
@@ -139,7 +145,7 @@ func newPanelRig(t *testing.T) *panelRig {
 // test.
 func (r *panelRig) window() (shell *exec.Cmd, panelPID int) {
 	r.t.Helper()
-	script := fmt.Sprintf(`%q --config %q --owner-pid $$ >/dev/null 2>&1 & echo $!; while kill -0 %d 2>/dev/null; do sleep 0.2; done`, r.bin, r.cfg, os.Getpid())
+	script := fmt.Sprintf(`%q --config %q --stand-socket %q --owner-pid $$ >/dev/null 2>&1 & echo $!; while kill -0 %d 2>/dev/null; do sleep 0.2; done`, r.bin, r.cfg, r.noDaemon, os.Getpid())
 	shell = exec.Command("sh", "-c", script)
 	shell.Env = append(os.Environ(), "HOME="+r.home)
 	out, err := shell.StdoutPipe()

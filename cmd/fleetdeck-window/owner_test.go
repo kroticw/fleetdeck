@@ -176,9 +176,12 @@ func TestThePanelUnderstandsHowTheWindowNamesItsOwner(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build ./cmd/fleetdeck: %v\n%s", err, out)
 	}
-	cmd := exec.Command(panel, panelArgs(1)...)
-	// Refused before anything is read, but kept off the real config anyway.
-	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+	// Refused before anything is read, but kept off the machine's config,
+	// board and fleet daemon anyway: HOME of its own, and a -stand-socket
+	// nothing listens on (the daemon is found by uid, not by HOME).
+	dir := t.TempDir()
+	cmd := exec.Command(panel, append([]string{"--stand-socket", filepath.Join(dir, "no-daemon.sock")}, panelArgs(1)...)...)
+	cmd.Env = append(os.Environ(), "HOME="+dir)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("the panel started though PID 1 is not its parent:\n%s", out)
