@@ -209,11 +209,6 @@ func (k *Keeper) afterExit(ctx context.Context, p *Panel, started time.Time, had
 }
 
 func (k *Keeper) fail(err error, tail string) {
-	// A Retry asked for before this failure is not an answer to it.
-	select {
-	case <-k.retry:
-	default:
-	}
 	k.emit(Event{State: Failed, Err: err, LogTail: tail})
 }
 

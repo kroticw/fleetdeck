@@ -184,6 +184,46 @@ func TestTheKeeperStartsItsOwnWhenATakenPanelGoesAway(t *testing.T) {
 	}
 }
 
+// A panel busy for a moment -- one look at it taking longer than the keeper
+// waits -- is not a panel gone: the keeper neither starts another nor says
+// anything. Only two missed looks in a row mean gone.
+func TestTheKeeperDoesNotTakeOneMissedLookForAPanelGone(t *testing.T) {
+	addr := freeAddr(t)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	requests := 0
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		n := requests
+		mu.Unlock()
+		if n == 3 {
+			// Longer than one look waits, so this look is a miss.
+			time.Sleep(answerTimeout + 300*time.Millisecond)
+		}
+		fmt.Fprint(w, "busy panel")
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	r := run(t, newKeeper(t, "listen", addr))
+	if up := r.expect(t, Answering, 5*time.Second); up.Ours {
+		t.Fatalf("Answering %+v, want the panel already there", up)
+	}
+	r.quiet(t, 2*time.Second)
+
+	// Control: the slow look really happened inside the quiet window --
+	// otherwise quiet proves nothing about a miss.
+	mu.Lock()
+	defer mu.Unlock()
+	if requests < 5 {
+		t.Fatalf("only %d looks at the panel: the missed one may not have happened", requests)
+	}
+}
+
 // What launchd's KeepAlive did for the launch agent: a panel that dies after
 // it has been up a while is started again.
 func TestTheKeeperRestartsAPanelThatDiesAfterItsMinimumUptime(t *testing.T) {
