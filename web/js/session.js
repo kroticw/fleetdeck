@@ -29,6 +29,7 @@ import { t } from "./i18n.js";
 import { syncSteps } from "./steps.js";
 import { createPending } from "./pending.js";
 import { wireImagePaste } from "./pasteimage.js";
+import { pageStorage } from "./buildcheck.js";
 
 // How many transcript steps the digest asks for, and how often it refreshes.
 // The digest is polled: it only changes when a session speaks.
@@ -250,19 +251,12 @@ function fitTerminal(terminal) {
 // reload — comes back on its tab; one opened afresh starts on the digest as it
 // always has.
 //
-// sessionStorage, for the reason buildcheck.js gives: this is about one reload
-// of one window. Every access is guarded — reading the property itself throws
-// where site data is blocked, and a panel without this memory still works.
+// The page's session storage, from buildcheck.js's pageStorage, for the reason
+// it gives: this is about one reload of one window. It may be undefined where
+// site data is blocked, and getItem/setItem can still throw on what it returns,
+// so every access below is guarded; a panel without this memory still works.
 const TAB_KEY = "fleetdeck-session-tab";
 const TABS = new Set(["digest", "screen"]);
-
-function pageStorage() {
-  try {
-    return globalThis.sessionStorage;
-  } catch {
-    return undefined;
-  }
-}
 
 function recalledTab(storage, short) {
   try {
