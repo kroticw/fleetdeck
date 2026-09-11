@@ -16,16 +16,23 @@ import {
   DEFAULT_PERCENT,
   MIN_PERCENT,
   MAX_PERCENT,
+  ORCHESTRATOR_KEYS,
+  SESSIONS_KEYS,
 } from "../js/columnwidth.js";
 
 let real;
 
+// Real Storage coerces its key argument with ToString rather than rejecting
+// a non-string one (getItem(undefined) reads the entry literally named
+// "undefined"). The fake matches that so a test relying on it — see the
+// legacy-key coercion trap below — exercises the same trap a real browser
+// would set, not one only the fake believes in.
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial));
   return {
-    getItem: (k) => (map.has(k) ? map.get(k) : null),
-    setItem: (k, v) => map.set(k, String(v)),
-    removeItem: (k) => map.delete(k),
+    getItem: (k) => (map.has(String(k)) ? map.get(String(k)) : null),
+    setItem: (k, v) => map.set(String(k), String(v)),
+    removeItem: (k) => map.delete(String(k)),
     map,
   };
 }
@@ -208,4 +215,50 @@ test("clampPercent is the one place the range is decided", () => {
   assert.equal(clampPercent(1), MIN_PERCENT);
   assert.equal(clampPercent(99), MAX_PERCENT);
   assert.equal(clampPercent(30), 30);
+});
+
+// The session list is a second column sharing the same module, not a second
+// copy of it. Every case above already proves the rules; what is new here is
+// only that a second set of keys stays out of the first set's way.
+test("a second column's keys are a separate column, not a second read of the first one's", () => {
+  const orchestrator = createColumnWidth(() => {}, ORCHESTRATOR_KEYS);
+  orchestrator.setPercent(50);
+  orchestrator.remember();
+  orchestrator.fold();
+
+  const sessions = createColumnWidth(() => {}, SESSIONS_KEYS);
+  assert.equal(sessions.state().percent, DEFAULT_PERCENT, "the session list inherited the orchestrator's width");
+  assert.equal(sessions.state().folded, false, "the session list inherited the orchestrator's folded state");
+
+  sessions.setPercent(20);
+  sessions.remember();
+
+  assert.equal(
+    createColumnWidth(() => {}, ORCHESTRATOR_KEYS).state().percent,
+    50,
+    "writing the session list's width moved the orchestrator's",
+  );
+});
+
+// The ladder never shipped for the session list, so SESSIONS_KEYS carries no
+// `legacy` entry. storedPercent's migration branch must treat that as "there
+// is nothing to migrate", not dereference a key that was never there.
+test("a column with no legacy key has nothing to migrate, and does not fail trying", () => {
+  // "undefined" is the literal key `read(keys.legacy)` would hit if the
+  // `keys.legacy ?` guard were dropped and a missing key coerced to a string
+  // instead of short-circuiting — a real risk in a browser's real
+  // localStorage, which stringifies whatever key it is given rather than
+  // throwing. Planting a legal-looking legacy value there catches exactly
+  // that regression; without the guard this test reads it back as "42".
+  globalThis.localStorage = fakeStorage({
+    "fleetdeck-orchestrator-width": "4",
+    undefined: "4",
+  });
+
+  assert.equal(storedPercent(SESSIONS_KEYS), DEFAULT_PERCENT);
+  assert.equal(storedFolded(SESSIONS_KEYS), false);
+  // Neither the orchestrator's own legacy key nor the coercion trap were
+  // consumed by a search that was never meant to reach them.
+  assert.equal(globalThis.localStorage.getItem("fleetdeck-orchestrator-width"), "4");
+  assert.equal(globalThis.localStorage.getItem(undefined), "4");
 });
