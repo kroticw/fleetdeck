@@ -1,4 +1,10 @@
-// How wide the orchestrator column is, and whether it is folded away.
+// How wide a column is, and whether it is folded away. Started as the
+// orchestrator column's own device; the session list now uses it too
+// (spec: "the same feel, not a similar one"), which is why the storage keys
+// below are a parameter rather than a literal — see createColumnWidth's own
+// doc comment. Everything else about the mechanism is shared unchanged:
+// there is exactly one implementation of "is this stored value legal",
+// whichever column is asking.
 //
 // It used to be a ladder of five steps moved by two buttons. The operator
 // looked at it and asked for the edge instead — grab the border, drag, let go.
@@ -29,14 +35,31 @@
 // practically zero — so there is a pixel floor as well, and the two are applied
 // together.
 
-const WIDTH_KEY = "fleetdeck-orchestrator-width-pct";
-const FOLDED_KEY = "fleetdeck-orchestrator-folded";
+// Which column is asking is a set of storage keys, not a second copy of the
+// module. The orchestrator column is the default set — these are the exact
+// strings it has always used, unchanged, so a caller that passes none (every
+// caller before this column had a neighbor) keeps reading the same entries
+// it always read. A second column passes its own keys and gets the same
+// rules applied to a different corner of storage.
+export const ORCHESTRATOR_KEYS = {
+  width: "fleetdeck-orchestrator-width-pct",
+  folded: "fleetdeck-orchestrator-folded",
+  // The key the ladder wrote, holding an index rather than a percentage. It
+  // is read once so an operator who had chosen a width keeps it, and then
+  // removed. Reusing the same key would have been worse than ignoring it:
+  // "3" is a perfectly good number, and read as a percentage it is a
+  // three-percent column.
+  legacy: "fleetdeck-orchestrator-width",
+};
 
-// The key the ladder wrote, holding an index rather than a percentage. It is
-// read once so an operator who had chosen a width keeps it, and then removed.
-// Reusing the same key would have been worse than ignoring it: "3" is a
-// perfectly good number, and read as a percentage it is a three-percent column.
-const LEGACY_KEY = "fleetdeck-orchestrator-width";
+// The session list never had a stepped version, so it has nothing to carry
+// across — no `legacy` key, and storedPercent below treats that as "there is
+// no migration to attempt", not as a bug.
+export const SESSIONS_KEYS = {
+  width: "fleetdeck-sessions-width-pct",
+  folded: "fleetdeck-sessions-folded",
+};
+
 const LEGACY_STEPS = [16, 20, 25, 32, 42];
 
 export const DEFAULT_PERCENT = 25;
@@ -73,21 +96,24 @@ export function clampPercent(percent) {
 
 /**
  * storedPercent is the remembered width, or the default when there is nothing
- * trustworthy to remember.
+ * trustworthy to remember. `keys` picks which column's entries to read;
+ * unset, it reads the orchestrator's, exactly as this function always has.
  *
  * Every rejection here is a real value that has been seen or can be: an absent
  * key on a first run, a blank one from a cleared entry, a step index from the
  * version before this one, and whatever a hand-edited entry contains.
  */
-export function storedPercent() {
-  const raw = read(WIDTH_KEY);
+export function storedPercent(keys = ORCHESTRATOR_KEYS) {
+  const raw = read(keys.width);
 
   if (raw === null || String(raw).trim() === "") {
     // Nothing of ours. The ladder may still have left something, and a width
-    // the operator chose is worth carrying across one upgrade.
-    const legacy = read(LEGACY_KEY);
+    // the operator chose is worth carrying across one upgrade — but only for
+    // a column the ladder could have written to; a column with no `legacy`
+    // key never had a ladder, and there is nothing to migrate.
+    const legacy = keys.legacy ? read(keys.legacy) : null;
     if (legacy !== null) {
-      write(LEGACY_KEY, null); // read once, then it stops existing
+      write(keys.legacy, null); // read once, then it stops existing
       const text = String(legacy).trim();
       // The same guard as above, and it is here because the test below caught
       // it missing: Number("") is 0, 0 is a legal step index, and a cleared
@@ -97,7 +123,7 @@ export function storedPercent() {
       const index = text === "" ? NaN : Number(text);
       if (Number.isInteger(index) && index >= 0 && index < LEGACY_STEPS.length) {
         const carried = clampPercent(LEGACY_STEPS[index]);
-        write(WIDTH_KEY, String(carried));
+        write(keys.width, String(carried));
         return carried;
       }
     }
@@ -111,8 +137,8 @@ export function storedPercent() {
   return clampPercent(percent);
 }
 
-export function storedFolded() {
-  return read(FOLDED_KEY) === "1";
+export function storedFolded(keys = ORCHESTRATOR_KEYS) {
+  return read(keys.folded) === "1";
 }
 
 /**
@@ -120,10 +146,17 @@ export function storedFolded() {
  * both. `onChange` is called whenever either changes; the caller applies the
  * same state at startup, because a state applied only when it changes is a
  * state a reload does not restore.
+ *
+ * `keys` picks which column's storage entries this instance reads and
+ * writes — unset, the orchestrator's, so every call site written before this
+ * parameter existed keeps behaving exactly as it did. A second column passes
+ * its own `{ width, folded }` (and, only if it ever shipped a stepped
+ * version, a `legacy` key too) and gets an entirely separate remembered
+ * state, sharing nothing with the orchestrator's but the rules.
  */
-export function createColumnWidth(onChange = () => {}) {
-  let percent = storedPercent();
-  let folded = storedFolded();
+export function createColumnWidth(onChange = () => {}, keys = ORCHESTRATOR_KEYS) {
+  let percent = storedPercent(keys);
+  let folded = storedFolded(keys);
 
   const state = () => ({ percent, width: `${percent}%`, folded });
   const announce = () => onChange(state());
@@ -146,7 +179,7 @@ export function createColumnWidth(onChange = () => {}) {
 
     /** remember writes the width that is on screen. Called when a drag ends. */
     remember() {
-      write(WIDTH_KEY, String(percent));
+      write(keys.width, String(percent));
     },
 
     // Folding does not touch the width. Unfolding must give back exactly the
@@ -155,14 +188,14 @@ export function createColumnWidth(onChange = () => {}) {
     fold() {
       if (folded) return;
       folded = true;
-      write(FOLDED_KEY, "1");
+      write(keys.folded, "1");
       announce();
     },
 
     unfold() {
       if (!folded) return;
       folded = false;
-      write(FOLDED_KEY, null);
+      write(keys.folded, null);
       announce();
     },
   };

@@ -94,15 +94,21 @@ let listSocket = null;
 globalThis.WebSocket = ListSocket;
 globalThis.location = { protocol: "http:", host: "127.0.0.1:7777" };
 
-async function list(snapshot) {
+async function list(snapshot, opts) {
   const dom = installDOM();
   const store = await import("../store.js");
   store.connect();
+  // A real parent, not a detached node: the resize grip is created as a
+  // sibling of root inside root.parentElement (web/js/columnresize.js),
+  // the same as the orchestrator column's own, and mounts nothing at all
+  // without one.
+  const main = dom.element("main");
   const root = dom.element("aside");
-  renderSessions(root, () => {});
+  main.appendChild(root);
+  const resize = renderSessions(root, () => {}, undefined, opts);
   listSocket.push(snapshot);
   await settle();
-  return { root, dom };
+  return { root, dom, resize };
 }
 
 const FLEET = {
@@ -353,4 +359,141 @@ test("a needs-based stall fires immediately, at age zero, in both the header and
 
   assert.equal(headerCountsIt, true, "a needs-based stall must be counted immediately, no threshold");
   assert.equal(isBadgedStalled(html), true, "the row must agree: Stalled immediately, no threshold");
+});
+
+// --- collapse/resize: the same mechanism as the orchestrator column's own
+// (web/js/columnresize.js) — the operator's own instruction was to reuse it
+// whole, not build a second, similar one. What is pinned here is the wiring:
+// that the same controls exist, that they read and write this column's own
+// storage entries (SESSIONS_KEYS, never the orchestrator's), and above all
+// that the stalled tracker keeps counting while the column is folded — see
+// the last test in this section.
+
+test("the session list has a resize grip, next to it rather than inside it", async () => {
+  const { root } = await list({ sessions: [] });
+  const grip = root.parentElement?.children.find((n) => String(n.className).includes("col-grip"));
+  assert.ok(grip, "no resize handle was created at all");
+  assert.equal(grip.parentNode, root.parentElement, "the handle was put inside the column");
+});
+
+test("the session list carries its own remembered width from the first paint", async () => {
+  const { root } = await list({ sessions: [] });
+  // DEFAULT_PERCENT, same value the orchestrator's own default is, but
+  // written under SESSIONS_KEYS -- see the next test for the part that
+  // actually distinguishes the two.
+  assert.equal(root.style.getPropertyValue("--col-width"), "25%");
+});
+
+// The fold/unfold buttons inside root are markup, not addressable nodes in
+// web/tests/fake-dom.js (its innerHTML is stored, never parsed), so this
+// drives the fold/unfold itself through resize.width — the same call a
+// click makes in a real browser (see sessions.js's own note on
+// renderSessions' return value) — and checks the markup those buttons would
+// be by matching the raw HTML string, the same way existing tests here check
+// for a badge.
+test("folding the session list hides the rows but keeps the way back, exactly like the orchestrator column's", async () => {
+  const { root, resize } = await list({ sessions: [{ short: "aa11", name: "a task", state: "working" }] });
+
+  assert.match(root.innerHTML, /class="col-size-btn col-size-unfold"[^>]*aria-label="[^"]/, "the way back has no label");
+
+  resize.width.fold();
+  await settle();
+
+  assert.equal(root.dataset.folded, "1", "the column was not marked folded");
+
+  const grip = root.parentElement?.children.find((n) => String(n.className).includes("col-grip"));
+  assert.equal(grip.hidden, true, "a folded column kept an edge that resizes nothing");
+
+  resize.width.unfold();
+  await settle();
+  assert.equal(root.dataset.folded, undefined, "the column stayed folded");
+  assert.equal(grip.hidden, false, "the edge did not come back with the column");
+});
+
+test("resizing and folding the session list never touches the orchestrator column's own remembered state", async () => {
+  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
+  const map = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+
+  try {
+    const { resize } = await list({ sessions: [] });
+    resize.width.fold();
+
+    assert.equal(map.get("fleetdeck-sessions-folded"), "1", "the session list's own fold was not remembered");
+    assert.equal(
+      map.has("fleetdeck-orchestrator-folded"),
+      false,
+      "folding the session list wrote to the orchestrator column's own storage entry",
+    );
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+// The one the orchestrator named as the risk this whole task carries: two
+// independent trackers (this column's own, the header's) settle on the same
+// answer only for as long as both keep receiving every snapshot. Folding
+// this column must not be the thing that stops it receiving them — render()
+// runs unconditionally regardless of the [data-folded] attribute it itself
+// sets, so a stall that started before the fold keeps aging while the rows
+// are hidden, and is already correctly badged, at the true age, the instant
+// the column reopens.
+//
+// Real elapsed time cannot stand in for BLOCKED_SETTLE_MS (10 minutes) in a
+// unit test, so this drives renderSessions' own injectable clock rather than
+// waiting on the wall clock -- see renderSessions' own `now` parameter.
+test("a stall held past the threshold while the session list is folded is badged the instant it reopens, not from a clock that restarted", async () => {
+  const dom = installDOM();
+  const store = await import("../store.js");
+  store.connect();
+  const main = dom.element("main");
+  const root = dom.element("aside");
+  main.appendChild(root);
+
+  let clock = 0;
+  const resize = renderSessions(root, () => {}, undefined, { now: () => clock });
+
+  const fleet = { sessions: [{ short: "aa11", name: "first", needs: "", state: "blocked" }] };
+
+  // Seen for the first time, fresh: neither place counts it yet.
+  listSocket.push(fleet);
+  await settle();
+  assert.equal(
+    (root.innerHTML.match(/sbadge-stalled/g) ?? []).length,
+    0,
+    "precondition: a fresh flag-only stall is not yet badged",
+  );
+
+  resize.width.fold();
+  assert.equal(root.dataset.folded, "1", "precondition: the column folded");
+
+  // The clock crosses BLOCKED_SETTLE_MS while the column is still folded,
+  // and the same still-blocked session arrives again -- render() must run
+  // anyway, feeding the one tracker instance that has been counting this
+  // session continuously since clock 0.
+  clock = BLOCKED_SETTLE_MS + 1;
+  listSocket.push(fleet);
+  await settle();
+
+  assert.equal(root.dataset.folded, "1", "precondition: still folded when the threshold was crossed");
+  assert.equal(
+    (root.innerHTML.match(/sbadge-stalled/g) ?? []).length,
+    1,
+    "a stall that crossed the threshold while folded must already be badged, even before the column reopens",
+  );
+
+  resize.width.unfold();
+  assert.equal(root.dataset.folded, undefined, "precondition: the column reopened");
+  assert.equal(
+    (root.innerHTML.match(/sbadge-stalled/g) ?? []).length,
+    1,
+    "the badge must still be there on reopening, not reset by having been hidden",
+  );
+
+  dom.restore();
 });

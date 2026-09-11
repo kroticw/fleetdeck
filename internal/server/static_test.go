@@ -157,6 +157,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/pasteimage.js":     true,
 		"js/pending.js":        true,
 		"js/columnwidth.js":    true,
+		"js/columnresize.js":   true,
 		"js/buildcheck.js":     true,
 		"js/liveterminal.js":   true,
 		"js/terminallinks.js":  true,

@@ -357,12 +357,12 @@ test("folding the column lets its terminal go, and unfolding attaches again", as
   const c = await column(structuredClone(PIN));
   const first = c.terminals.at(-1);
 
-  fireEvent(c.root.querySelector(".o-size-fold"), "click");
+  fireEvent(c.root.querySelector(".col-size-fold"), "click");
   await settle();
   assert.equal(c.ptys()[0].closedWith?.code, 1000, "a folded column kept its terminal attached");
   assert.equal(first.disposed, 1);
 
-  fireEvent(c.root.querySelector(".o-size-unfold"), "click");
+  fireEvent(c.root.querySelector(".col-size-unfold"), "click");
   await settle();
   assert.equal(c.ptys().length, 2, "unfolding did not bring the terminal back");
   assert.match(c.ptys()[1].url, /\/api\/sessions\/abc\/pty\?/);
@@ -700,14 +700,49 @@ test("a session pinned but not currently listed reads differently from nothing p
 // reach them, that they move the column, and above all that a folded column
 // still shows the one control that brings it back.
 
-const sizeButton = (c, what) => c.root.querySelector(`.o-size-${what}`);
+const sizeButton = (c, what) => c.root.querySelector(`.col-size-${what}`);
 
 test("the column carries its remembered width from the first paint, not the first click", async () => {
   const c = await column(structuredClone(PIN));
 
   // Break it by applying the width only when it changes and this test fails
   // with nothing set: a reload would show the default and then jump.
-  assert.equal(c.root.style.getPropertyValue("--o-width"), "25%");
+  assert.equal(c.root.style.getPropertyValue("--col-width"), "25%");
+});
+
+// The storage keys are literal strings, not the exported constant, on
+// purpose: an operator who resized this column before columnresize.js
+// existed has these exact entries sitting in a real browser's storage right
+// now, and this proves the column this task rebuilt still reads them —
+// not merely that ORCHESTRATOR_KEYS in columnwidth.js still says what it
+// always said. Break the rename (a stray "fleetdeck-orchestrator-width-pct"
+// missed somewhere, or a column that reads the right key but paints the
+// wrong CSS variable) and this fails with the operator's chosen width
+// silently reset to the default, read back as "it did that on its own".
+test("a width and fold chosen before this task rebuilt the column come back exactly the same", async () => {
+  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
+  const map = new Map([
+    ["fleetdeck-orchestrator-width-pct", "37"],
+    ["fleetdeck-orchestrator-folded", "1"],
+  ]);
+  globalThis.localStorage = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+
+  try {
+    const c = await column(structuredClone(PIN));
+    assert.equal(c.root.style.getPropertyValue("--col-width"), "37%", "the operator's chosen width was not carried over");
+    assert.equal(c.root.dataset.folded, "1", "the operator's folded column came back open");
+    // The grip only hides itself once it has been told to — the same fact
+    // "the edge goes away while the column is folded" pins for a fold done
+    // through the UI; this is that fact for a fold read from storage.
+    assert.equal(grip(c).hidden, true, "a column that was already folded showed an edge to drag it wider with");
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
 });
 
 // The buttons that used to widen and narrow are gone: the operator looked at
@@ -716,7 +751,7 @@ test("the column carries its remembered width from the first paint, not the firs
 // is — the dragging arithmetic and whether a person can SEE it are answered by
 // a browser, in the acceptance run, because neither is a thing this stand-in
 // can be asked.
-const grip = (c) => c.root.parentElement?.children.find((n) => String(n.className).includes("o-grip"));
+const grip = (c) => c.root.parentElement?.children.find((n) => String(n.className).includes("col-grip"));
 
 test("the column has an edge to drag, next to it rather than inside it", async () => {
   const c = await column(structuredClone(PIN));
@@ -758,7 +793,7 @@ test("a folded column still carries the control that brings it back", async () =
 
 test("and pressing it gives the column back at the width it had", async () => {
   const c = await column(structuredClone(PIN));
-  const chosen = c.root.style.getPropertyValue("--o-width");
+  const chosen = c.root.style.getPropertyValue("--col-width");
 
   fireEvent(sizeButton(c, "fold"), "click");
   await settle();
@@ -766,7 +801,7 @@ test("and pressing it gives the column back at the width it had", async () => {
   await settle();
 
   assert.equal(c.root.dataset.folded, undefined, "the column stayed folded");
-  assert.equal(c.root.style.getPropertyValue("--o-width"), chosen, "the width was lost by folding");
+  assert.equal(c.root.style.getPropertyValue("--col-width"), chosen, "the width was lost by folding");
 });
 
 // A folded column has no edge, and an edge with nothing behind it is a strip a

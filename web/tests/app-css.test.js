@@ -155,14 +155,17 @@ test("the resize edge is painted and says which way it moves", () => {
     return match[2];
   };
 
-  const edge = body("\\.o-grip");
+  const edge = body("\\.col-grip");
   assert.match(edge, /cursor:\s*col-resize/, "the edge does not say it can be dragged sideways");
   assert.match(edge, /background:\s*var\(--/, "the edge is not painted, so nobody can find it");
 
   // The pixel floor, alongside the percentage one in web/js/columnwidth.js. A
   // percentage minimum on a narrow window is a handful of pixels — "not zero"
-  // and practically zero.
-  assert.match(body("\\.col-orchestrator"), /min-width:\s*\d+px/, "the column lost its pixel floor");
+  // and practically zero. Both resizable columns carry it now, not only the
+  // orchestrator's.
+  for (const selector of ["\\.col-orchestrator", "\\.col-sessions"]) {
+    assert.match(body(selector), /min-width:\s*\d+px/, `${selector} lost its pixel floor`);
+  }
 });
 
 // The orchestrator column is a terminal now, and a terminal is sized by what it
