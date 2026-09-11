@@ -46,10 +46,10 @@ func StartPanel(bin string, args, env []string, logPath string) (*Panel, error) 
 	cmd.Stderr = log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		log.Close()
+		_ = log.Close()
 		return nil, fmt.Errorf("start the panel: %w", err)
 	}
-	log.Close()
+	_ = log.Close()
 	p := &Panel{PID: cmd.Process.Pid, done: make(chan struct{})}
 	go func() {
 		_ = cmd.Wait()
@@ -91,7 +91,7 @@ func WaitAnswer(ctx context.Context, url string) error {
 			return err
 		}
 		if resp, err := client.Do(req); err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil
 		}
 		select {
@@ -118,7 +118,7 @@ func Acquire(path string) (func(), error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
+		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, ErrBusy
 		}
@@ -126,7 +126,7 @@ func Acquire(path string) (func(), error) {
 	}
 	return func() {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		_ = f.Close()
 	}, nil
 }
 

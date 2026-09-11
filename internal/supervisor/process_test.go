@@ -50,7 +50,7 @@ func freeAddr(t *testing.T) string {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
-	ln.Close()
+	_ = ln.Close()
 	return addr
 }
 
@@ -76,7 +76,7 @@ func TestAStartedPanelAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
@@ -84,20 +84,24 @@ func TestAStartedPanelAnswers(t *testing.T) {
 
 // The panel must outlive the window that started it: closing the window must
 // not take the panel down, notifications keep coming, the status line keeps
-// finding where to report. A process in its own session is not in the
-// window's process group and gets none of its signals.
-func TestAStartedPanelLivesInASessionOfItsOwn(t *testing.T) {
+// finding where to report. A process started with Setsid leads a new session
+// and, with it, a new process group -- and a process group is what signals
+// meant for the window are delivered to. The group is what is checked:
+// syscall has Getpgid on every platform this runs on, Getsid only on darwin
+// (the first version of this test used Getsid and did not compile on the
+// Linux CI leg).
+func TestAStartedPanelLivesInAProcessGroupOfItsOwn(t *testing.T) {
 	p, _ := startHelper(t, "listen")
-	sid, err := syscall.Getsid(p.PID)
+	pgid, err := syscall.Getpgid(p.PID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	own, _ := syscall.Getsid(0)
-	if sid == own {
-		t.Fatal("the panel shares the starter's session: it would go down with the window")
+	own, _ := syscall.Getpgid(0)
+	if pgid == own {
+		t.Fatal("the panel shares the starter's process group: it would get the window's signals")
 	}
-	if sid != p.PID {
-		t.Fatalf("session %d, want the panel to lead its own (%d)", sid, p.PID)
+	if pgid != p.PID {
+		t.Fatalf("process group %d, want the panel to lead its own (%d)", pgid, p.PID)
 	}
 }
 
