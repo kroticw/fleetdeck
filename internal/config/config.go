@@ -136,6 +136,13 @@ func fleetPlace(i int) string {
 	return fmt.Sprintf("fleets[%d]", i-1)
 }
 
+// ValidateFleets is the check Load makes on c's fleets, for a caller that
+// wants to know whether a fleet it is about to add would be refused before it
+// makes anything for it.
+func ValidateFleets(c Config) error {
+	return validateFleets(c)
+}
+
 // validateFleets refuses fleets the panel could not tell apart, saying where
 // in the file each one it names is written.
 func validateFleets(c Config) error {

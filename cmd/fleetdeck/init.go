@@ -40,6 +40,7 @@ func initCommand(args []string) error {
 	workspacePath := flags.String("workspace", "", "directory to make the board and the docs in, recorded in the configuration file this command creates (default ~/fleetdeck)")
 	boardPath := flags.String("board", "", "board directory alone, with no workspace around it, to record in the configuration file this command creates")
 	force := flags.Bool("force", false, "replace a statusline that init would otherwise refuse to touch")
+	fleetName := flags.String("fleet", "", "add a fleet by this name to an existing configuration, with its board in --workspace or --board")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -52,7 +53,7 @@ func initCommand(args []string) error {
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
-	return runInit(initEnv{home: home, binary: binary, workspace: *workspacePath, board: *boardPath, force: *force, out: os.Stdout})
+	return runInit(initEnv{home: home, binary: binary, workspace: *workspacePath, board: *boardPath, fleet: *fleetName, force: *force, out: os.Stdout})
 }
 
 // initEnv is everything runInit is allowed to touch. It is a struct, and every
@@ -77,6 +78,9 @@ type initEnv struct {
 	// force allows the statusline step to replace a statusline the operator
 	// configured themselves.
 	force bool
+	// fleet is the --fleet flag: the name of a fleet to add to an existing
+	// configuration, its board made where workspace or board says.
+	fleet string
 	out   io.Writer
 }
 
@@ -105,6 +109,14 @@ func runInit(env initEnv) error {
 	if env.workspace != "" && env.board != "" {
 		// Both name the board, and whichever lost would do so silently.
 		return errors.New("--workspace and --board both say where the board goes; give one of them")
+	}
+	if env.fleet != "" {
+		// Everything that would refuse the fleet is checked before anything
+		// is made for it: a workspace made for a fleet the configuration then
+		// refuses is a folder nobody asked for.
+		if _, _, err := plannedFleet(configPathOf(env), env); err != nil {
+			return err
+		}
 	}
 
 	steps := initSteps(env)
@@ -138,9 +150,9 @@ func runInit(env initEnv) error {
 // that the permissions step lets agents into whatever the board step settled
 // on, and has nothing to allow when that step was refused.
 func initSteps(env initEnv) []initStep {
-	cfgPath := env.config
-	if cfgPath == "" {
-		cfgPath = filepath.Join(env.home, ".config", "fleetdeck", "config.yaml")
+	cfgPath := configPathOf(env)
+	if env.fleet != "" {
+		return fleetSteps(cfgPath, env)
 	}
 	cfg, cfgNew, cfgStep := ensureConfig(cfgPath, env)
 	boardStep, allow := ensureBoard(cfgPath, cfg, cfgNew, cfgStep.err, env)
