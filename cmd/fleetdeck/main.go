@@ -360,15 +360,20 @@ func run(configPath string) error {
 	// printed ahead of ListenAndServe made a failed start look like a running
 	// panel — the log carried the success line and then an unrelated-looking
 	// bind error, right next to whichever process actually holds the port
-	// (most often this same panel, already started by the launchd agent
-	// fleetdeck init installs). ln.Addr() is used for the log line rather
-	// than the address that was asked for so that server.port: 0 — "let the
-	// OS choose" — reports the port it actually got, not literally "0".
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.ServerPort))
+	// (most often another panel: the one the fleetdeck window started from
+	// inside its app bundle, or one started from a terminal). ln.Addr() is
+	// used for the log line rather than the address that was asked for so
+	// that server.port: 0 — "let the OS choose" — reports the port it
+	// actually got, not literally "0".
+	addr := fmt.Sprintf("127.0.0.1:%d", cfg.ServerPort)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		stop()
 		wg.Wait()
-		return fmt.Errorf("bind 127.0.0.1:%d: %w (a panel may already be running there)", cfg.ServerPort, err)
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return bindError(addr, err, portHolder(context.Background(), addr), readBuild())
+		}
+		return fmt.Errorf("bind %s: %w", addr, err)
 	}
 
 	srv := &http.Server{
