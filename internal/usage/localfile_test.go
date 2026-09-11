@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -321,5 +322,143 @@ func TestAppendTraceOnceLeavesAnUnrelatedExistingLogUntouched(t *testing.T) {
 	}
 	if got := countLines(t, path); got != 68 {
 		t.Fatalf("got %d lines, want the original 68 preserved exactly", got)
+	}
+}
+
+// --- AppendTraceOnce under real concurrent OS processes -------------------
+//
+// cmd/fleetdeck-status is not one long-running process: it is run fresh for
+// every session's every statusline tick, and several sessions tick at once
+// on a live machine (the orchestrator counted at least three, plus their
+// own, while this was being written). Every one of them can call
+// AppendTraceOnce against the SAME <log path>.state.json at the same
+// moment. Every test above exercises AppendTraceOnce sequentially, in one
+// goroutine, in one process -- none of them says anything about that.
+//
+// TestMain re-executes this same compiled test binary as a plain worker
+// process when GO_WANT_HELPER_PROCESS is set (the standard library's own
+// idiom for this, e.g. os/exec's tests) rather than adding a second
+// permanent command under cmd/: this repository already has a standing
+// lesson about exactly that (a throwaway probe once leaked into `make
+// dist` because Make's own binary discovery does not honour Go's leading-
+// underscore convention the way the toolchain itself does), and a helper
+// that only exists inside this test file's own process image cannot leak
+// anywhere a build could find it.
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		runAppendTraceOnceHelperProcess()
+		return
+	}
+	os.Exit(m.Run())
+}
+
+// runAppendTraceOnceHelperProcess reads logPath and message from argv
+// (after the "--" testing's own flag parsing leaves in place) and makes
+// exactly one AppendTraceOnce call, then exits -- the whole content of the
+// worker process TestAppendTraceOnceUnderRealConcurrentProcesses spawns
+// many of at once.
+func runAppendTraceOnceHelperProcess() {
+	args := os.Args
+	for len(args) > 0 && args[0] != "--" {
+		args = args[1:]
+	}
+	if len(args) != 3 {
+		fmt.Fprintln(os.Stderr, "helper process: want -- <logPath> <message>")
+		os.Exit(2)
+	}
+	logPath, message := args[1], args[2]
+	if err := AppendTraceOnce(logPath, message); err != nil {
+		fmt.Fprintln(os.Stderr, "helper process:", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+// spawnAppendTraceOnce runs one real, separate OS process (this same test
+// binary, re-executed) that calls AppendTraceOnce(logPath, message) and
+// nothing else.
+func spawnAppendTraceOnce(t *testing.T, logPath, message string) error {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "--", logPath, message)
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, out)
+	}
+	return nil
+}
+
+// TestAcquireStateLockBreaksAStaleLock is the other half of
+// acquireStateLock's own contract: a lock file left behind by a process
+// that crashed mid-update (so it was never released) must not block every
+// later call forever -- a permanently stuck lock is a worse failure than
+// the race it exists to close.
+func TestAcquireStateLockBreaksAStaleLock(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "rate_limits_trace.log.state.json.lock")
+	if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(lockPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	release, ok := acquireStateLock(lockPath)
+	if !ok {
+		t.Fatal("a stale lock must not be honoured forever")
+	}
+	release()
+}
+
+// TestAcquireStateLockFailsWhenHeldAndFresh is
+// TestAcquireStateLockBreaksAStaleLock's control case: a lock file that is
+// genuinely fresh (another process plausibly mid-update right now) must
+// not be broken, and acquiring it must fail rather than corrupt whatever
+// the holder is doing.
+func TestAcquireStateLockFailsWhenHeldAndFresh(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "rate_limits_trace.log.state.json.lock")
+	if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, ok := acquireStateLock(lockPath)
+	if ok {
+		t.Fatal("a fresh, genuinely held lock must not be acquired a second time")
+	}
+}
+
+// TestAppendTraceOnceUnderRealConcurrentProcesses is the check the
+// orchestrator asked for by name: N real processes, the same cause, at
+// once -- how many opening lines land in the log? It must be one, the same
+// answer TestAppendTraceOnceControlCase already gives for N sequential
+// calls in one process; this is the same property, machine-checked under
+// the concurrency the real deployment actually has.
+func TestAppendTraceOnceUnderRealConcurrentProcesses(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "rate_limits_trace.log")
+	const n = 50
+	const message = "concurrent cause"
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := spawnAppendTraceOnce(t, logPath, message); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("helper process failed: %v", err)
+	}
+
+	got := countLines(t, logPath)
+	t.Logf("%d concurrent real processes, same cause: %d opening line(s) in the log (want 1)", n, got)
+	if got != 1 {
+		t.Fatalf("%d concurrent processes with the same cause produced %d opening lines, want exactly 1 -- the read-check-write on the state file is not safe under real concurrency", n, got)
 	}
 }

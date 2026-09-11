@@ -82,6 +82,45 @@ func tracePathStatePath(logPath string) string {
 	return logPath + ".state.json"
 }
 
+// acquireStateLock acquires an exclusive, short-lived lock at path using
+// O_EXCL -- the only atomic "am I first" primitive a plain filesystem
+// offers, and the fix for the race AppendTraceOnce's own doc comment
+// measures: without it, two processes can both reach its read-check-write
+// section at once and each conclude they are the first to open a streak
+// for the same cause.
+//
+// A handful of short retries covers the realistic case: statusline ticks
+// from different sessions land close together, not at the exact same
+// instant, so most contention resolves within a few retries. A lock older
+// than staleLockAge is assumed abandoned by a process that crashed
+// mid-update (never released) rather than honoured forever -- a lock stuck
+// permanently would be a worse failure than the race it exists to close.
+// Exhausting every retry without acquiring it is reported as ok=false,
+// never as a panic or a blocking wait with no bound: the caller skips this
+// one update rather than risk hanging a statusline tick on a lock file.
+func acquireStateLock(path string) (release func(), ok bool) {
+	const attempts = 20
+	const perAttempt = 5 * time.Millisecond
+	const staleLockAge = 2 * time.Second
+
+	for i := 0; i < attempts; i++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(path) }, true
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, false
+		}
+		if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > staleLockAge {
+			_ = os.Remove(path)
+			continue
+		}
+		time.Sleep(perAttempt)
+	}
+	return nil, false
+}
+
 func loadTraceState(path string) traceState {
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -143,8 +182,29 @@ func closeTraceState(logPath string, s traceState) error {
 //
 // Best-effort, matching AppendTrace: a failure here is never escalated into
 // something a caller has to handle.
+//
+// Several instances of cmd/fleetdeck-status can call this against the same
+// logPath at once -- one per session's statusline tick, several sessions
+// ticking at once on a live machine -- and the read-check-write above this
+// comment is not safe on its own: two processes can both observe "no
+// streak open yet" and each write their own opening line for the same
+// cause, measured on this exact code before acquireStateLock existed (20
+// real concurrent processes, the same cause, produced 2 opening lines
+// where the whole point is exactly 1). acquireStateLock serializes the
+// section below across processes; losing the race after its retries are
+// exhausted is not escalated into an error here either -- the update is
+// simply skipped, and a cause that is real will be seen again on a later
+// tick, which costs far less than a lock stuck forever because whatever
+// held it crashed mid-update.
 func AppendTraceOnce(logPath, message string) error {
 	statePath := tracePathStatePath(logPath)
+
+	release, ok := acquireStateLock(statePath + ".lock")
+	if !ok {
+		return nil
+	}
+	defer release()
+
 	state := loadTraceState(statePath)
 
 	if message == "" {
