@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -406,6 +407,18 @@ func run(configPath string) error {
 	return nil
 }
 
+// listedAlive reports whether short is in the daemon's list and not dying. A dying
+// session is being stopped: the daemon marks it so about a second before its
+// terminal stream ends, which is exactly when the bridge asks.
+func listedAlive(sessions []daemon.Session, short string) bool {
+	for _, s := range sessions {
+		if s.Short == short {
+			return !s.Dying
+		}
+	}
+	return false
+}
+
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
 func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
@@ -414,6 +427,28 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		SendText:   func(session, text string) error { return dc.SendText(ctx, session, text) },
 		SendKeys:   func(session, keys string) error { return dc.SendKeys(ctx, session, keys) },
 		ReadScreen: func(session string, tail int) daemon.ScreenResult { return dc.ReadScreen(ctx, session, tail) },
+		// Returned through a local, not directly: a nil *daemon.Attachment put straight
+		// into the interface would be a non-nil Terminal holding nothing.
+		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {
+			a, err := dc.Attach(actx, session, cols, rows)
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
+		// Asked of the daemon itself, never of p.snapshot: the bridge asks the moment
+		// a stream ends, and the snapshot can be a whole poll behind that moment.
+		SessionListed: func(lctx context.Context, session string) (bool, error) {
+			sessions, err := dc.ListSessions(lctx)
+			if err != nil {
+				return false, err
+			}
+			return listedAlive(sessions, session), nil
+		},
+		// New with every process and kept nowhere else: the page asks for it each time
+		// it opens a terminal, so a restart — which ends every open terminal anyway —
+		// is all it takes to replace it. rand.Text carries at least 128 random bits.
+		TerminalToken: rand.Text(),
 
 		SetCardField: setCardField,
 		// Without this the server has nothing to confine a card write to and answers

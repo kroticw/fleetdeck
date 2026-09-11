@@ -26,8 +26,11 @@
        Terminal, onto window. A classic script tag runs before the deferred
        module below, so window.Terminal is already there when the panel opens a
        session. Loaded from the binary's own embedded files, never a CDN — the
-       page's Content-Security-Policy is script-src 'self'. -->
+       page's Content-Security-Policy is script-src 'self'. The fit addon is the
+       same kind of bundle and assigns FitAddon the same way; it must be the
+       xterm release's own (web/vendor/README.md). -->
   <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-fit.js"></script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

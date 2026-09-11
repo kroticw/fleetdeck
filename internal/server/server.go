@@ -17,6 +17,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -153,6 +154,37 @@ type Deps struct {
 	// changed. Nil serves the page as embedded and the snapshot without it.
 	Build *buildinfo.Fingerprint
 
+	// Attach opens a held, two-way terminal on a session at the given geometry —
+	// daemon.Client.Attach. It backs GET /api/sessions/{id}/pty. ctx bounds opening
+	// only; the terminal lives until it is closed. Nil leaves the route answering 503.
+	Attach func(ctx context.Context, session string, cols, rows int) (Terminal, error)
+
+	// SessionListed reports whether the daemon lists session as alive right now —
+	// present in its list and not dying. The terminal bridge asks it when a stream
+	// ends with no reason attached, because that alone does not say the session
+	// ended (see streamEnding in pty.go). It must ask the daemon, not the cached
+	// Snapshot, which can be a whole poll behind. Nil leaves such an ending
+	// unexplained rather than guessed.
+	SessionListed func(ctx context.Context, session string) (bool, error)
+
+	// TerminalToken is the secret a terminal socket must present as its first
+	// message before the bridge attaches to anything (see authenticateTerminal in
+	// pty.go). It is expected to be random and to live exactly as long as the
+	// process: the panel's page reads it from GET /api/terminal-token each time it
+	// opens a terminal, so a restart costs nothing the restart has not already
+	// cost — every socket the old process held is gone with it. It is never
+	// written to disk, logged, or put in a snapshot.
+	//
+	// Like BoardDir, an empty value is not a capability the panel simply lacks:
+	// without it the terminal socket would have only the Origin rule between a
+	// page and a live session, so both routes answer 503 instead.
+	TerminalToken string
+
+	// terminalAuthTimeout overrides how long a terminal socket may take to send
+	// its token. It exists for tests, which cannot wait the real ten seconds; zero
+	// means terminalAuthWait.
+	terminalAuthTimeout time.Duration
+
 	// interval overrides the WebSocket's one-second push cadence. It exists for
 	// tests, which cannot afford to wait whole seconds to observe a cadence; zero
 	// means the one second the panel actually uses.
@@ -193,6 +225,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
 	mux.HandleFunc("POST /api/sessions/{id}/image", d.handleUploadImage)
 	mux.HandleFunc("GET /ws", d.handleWS)
+	mux.HandleFunc("GET /api/sessions/{id}/pty", d.handlePTY)
+	mux.HandleFunc("GET /api/terminal-token", d.handleTerminalToken)
 	mux.Handle("GET /", staticHandler(d.Build))
 	return guard(mux)
 }

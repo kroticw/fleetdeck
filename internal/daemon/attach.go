@@ -222,6 +222,13 @@ func kickHoldback(data []byte, moreWaiting bool) int {
 	return 0
 }
 
+// Writable reports whether this attachment was opened with a control key, and so
+// whether Write can type into the session at all. A caller that shows the terminal
+// to a person uses it to say so before they start typing, not after.
+func (a *Attachment) Writable() bool {
+	return a.keyErr == nil
+}
+
 // Write types p into the session. There is no acknowledgement past the attach header
 // and a write is never retried: a partial write to a stream socket is possible, and a
 // retry here would type into someone's session twice (protocol doc, section 3).

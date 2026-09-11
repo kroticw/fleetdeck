@@ -142,6 +142,9 @@ func TestAttachSendsGeometryItsOwnIDAndTheKey(t *testing.T) {
 		t.Fatalf("Attach: %v", err)
 	}
 	defer a.Close()
+	if !a.Writable() {
+		t.Error("Writable() = false for an attachment opened with a key")
+	}
 
 	got := f.requests("attach")
 	if len(got) != 1 {
@@ -212,6 +215,9 @@ func TestAttachWithoutKeyReadsButRefusesToWrite(t *testing.T) {
 	}
 	defer a.Close()
 
+	if a.Writable() {
+		t.Error("Writable() = true for an attachment opened without a key")
+	}
 	if _, has := f.requests("attach")[0]["auth"]; has {
 		t.Error("an attach with no key sent an auth field; the daemon rejects a wrong key outright")
 	}

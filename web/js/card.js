@@ -306,8 +306,15 @@ export function renderCard(root, path, onClose, options = {}) {
     draw(latest);
   };
 
+  // Escape closes the panel — except when it was pressed inside a live
+  // terminal. There it belongs to the session, and in a Claude Code session it
+  // interrupts the turn: closing a card must never be the same keystroke as
+  // interrupting the orchestrator. The terminal's host carries data-terminal
+  // (web/js/session.js) for exactly this.
   const onKey = (event) => {
-    if (event.key === "Escape") onClose();
+    if (event.key !== "Escape") return;
+    if (event.target?.closest?.("[data-terminal]")) return;
+    onClose();
   };
 
   // mousedown rather than click: the click that opens this panel is still on its

@@ -602,3 +602,31 @@ func TestSetSessionLabelEmptyRemovesTheEntryFromTheCollector(t *testing.T) {
 		t.Fatalf("want the entry gone from disk too, got %+v", got.SessionLabels)
 	}
 }
+
+// The terminal bridge's question "is this session still running?" is answered
+// by the daemon's own list: present and not dying. A dying session is on its way
+// out — the daemon marks it so about a second before its stream ends — and
+// counting it as running would tell the operator a stopped session merely lost
+// its connection.
+func TestListedAliveCountsOnlyAPresentSessionThatIsNotDying(t *testing.T) {
+	sessions := []daemon.Session{{Short: "aaaa1111"}, {Short: "bbbb2222", Dying: true}}
+	for short, want := range map[string]bool{"aaaa1111": true, "bbbb2222": false, "cccc3333": false} {
+		if got := listedAlive(sessions, short); got != want {
+			t.Errorf("listedAlive(%q) = %v, want %v", short, got, want)
+		}
+	}
+}
+
+// The terminal token is what a page must show before the bridge attaches to a
+// session. An empty one leaves the terminal refusing every socket, and a fixed
+// one would be the same secret on every machine running this binary.
+func TestDepsWiresARandomTerminalToken(t *testing.T) {
+	a := deps(context.Background(), nil, nil, nil, config.Config{}, "").TerminalToken
+	b := deps(context.Background(), nil, nil, nil, config.Config{}, "").TerminalToken
+	if len(a) < 26 || len(b) < 26 {
+		t.Fatalf("tokens %q and %q: want at least 128 bits of randomness each", a, b)
+	}
+	if a == b {
+		t.Errorf("two panels got the same token %q", a)
+	}
+}
