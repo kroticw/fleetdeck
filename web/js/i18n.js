@@ -104,6 +104,8 @@ const en = {
   terminal_key_refused: "the daemon refused the control key",
   terminal_daemon_unavailable: "the daemon is not running",
   terminal_connection_lost: "the terminal connection was lost — reopen the tab to reconnect",
+  terminal_reconnecting: "reconnecting by itself…",
+  terminal_link_lost: "the terminal lost its connection",
 
   // Attaching an image to a session (web/js/session.js, web/js/imagefile.js).
   // Both refusals are worded as what the panel will accept rather than as what
@@ -215,6 +217,8 @@ const ru = {
   terminal_key_refused: "демон отверг ключ управления",
   terminal_daemon_unavailable: "демон не запущен",
   terminal_connection_lost: "связь с терминалом потеряна — откройте вкладку заново, чтобы переподключиться",
+  terminal_reconnecting: "переподключаюсь сам…",
+  terminal_link_lost: "терминал потерял связь",
 
   image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
   image_too_large: "эта картинка слишком велика, чтобы её прикрепить",

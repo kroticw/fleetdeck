@@ -152,9 +152,36 @@ function terminalFitter(terminal) {
 // than a blink for the terminal to follow.
 const PANE_SETTLE_MS = 150;
 
+// How long a terminal that reconnects waits before each attempt, by attempt;
+// the last value repeats. The first is short because the common case is the
+// panel restarting under the page — replaced by a newer build, or brought back
+// by its supervisor — which is over in a moment. The rest back off so that a
+// panel that is down for good costs one request every ten seconds rather than
+// a stream of them. A connection that gets through starts the count over.
+const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
+
+// Endings a reconnect cannot fix, so a terminal that reconnects does not try
+// after them: the session ended (4000) or is not there (4404) — its caller
+// opens it again if it comes back — another attacher took the terminal over
+// (4001; on Windows that is the operator's own terminal, and taking it back
+// would evict them in a loop), or the panel refused the token (4403).
+const FINAL_ENDINGS = new Set([4000, 4001, 4403, 4404]);
+
+// What an ending that is being retried says. The words closeMessage gives the
+// screen tab end in advice to reopen the tab, which a terminal that reconnects
+// by itself must not give; only the daemon being away says something more
+// useful than that the connection went.
+const RETRIED_ENDINGS = { 4503: "terminal_daemon_unavailable" };
+
 // createLiveTerminal draws the live terminal of session `short` into `host`.
 // Nothing happens until open(); stop() leaves no socket, timer, observer or
 // terminal behind.
+//
+// With `reconnect`, a stream that ends for a reason that can pass — a lost
+// connection, a panel restarting, a daemon briefly away — is opened again by
+// itself after RECONNECT_DELAYS_MS, into the same terminal, which keeps what it
+// showed meanwhile. Without it, which is the default, an ended stream stays
+// ended and the caller decides what reopens it.
 //
 // `report` is how it speaks, every member optional:
 //   streamError(message) — the stream's own state: it ended and why, a token
@@ -164,7 +191,7 @@ const PANE_SETTLE_MS = 150;
 //                          key goes through.
 //   standing()           — readOnly or unfitted may have changed; read them.
 //   ready()              — the bridge has attached.
-export function createLiveTerminal(host, short, { timers = globalThis, report = {} } = {}) {
+export function createLiveTerminal(host, short, { timers = globalThis, report = {}, reconnect = false } = {}) {
   const say = {
     streamError: report.streamError ?? (() => {}),
     actionError: report.actionError ?? (() => {}),
@@ -195,6 +222,22 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // size of its pane.
   let readOnly = false;
   let unfitted = false;
+  // Reconnecting: the armed attempt, and how many have failed since the last
+  // connection that got through.
+  let retry = null;
+  let failures = 0;
+
+  // tryAgain says why the stream is down and that it is being tried again,
+  // and arms the attempt.
+  const tryAgain = (why) => {
+    const delay = RECONNECT_DELAYS_MS[Math.min(failures, RECONNECT_DELAYS_MS.length - 1)];
+    failures += 1;
+    say.streamError(`${why} — ${t("terminal_reconnecting")}`);
+    retry = timers.setTimeout(() => {
+      retry = null;
+      void openStream();
+    }, delay);
+  };
 
   const disposeTerminal = () => {
     // xterm holds a renderer, listeners and a resize observer. Dropping the
@@ -213,6 +256,8 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // a caller putting its terminal away is not a lost connection.
   const closeStream = () => {
     opening += 1;
+    if (retry !== null) timers.clearTimeout(retry);
+    retry = null;
     if (typing) typing.dispose();
     typing = null;
     sessionSize = null;
@@ -312,6 +357,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     if (msg?.type === "ready") {
       writable = msg.writable === true;
       readOnly = !writable;
+      failures = 0;
       say.streamError("");
       say.standing();
       say.ready();
@@ -323,8 +369,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   };
 
   // openStream is one socket for as long as the caller keeps the terminal open.
-  // It is never reopened by itself — see closeMessage and the note at the top of
-  // this file.
+  // It is reopened by itself only for a caller that asked to reconnect.
   //
   // The socket must prove the panel's terminal token before the bridge attaches
   // to anything (internal/server/pty.go), so the token is read first, fresh for
@@ -343,7 +388,12 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     try {
       token = await fetchTerminalToken();
     } catch (err) {
-      if (mine === opening) say.streamError(`${t("terminal_token_unavailable")}: ${err.message}`);
+      if (mine !== opening) return;
+      const why = `${t("terminal_token_unavailable")}: ${err.message}`;
+      // A panel that is restarting answers nothing for a moment, and the token
+      // is the first thing asked of it.
+      if (reconnect) tryAgain(why);
+      else say.streamError(why);
       return;
     }
     if (mine !== opening) return;
@@ -376,9 +426,13 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       sessionSize = null;
       // The terminal stays as it was: the last thing the session said is often
       // exactly what the operator needs while reading why it stopped.
-      say.streamError(closeMessage(event.code, event.reason));
+      if (reconnect && !FINAL_ENDINGS.has(event.code)) tryAgain(t(RETRIED_ENDINGS[event.code] ?? "terminal_link_lost"));
+      else say.streamError(closeMessage(event.code, event.reason));
       say.standing();
     };
+    // One wiring at a time: an opening after a reconnect replaces the last one
+    // rather than adding to it, or every key would be typed once per attempt.
+    if (typing) typing.dispose();
     typing = term.onData((data) => sendBytes(encoder.encode(data)));
   };
 
