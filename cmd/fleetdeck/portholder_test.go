@@ -159,7 +159,7 @@ func TestAPanelThatCannotTakeItsPortNamesWhatHoldsIt(t *testing.T) {
 			if err := config.Save(cfgPath, cfg); err != nil {
 				t.Fatal(err)
 			}
-			err := run(cfgPath, "")
+			err := run(cfgPath, "", 0)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("run on a taken port: %v; want it to say %q", err, tc.want)
 			}
