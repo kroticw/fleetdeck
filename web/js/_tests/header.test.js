@@ -33,6 +33,7 @@ import {
   gauge,
   isUsageStale,
   RATE_LIMITS_AGE_WORTH_SHOWING_MS,
+  fleetSwitcherHTML,
 } from "../header.js";
 import { t } from "../i18n.js";
 
@@ -447,4 +448,34 @@ test("control case: age alone flips stale once past the threshold, with no usage
   const justOver = { limits: { fetchedAt } };
   assert.equal(isUsageStale(justUnder, RATE_LIMITS_AGE_WORTH_SHOWING_MS - 1), false);
   assert.equal(isUsageStale(justOver, RATE_LIMITS_AGE_WORTH_SHOWING_MS + 1), true);
+});
+
+// --- the fleet switcher ---
+
+test("the switcher names every fleet, marks this one and counts the others' waiting", () => {
+  const html = fleetSwitcherHTML([
+    { name: "A", current: false, waiting: 2 },
+    { name: "B", current: true, waiting: 0 },
+  ]);
+  const entries = [...html.matchAll(/<button type="button" class="([^"]*)" data-fleet="([^"]*)"([^>]*)>(.*?)<\/button>/g)];
+  assert.deepEqual(entries.map((m) => m[2]), ["A", "B"]);
+  assert.equal(entries[0][1], "fleet-entry");
+  assert.match(entries[0][4], /class="fleet-entry-waiting">2</, "a fleet with waiting sessions says how many");
+  assert.equal(entries[1][1], "fleet-entry fleet-entry-current");
+  assert.match(entries[1][3], /aria-current="page"/);
+  assert.doesNotMatch(entries[1][4], /fleet-entry-waiting/, "no count where nothing waits");
+});
+
+test("one fleet has no switcher at all", () => {
+  assert.equal(fleetSwitcherHTML([{ name: "A", current: true, waiting: 3 }]), "");
+  assert.equal(fleetSwitcherHTML([]), "");
+});
+
+test("a fleet's name reaches the switcher only as escaped text", () => {
+  const html = fleetSwitcherHTML([
+    { name: '"><img src=x>', current: false, waiting: 0 },
+    { name: "B", current: true, waiting: 0 },
+  ]);
+  assert.ok(!html.includes("<img"), "a name must never reach the DOM as markup");
+  assert.ok(html.includes('data-fleet="&quot;&gt;&lt;img src=x&gt;"'));
 });

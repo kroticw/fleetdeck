@@ -416,6 +416,72 @@ body {
   color: var(--text);
 }
 
+/* --- fleets (web/js/fleet.js) ---
+ *
+ * The switcher beside the brand, only on a panel with more than one fleet:
+ * this tab's fleet marked, and on another a count of its own sessions waiting
+ * for an answer, in the waiting counter's colour, so a question there is seen
+ * from here. Then, in the session list, the heading of the sessions no fleet
+ * claims and one line per other fleet. */
+.fleet-switch {
+  display: inline-flex;
+  gap: var(--gap-sm);
+}
+
+.fleet-entry,
+.fleet-other {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.fleet-entry:hover,
+.fleet-other:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.fleet-entry-current {
+  color: var(--text);
+  font-weight: 600;
+  border-color: var(--accent);
+  cursor: default;
+}
+
+.fleet-entry-waiting,
+.fleet-other-waiting {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--danger);
+}
+
+.fleet-group-head {
+  padding: var(--gap) var(--gap) var(--gap-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.fleet-other {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  margin: var(--gap-sm) var(--gap);
+  text-align: left;
+}
+
+.fleet-other-name {
+  font-weight: 600;
+  color: var(--text);
+}
+/* --- end of fleets --- */
+
 /* The update button, only in the fleetdeck window (web/js/update.js): the
  * same weight as the theme toggle, with the step it is on as quiet text
  * beside it, and a failure worded the way usage problems are. */
