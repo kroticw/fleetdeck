@@ -27,13 +27,29 @@ The first time the panel starts on a machine with no configuration file, it show
 - `board` — an empty board made from the board template this repository carries (`plugin/templates/board`): a `cards` directory with no cards in it, `README.md`, `archive/AGENTS-ARCHIVE.md`, and the card validator `scripts/validate_cards.py` with its tests. It is a git repository of its own, on `master`, with no commit yet: a signed commit would ask for a passphrase, and the panel has nobody to ask.
 - `docs` — an empty directory, which the Docs tab reads.
 
-Outside the workspace it then does what `fleetdeck init` does (below): it writes the configuration file naming both directories, wires Claude Code's statusline, and lets Claude Code sessions write in the workspace. Every step's outcome is shown, and a refused step is shown with its reason. As soon as the configuration and the board exist, the page becomes the panel; the app does not restart it. When the folder cannot be made, the page stays, and another folder can be chosen.
+Outside the workspace it then does what `fleetdeck init` does (below): it writes the configuration file naming both directories, wires Claude Code's statusline, and lets Claude Code sessions write in the workspace. Every step's outcome is shown, and a refused step is shown with its reason. As soon as the configuration and the board exist, the page becomes the panel, the app does not restart it, and the page goes on to the orchestrator (below) with those outcomes still on screen. When the folder cannot be made, the page stays, and another folder can be chosen.
 
 A panel that has a configuration file never shows this page. A board that already exists elsewhere, with its own git history, is not moved and not changed: the configuration goes on naming it.
 
 A new board has no cards, and that is not an error: what makes a directory a board is its `cards` subdirectory. A `board.path` whose directory has no `cards` subdirectory is still reported as the wrong directory.
 
 **What the machine needs.** The board's history needs `git`, and the validator that agents run needs `python3`. On a Mac without the Command Line Tools neither exists: `/usr/bin/git` and `/usr/bin/python3` are stubs that offer to install the tools. The board is made anyway. Without git, the panel writes a card field and says it could not commit it. Installing the Command Line Tools (`xcode-select --install`) provides both.
+
+## Appointing the orchestrator
+
+The orchestrator is the Claude Code session the fleet is led from: it sets the other sessions their tasks, takes their work in and keeps the board. After the workspace, the same page asks which session that is — a new one, or one already running — or lets the choice be skipped.
+
+Both are appointed the same way, so that two orchestrators appointed differently cannot come to behave differently:
+
+1. The orchestrator's working order ([`orchestrator.md`](orchestrator.md), in the page's language) is written to `orchestrator.md` in the first documentation directory, or in the board when there is none, headed by where this panel keeps its board, documentation and configuration. The Docs tab shows it. It is rewritten each time the orchestrator is appointed. A file of that name that fleetdeck did not write is never replaced: the appointment stops and names it.
+2. The session is sent one line telling it to read that file. The page shows the line and the file before anything is sent. It is a line and not the working order itself because a long, multi-line message can be left in a session's input box as an unsent paste instead of being submitted; and the file stays on disk for the orchestrator to read again once its context has been compacted.
+3. The session is pinned to the orchestrator column (`orchestrator.session`), only after the line went in.
+
+**A new session** is started with `claude --bg --name orchestrator` in the workspace, waited for until the daemon lists it (up to a minute), and sent the same line. Its first message is that line: it has no history of its own.
+
+**An existing session** is chosen from the running sessions, each shown with its directory, its state, how full its context is, and what it is busy with — the question it is waiting on, or its detail. Choosing one says, before its button, what appointing it means: the line goes onto the end of a conversation that has its own history and its own task, as if it had been typed there; nothing is erased or restarted; the working order takes up part of its context, and from then on it carries its task and the fleet together; a session that is working reads the line after its current step, and one waiting on a question should be answered first; and none of this can be taken back. A session that will not take the line within a few seconds — most often one with a question on its screen — is not pinned, and the page says so.
+
+The wizard can be run again from the orchestrator column's head (**wizard…**), which opens the same page at this step. There it marks the current orchestrator and says what happens to it when another is chosen: it leaves the column, and the line it was sent stays in its history. The column's dropdown, beside it, only moves the pin and sends nothing.
 
 ## Running `fleetdeck init`
 

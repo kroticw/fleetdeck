@@ -388,6 +388,23 @@ test("a connection being retried and a choice that was not saved are on screen t
   assert.equal(c.root.querySelectorAll(".o-error").length, 2);
 });
 
+// Requirement 5 of the first-run wizard's card: the wizard can be run again,
+// and the column the orchestrator lives in is where a person looks for it —
+// pinned or not, since "nothing pinned" is exactly when it is wanted.
+test("the column's head leads to the orchestrator wizard, pinned or not", async () => {
+  for (const snapshot of [structuredClone(PIN), { ...structuredClone(PIN), orchestratorSession: "" }]) {
+    const c = await column(snapshot);
+    const link = c.root.querySelector("a.o-wizard");
+    assert.ok(link, "no way to the wizard from the column");
+    assert.equal(link.getAttribute("href"), "/setup.html");
+    assert.equal(link.textContent, t("orchestrator_wizard"));
+    assert.equal(link.getAttribute("title"), t("orchestrator_wizard_hint"));
+    current.stop();
+    current.dom.restore();
+    current = null;
+  }
+});
+
 test("a connection error goes with the terminal it was about", async () => {
   const c = await column(structuredClone(PIN));
   ready(c.ptys()[0]);

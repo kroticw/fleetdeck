@@ -309,6 +309,14 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     });
     head.append(pickSelect);
 
+    // The picker above only moves the pin. Appointing — the working order
+    // sent to the session, then the pin — is the wizard's, and this is where
+    // it is run again: the first-run page at its orchestrator step.
+    const wizard = el("a", "o-wizard", t("orchestrator_wizard"));
+    wizard.setAttribute("href", "/setup.html");
+    wizard.setAttribute("title", t("orchestrator_wizard_hint"));
+    head.append(wizard);
+
     root.appendChild(head);
 
     // Where the terminal goes, or the sentence saying why there is none. The
