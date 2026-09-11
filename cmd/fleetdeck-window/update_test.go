@@ -106,12 +106,6 @@ func TestTheNewWindowSaysItIsTakingOverNotStartingFromNothing(t *testing.T) {
 
 // A stub has a test that fails while it is one: the handover timeout is a
 // placeholder until ten real handovers are measured.
-func TestTheHandoverTimeoutHasBeenMeasured(t *testing.T) {
-	if !handoverMeasured {
-		t.Fatal("handoverTimeout is a placeholder: measure ten handovers and write the worst in measuredWorstHandover")
-	}
-}
-
 func TestTheHandoverTimeoutIsTheMeasuredWorstTimesThree(t *testing.T) {
 	if measuredWorstHandover*handoverMargin != handoverTimeout || handoverMargin != 3 {
 		t.Fatalf("handoverTimeout = %s, want %s x 3", handoverTimeout, measuredWorstHandover)

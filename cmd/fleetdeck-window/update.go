@@ -40,14 +40,20 @@ const (
 // How long the new window has, from its start to its panel answering from the
 // canonical path: the worst of ten measured handovers, three times over.
 //
-// NOT MEASURED YET: a handover opens a window, and the ten launches are to be
-// run at a moment agreed with the operator, whose screen it is.
-// TestTheHandoverTimeoutHasBeenMeasured fails until they are.
+// Measured on 2026-09-11 on the operator's machine, on his screen at a moment
+// he gave for it, with the fleet running: ten handovers, each a real one -- a
+// new window from a freshly built bundle of its own (ten different binaries,
+// each run for the first time, as after every update), started with
+// --handover and --canonical against a live panel from the canonical bundle,
+// on a stand with a HOME and a port of its own. Timed from the new window's
+// start to "done" in the handover file. In ms: 812, 762, 542, 495, 490, 489,
+// 490, 485, 484, 483 -- the first two slower, the rest steady. Not measured: a
+// handover straight after login, with nothing of the binaries in the disk
+// cache.
 const (
-	measuredWorstHandover = 10 * time.Second
+	measuredWorstHandover = 812 * time.Millisecond
 	handoverMargin        = 3
 	handoverTimeout       = measuredWorstHandover * handoverMargin
-	handoverMeasured      = false
 )
 
 // bundleOf is the .app bundle exe sits in, or "" when it is not in one.
