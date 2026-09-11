@@ -20,19 +20,35 @@ go install github.com/kroticw/fleetdeck/cmd/fleetdeck-status@latest
 
 A third way exists for the one case those two do not cover: something outside this repository that references a fixed path directly, rather than wherever a build happened to land — Claude Code's `statusLine.command` composed with another statusline tool, for one. `make install` builds both binaries fresh and writes them to `INSTALLDIR` (default `~/.local/bin`), replacing whatever already sits there under those two names and printing each binary's own sha256 so the replacement is verifiable rather than assumed.
 
+## First launch: choosing the workspace
+
+The first time the panel starts on a machine with no configuration file, it shows a setup page instead of the board. The page asks for one folder, the workspace, and proposes `~/fleetdeck`. Inside the app a Choose… button opens the system's folder chooser, and the workspace is made in a `fleetdeck` folder inside the chosen one. Before anything is written, the page says what will be written outside that folder. Create makes two directories in the workspace:
+
+- `board` — an empty board made from the board template this repository carries (`plugin/templates/board`): a `cards` directory with no cards in it, `README.md`, `archive/AGENTS-ARCHIVE.md`, and the card validator `scripts/validate_cards.py` with its tests. It is a git repository of its own, on `master`, with no commit yet: a signed commit would ask for a passphrase, and the panel has nobody to ask.
+- `docs` — an empty directory, which the Docs tab reads.
+
+Outside the workspace it then does what `fleetdeck init` does (below): it writes the configuration file naming both directories, wires Claude Code's statusline, and lets Claude Code sessions write in the workspace. Every step's outcome is shown, and a refused step is shown with its reason. As soon as the configuration and the board exist, the page becomes the panel; the app does not restart it. When the folder cannot be made, the page stays, and another folder can be chosen.
+
+A panel that has a configuration file never shows this page. A board that already exists elsewhere, with its own git history, is not moved and not changed: the configuration goes on naming it.
+
+A new board has no cards, and that is not an error: what makes a directory a board is its `cards` subdirectory. A `board.path` whose directory has no `cards` subdirectory is still reported as the wrong directory.
+
+**What the machine needs.** The board's history needs `git`, and the validator that agents run needs `python3`. On a Mac without the Command Line Tools neither exists: `/usr/bin/git` and `/usr/bin/python3` are stubs that offer to install the tools. The board is made anyway. Without git, the panel writes a card field and says it could not commit it. Installing the Command Line Tools (`xcode-select --install`) provides both.
+
 ## Running `fleetdeck init`
 
-`fleetdeck init` sets up three things and prints one line per step, including the steps it refused and why:
+`fleetdeck init` does from a terminal what the setup page does. It prints one line per step, including the steps it refused and why:
 
-- **The configuration file**, `~/.config/fleetdeck/config.yaml`, is written only when there is no file there. An existing configuration is read and left exactly as it is, comments included — it is hand-written YAML, and rewriting it from a struct would drop every comment and every ordering its author chose. The output says `(kept)` when that happens.
-- **The board directory** comes from the configuration. On a machine with neither a configuration nor a `--board` flag the board is `~/fleetdeck/board`, and that path is what the newly created configuration records. A board directory that is absent or empty gets a `cards` subdirectory created under it with one example card written inside — the panel reads cards from `<board.path>/cards/`, not from the board directory itself, and an empty board is an error to the panel indistinguishable from a broken one. A directory that already holds files is left untouched, `cards` subdirectory included.
+- **The configuration file**, `~/.config/fleetdeck/config.yaml`, is written only when there is no file there, and only after the board it names exists: a configuration naming a board that could not be made would point the panel at nothing. An existing configuration is read and left exactly as it is, comments included — it is hand-written YAML, and rewriting it from a struct would drop every comment and every ordering its author chose. The output says `(kept)` when that happens.
+- **The workspace**, on a machine with no configuration, is `--workspace <path>` or `~/fleetdeck`: the board and the docs described above, both recorded in the new configuration (`board.path` and `docs.paths`). `--board <path>` makes a board alone instead, with no docs; the two flags cannot be combined. With an existing configuration, the board it names is made from the template only when its directory is absent or empty. A directory that already holds files is left untouched.
 - **The statusline** is wired by setting `statusLine` in `~/.claude/settings.json` — that one key, with every other setting left alone. Two things stop this step. A `statusLine` that already runs something else is refused unless you pass `--force`, since replacing a statusline you configured yourself is not this command's decision. A `fleetdeck-status` that is not next to the `fleetdeck` binary is refused outright: writing a path that does not work would break the status line of every Claude Code session on the machine.
+- **The permissions**: the workspace — or the board alone, when there is no workspace — is added to `permissions.additionalDirectories` in `~/.claude/settings.json`. An agent keeps its card on the board, outside its own working directory, and without this entry every card write is a permission prompt. A directory that is already listed, or that lies inside a listed one, is left as it is; an entry may start with `~/`.
 
 Earlier versions of `init` also wrote a launch agent that started the panel at login. The app starts the panel now, and an agent left in place would start a second one at every login. When `init` finds an agent an earlier `init` wrote, it says so and prints the two commands that remove it; it runs neither — see [The app and the panel](#the-app-and-the-panel).
 
 A refused step does not stop the others, and the command exits non-zero when anything was skipped, naming what it found and what it would have written. Running `init` a second time changes no file: every step reports `(kept)`.
 
-Two cases end in a refusal rather than an edit, both for the same reason — `init` does not rewrite a configuration file it did not create. A configuration that names no `board.path` is left for you to fill in; a `--board` pointing somewhere other than the configured board is refused rather than silently ignored.
+Two cases end in a refusal rather than an edit, both for the same reason — `init` does not rewrite a configuration file it did not create. A configuration that names no `board.path` is left for you to fill in; a `--board` or `--workspace` that puts the board somewhere other than the configured board is refused rather than silently ignored.
 
 ## The app and the panel
 
@@ -105,7 +121,9 @@ curl http://127.0.0.1:7777/api/snapshot
 
 ## Creating a first card
 
-Creating a card does not require the panel: a card is a markdown file with YAML frontmatter, following the convention described in [`board-convention.md`](board-convention.md). Copy the template card, fill in the frontmatter, and describe the task in the body.
+The panel starts a card: the **+ card** button in the row of tabs above the board takes a title and a zone, and writes a card in stage `new` at progress `0`, named from the title — a Russian title gets a file name in latin letters — and records it in the board's git history. That is all it writes; the rest of the card is written by whoever takes the task on. An existing card is never overwritten: a second card with the same title on the same day gets a `-2` file. When the card reaches the board but its commit does not happen, the panel says so and does not offer to create it again.
+
+A card does not need the panel either: it is a markdown file with YAML frontmatter, following the convention described in [`board-convention.md`](board-convention.md). Copy the template card, fill in the frontmatter, and describe the task in the body.
 
 ## Linking a card to a session
 

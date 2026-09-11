@@ -284,3 +284,25 @@ func TestCommitUnderRealGitConfiguration(t *testing.T) {
 			"configuration: the bounded deadline in run() failed to enforce itself")
 	}
 }
+
+// A new board is a repository of its own on master, the branch
+// bootstrap-board.sh gave the operator's board, whatever init.defaultBranch the
+// machine's git carries.
+func TestInitRepoMakesARepositoryOnMaster(t *testing.T) {
+	dir := t.TempDir()
+	if err := InitRepo(dir); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "symbolic-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("not a repository after InitRepo: %s", out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "refs/heads/master" {
+		t.Fatalf("a new board starts on master: got %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf("the repository must be the board's own, not an enclosing one: %v", err)
+	}
+}

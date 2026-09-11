@@ -81,7 +81,7 @@ export function columnHTML(label, stage, cards, orphanPaths) {
 // first frame arrives, or after the socket drops) — that renders the same
 // empty board a snapshot with no cards would, never an error and never a
 // blank root. A snapshot with boardError set (state.Snapshot.BoardError,
-// e.g. a misconfigured board path or zero cards found) is a distinct case
+// e.g. a board path with no cards/ directory under it) is a distinct case
 // from that: cards is nil either way, but the board failed to load rather
 // than loading and finding nothing, so it must not look identical to a
 // healthy empty board (spec section 7's "degrade in parts, never silently").

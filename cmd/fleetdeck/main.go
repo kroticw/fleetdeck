@@ -19,7 +19,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -191,6 +193,23 @@ func setCardField(path, field, value string) error {
 	}
 }
 
+// createCard is server.Deps.CreateCard: start a card on the board, then record it
+// in the board's git history — the same two steps as setCardField, with the same
+// rule for the second: once the file exists, a commit that did not happen is
+// wrapped in server.ErrCardWrittenNotCommitted and returned with the path, so the
+// operator is not invited to create the card a second time.
+func createCard(boardDir, title, zone string, now time.Time) (string, error) {
+	path, err := board.CreateCard(boardDir, title, zone, now)
+	if err != nil {
+		return "", err
+	}
+	msg := "chore(board): add card " + filepath.Base(path)
+	if err := board.Commit(filepath.Dir(path), filepath.Base(path), msg); err != nil {
+		return path, fmt.Errorf("%w: %w", server.ErrCardWrittenNotCommitted, err)
+	}
+	return path, nil
+}
+
 // setOrchestratorSession is server.Deps.SetOrchestratorSession: pin, or
 // given an empty string unpin, the session shown in the orchestrator
 // column, persisting the choice before the running collector reports it.
@@ -280,6 +299,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	standSocket := flag.String("stand-socket", "", "fixed daemon control-socket path for an isolated test stand: given, this panel connects ONLY to this socket and never discovers the real fleet daemon (see internal/daemon.New); required for a panel run anywhere a live fleet daemon might otherwise be found")
 	ownerPID := flag.Int("owner-pid", 0, "the fleetdeck window that started this panel, as its parent: the panel stops when that process is gone")
+	port := flag.Int("port", 0, "port to listen on instead of server.port; for a test stand, which must not take the operator's port even before it has a configuration")
 	flag.Parse()
 
 	// -stand-socket is the one flag whose mere presence changes what this
@@ -303,7 +323,7 @@ func main() {
 		return
 	}
 
-	if err := run(*configPath, *standSocket, *ownerPID); err != nil {
+	if err := runWith(runOpts{configPath: *configPath, standSocket: *standSocket, owner: *ownerPID, port: *port}); err != nil {
 		log.Fatalf("fleetdeck: %v", err)
 	}
 }
@@ -347,31 +367,114 @@ func projectsDir() string {
 // the panel shuts down the same way it does on SIGTERM once that process is
 // gone (see owner.go).
 func run(configPath, standSocket string, owner int) error {
-	if owner != 0 {
-		if err := checkOwner(owner); err != nil {
+	return runWith(runOpts{configPath: configPath, standSocket: standSocket, owner: owner})
+}
+
+// runOpts is what the command line hands the panel.
+type runOpts struct {
+	configPath, standSocket string
+	// owner is the window that started the panel, or 0.
+	owner int
+	// port, when not 0, is listened on instead of server.port. A panel with no
+	// configuration file has no server.port of its own but the default, and a
+	// test stand must not take the default: it belongs to the operator's panel.
+	port int
+}
+
+// runWith is run with every option, serving until a signal arrives.
+func runWith(o runOpts) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return serve(ctx, o)
+}
+
+// serve is the panel: it assembles everything and serves until ctx is done.
+//
+// A panel with no configuration file starts in setup: it listens, serves the
+// setup page, and once a workspace and a configuration naming it have been made
+// (setupWorkspace), it loads that configuration and becomes the panel on the
+// same listener, without a restart — the window watching it sees no gap. A
+// panel that has a configuration never offers setup.
+func serve(parent context.Context, o runOpts) error {
+	if o.owner != 0 {
+		if err := checkOwner(o.owner); err != nil {
 			return err
 		}
 	}
-	cfg, err := config.Load(configPath)
+	firstRun, cfg, err := loadConfig(o.configPath)
 	if err != nil {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := context.WithCancel(parent)
 	defer stop()
-	if owner != 0 {
-		gone := ownerGone(owner)
+	if o.owner != 0 {
+		gone := ownerGone(o.owner)
 		go func() {
 			select {
 			case <-gone:
-				log.Printf("fleetdeck: the window that started this panel (pid %d) is gone; shutting down with it", owner)
+				log.Printf("fleetdeck: the window that started this panel (pid %d) is gone; shutting down with it", o.owner)
 				stop()
 			case <-ctx.Done():
 			}
 		}()
 	}
 
-	dc := daemonClient(standSocket)
+	port := cfg.ServerPort
+	if o.port != 0 {
+		port = o.port
+	}
+	// Bind before announcing anything: a bare fmt.Sprintf("127.0.0.1:%d", ...)
+	// printed ahead of ListenAndServe made a failed start look like a running
+	// panel — the log carried the success line and then an unrelated-looking
+	// bind error, right next to whichever process actually holds the port
+	// (most often another panel: the one the fleetdeck window started from
+	// inside its app bundle, or one started from a terminal). ln.Addr() is
+	// used for the log line rather than the address that was asked for so
+	// that server.port: 0 — "let the OS choose" — reports the port it
+	// actually got, not literally "0".
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return bindError(addr, err, portHolder(context.Background(), addr), readBuild())
+		}
+		return fmt.Errorf("bind %s: %w", addr, err)
+	}
+
+	var handler switchHandler
+	srv := &http.Server{
+		Handler:           &handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+	serveErr := make(chan error, 1)
+	startServing := func(what string) {
+		go func() {
+			log.Printf("fleetdeck %s %s on http://%s", version.String(), what, ln.Addr())
+			serveErr <- srv.Serve(ln)
+		}()
+	}
+
+	if firstRun {
+		ready := make(chan struct{})
+		handler.set(server.NewSetup(setupDeps(o.configPath, ready)))
+		startServing("waiting to be set up")
+		select {
+		case <-ready:
+		case err := <-serveErr:
+			return err
+		case <-ctx.Done():
+			return shutdown(srv)
+		}
+		if cfg, err = config.Load(o.configPath); err != nil {
+			_ = shutdown(srv)
+			return err
+		}
+		log.Printf("fleetdeck: set up with the board at %s", cfg.BoardPath)
+	}
+
+	dc := daemonClient(o.standSocket)
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir())
 
@@ -393,42 +496,15 @@ func run(configPath, standSocket string, owner int) error {
 		watchBoard(ctx, cfg.BoardPath, func() { p.refresh(ctx) })
 	}()
 
-	// Bind before announcing anything: a bare fmt.Sprintf("127.0.0.1:%d", ...)
-	// printed ahead of ListenAndServe made a failed start look like a running
-	// panel — the log carried the success line and then an unrelated-looking
-	// bind error, right next to whichever process actually holds the port
-	// (most often another panel: the one the fleetdeck window started from
-	// inside its app bundle, or one started from a terminal). ln.Addr() is
-	// used for the log line rather than the address that was asked for so
-	// that server.port: 0 — "let the OS choose" — reports the port it
-	// actually got, not literally "0".
-	addr := fmt.Sprintf("127.0.0.1:%d", cfg.ServerPort)
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		stop()
-		wg.Wait()
-		if errors.Is(err, syscall.EADDRINUSE) {
-			return bindError(addr, err, portHolder(context.Background(), addr), readBuild())
-		}
-		return fmt.Errorf("bind %s: %w", addr, err)
-	}
-
-	d := deps(ctx, p, dc, collector, cfg, configPath)
+	d := deps(ctx, p, dc, collector, cfg, o.configPath)
 	if d.Build != nil {
 		// Which window this panel belongs to, for a window that finds it answering.
-		d.Build.Owner = owner
+		d.Build.Owner = o.owner
 	}
-	srv := &http.Server{
-		Handler:           server.New(d),
-		ReadHeaderTimeout: readHeaderTimeout,
-		IdleTimeout:       idleTimeout,
+	handler.set(server.New(d))
+	if !firstRun {
+		startServing("listening")
 	}
-
-	serveErr := make(chan error, 1)
-	go func() {
-		log.Printf("fleetdeck %s listening on http://%s", version.String(), ln.Addr())
-		serveErr <- srv.Serve(ln)
-	}()
 
 	select {
 	case err := <-serveErr:
@@ -445,13 +521,110 @@ func run(configPath, standSocket string, owner int) error {
 	// the server is draining.
 	stop()
 	wg.Wait()
+	return shutdown(srv)
+}
 
+func shutdown(srv *http.Server) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+// loadConfig reads the configuration file. firstRun is true when there is no
+// file at all: that, and only that, is a panel that has never been set up. A
+// file that exists and does not parse is an error, as it always was — never a
+// reason to offer setup over somebody's configuration.
+func loadConfig(path string) (firstRun bool, cfg config.Config, err error) {
+	switch _, statErr := os.Stat(path); {
+	case errors.Is(statErr, fs.ErrNotExist):
+		return true, config.Default(), nil
+	case statErr != nil:
+		return false, config.Config{}, fmt.Errorf("read config %s: %w", path, statErr)
+	}
+	cfg, err = config.Load(path)
+	return false, cfg, err
+}
+
+// switchHandler is the listener's one handler, replaced once: the setup surface
+// first, the panel after it.
+type switchHandler struct {
+	h atomic.Pointer[http.Handler]
+}
+
+func (s *switchHandler) set(h http.Handler) { s.h.Store(&h) }
+
+func (s *switchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h := s.h.Load()
+	if h == nil {
+		http.Error(w, "fleetdeck is starting", http.StatusServiceUnavailable)
+		return
+	}
+	(*h).ServeHTTP(w, r)
+}
+
+// setupDeps is the setup surface's one write: `fleetdeck init --workspace`,
+// the same steps and the same report, against the configuration file this
+// panel was told to read. ready is closed once a configuration and a board
+// exist, and a second setup is refused from then on.
+func setupDeps(configPath string, ready chan struct{}) server.SetupDeps {
+	home, _ := os.UserHomeDir()
+	binary, _ := os.Executable()
+	var mu sync.Mutex
+	done := false
+	return server.SetupDeps{
+		DefaultWorkspace: filepath.Join(home, defaultWorkspaceName),
+		Setup: func(path string) ([]server.SetupStep, bool, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if done {
+				return nil, false, errors.New("this panel is already set up")
+			}
+			root, err := workspacePath(path, home)
+			if err != nil {
+				return nil, false, err
+			}
+			steps := initSteps(initEnv{home: home, binary: binary, workspace: root, config: configPath})
+			out := make([]server.SetupStep, 0, len(steps))
+			for _, s := range steps {
+				step := server.SetupStep{Name: s.name, Note: s.note, Detail: s.detail}
+				if s.err != nil {
+					step.Error = s.err.Error()
+				}
+				out = append(out, step)
+			}
+			// The configuration is what the panel runs on, and it is written only
+			// over a board that exists (saveNewConfig), so its step alone says
+			// whether the panel can run. The statusline and the permissions are
+			// reported, and a refusal there does not keep the panel from running.
+			ok := steps[0].err == nil
+			if ok {
+				done = true
+				close(ready)
+			}
+			return out, ok, nil
+		},
+	}
+}
+
+// workspacePath is the path the setup page sent, made absolute: "~" and "~/..."
+// against home. Anything else relative is refused — it would be relative to
+// wherever the panel was started, which the person choosing cannot see.
+func workspacePath(path, home string) (string, error) {
+	path = strings.TrimSpace(path)
+	switch {
+	case path == "":
+		return "", errors.New("name a folder for the workspace")
+	case path == "~":
+		return home, nil
+	case strings.HasPrefix(path, "~/"):
+		return filepath.Join(home, path[2:]), nil
+	case !filepath.IsAbs(path):
+		return "", fmt.Errorf("%q is not a full path: give one starting with / or ~/", path)
+	}
+	return filepath.Clean(path), nil
 }
 
 // checkStandSocket refuses an explicitly empty -stand-socket, which a script
@@ -516,6 +689,14 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
 func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
+	// Left nil without a board: the route then answers that this panel has no
+	// board, instead of creating cards relative to wherever the panel started.
+	var create func(title, zone string) (string, error)
+	if cfg.BoardPath != "" {
+		create = func(title, zone string) (string, error) {
+			return createCard(cfg.BoardPath, title, zone, time.Now())
+		}
+	}
 	return server.Deps{
 		Snapshot: p.snapshot,
 		SendText: func(session, text string) error { return dc.SendText(ctx, session, text) },
@@ -543,6 +724,7 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		TerminalToken: rand.Text(),
 
 		SetCardField: setCardField,
+		CreateCard:   create,
 		// Without this the server has nothing to confine a card write to and answers
 		// every one of them 503 — deliberately, since the path arrives from the
 		// browser and internal/board will rewrite a frontmatter line in any file

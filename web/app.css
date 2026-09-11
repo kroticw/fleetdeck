@@ -1329,6 +1329,93 @@ main {
   border-bottom-color: var(--accent);
 }
 
+/* Starting a card (web/js/newcard.js). The row is the anchor for the form, and
+   the form opens over the column rather than as a row of its own: nothing moves
+   when it opens or closes. z-index 1 keeps it under the card and session
+   panels (z-index 2), which cover this row when they are up. */
+#tabs {
+  position: relative;
+  align-items: center;
+}
+
+.newcard-open {
+  margin-left: auto;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  margin-bottom: var(--gap-sm);
+}
+
+.newcard-open:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.newcard {
+  position: absolute;
+  top: 100%;
+  right: var(--gap-lg);
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  width: min(28rem, calc(100% - 2 * var(--gap-lg)));
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: 0 4px 16px var(--shadow);
+}
+
+.newcard-title {
+  flex: 1 1 100%;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.newcard-zone,
+.newcard-create,
+.newcard-cancel {
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.newcard-create {
+  margin-left: auto;
+}
+
+.newcard-error {
+  flex: 1 1 100%;
+  color: var(--danger);
+  font-size: var(--fs-xs);
+}
+
+.newcard-error:empty {
+  display: none;
+}
+
+.newcard-note {
+  position: absolute;
+  top: 100%;
+  right: var(--gap-lg);
+  z-index: 1;
+  color: var(--attn);
+  font-size: var(--fs-xs);
+  background: var(--surface-raised);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
 #docs {
   flex: 1;
   min-height: 0;
@@ -2185,5 +2272,74 @@ main {
 body.is-resizing {
   cursor: col-resize;
   user-select: none;
+}
+
+/* The setup page (setup.html, web/js/setup.js): one column of text and one row
+   of controls, for a panel that has no configuration yet. */
+.setup {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--gap-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  color: var(--text);
+}
+
+.setup-title {
+  font-size: var(--fs-md);
+  margin: var(--gap-lg) 0 0;
+}
+
+.setup-intro,
+.setup-outside,
+.setup-made {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.setup-outside {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.setup-row {
+  display: flex;
+  gap: var(--gap);
+}
+
+.setup-path {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.setup-error {
+  color: var(--danger);
+}
+
+.setup-error:empty,
+.setup-status:empty {
+  display: none;
+}
+
+.setup-steps {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.setup-step-skipped {
+  color: var(--attn);
+}
+
+.setup-step-detail {
+  color: var(--text-muted);
 }
 

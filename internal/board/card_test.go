@@ -81,14 +81,25 @@ func TestScanBoardWithNoCardsSubdirIsTypedError(t *testing.T) {
 	}
 }
 
-func TestScanEmptyCardsSubdirIsTypedError(t *testing.T) {
+// A new board starts empty (the operator's decision, 2026-09-11): what tells a
+// board apart from a wrong path is its cards/ subdirectory, which the test
+// above pins as ErrNoCardsDir, not a card inside it. A file that is not a card
+// — a .gitkeep that keeps cards/ in git — leaves the board just as empty.
+func TestScanEmptyCardsSubdirIsAnEmptyBoard(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "cards"), 0o700); err != nil {
+	cardsDir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Scan(dir)
-	if !errors.Is(err, ErrNoCards) {
-		t.Fatalf("a cards/ subdirectory with zero cards must be reported, not pass as success with zero cards: %v", err)
+	if err := os.WriteFile(filepath.Join(cardsDir, ".gitkeep"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cards, err := Scan(dir)
+	if err != nil {
+		t.Fatalf("a cards/ subdirectory with no cards is an empty board, not a broken one: %v", err)
+	}
+	if len(cards) != 0 {
+		t.Fatalf("an empty board has no cards, got %d", len(cards))
 	}
 }
 

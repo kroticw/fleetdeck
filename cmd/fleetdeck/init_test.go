@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -201,6 +202,13 @@ func TestInitOnAFreshHomeCreatesBoardAndConfigNamingIt(t *testing.T) {
 	if _, err := os.Stat(cfg.BoardPath); err != nil {
 		t.Fatalf("board directory was not created: %v", err)
 	}
+	wantDocs := []string{filepath.Join(home, "fleetdeck", "docs")}
+	if !slices.Equal(cfg.DocsPaths, wantDocs) {
+		t.Fatalf("config docs paths = %q, want %q", cfg.DocsPaths, wantDocs)
+	}
+	if _, err := os.Stat(wantDocs[0]); err != nil {
+		t.Fatalf("docs directory was not created: %v", err)
+	}
 	if !strings.Contains(out.String(), cfg.BoardPath) {
 		t.Fatalf("init must print the board it chose, got:\n%s", out.String())
 	}
@@ -289,32 +297,269 @@ func TestInitRefusesABoardFlagThatContradictsTheConfig(t *testing.T) {
 	}
 }
 
-func TestInitWritesAnExampleCardThatParses(t *testing.T) {
+// A new board starts empty but is the operator's board in every other respect:
+// the template's validator, README and archive, and no example card (the
+// operator's decision, 2026-09-11).
+func TestInitMakesAnEmptyBoardFromTheTemplate(t *testing.T) {
 	home := t.TempDir()
 	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
 	boardDir := filepath.Join(home, "fleetdeck", "board")
-	path := filepath.Join(boardDir, "cards", exampleCardName)
-
-	card, err := board.ParseCard(path)
-	if err != nil {
-		t.Fatalf("the example card cannot be read: %v", err)
-	}
-	if card.ParseError != "" {
-		t.Fatalf("the example card does not parse: %s", card.ParseError)
-	}
-	if card.Zone == "" || card.Stage == "" || card.Created == "" || card.Title == "" {
-		t.Fatalf("the example card is missing fields the board expects: %+v", card)
-	}
 
 	cards, err := board.Scan(boardDir)
 	if err != nil {
-		t.Fatalf("a board holding only the example card must scan: %v", err)
+		t.Fatalf("a new board must scan as a board: %v", err)
 	}
-	if len(cards) != 1 {
-		t.Fatalf("expected one card, got %d", len(cards))
+	if len(cards) != 0 {
+		t.Fatalf("a new board is empty, got %d cards", len(cards))
 	}
+	for _, name := range []string{"README.md", "scripts/validate_cards.py", "archive/AGENTS-ARCHIVE.md"} {
+		if _, err := os.Stat(filepath.Join(boardDir, name)); err != nil {
+			t.Errorf("the board lacks the template's %s: %v", name, err)
+		}
+	}
+}
+
+// --workspace names the directory the board and the docs are made in, and the
+// configuration it creates names both.
+func TestInitHonoursTheWorkspaceFlagOnAFreshHome(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(t.TempDir(), "work", "fleet")
+	var out bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), workspace: root, out: &out}); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	cfg, err := config.Load(filepath.Join(home, ".config", "fleetdeck", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BoardPath != filepath.Join(root, "board") {
+		t.Fatalf("config board path = %q, want it under the workspace %q", cfg.BoardPath, root)
+	}
+	if !slices.Equal(cfg.DocsPaths, []string{filepath.Join(root, "docs")}) {
+		t.Fatalf("config docs paths = %q, want the workspace's docs", cfg.DocsPaths)
+	}
+	if _, err := board.Scan(cfg.BoardPath); err != nil {
+		t.Fatalf("the workspace board must scan: %v", err)
+	}
+	if !strings.Contains(out.String(), root) {
+		t.Fatalf("init must print the workspace it made:\n%s", out.String())
+	}
+}
+
+// A configuration naming a board that could not be made would be a panel
+// pointed at nothing — and init, which does not rewrite a configuration it
+// finds, would then refuse the corrected path on the next run. So the board
+// comes first, and no configuration is written without one.
+func TestInitWritesNoConfigurationWhenTheBoardCannotBeMade(t *testing.T) {
+	home := t.TempDir()
+	blocker := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := runInit(initEnv{home: home, binary: fakeInstall(t, true), workspace: filepath.Join(blocker, "ws"), out: &out})
+	if err == nil {
+		t.Fatalf("a workspace under a file cannot be made:\n%s", out.String())
+	}
+	cfgPath := filepath.Join(home, ".config", "fleetdeck", "config.yaml")
+	if _, statErr := os.Stat(cfgPath); !os.IsNotExist(statErr) {
+		t.Fatalf("a configuration was written for a board that does not exist:\n%s", out.String())
+	}
+
+	// The corrected path then goes through as on a fresh machine.
+	good := filepath.Join(t.TempDir(), "ws")
+	out.Reset()
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), workspace: good, out: &out}); err != nil {
+		t.Fatalf("the corrected path must be accepted: %v\n%s", err, out.String())
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil || cfg.BoardPath != filepath.Join(good, "board") {
+		t.Fatalf("config board path = %q (%v), want the corrected workspace's board", cfg.BoardPath, err)
+	}
+}
+
+func TestInitRefusesWorkspaceAndBoardTogether(t *testing.T) {
+	home := t.TempDir()
+	err := runInit(initEnv{
+		home: home, binary: fakeInstall(t, true),
+		workspace: filepath.Join(home, "ws"), board: filepath.Join(home, "b"),
+		out: io.Discard,
+	})
+	if err == nil {
+		t.Fatal("--workspace and --board name the board twice; one of them would silently lose")
+	}
+	for _, p := range []string{filepath.Join(home, "ws"), filepath.Join(home, "b"), filepath.Join(home, ".config")} {
+		if _, statErr := os.Stat(p); !os.IsNotExist(statErr) {
+			t.Fatalf("a refused init created %s", p)
+		}
+	}
+}
+
+// The operator's own case: a configuration naming a board that holds cards.
+// init keeps both exactly as they are, and a --workspace that would put the
+// board elsewhere is refused, not obeyed half-way.
+func TestInitRefusesAWorkspaceFlagThatContradictsTheConfig(t *testing.T) {
+	home := t.TempDir()
+	cfgPath := filepath.Join(home, ".config", "fleetdeck", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configured := filepath.Join(home, "obsidian", "board")
+	if err := os.WriteFile(cfgPath, []byte("board:\n  path: "+configured+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := runInit(initEnv{home: home, binary: fakeInstall(t, true), workspace: filepath.Join(home, "fleetdeck"), out: &out})
+	if err == nil {
+		t.Fatal("--workspace must not silently lose to the configured board")
+	}
+	if !strings.Contains(out.String(), configured) {
+		t.Fatalf("the refusal must name the configured board:\n%s", out.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "fleetdeck")); !os.IsNotExist(statErr) {
+		t.Fatal("a refused workspace step must not create the directory anyway")
+	}
+}
+
+// Agents keep their cards in the board, outside their own working directory,
+// so Claude Code must be told they may write there.
+func TestInitAllowsAgentsIntoTheWorkspace(t *testing.T) {
+	home := t.TempDir()
+	settings := settingsPathOf(home)
+	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(`{"permissions":{"allow":["Read"],"additionalDirectories":["/srv/other"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: &out}); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	perms, _ := readSettings(t, settings)["permissions"].(map[string]any)
+	dirs := anyStrings(perms["additionalDirectories"])
+	want := []string{"/srv/other", filepath.Join(home, "fleetdeck")}
+	if !slices.Equal(dirs, want) {
+		t.Fatalf("additionalDirectories = %q, want %q", dirs, want)
+	}
+	if got := anyStrings(perms["allow"]); !slices.Equal(got, []string{"Read"}) {
+		t.Fatalf("other permissions must survive: allow = %q", got)
+	}
+	if !strings.Contains(out.String(), "permissions:") {
+		t.Fatalf("init must report the permissions step:\n%s", out.String())
+	}
+}
+
+// A directory already allowed, or inside one that is, needs nothing: the file
+// is not opened for writing at all.
+func TestInitLeavesAnAlreadyAllowedDirectoryAlone(t *testing.T) {
+	for name, allowed := range map[string]string{
+		"the workspace itself": "fleetdeck",
+		"a parent of it":       ".",
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			settings := settingsPathOf(home)
+			if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			statusBinary := fakeInstall(t, true)
+			entry := filepath.Join(home, allowed)
+			original := `{"permissions":{"additionalDirectories":["` + entry + `"]},"statusLine":{"command":"` +
+				filepath.Join(filepath.Dir(statusBinary), statusBinaryName) + `","type":"command"}}`
+			if err := os.WriteFile(settings, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := runInit(initEnv{home: home, binary: statusBinary, out: io.Discard}); err != nil {
+				t.Fatal(err)
+			}
+			if raw, _ := os.ReadFile(settings); string(raw) != original {
+				t.Fatalf("an allowed directory was written again:\n%s", raw)
+			}
+		})
+	}
+}
+
+// With an existing configuration there is no workspace, only the board it
+// names — and that board is what agents must be let into.
+func TestInitAllowsAgentsIntoTheConfiguredBoard(t *testing.T) {
+	home := t.TempDir()
+	cfgPath := filepath.Join(home, ".config", "fleetdeck", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configured := filepath.Join(home, "cards-board")
+	if err := os.WriteFile(cfgPath, []byte("board:\n  path: "+configured+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	perms, _ := readSettings(t, settingsPathOf(home))["permissions"].(map[string]any)
+	if got := anyStrings(perms["additionalDirectories"]); !slices.Equal(got, []string{configured}) {
+		t.Fatalf("additionalDirectories = %q, want the configured board", got)
+	}
+}
+
+// A hand-written entry is often spelled from the home directory.
+func TestAllowDirectoryReadsATildeEntryAgainstHome(t *testing.T) {
+	home := t.TempDir()
+	p := filepath.Join(t.TempDir(), "settings.json")
+	original := `{"permissions":{"additionalDirectories":["~/fleetdeck"]}}`
+	if err := os.WriteFile(p, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	what, _, err := allowDirectory(p, filepath.Join(home, "fleetdeck", "board"), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(what, "kept") {
+		t.Fatalf("~/fleetdeck already allows the board, got %q", what)
+	}
+	if raw, _ := os.ReadFile(p); string(raw) != original {
+		t.Fatalf("the file was rewritten:\n%s", raw)
+	}
+}
+
+// A sibling whose name merely starts the same is not inside the allowed one.
+func TestAllowDirectoryDoesNotTakeAPrefixForAParent(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(p, []byte(`{"permissions":{"additionalDirectories":["/srv/fleet"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	what, _, err := allowDirectory(p, "/srv/fleetdeck", "/home/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if what != "added" {
+		t.Fatalf("/srv/fleet does not hold /srv/fleetdeck, got %q", what)
+	}
+}
+
+func TestAllowDirectoryRefusesAPermissionsValueOfTheWrongShape(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	original := `{"permissions":["Read"]}`
+	if err := os.WriteFile(p, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := allowDirectory(p, "/srv/fleetdeck", "/home/x"); err == nil {
+		t.Fatal("a permissions value that is not an object must stop the step, not be replaced")
+	}
+	if raw, _ := os.ReadFile(p); string(raw) != original {
+		t.Fatalf("a refused step changed the file:\n%s", raw)
+	}
+}
+
+func anyStrings(v any) []string {
+	list, _ := v.([]any)
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		s, _ := item.(string)
+		out = append(out, s)
+	}
+	return out
 }
 
 func TestInitLeavesABoardThatAlreadyHasFilesAlone(t *testing.T) {
@@ -331,8 +576,8 @@ func TestInitLeavesABoardThatAlreadyHasFilesAlone(t *testing.T) {
 	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(boardDir, exampleCardName)); !os.IsNotExist(err) {
-		t.Fatal("an example card must not be added to a board that already holds cards")
+	if _, err := os.Stat(filepath.Join(boardDir, "README.md")); !os.IsNotExist(err) {
+		t.Fatal("the template must not be spread over a board that already holds files")
 	}
 	raw, _ := os.ReadFile(existing)
 	if !strings.Contains(string(raw), "# Mine") {
@@ -352,11 +597,13 @@ func TestInitRefusesOnlyTheStatuslineStepWhenTheReporterIsMissing(t *testing.T) 
 	if !strings.Contains(out.String(), filepath.Join(filepath.Dir(binary), statusBinaryName)) {
 		t.Fatalf("the refusal must say where it looked:\n%s", out.String())
 	}
-	if _, statErr := os.Stat(settingsPathOf(home)); !os.IsNotExist(statErr) {
+	// The file itself exists — the permissions step writes it — but it must
+	// carry no statusline at all.
+	if _, present := readSettings(t, settingsPathOf(home))["statusLine"]; present {
 		t.Fatal("Claude Code's settings must not be pointed at a command that is not there")
 	}
 	// Every other step still ran.
-	if _, statErr := os.Stat(filepath.Join(home, "fleetdeck", "board", "cards", exampleCardName)); statErr != nil {
+	if _, statErr := os.Stat(filepath.Join(home, "fleetdeck", "board", "cards")); statErr != nil {
 		t.Fatalf("the board step was skipped along with the statusline: %v", statErr)
 	}
 }

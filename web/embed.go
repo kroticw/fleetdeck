@@ -31,5 +31,8 @@ import "embed"
 // compiling, rather than the panel quietly serving a 404 for a <script> tag no
 // browser reports back to us.
 //
-//go:embed index.html app.css js vendor
+// setup.html is the page a panel with no configuration serves in place of
+// index.html (internal/server/setup.go).
+//
+//go:embed index.html setup.html app.css js vendor
 var FS embed.FS
