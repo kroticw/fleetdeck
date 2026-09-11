@@ -395,6 +395,18 @@ export function fleetSwitcherHTML(entries) {
   return `<nav class="fleet-switch" aria-label="${escapeHTML(t("fleet_switch"))}">${buttons.join("")}</nav>`;
 }
 
+// headerCounts is what the header's two counters count: this fleet's sessions
+// and the sessions no fleet claims. Another fleet's waiting sessions are
+// counted on its switcher entry instead, so they are neither lost nor taken
+// for this fleet's. stalled is the tracker's answer for every session.
+export function headerCounts(snap, stalled) {
+  const counted = new Set(headerSessions(snap));
+  return {
+    waiting: [...counted].filter(isWaiting),
+    stalled: stalled.filter((s) => counted.has(s)),
+  };
+}
+
 export function renderHeader(root) {
   initTheme();
 
@@ -458,13 +470,12 @@ export function renderHeader(root) {
     const snap = rawSnap ?? {};
     const sessions = snap.sessions ?? [];
     const nowMs = Date.now();
-    // The counters count this fleet and the sessions no fleet claims; another
-    // fleet's waiting sessions are counted on its switcher entry instead. The
-    // tracker still sees every session, so a session's stall clock does not
-    // restart because a fleet claimed or released it.
-    const counted = new Set(headerSessions(snap));
-    const waitingCount = [...counted].filter(isWaiting).length;
-    const stalledSessions = stalledTracker.update(sessions, nowMs).filter((s) => counted.has(s));
+    // The tracker sees every session, so a session's stall clock does not
+    // restart because a fleet claimed or released it; headerCounts then keeps
+    // what this fleet's counters count.
+    const counts = headerCounts(snap, stalledTracker.update(sessions, nowMs));
+    const waitingCount = counts.waiting.length;
+    const stalledSessions = counts.stalled;
     const stalledCount = stalledSessions.length;
     const usageSeverity = usageTracker.update(!!snap.usageError, nowMs);
     const usageStale = isUsageStale(snap, nowMs);

@@ -112,6 +112,35 @@ func TestInitFleetRunTwiceKeepsTheFleet(t *testing.T) {
 	}
 }
 
+func TestInitFleetAddsNothingWhenItsBoardCannotBeMade(t *testing.T) {
+	// A fleet in the configuration whose board does not exist would point the
+	// panel at nothing, the same rule a first run keeps for its own board.
+	home, cfgPath := firstFleet(t)
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err = runInit(initEnv{home: home, binary: fakeInstall(t, true), workspace: filepath.Join(file, "fleet"), fleet: "clining", out: &out})
+	if err == nil {
+		t.Fatalf("init --fleet over a board it could not make succeeded:\n%s", out.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("a fleet whose board could not be made was added:\n%s", after)
+	}
+	if !strings.Contains(out.String(), "fleet clining not added") {
+		t.Fatalf("init --fleet does not say the fleet was not added:\n%s", out.String())
+	}
+}
+
 func TestInitFleetRefusesBeforeMakingAnything(t *testing.T) {
 	cases := []struct {
 		name  string

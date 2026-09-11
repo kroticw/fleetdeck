@@ -573,6 +573,24 @@ test("several fleets: a fleet that is only its orchestrator still shows the rest
   dom.restore();
 });
 
+test("several fleets: a fleet with no sessions of its own says so, whatever the others have", async () => {
+  const snap = {
+    fleet: "C",
+    fleets: ["A", "C"],
+    orchestratorSession: "",
+    sessions: [
+      { short: "aa11", name: "a task of A", sessionId: "u-3", fleets: ["A"] },
+      { short: "nn33", name: "nobody's session", sessionId: "u-2" },
+    ],
+  };
+  const { root, dom } = await list(snap);
+  const html = root.innerHTML;
+  assert.ok(html.includes("No sessions") || html.includes("Нет сессий"), "this fleet has no sessions at all");
+  assert.ok(!html.includes("besides the orchestrator") && !html.includes("Кроме оркестратора"),
+    "an orchestrator it does not have is not what its column is missing");
+  dom.restore();
+});
+
 test("one fleet: the column looks exactly as it did before there were fleets", async () => {
   const snap = {
     fleet: "A",

@@ -70,6 +70,25 @@ func TestCollectReadsEveryFleetsBoard(t *testing.T) {
 	}
 }
 
+func TestTheWholeSnapshotsOrphansAreTheFirstFleets(t *testing.T) {
+	// The top-level fields stay the first fleet's, as a one-fleet panel always
+	// had them: a card of B naming a dead session is B's orphan, shown in B's
+	// view, never in the first fleet's.
+	cfg := twoFleetConfig(t)
+	cfg.Fleets[0].BoardPath = boardWithCards(t, "dead0001")
+	whole := NewCollector(cfg, fakeDaemon(t, twoFleetJobs), nil, t.TempDir()).Collect(context.Background())
+	if len(whole.OrphanCards) != 0 {
+		t.Fatalf("B's orphan reached the first fleet's orphans: %v", whole.OrphanCards)
+	}
+	view, err := state.ForFleet(whole, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.OrphanCards) != 1 {
+		t.Fatalf("B's view must name its orphan, got %v", view.OrphanCards)
+	}
+}
+
 func TestAFleetsBrokenBoardIsThatFleetsError(t *testing.T) {
 	cfg := twoFleetConfig(t)
 	cfg.Fleets[0].BoardPath = t.TempDir() // no cards directory

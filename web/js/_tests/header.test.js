@@ -34,6 +34,7 @@ import {
   isUsageStale,
   RATE_LIMITS_AGE_WORTH_SHOWING_MS,
   fleetSwitcherHTML,
+  headerCounts,
 } from "../header.js";
 import { t } from "../i18n.js";
 
@@ -464,6 +465,17 @@ test("the switcher names every fleet, marks this one and counts the others' wait
   assert.equal(entries[1][1], "fleet-entry fleet-entry-current");
   assert.match(entries[1][3], /aria-current="page"/);
   assert.doesNotMatch(entries[1][4], /fleet-entry-waiting/, "no count where nothing waits");
+});
+
+test("the counters count this fleet and the unclaimed, never another fleet's", () => {
+  const mine = { short: "b1", fleets: ["B"], needs: "answer: ship it?" };
+  const nobodys = { short: "n1", needs: "usage limit reached" };
+  const theirs = { short: "a1", fleets: ["A"], needs: "answer: go on?" };
+  const theirStall = { short: "a2", fleets: ["A"], needs: "rate limited" };
+  const snap = { fleet: "B", fleets: ["A", "B"], sessions: [mine, nobodys, theirs, theirStall] };
+  const counts = headerCounts(snap, [nobodys, theirStall]);
+  assert.deepEqual(counts.waiting.map((s) => s.short), ["b1"]);
+  assert.deepEqual(counts.stalled.map((s) => s.short), ["n1"]);
 });
 
 test("one fleet has no switcher at all", () => {

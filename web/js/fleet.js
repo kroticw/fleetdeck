@@ -69,9 +69,9 @@ export function groupSessions(snap) {
 // headerSessions is what the header's counters count: this fleet's sessions
 // and the unclaimed ones. Another fleet's waiting session is counted on that
 // fleet's switcher entry instead, so it is neither lost nor mistaken for this
-// fleet's. With one fleet it is every session, as it always was.
+// fleet's. With one fleet it is every session, as it always was: each is that
+// fleet's or unclaimed, and a snapshot with no fleets tags none of them.
 export function headerSessions(snap) {
-  if (!isMultiFleet(snap)) return snap?.sessions ?? [];
   const { own, unclaimed } = groupSessions(snap);
   return [...own, ...unclaimed];
 }
