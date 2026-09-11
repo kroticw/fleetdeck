@@ -335,6 +335,26 @@ func TestTheKeeperLeavesItsPanelRunningWhenItStops(t *testing.T) {
 	}
 }
 
+// Any HTTP answer at all means a server listens there -- a panel answering 404
+// or 500 is a panel, not an empty port the keeper should start another on.
+// Only a failure to connect means nothing is there.
+func TestAnyHTTPAnswerCountsAsSomethingAnswering(t *testing.T) {
+	addr := freeAddr(t)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.NotFoundHandler()}
+	go func() { _ = srv.Serve(ln) }()
+	if !answers(context.Background(), "http://"+addr+"/") {
+		t.Fatal("a server answering 404 does not count as answering")
+	}
+	_ = srv.Close()
+	if answers(context.Background(), "http://"+addr+"/") {
+		t.Fatal("a closed port counts as answering")
+	}
+}
+
 func TestLogTailIsTheLastLinesOfTheLog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "panel.log")
 	var b strings.Builder

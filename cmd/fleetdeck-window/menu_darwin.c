@@ -99,10 +99,11 @@ void fleetdeck_install_menu(void) {
 
 // --- close-to-hide -----------------------------------------------------
 //
-// The window owns only itself (see main.go's package doc): it must never
-// decide the panel or the session's fate. Before this file, closing the
-// window tore the underlying engine down, which is exactly backwards for a
-// window meant to behave like a browser tab you can put away and come back
+// Closing the window must not decide the panel's or a session's fate (see
+// main.go's package doc: since 2026-09-11 the window starts and keeps the
+// panel, and the panel still outlives the window). Before this file, closing
+// the window tore the underlying engine down, which is exactly backwards for
+// a window meant to behave like a browser tab you can put away and come back
 // to. windowShouldClose: returning NO, plus orderOut: to actually hide it,
 // keeps the engine (and its WKWebView, and that view's live reconnect
 // logic) alive with nothing visible -- the same object, not a new one, is

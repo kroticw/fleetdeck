@@ -178,8 +178,10 @@ run: build
 	fi
 	$(BINDIR)/fleetdeck
 
-# window-app stages a launchable .app bundle around cmd/fleetdeck-window: a Dock icon
-# and a double-click launch, nothing more. It is deliberately not part of `dist` -- see
+# window-app stages the fleetdeck app: an .app bundle holding cmd/fleetdeck-window and
+# the panel it starts, side by side in Contents/MacOS -- the window looks for the panel
+# beside itself, and starts it when nothing answers at the panel's URL (see
+# cmd/fleetdeck-window's package doc). It is deliberately not part of `dist` -- see
 # DIST_BIN_NAMES above -- and codesigning it is a separate, not-yet-taken-up task; a
 # bundle built and run locally (this target does both) never picks up the
 # com.apple.quarantine attribute Gatekeeper acts on, so none is needed for that case.
@@ -189,11 +191,12 @@ window-app:
 	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/MacOS"
 	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
 	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
+	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
 	@echo "window-app: $(BINDIR)/fleetdeck.app (open it, or: open $(BINDIR)/fleetdeck.app)"
 
 # INSTALLDIR is where `make install` puts fleetdeck and fleetdeck-status: a
 # fixed, stable path something outside this repository points at directly --
-# a launchd agent's ProgramArguments, Claude Code's statusLine.command --
+# Claude Code's statusLine.command, a person's own PATH --
 # and which a rebuild must land on again at the same path, or whatever
 # pointed there keeps running the binary from before. Defaults to the
 # conventional ~/.local/bin; overridable because nothing about this project
@@ -215,8 +218,9 @@ INSTALL_BIN_NAMES := fleetdeck fleetdeck-status
 # writes them to INSTALLDIR, overwriting whatever is already there under
 # those names. It never runs itself -- nothing else in this Makefile or in
 # CI calls it -- because INSTALLDIR is the operator's own path, outside this
-# repository, and it is their call when whatever a launch agent or Claude
-# Code's statusLine.command is currently running from that path changes.
+# repository, and it is their call when whatever Claude Code's
+# statusLine.command, or a terminal, is currently running from that path
+# changes.
 #
 # Each binary's own sha256 is printed right after it is written, not merely
 # "done": a copy that silently failed, or landed somewhere the operator did

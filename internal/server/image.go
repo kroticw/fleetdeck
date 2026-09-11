@@ -116,8 +116,8 @@ func sessionIDSafe(id string) bool {
 
 func (d Deps) handleUploadImage(w http.ResponseWriter, r *http.Request) {
 	// Absolute, not merely non-empty. A relative directory is resolved against
-	// the process's working directory — for a launch agent, a directory nobody
-	// chose — so a panel configured that way scatters files wherever it was
+	// the process's working directory — for a panel started by the window, the
+	// directory an app from the Dock is given, which nobody chose — so a panel configured that way scatters files wherever it was
 	// started from. Observed while mutation-testing this file: with the check
 	// disabled, an empty ImageDir became the relative path "abc123" and wrote
 	// three images straight into the repository. A configured-but-relative
