@@ -72,7 +72,7 @@ The template keeps `cards/.gitkeep`, so an empty `cards` survives a clone of the
 
 **Read:** `go:embed` skips names beginning with `.` or `_` when it walks a directory. `.gitignore` and `cards/.gitkeep` are therefore named in the directive one by one. `all:` is not used, for the reason `web/embed.go` gives: it would also take `.DS_Store` and editor files.
 
-**Decided: a composition test, not only a behaviour test.** `TestBoardEmbedsEveryTemplateFile` walks the directory and the embedded tree and compares the lists. Without it, a file added to the template and forgotten in the directive would reach boards made by `upgrade-board.sh` and never the boards the panel makes, and nothing would say so. A second test names the six files, so that a file vanishing from both places at once is still caught. **Measured:** taking `.gitignore` out of the directive fails both tests.
+**Decided: a composition test, not only a behaviour test.** `TestBoardEmbedsEveryTemplateFile` walks the directory and the embedded tree and compares the lists. Without it, a file added to the template and forgotten in the directive would reach boards made by `upgrade-board.sh` and never the boards the panel makes, and nothing would say so. A second test names the files one by one, so that a file vanishing from both places at once is still caught; it is extended whenever the template gains a file. **Measured:** taking `.gitignore` out of the directive fails both tests.
 
 **Read:** embedded files carry no mode. The scripts are made executable when they are written out, as the bash script did with `chmod +x`.
 

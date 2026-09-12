@@ -6,9 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from validate_cards import main, parse_frontmatter, validate_card
+from validate_cards import main, parse_frontmatter, validate_card, validate_collection
 
 VALID = """---
+id: T-001
 zone: unplanned
 stage: active
 progress: 20
@@ -150,6 +151,77 @@ class ValidateCardTest(unittest.TestCase):
         self.assertTrue(any("pinned" in e for e in errors))
 
 
+class CardIdTest(unittest.TestCase):
+    def test_missing_id_is_error(self):
+        errors = validate_card("bad.md", card(id=None))
+        self.assertTrue(any("id" in e for e in errors))
+
+    def test_bad_id_format_is_error(self):
+        for bad in ("T-1", "T-0001", "FD-001", "t-001", "T001", "001"):
+            with self.subTest(id=bad):
+                errors = validate_card("bad.md", card(id=bad))
+                self.assertTrue(any("id" in e for e in errors))
+
+    def test_id_matching_filename_is_valid(self):
+        sample = card(id="T-042")
+        self.assertEqual(validate_card("T-042-2026-09-05-slug.md", sample), [])
+
+    def test_id_diverging_from_filename_is_error(self):
+        errors = validate_card("T-042-2026-09-05-slug.md", card(id="T-007"))
+        self.assertTrue(any("имен" in e for e in errors))
+
+    def test_legacy_filename_without_id_is_not_an_error(self):
+        self.assertEqual(validate_card("2026-09-05-slug.md", card(id="T-007")), [])
+
+    def test_quoted_id_is_valid(self):
+        self.assertEqual(validate_card("T-042-x.md", card(id='"T-042"')), [])
+
+
+class CollectionTest(unittest.TestCase):
+    def test_duplicate_id_is_error(self):
+        cards = [("a.md", card(id="T-005")), ("b.md", card(id="T-005"))]
+        errors = validate_collection(cards, vault={})
+        self.assertTrue(any("T-005" in e for e in errors))
+
+    def test_distinct_ids_are_valid(self):
+        cards = [("a.md", card(id="T-005")), ("b.md", card(id="T-006"))]
+        self.assertEqual(validate_collection(cards, vault={}), [])
+
+    def test_id_missing_from_registry_is_error(self):
+        """Карточка, заведённая мимо new_card.py, номера не захватывала."""
+        errors = validate_collection([("a.md", card(id="T-005"))], vault=set(), registry={"T-004"})
+        self.assertTrue(any("реестр" in e for e in errors))
+
+    def test_id_present_in_registry_is_valid(self):
+        cards = [("a.md", card(id="T-005"))]
+        self.assertEqual(validate_collection(cards, vault=set(), registry={"T-005"}), [])
+
+    def test_registry_is_not_checked_when_absent(self):
+        cards = [("a.md", card(id="T-005"))]
+        self.assertEqual(validate_collection(cards, vault=set(), registry=None), [])
+
+    def test_broken_wikilink_is_error(self):
+        body = card(id="T-005") + "\nсм. [[нет-такой-заметки]]\n"
+        errors = validate_collection([("a.md", body)], vault={"a"})
+        self.assertTrue(any("нет-такой-заметки" in e for e in errors))
+
+    def test_resolvable_wikilink_is_valid(self):
+        body = card(id="T-005") + "\nсм. [[T-006-другая]]\n"
+        self.assertEqual(validate_collection([("a.md", body)], vault={"T-006-другая"}), [])
+
+    def test_wikilink_with_alias_and_heading_resolves(self):
+        body = card(id="T-005") + "\n[[T-006-другая#Лог|вон та]]\n"
+        self.assertEqual(validate_collection([("a.md", body)], vault={"T-006-другая"}), [])
+
+    def test_wikilink_inside_inline_code_is_ignored(self):
+        body = card(id="T-005") + "\nссылка вида `[[имя]]` по имени файла\n"
+        self.assertEqual(validate_collection([("a.md", body)], vault=set()), [])
+
+    def test_wikilink_inside_fenced_block_is_ignored(self):
+        body = card(id="T-005") + "\n```text\n[[имя]]\n```\n"
+        self.assertEqual(validate_collection([("a.md", body)], vault=set()), [])
+
+
 class MainTest(unittest.TestCase):
     def run_main(self, *args):
         """Прогнать main, вернув код возврата и весь его вывод."""
@@ -180,6 +252,20 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("broken.md", output)
         self.assertNotIn("ok.md", output)
+
+    def test_reports_cards_without_id_in_filename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "2026-09-05-slug.md").write_text(VALID, encoding="utf-8")
+            code, output = self.run_main(tmp)
+        self.assertEqual(code, 0)
+        self.assertIn("без идентификатора в имени файла: 1", output)
+
+    def test_says_nothing_when_every_filename_carries_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "T-001-2026-09-05-slug.md").write_text(VALID, encoding="utf-8")
+            code, output = self.run_main(tmp)
+        self.assertEqual(code, 0)
+        self.assertNotIn("без идентификатора", output)
 
     def test_missing_path_returns_two(self):
         with tempfile.TemporaryDirectory() as tmp:

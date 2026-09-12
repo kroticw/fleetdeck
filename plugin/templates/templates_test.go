@@ -63,6 +63,12 @@ func TestBoardHoldsTheOperatorsBoardFiles(t *testing.T) {
 		"README.md",
 		"archive/AGENTS-ARCHIVE.md",
 		"cards/.gitkeep",
+		"scripts/backfill_ids.py",
+		"scripts/card_path.py",
+		"scripts/new_card.py",
+		"scripts/test_backfill_ids.py",
+		"scripts/test_card_path.py",
+		"scripts/test_new_card.py",
 		"scripts/test_validate_cards.py",
 		"scripts/validate_cards.py",
 	}

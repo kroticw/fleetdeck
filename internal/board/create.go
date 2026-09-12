@@ -18,8 +18,12 @@ const (
 	maxTitleRunes = 200
 	// maxSlugLen bounds the part of the file name made from the title, in bytes.
 	maxSlugLen = 60
-	// maxSameName bounds how many cards of one day may share a title.
-	maxSameName = 100
+	// maxNameAttempts bounds the retry when the name a claimed number produces
+	// is somehow already on disk. A claimed number is exclusive, so the name it
+	// makes is unique by construction and this should never spin — it is here so
+	// that a board left in a state nobody predicted fails with a message rather
+	// than looping.
+	maxNameAttempts = 100
 )
 
 // ErrInvalidCard means a card to be created would not be a valid card: an
@@ -46,10 +50,16 @@ var translit = map[rune]string{
 // a card is written by the agent or the person who takes the task on, and the
 // panel only has to be able to start one.
 //
-// The file is cards/<date>-<slug>.md, the slug made from the title. It is
-// created exclusively: a card that already has that name gets a -2, -3, ...
-// file instead, and no existing card is ever overwritten. It returns the path
-// of the new card.
+// The card gets a number first (see claimNumber): the board's validator
+// requires one, and a card the panel made without one is a card the board
+// refuses — which is what the button did before the numbering scheme reached
+// the template. The number is claimed through the same .ids/T-NNN marker the
+// board's own scripts/new_card.py claims, so the panel and the scripts cannot
+// hand the same number to two cards.
+//
+// The file is cards/T-NNN-<date>-<slug>.md, the slug made from the title. It is
+// created exclusively, and no existing card is ever overwritten. It returns the
+// path of the new card.
 func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 	title = strings.TrimSpace(title)
 	switch {
@@ -69,32 +79,39 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 	}
 
 	date := day.Format("2006-01-02")
-	content := fmt.Sprintf("---\nzone: %s\nstage: new\nprogress: 0\ncreated: %s\n---\n\n# %s\n", zone, date, title)
-	base := date + "-" + slug(title)
-	for n := 1; n <= maxSameName; n++ {
-		name := base + ".md"
-		if n > 1 {
-			name = fmt.Sprintf("%s-%d.md", base, n)
+	tail := date + "-" + slug(title)
+	start := nextNumber(boardDir)
+	for attempt := 0; attempt < maxNameAttempts; attempt++ {
+		number, err := claimNumber(boardDir, start)
+		if err != nil {
+			return "", err
 		}
-		path := filepath.Join(cardsDir, name)
+		start = number + 1
+
+		id := fmt.Sprintf(idFormat, number)
+		path := filepath.Join(cardsDir, id+"-"+tail+".md")
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, fs.ErrExist) {
+			// The number is spent either way: a claimed number is never
+			// released, so the next attempt takes the one after it.
 			continue
 		}
 		if err != nil {
 			return "", fmt.Errorf("create card: %w", err)
 		}
+		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\ncreated: %s\n---\n\n# %s\n", id, zone, date, title)
 		_, werr := f.WriteString(content)
 		cerr := f.Close()
 		if werr != nil || cerr != nil {
 			// A half-written card is a broken card on the board; the file was
-			// ours alone a moment ago, so it goes.
+			// ours alone a moment ago, so it goes. The marker stays: the
+			// number is spent, and a marker with no card is harmless.
 			_ = os.Remove(path)
 			return "", fmt.Errorf("write card %s: %w", path, errors.Join(werr, cerr))
 		}
 		return path, nil
 	}
-	return "", fmt.Errorf("create card: %d cards named %s already exist", maxSameName, base)
+	return "", fmt.Errorf("create card: %d names starting %s are already taken", maxNameAttempts, tail)
 }
 
 // slug makes a file name part from a title: latin letters and digits, Russian

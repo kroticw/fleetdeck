@@ -158,7 +158,9 @@ cd "$target"
 printf '\nпроверка валидатора: '
 python3 scripts/validate_cards.py
 printf 'проверка тестов:    '
-( cd scripts && python3 -m unittest test_validate_cards 2>&1 | tail -1 )
+# discover, а не перечисление модулей: скрипты доски добавляются, и модуль,
+# забытый в списке, молча остаётся непроверенным.
+( cd scripts && python3 -m unittest discover --pattern 'test_*.py' 2>&1 | tail -1 )
 
 printf '\nизменения не закоммичены: подпись попросит PIN, а скрипт может идти\n'
 printf 'без человека. Зафиксируйте сами либо оставьте ближайшей уборке флота.\n'

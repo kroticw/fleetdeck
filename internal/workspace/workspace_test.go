@@ -62,6 +62,12 @@ func TestCreateMakesAnEmptyBoardFromTheTemplateAndADocsDirectory(t *testing.T) {
 		"README.md",
 		"archive/AGENTS-ARCHIVE.md",
 		"cards/.gitkeep",
+		"scripts/backfill_ids.py",
+		"scripts/card_path.py",
+		"scripts/new_card.py",
+		"scripts/test_backfill_ids.py",
+		"scripts/test_card_path.py",
+		"scripts/test_new_card.py",
 		"scripts/test_validate_cards.py",
 		"scripts/validate_cards.py",
 	}
@@ -97,20 +103,33 @@ func TestCreateMakesAnEmptyBoardFromTheTemplateAndADocsDirectory(t *testing.T) {
 }
 
 // The scripts are run as ./scripts/validate_cards.py by agents; embedding
-// loses file modes, so Create must give them back.
+// loses file modes, so Create must give them back. Every script in the
+// directory is checked rather than a list of names: the board's scripts get
+// added to, and a name left out of such a list is a script that reaches the
+// operator without its executable bit and says so only when it is first run.
 func TestCreateMakesTheScriptsExecutable(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "ws")
 	res, err := Create(root, Options{InitRepo: noRepo})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"validate_cards.py", "test_validate_cards.py"} {
-		info, err := os.Stat(filepath.Join(res.Board, "scripts", name))
+	entries, err := os.ReadDir(filepath.Join(res.Board, "scripts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("the created board has no scripts at all")
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".py") {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(res.Board, "scripts", entry.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if info.Mode().Perm()&0o100 == 0 {
-			t.Errorf("%s is not executable: %v", name, info.Mode())
+			t.Errorf("%s is not executable: %v", entry.Name(), info.Mode())
 		}
 	}
 	info, err := os.Stat(filepath.Join(res.Board, "README.md"))

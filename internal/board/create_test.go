@@ -27,14 +27,14 @@ func TestCreateCardWritesTheTitleAndZoneAndNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(CardsDir(dir), "2026-09-11-fix-the-header-clamp.md"); path != want {
+	if want := filepath.Join(CardsDir(dir), "T-001-2026-09-11-fix-the-header-clamp.md"); path != want {
 		t.Fatalf("path = %s, want %s", path, want)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "---\nzone: urgent\nstage: new\nprogress: 0\ncreated: 2026-09-11\n---\n\n# Fix the header clamp\n"
+	want := "---\nid: T-001\nzone: urgent\nstage: new\nprogress: 0\ncreated: 2026-09-11\n---\n\n# Fix the header clamp\n"
 	if string(raw) != want {
 		t.Fatalf("card content:\n%q\nwant\n%q", raw, want)
 	}
@@ -54,7 +54,7 @@ func TestCreateCardTransliteratesACyrillicTitleIntoTheFileName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := filepath.Base(path); got != "2026-09-11-fleetdeck-rabochaya-papka-doska-i-shchetki.md" {
+	if got := filepath.Base(path); got != "T-001-2026-09-11-fleetdeck-rabochaya-papka-doska-i-shchetki.md" {
 		t.Fatalf("file name = %s", got)
 	}
 	c, _ := ParseCard(path)
@@ -63,20 +63,22 @@ func TestCreateCardTransliteratesACyrillicTitleIntoTheFileName(t *testing.T) {
 	}
 }
 
+// Two cards of one day may carry the same title; what keeps them apart is the
+// number, which no two cards share.
 func TestCreateCardNeverOverwritesACardWithTheSameName(t *testing.T) {
 	dir := emptyBoard(t)
 	first, err := CreateCard(dir, "Same", "planned", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(first, []byte("---\nzone: planned\n---\n\n# Same, edited by an agent\n"), 0o600); err != nil {
+	if err := os.WriteFile(first, []byte("---\nid: T-001\nzone: planned\n---\n\n# Same, edited by an agent\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	second, err := CreateCard(dir, "Same", "urgent", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(second) != "2026-09-11-same-2.md" {
+	if filepath.Base(second) != "T-002-2026-09-11-same.md" {
 		t.Fatalf("a second card of the same name must get its own file, got %s", second)
 	}
 	raw, _ := os.ReadFile(first)
@@ -140,7 +142,7 @@ func TestCreateCardNamesATitleWithNoLettersCard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(path) != "2026-09-11-card.md" {
+	if filepath.Base(path) != "T-001-2026-09-11-card.md" {
 		t.Fatalf("file name = %s", filepath.Base(path))
 	}
 }
@@ -151,7 +153,7 @@ func TestCreateCardKeepsTheFileNameShort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	slug := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "2026-09-11-"), ".md")
+	slug := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "T-001-2026-09-11-"), ".md")
 	if len(slug) > maxSlugLen || strings.HasSuffix(slug, "-") || slug == "" {
 		t.Fatalf("slug %q must be non-empty, at most %d bytes and not end in a dash", slug, maxSlugLen)
 	}

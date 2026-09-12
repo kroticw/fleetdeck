@@ -37,7 +37,12 @@ mkdir -p "$target"
 # Копируем содержимое шаблона вместе со скрытыми файлами. Точка на конце
 # источника переносит именно содержимое, а не сам каталог.
 cp -R "$template/." "$target/"
-chmod +x "$target/scripts/validate_cards.py" "$target/scripts/test_validate_cards.py"
+# Циклом, а не списком имён: скрипты доски добавляются, и список, набранный
+# руками, отстаёт молча — новый скрипт приезжает на доску без бита исполнения,
+# и это выясняется только в момент, когда его пытаются запустить.
+for script in "$target"/scripts/*.py; do
+    chmod +x "$script"
+done
 
 cd "$target"
 
@@ -52,7 +57,9 @@ printf '\nпроверка валидатора: '
 python3 scripts/validate_cards.py
 
 printf 'проверка тестов:    '
-( cd scripts && python3 -m unittest test_validate_cards 2>&1 | tail -1 )
+# discover, а не перечисление модулей: скрипты доски добавляются, и модуль,
+# забытый в списке, молча остаётся непроверенным.
+( cd scripts && python3 -m unittest discover --pattern 'test_*.py' 2>&1 | tail -1 )
 
 cat <<NEXT
 
