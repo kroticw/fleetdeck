@@ -168,7 +168,45 @@ The mutants: no bundle seal; one architecture only; no plist version; `treeDir` 
 
 **Not measured, and the loose end of this release:** a first run of the release app all the way through first-run setup, on a machine with no fleet. The app opened on a fleet that already existed, so `ensureStatusline` never ran from a downloaded copy. Section 3 says the path it would record is the right one as long as the person dragged the app in Finder, which the guide tells them to do — but that is the path not yet walked end to end.
 
-## 9. Not verified
+## 9. The disk image, and why the zip stays
+
+Added on 2026-09-12, on top of everything above. The release now carries two macOS downloads, with two jobs: `fleetdeck-<version>-macos.dmg` is what a person installs from, `fleetdeck-<version>-macos.zip` is what an installed app fetches when it updates itself.
+
+**Why an image at all.** Section 3 ends with a sentence in the documentation asking people to drag the app to Applications before opening it, because an app opened from Downloads runs from a translocated copy and first-run setup would write that copy's path into Claude Code's settings. A sentence in the documentation is a thing people skip. The image turns the same instruction into the shape of a window: the app on the left, a shortcut to Applications on the right, an arrow between them.
+
+**Why the zip could not simply be replaced.** `internal/supervisor/release.go` builds the download address from a name — `ArchiveName(tag)` is `"fleetdeck-" + tag + "-macos.zip"` — rather than looking at what a release carries. Every copy of v0.5.0 already on somebody's Mac has that spelling compiled into it. A release without the zip answers those copies with a 404, and no later release can undo it: the client that cannot update is the one already installed. Dropping the zip is a one-way door, and the door is behind us.
+
+The same fact is what makes adding the image safe. The updater does not enumerate assets and cannot be lured onto a `.dmg` by anything as weak as an extension or an ordering — it asks for one URL and gets that file or nothing.
+
+**Measured, on this machine, on a real notarized build:**
+
+```text
+codesign --display  → Authority=Developer ID Application: … (PTLLPQ8LY4)
+                      Authority=Developer ID Certification Authority
+                      Authority=Apple Root CA, Timestamp=…
+stapler validate <image>                                   → worked
+spctl --assess --type open --context context:primary-signature
+    notarized image                                        → accepted, source=Notarized Developer ID
+    the same image with Firefox's quarantine attribute set → accepted
+    an ad-hoc image                                        → rejected, status 3
+the app on the mounted image, spctl --assess --type execute → accepted, source=Notarized Developer ID
+```
+
+Three things that came out of doing it rather than reading about it:
+
+- **Stapling a disk image does not break its signature.** The ticket lands outside what the signature covers, the same way the app's does (section 8), so the order is sign, submit, staple, and `codesign --verify` still passes afterwards. Measured, because the opposite would have been discovered on a tag.
+- **The app inside a quarantined image carries no quarantine attribute of its own.** The mark is on the image. Finder puts one on the copy it writes into Applications, and Gatekeeper has already answered `accepted` for it by then.
+- **`hdiutil attach -mountrandom <dir>` needs `<dir>` to exist**, or it fails with "no mountable file systems" — which reads exactly like a corrupt image and is not one.
+
+**The window cannot be built, only recorded.** A `.DS_Store` is Finder's private binary record of a folder's window — size, icon view, icon positions, which file is the background — and the only supported way to make one is to drive Finder over AppleScript on a machine with a window server. A release runs on a GitHub runner. So `scripts/build-dmg-layout.sh` produces it once, by hand, and `packaging/dmg/DS_Store` is committed; `scripts/build-dist-dmg.sh` copies it in and touches neither Finder nor AppleScript. The gate then compares the published file with the committed one byte for byte, which is the only honest version of the claim: not "the window looks right", but "the window shipped is the window that was looked at".
+
+Two numbers in that file are load-bearing. The volume is named `fleetdeck`, because the background is recorded as an alias carrying the volume's name beside the relative path, and an image built under another name can come up blank. And the window's height is the background's height plus the title bar — Finder paints the picture into the content area at natural size, anchored top left, so a shorter window scrolls and a taller one shows bare window underneath. Measured on this machine: a Finder with the tab bar, status bar and path bar turned on eats about 52 px more, which is why nothing carrying meaning sits below the icon labels.
+
+**The gate.** `scripts/verify-dist-dmg.sh` asks the app inside the image exactly what `verify-dist-app.sh` asks the app inside the zip — both source `scripts/dist-app-checks.sh`, so there is one piece of code and not two that resemble each other. What it adds is what only an image has: exactly one `.dmg` named for this tag, a volume holding the app, the Applications symlink and the two window files and nothing else, Finder's invisible flag on both of those, the layout matching the repository, the image's own seal and ticket, Gatekeeper's verdict on the image, and — the one claim none of the rest can make — the app on the image being the *same* app as the zip's, compared by code directory hash rather than by version number.
+
+Five mutants, all killed: `Applications` as a folder rather than a symlink; the window files without the invisible flag; a layout that is not the committed one; a stray file on the volume; and an image holding a different build of the same version, signed the same way.
+
+## 10. Not verified
 
 - **A clean Mac.** There is no macOS virtual machine here (Parallels holds only a Windows VM). The stand-in for a clean machine was the quarantine attribute set by hand in Firefox's format, the operator's own screen, and stand-in bundles. A Mac without Claude Code, git or the Command Line Tools was not tried.
 - ~~**A real browser download.**~~ Closed on 2026-09-12: v0.3.0 was downloaded with Firefox and carried the browser's own quarantine attribute through Archive Utility to the bundle and its binaries (section 8). Safari, which unpacks "safe" downloads itself, was still not tried.
@@ -176,4 +214,5 @@ The mutants: no bundle seal; one architecture only; no plist version; `treeDir` 
 - **The "damaged" dialog's exact words**, the second warning in the Open Anyway path, and whether a password was asked.
 - ~~**The release workflow itself.**~~ Closed on 2026-09-12: v0.3.0 was cut, and every step ran — the certificate imported into a keychain made for the job, the app signed, Apple's answer waited for, the ticket stapled, the gate passed under `EXPECT_SEAL=notarized`, and the signing material deleted afterwards.
 - **The x86_64 slice on a real Intel Mac.** Every x86_64 slice is cross-compiled on an Apple silicon Mac: this machine, the macOS runner of CI's `check` job, and the release job's runner. It has been run only under Rosetta 2 on Apple silicon, which translates it and is not an Intel processor. It has never run on a real Intel Mac, and there is no Intel Mac here to run it on. "An Intel Mac can run the release" follows from how a universal binary works; it has not been measured. (Section 8 is read from the same place for the x86_64 slice's signature: every slice of a universal binary is covered by the one bundle signature, and only the arm64 one has been run under it here.)
+- **The image downloaded by a browser from a real release.** Everything above was measured on an image built and notarized here, with the quarantine attribute set by hand; nothing has yet made the trip through GitHub and a browser. The drag into Applications and the first double click from there are the acceptance this is waiting on, and they need a published tag.
 - **A new version over an installed one:** whether Gatekeeper asks again. A notarized app is expected not to ask at all, whatever its code hash, but that has not been tried with two signed releases.

@@ -5,6 +5,12 @@
 # unpacked from the zip, from the outside, and trusting nothing build-dist-app.sh says
 # about what it did.
 #
+# Everything it asks about the app itself lives in scripts/dist-app-checks.sh, which
+# scripts/verify-dist-dmg.sh sources too: the app inside the disk image and the app
+# inside the zip are checked by one piece of code, not by two that resemble each other.
+# What stays here is everything about the zip -- that there is exactly one of it, and
+# that it holds exactly the app and nothing else.
+#
 # Usage: verify-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal>
 #
 # <expect-seal> is the seal this zip is required to carry, and the gate demands
@@ -35,6 +41,8 @@ ldflags=$5
 expect_seal=$6
 
 work=
+# shellcheck disable=SC2034  # read by scripts/dist-app-checks.sh
+src=cmd/fleetdeck-window
 
 fail() {
 	echo "verify-dist-app: $*" >&2
@@ -42,16 +50,8 @@ fail() {
 	exit 1
 }
 
-# lipo's name for a Go architecture. A function, not a case inside $(...): the bash
-# 3.2 that is /bin/sh on macOS cannot parse a case pattern's ")" inside a command
-# substitution. A mutation pass found this script stopping there, part way, with
-# status 0 and every check below unrun (see docs/engineering/release-app.md).
-lipo_arch() {
-	case $1 in
-		amd64) echo x86_64 ;;
-		*) echo "$1" ;;
-	esac
-}
+# shellcheck source=scripts/dist-app-checks.sh
+. "$(dirname "$0")/dist-app-checks.sh"
 
 [ -d "$dist_dir" ] || fail "$dist_dir is not a directory"
 [ -n "$version" ] || fail "version is empty"
@@ -109,138 +109,11 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"; exit 1' INT TERM HUP
 ditto -x -k "$zip" "$work"
 app="$work/fleetdeck.app"
-plist="$app/Contents/Info.plist"
 
-for key in CFBundleShortVersionString CFBundleVersion; do
-	got=$(plutil -extract "$key" raw "$plist" 2>/dev/null || echo "(missing)")
-	[ "$got" = "${version#v}" ] || fail "Info.plist $key is '$got', not '${version#v}': Finder's Get Info would show a version this release is not"
-done
-executable=$(plutil -extract CFBundleExecutable raw "$plist")
-[ -x "$app/Contents/MacOS/$executable" ] || fail "Info.plist names $executable as the app, and it is not in Contents/MacOS"
+app_is_the_release "$app" "$version" "$arches" "$binaries" "$ldflags"
+app_carries_the_seal "$app" "$binaries" "$expect_seal"
 
-# In everything but the version, the release app is the app `make window-app` builds:
-# the same plist keys and the same icon. Compared through plutil's JSON form, with the
-# version keys taken out of both, so a comment or key order in the source does not
-# count as a difference and a changed or added key does.
-src=cmd/fleetdeck-window
-for p in release:"$plist" source:"$src/Info.plist"; do
-	cp "${p#*:}" "$work/${p%%:*}.plist"
-	plutil -remove CFBundleShortVersionString "$work/${p%%:*}.plist" 2>/dev/null || true
-	plutil -remove CFBundleVersion "$work/${p%%:*}.plist" 2>/dev/null || true
-	plutil -convert json -o "$work/${p%%:*}.json" "$work/${p%%:*}.plist"
-done
-cmp -s "$work/release.json" "$work/source.json" ||
-	fail "the release Info.plist differs from $src/Info.plist in more than the version
-  release: $(cat "$work/release.json")
-  source:  $(cat "$work/source.json")"
-cmp -s "$app/Contents/Resources/icon.icns" "$src/icon.icns" ||
-	fail "the release icon is not $src/icon.icns"
-
-# Each slice is taken out of the universal binary and read on its own: `go version -m`
-# on a universal binary reads the first slice and says nothing about the others.
-# The ldflags must match exactly, which is also what proves the window was built
-# without the source tree `make window-app` writes into it for its Update button.
 want_archs=$(for arch in $arches; do lipo_arch "$arch"; done | sort | tr '\n' ' ')
-for b in $binaries; do
-	bin="$app/Contents/MacOS/$b"
-	[ -x "$bin" ] || fail "$b is not executable once unpacked"
-	got_archs=$(lipo -archs "$bin" | tr ' ' '\n' | sort | tr '\n' ' ')
-	[ "$got_archs" = "$want_archs" ] || fail "$b holds '$got_archs', want '$want_archs'"
-	for arch in $arches; do
-		lipo -thin "$(lipo_arch "$arch")" -output "$work/$b-$arch" "$bin"
-		info=$(go version -m "$work/$b-$arch")
-		echo "$info" | grep -qE "^[[:space:]]*build[[:space:]]+GOARCH=$arch\$" ||
-			fail "$b: the $(lipo_arch "$arch") slice is not built for darwin/$arch"
-		got_ldflags=$(echo "$info" | sed -n 's/^[[:space:]]*build[[:space:]]*-ldflags=//p')
-		[ "$got_ldflags" = "\"$ldflags\"" ] ||
-			fail "$b ($arch) was not built with exactly the release ldflags
-  wanted: \"$ldflags\"
-  found:  ${got_ldflags:-none}"
-	done
-done
-
-# The seal over the whole bundle. Without one a downloaded copy is "damaged" to
-# Gatekeeper rather than merely unverified.
-codesign --verify --deep --strict "$app" || fail "the bundle's signature does not verify"
-
-# codesign --display writes to standard error, so every reader below folds it in.
-seal_of() { codesign --display --verbose=4 "$1" 2>&1; }
-
-# entitlements_of writes one piece's entitlements to $2 as JSON. A piece signed
-# with no entitlements at all has no blob to print, and that is the same thing as
-# an empty list -- so it is normalised to one rather than left to compare as an
-# empty file against a plist.
-entitlements_of() {
-	codesign --display --entitlements :- "$1" >"$work/entitlements.raw" 2>/dev/null || :
-	if [ -s "$work/entitlements.raw" ]; then
-		plutil -convert json -o "$2" "$work/entitlements.raw" ||
-			fail "$1 carries an entitlements blob that is not a property list"
-	else
-		echo '{}' >"$2"
-	fi
-}
-
-# The one thing the hardened runtime is: a set of restrictions a process runs
-# under, recorded as a flag in the signature. Everything in entitlements.plist is
-# a hole in it, which is why the gate compares that file byte for byte with what
-# the bundle actually carries -- an entitlement added to a build and not to the
-# file, or the other way round, is a difference nobody meant.
-developer_id_seal() {
-	_piece=$1
-	_info=$(seal_of "$_piece")
-	echo "$_info" | grep -q '^Authority=Developer ID Application:' ||
-		fail "$_piece is not signed with a Developer ID Application certificate"
-	echo "$_info" | grep -q '^Authority=Developer ID Certification Authority$' ||
-		fail "$_piece: the signing certificate does not chain to Apple's Developer ID authority"
-	echo "$_info" | grep -q '^Authority=Apple Root CA$' ||
-		fail "$_piece: the signing certificate does not chain to the Apple root"
-	echo "$_info" | grep -q '^Timestamp=' ||
-		fail "$_piece was signed without a secure timestamp, and notarization rejects a submission without one"
-	echo "$_info" | grep -q '^TeamIdentifier=[A-Z0-9]' ||
-		fail "$_piece carries no team identifier"
-	echo "$_info" | grep -qE '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' ||
-		fail "$_piece was signed without the hardened runtime, which notarization requires"
-	entitlements_of "$_piece" "$work/got-entitlements.json"
-	plutil -convert json -o "$work/want-entitlements.json" "$src/entitlements.plist"
-	cmp -s "$work/got-entitlements.json" "$work/want-entitlements.json" ||
-		fail "$_piece carries entitlements this repository does not keep -- every one of them is a hole in the hardened runtime
-  bundle: $(cat "$work/got-entitlements.json")
-  $src/entitlements.plist: $(cat "$work/want-entitlements.json")"
-}
-
-case $expect_seal in
-	adhoc)
-		seal_of "$app" | grep -q '^Signature=adhoc' ||
-			fail "the app is sealed with something other than an ad-hoc signature, and this build was not told to expect that"
-		;;
-	developer-id | notarized)
-		developer_id_seal "$app"
-		for b in $binaries; do
-			[ "$b" = "$executable" ] && continue
-			developer_id_seal "$app/Contents/MacOS/$b"
-		done
-		;;
-esac
-
-if [ "$expect_seal" = notarized ]; then
-	xcrun stapler validate "$app" >/dev/null 2>&1 ||
-		fail "no notarization ticket is stapled to the bundle: a Mac with no network would refuse this app"
-	# The question the whole release is for, asked of the app rather than of the
-	# process that made it: does Gatekeeper let a person open this.
-	assessment=$(spctl --assess --type execute -vv "$app" 2>&1) ||
-		fail "Gatekeeper rejects the app, which is what a person would see on opening it:
-$assessment"
-	echo "$assessment" | grep -q 'source=Notarized Developer ID' ||
-		fail "Gatekeeper accepts the app for some reason other than its notarization:
-$assessment"
-fi
-
-# Asking the program is not the same as reading its metadata: the linker accepts an
-# -X target that does not exist without complaint. The panel is the one command that
-# answers a version question; the host runs its own slice of it.
-reported=$("$app/Contents/MacOS/fleetdeck" version)
-[ "$reported" = "$version" ] || fail "the app's panel reports '$reported', not '$version'"
-
 rm -rf "$work"
 # This line is the proof the gate reached its end; the Go test asserts it.
 echo "verify-dist-app: $zip ok (contents, version $version in plist and binaries, ${want_archs% }, $expect_seal)"

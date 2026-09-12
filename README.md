@@ -24,12 +24,14 @@ macOS only, and it talks to the Claude Code daemon on your own machine — see [
 
 ## Install
 
-From a release — [the latest one](https://github.com/kroticw/fleetdeck/releases/latest) carries `fleetdeck-<version>-macos.zip`:
+From a release — [the latest one](https://github.com/kroticw/fleetdeck/releases/latest) carries `fleetdeck-<version>-macos.dmg`:
 
-1. Unpack it, and drag `fleetdeck.app` into Applications **before** opening it. Opened from Downloads it records a temporary path in Claude Code's settings.
+1. Open it. A window comes up with the app on the left and a shortcut to Applications on the right; drag the app onto the shortcut. Opened straight out of Downloads instead, it records a temporary path in Claude Code's settings.
 2. Open it from Applications. The setup page takes over from there.
 
-From v0.3.0 the app is signed with an Apple Developer ID and notarized, so macOS asks nothing. Releases before that are unsigned, and macOS will not open one without an exception — [getting started](docs/en/getting-started.md#installing-the-app-from-a-release) walks through it.
+The release also carries `fleetdeck-<version>-macos.zip` with the same app — that is what an installed copy downloads when you press Update.
+
+From v0.3.0 the app is signed with an Apple Developer ID and notarized, and the disk image carries a signature and a ticket of its own, so macOS asks nothing. Releases before that are unsigned, and macOS will not open one without an exception — [getting started](docs/en/getting-started.md#installing-the-app-from-a-release) walks through it.
 
 From source, with Go 1.27:
 

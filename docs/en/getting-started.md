@@ -4,16 +4,20 @@ This page walks through installing fleetdeck, opening the panel, creating a firs
 
 ## Installing the app from a release
 
-Every release on the [releases page](https://github.com/kroticw/fleetdeck/releases) carries `fleetdeck-<version>-macos.zip`: the fleetdeck app, one download for Apple silicon and Intel Macs, with the release's version in Finder's Get Info. It needs Claude Code on the same Mac, since the app starts sessions with `claude`, and git and python3 for the board — see "What the machine needs" under [First launch](#first-launch-choosing-the-workspace).
+Every release on the [releases page](https://github.com/kroticw/fleetdeck/releases) carries `fleetdeck-<version>-macos.dmg`: a disk image holding the fleetdeck app, one download for Apple silicon and Intel Macs, with the release's version in Finder's Get Info. It needs Claude Code on the same Mac, since the app starts sessions with `claude`, and git and python3 for the board — see "What the machine needs" under [First launch](#first-launch-choosing-the-workspace).
 
-From v0.3.0 the app is signed with an Apple Developer ID certificate and notarized by Apple. macOS opens it with a double click and says nothing: there is no warning to dismiss and nothing to allow in System Settings.
+From v0.3.0 the app is signed with an Apple Developer ID certificate and notarized by Apple, and the disk image carries a signature and a ticket of its own. macOS opens both with a double click and says nothing: there is no warning to dismiss and nothing to allow in System Settings.
 
-There are two steps, and their order matters:
+There are two steps:
 
-1. Download the zip and double-click it. `fleetdeck.app` appears beside it.
-2. Drag `fleetdeck.app` into Applications **before** you open it for the first time. Opened from Downloads, it runs from a temporary copy at a random path, and first-run setup would record that path in Claude Code's settings as the statusline command.
+1. Download the `.dmg` and double-click it. A window opens with the app on the left and a shortcut to Applications on the right.
+2. Drag the app onto that shortcut.
 
 Then open fleetdeck from Applications, and the panel's setup page takes over — see [First launch](#first-launch-choosing-the-workspace).
+
+The drag is not a formality, and the window is laid out to make it the obvious move. An app opened straight out of its download runs from a temporary copy macOS makes at a random path, and first-run setup would record that path in Claude Code's settings as the statusline command — a path that stops existing the moment the app quits.
+
+The release also carries `fleetdeck-<version>-macos.zip`, holding the same app. That is what an installed fleetdeck downloads for itself when you press Update, and it is there for anyone who would rather unpack an archive — in which case dragging the app into Applications before opening it is yours to remember.
 
 **Releases before v0.3.0 are not signed**, and macOS will not open one until you make an exception for it. If you have an older one, download the current release instead; that is quicker than the exception and leaves nothing behind in Privacy & Security. Should you want the older one anyway: open it from Applications, and when macOS says it could not verify the app is free of malware, press **Done** — not **Move to Trash**, which is the highlighted button. Then open System Settings, choose **Privacy & Security**, scroll to **Security**, and press the **Open Anyway** button on the line about fleetdeck. It appears only after the refusal and, according to [Apple](https://support.apple.com/guide/mac-help/mh40616/mac), stays for about an hour. The warning comes back with a button that opens the app; Apple's instructions say macOS then asks for your login password.
 
