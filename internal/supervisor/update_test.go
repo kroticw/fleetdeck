@@ -151,14 +151,26 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 	return func() { cancel(); <-done }, nil
 }
 
+// goBin is this machine's go, wherever it is. FindTools looks in the
+// well-known places and then gives up, and a CI runner keeps go in none of
+// them -- which is the very thing that made this source resolve its own tools
+// (see TestATreeSourceSaysWhichToolItCannotFind). A test must not depend on
+// the answer either way, so it hands over the path it was run with.
+func goBin() string {
+	path, _ := exec.LookPath("go")
+	return path
+}
+
 func (r *updateRig) update(running string) *Update {
 	makeBin, _ := exec.LookPath("make")
 	return &Update{
 		Source: &TreeSource{
-			Tree:    r.f.supervisedTree(),
-			Tools:   Tools{Git: r.f.git, Make: makeBin},
-			Env:     append(r.f.env, "HELPER_BIN="+os.Args[0]),
-			Running: running,
+			Dir:      r.f.tree,
+			Remote:   "origin",
+			Branch:   "master",
+			Embedded: Tools{Git: r.f.git, Make: makeBin, Go: goBin()},
+			Env:      append(r.f.env, "HELPER_BIN="+os.Args[0]),
+			Running:  running,
 		},
 		Canonical:       r.canonical,
 		LockPath:        filepath.Join(r.t.TempDir(), "update.lock"),

@@ -107,21 +107,23 @@ func updateWay(cfg config) way {
 	if bundle == "" {
 		return way{Refusal: refusalNotABundle}
 	}
+	// A build with a checkout written into it updates from that checkout, and
+	// nothing about the state of the machine changes which way it is.
+	//
+	// This asked FindTools here once, and treated a missing go as "this was
+	// built here, with no checkout" -- which CI caught on a runner where go
+	// lives somewhere FindTools does not look. The advice that came out of it
+	// was to rebuild from a clone the person already had. Tools that have
+	// moved are a refusal at the moment they are needed, with their own
+	// sentence, and TreeSource makes it.
 	if cfg.tree != "" {
-		tools, err := supervisor.FindTools(supervisor.Tools{Git: gitPath, Go: goPath, Make: makePath}, supervisor.FileExists)
-		if err != nil {
-			// The tree is written in but the tools that built it are gone.
-			// That is a checkout build with a broken machine, not a release.
-			return way{Refusal: refusalBuiltHere}
-		}
 		return way{Source: &supervisor.TreeSource{
-			Tree: &supervisor.Tree{
-				Dir: cfg.tree, Remote: updateRemote, Branch: updateBranch,
-				Git: tools.Git, Env: supervisor.BuildEnv(tools, os.Environ()),
-			},
-			Tools:   tools,
-			Env:     os.Environ(),
-			Running: ownRevision(),
+			Dir:      cfg.tree,
+			Remote:   updateRemote,
+			Branch:   updateBranch,
+			Embedded: supervisor.Tools{Git: gitPath, Go: goPath, Make: makePath},
+			Env:      os.Environ(),
+			Running:  ownRevision(),
 		}}
 	}
 	if cfg.teamID == "" {

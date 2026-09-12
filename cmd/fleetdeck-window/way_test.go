@@ -30,14 +30,37 @@ func TestAWindowBuiltFromAReleaseCanUpdateFromTheReleasesPage(t *testing.T) {
 
 // The path that already worked keeps working, and keeps working the same way:
 // a checkout updates from its checkout, never from a download.
+//
+// It does so whatever the machine looks like. This test ran green here and red
+// on CI, because it used to depend on finding go where FindTools looks, and a
+// runner keeps go somewhere else: a build with a checkout written into it then
+// called itself a build with no checkout. Which way an app updates follows
+// from what the app is, and from nothing else. Tools that have moved are
+// TreeSource's refusal to make, at the moment it needs them
+// (TestATreeSourceSaysWhichToolItCannotFind).
 func TestAWindowBuiltFromACheckoutStillUpdatesFromItsTree(t *testing.T) {
 	way := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "dev"})
 
 	if way.Refusal != "" {
 		t.Fatalf("a checkout build refuses to update: %q", way.Refusal)
 	}
-	if _, ok := way.Source.(*supervisor.TreeSource); !ok {
+	tree, ok := way.Source.(*supervisor.TreeSource)
+	if !ok {
 		t.Fatalf("a checkout build updates from %T, want a *supervisor.TreeSource", way.Source)
+	}
+	if tree.Dir != "/src/fleetdeck" {
+		t.Errorf("it would update from %q, not the checkout written into the build", tree.Dir)
+	}
+}
+
+// A checkout build that is also signed still updates from its checkout: that
+// is the build somebody is working on, and downloading a release over it would
+// throw their work away.
+func TestASignedCheckoutBuildStillPrefersItsTree(t *testing.T) {
+	way := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "v0.3.0", teamID: "PTLLPQ8LY4"})
+
+	if _, ok := way.Source.(*supervisor.TreeSource); !ok {
+		t.Fatalf("a signed checkout build updates from %T, want a *supervisor.TreeSource", way.Source)
 	}
 }
 

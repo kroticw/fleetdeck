@@ -164,6 +164,38 @@ func TestAnUpdateThatCannotStageStartsNoNewWindow(t *testing.T) {
 	}
 }
 
+// Tools that have moved since the build are a refusal at the moment they are
+// needed, with their own sentence naming what is missing.
+//
+// This is here because of where the check used to live. cmd/fleetdeck-window
+// resolved the tools to decide which way an app updates, so on a machine
+// where go had moved -- a CI runner, as it turned out -- a build with a
+// checkout written into it reported itself as a build with no checkout, and
+// advised the person to rebuild from the clone they were already standing in.
+// Which way an app updates follows from what the app is; whether the tools are
+// there follows from the machine, and the two are answered in different places
+// now.
+func TestATreeSourceSaysWhichToolItCannotFind(t *testing.T) {
+	src := &TreeSource{
+		Dir:      t.TempDir(),
+		Remote:   "origin",
+		Branch:   "master",
+		Embedded: Tools{Git: "/nowhere/git", Go: "/nowhere/go", Make: "/nowhere/make"},
+		Exists:   func(string) bool { return false },
+	}
+
+	_, err := src.Check(context.Background())
+
+	if err == nil {
+		t.Fatal("a checkout with no tools to build it reported no problem")
+	}
+	for _, tool := range []string{"git", "go", "make"} {
+		if !strings.Contains(err.Error(), tool) {
+			t.Errorf("the refusal does not name %s: %v", tool, err)
+		}
+	}
+}
+
 // The staging directory is cleared before a source is asked to fill it: what
 // an earlier update left there is the bundle it swapped out, an old version of
 // this very app, and starting that would be an update backwards.

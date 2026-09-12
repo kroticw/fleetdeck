@@ -13,12 +13,44 @@ import (
 // This is what the update button did before there was anything else, and it
 // still does exactly that. It is a Source so that it and ReleaseSource go
 // through one Update, one lock, one handover and one swap.
+//
+// It resolves the tools it needs itself, when it needs them, rather than being
+// handed them. That is not tidiness: the caller deciding which way an app
+// updates must not have to know whether git and go are where they were at
+// build time. CI caught this the other way round -- on a runner where go sits
+// somewhere FindTools does not look, a build with a checkout written into it
+// called itself a build with no checkout, and offered a person the one piece
+// of advice that could not help them: rebuild from your clone.
 type TreeSource struct {
-	Tree  *Tree
-	Tools Tools
-	Env   []string
+	// Dir, Remote and Branch are the checkout and the branch of its remote it
+	// follows.
+	Dir, Remote, Branch string
+	// Embedded are the tool paths written into the build; where they no
+	// longer are, FindTools looks in the well-known places.
+	Embedded Tools
+	Env      []string
 	// Running is the commit the window was built from.
 	Running string
+	// Exists is FileExists in production, and a stand-in in tests.
+	Exists func(string) bool
+}
+
+// tools resolves this source's tools and the tree that uses them. Its error is
+// the one a person reads when git or go has gone: it names what is missing and
+// where it was looked for.
+func (s *TreeSource) tools() (Tools, *Tree, error) {
+	exists := s.Exists
+	if exists == nil {
+		exists = FileExists
+	}
+	found, err := FindTools(s.Embedded, exists)
+	if err != nil {
+		return Tools{}, nil, err
+	}
+	return found, &Tree{
+		Dir: s.Dir, Remote: s.Remote, Branch: s.Branch,
+		Git: found.Git, Env: BuildEnv(found, s.Env),
+	}, nil
 }
 
 // Check fetches the tree's remote branch and says which commit an update would
@@ -28,7 +60,11 @@ type TreeSource struct {
 // fast-forward for a question, and an update with nothing new in it must leave
 // their checkout exactly as it was.
 func (s *TreeSource) Check(ctx context.Context) (string, error) {
-	st, err := s.Tree.Check(ctx)
+	_, tree, err := s.tools()
+	if err != nil {
+		return "", err
+	}
+	st, err := tree.Check(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -40,7 +76,11 @@ func (s *TreeSource) Check(ctx context.Context) (string, error) {
 
 // Stage brings the tree forward to that commit and builds the app into dir.
 func (s *TreeSource) Stage(ctx context.Context, dir, version string, say func(Progress)) (string, error) {
-	st, err := s.Tree.Forward(ctx)
+	tools, tree, err := s.tools()
+	if err != nil {
+		return "", err
+	}
+	st, err := tree.Forward(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -53,7 +93,7 @@ func (s *TreeSource) Stage(ctx context.Context, dir, version string, say func(Pr
 	if say != nil {
 		say(Progress{Step: "build", Detail: st.Head})
 	}
-	if err := Make(ctx, s.Tree.Dir, s.Tools, s.Env, "window-app", "BINDIR="+dir); err != nil {
+	if err := Make(ctx, s.Dir, tools, s.Env, "window-app", "BINDIR="+dir); err != nil {
 		return "", err
 	}
 	staged := filepath.Join(dir, BundleName)
