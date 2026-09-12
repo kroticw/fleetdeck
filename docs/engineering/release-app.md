@@ -15,8 +15,8 @@ This is the fact the whole release depends on.
 - **Measured on the operator's screen**, macOS 26.6.2 (25G83), arm64, Russian, with stand-in bundles (section 6), both quarantined as a Firefox download and unpacked with `ditto`:
   - **Unsealed**, as `window-app` leaves it: macOS said the app is damaged and cannot be opened. That was reported from the screen, not captured word for word. The kernel log has AMFI's `Unrecoverable CT signature issue, bailing out` for it. Apple's documented way to open an unverified app does not reach this case, and no way to open it from the user interface was found.
   - **Sealed**: the dialog «Файл «fleetdeck» не был открыт» — «Apple не удалось подтвердить, что файл «fleetdeck» не содержит вредоносного ПО, которое может нанести вред Вашему Mac или конфиденциальности Ваших данных.», with the buttons «Переместить в Корзину» (highlighted) and «Готово». This was captured. syspolicyd logged `rejecting due to lack of matching active rule`.
-- **Decided: the release is sealed ad hoc.** It costs nothing and needs no certificate, and it is the difference between "inconvenient" and "impossible". It is not a Developer ID signature: it identifies no one, and Gatekeeper still refuses the app until the person makes an exception (section 2). An app signed with a Developer ID and notarized opens with a double click. That needs an Apple Developer Program membership, and it is not done.
-- **Read and measured: `syspolicy_check distribution`** reports both of our bundles as `Adhoc Signed App` and `Notary Ticket Missing`, and reports the unsealed one's codesign error as fatal. It also reports `Internal Xprotect Error` for both, and not for a Developer ID app on the same machine (OrbStack.app). Why is not known. It did not stop the sealed app from opening once allowed.
+- **Decided, and since superseded: the release was sealed ad hoc.** It cost nothing and needed no certificate, and it was the difference between "inconvenient" and "impossible". It is not a Developer ID signature: it identifies no one, and Gatekeeper still refuses such an app until the person makes an exception (section 2). The release is now signed with a Developer ID and notarized instead — section 8 — and the ad-hoc seal is what every build without a certificate still gets: a developer's, and CI's check job, which runs `make dist-app` on a runner that has none.
+- **Read and measured: `syspolicy_check distribution`** reports both of our bundles as `Adhoc Signed App` and `Notary Ticket Missing`, and reports the unsealed one's codesign error as fatal. It also reports `Internal Xprotect Error` for both, and not for a Developer ID app on the same machine (OrbStack.app). Why is not known. It did not stop the sealed app from opening once allowed. **Measured on 2026-09-12:** on the notarized bundle the same command answers `App passed all pre-distribution checks and is ready for distribution`, with no Xprotect error — so that error tracked the seal, not the machine.
 
 ## 2. The path a person takes, reconstructed from the log
 
@@ -95,12 +95,53 @@ The mutants: no bundle seal; one architecture only; no plist version; `treeDir` 
 
 **Measured.** A fingerprint of what `make window-app` and `make install` produce was taken before any change and again on the branch. It covers the file list with modes, the `Info.plist` and icon hashes, each binary's build record (`go version -m`, which carries `-ldflags` and every build setting) and its signature identifier. The two were identical over 103 lines; only the module's pseudo-version, which comes from the commit, was left out. The control was a copy of the tree with two deliberate changes: one more `-X` in the window's ldflags, and one character in `Info.plist`. The fingerprint showed both. `TestTheAppBundleCarriesThePanelWhereTheWindowLooksForIt` and the `install` tests still run the real targets.
 
-## 8. Not verified
+## 8. Signing and notarization
+
+**2026-09-12.** Section 1 said an app signed with a Developer ID and notarized opens with a double click, and that it was not done. It is done now. The code is in [`scripts/build-dist-app.sh`](../../scripts/build-dist-app.sh) and [`scripts/notarize-dist-app.sh`](../../scripts/notarize-dist-app.sh); the secrets the workflow needs are in [signing-secrets.md](signing-secrets.md). What cost something to learn:
+
+- **Measured: the three states are three different `spctl` answers**, on the same app built three ways on the same machine:
+
+  | Seal | `spctl --assess --type execute` | status |
+  | --- | --- | --- |
+  | Ad hoc | `rejected`, no source line | 3 |
+  | Developer ID, not notarized | `rejected`, `source=Unnotarized Developer ID` | 3 |
+  | Developer ID, notarized, stapled | `accepted`, `source=Notarized Developer ID` | 0 |
+
+  The middle row is the one worth knowing: a signature alone changes nothing a person would notice. Signing is what makes notarization possible, and notarization is what opens the app.
+
+- **Measured: the entitlements list is empty, and that is a result.** A probe was signed exactly the way a release is — Developer ID, `--options runtime`, this repository's `entitlements.plist` — placed in a bundle shaped like the app's, and run from inside it. It did each thing the app does: the `osascript` banner `internal/notify` sends, starting a system binary, starting the panel beside it in the bundle, listening on a loopback port, and reading the home directory. Every one was allowed with no entitlement at all. The system log was watched throughout (`com.apple.TCC`, `amfid`, `taskgated-helper`, `com.apple.syspolicy`, `osascript`), with a deliberate `spctl` call in it as a control so that a watcher reporting nothing could be told from a watcher that was blind: 118 lines, no denial. The real panel was also run out of the signed bundle, in a scratch `HOME` on a port of its own, and served its page.
+
+  **Decided: nothing is copied from the Electron project next door.** Its four entitlements are `allow-jit` and `allow-unsigned-executable-memory`, which are Chromium's in-process V8 and have no bearing on a WKWebView whose JavaScript runs in Apple's own WebContent process; `disable-library-validation`, which is for loading native modules built by someone else, and this app links system frameworks and nothing more; and `network.client`, which is an App Sandbox entitlement and means nothing outside a sandbox. Every entitlement is a hole in the hardened runtime, and a hole opened by copying is one nobody measured.
+
+  The probe bundle was given a `CFBundleIdentifier` of its own, for the reason in section 6.
+
+  **Not measured at the time of writing: the window itself under the hardened runtime.** Everything above was measured on the panel and on a probe, both of which are plain Go binaries; the window is the one piece that links WebKit through cgo, and running it puts a window on somebody's screen. The reasoning that it needs nothing is that WKWebView's JavaScript runs in Apple's own WebContent process, not in ours — reasoning, not a measurement.
+
+- **Measured: `codesign` asks for a secure timestamp by default** whenever it signs with a real identity. Leaving `--timestamp` off changes nothing; `--timestamp=none` is what turns it off, and a signature without one reports `Signed Time=` where a timestamped one reports `Timestamp=`. This was found by a mutant that survived: "build without `--timestamp`" was not a mutant at all. The flag is written out in the build anyway, because a release must not rest on a default staying what it is.
+
+- **Measured: the notarization ticket lands at `Contents/CodeResources`**, beside `_CodeSignature` rather than inside it, magic `s8ch`, about 1.8 KB. Read off a notarized app already on this machine, before the first submission was made. It is outside what the signature seals, so stapling does not break the signature — and it is a new member in the zip, which the gate's exact member list has to know about.
+
+- **Decided: the zip is written twice.** Apple is given the signed zip; the ticket it returns is stapled into the *bundle*, because a zip has nowhere to hold one; the zip is then written again from the stapled bundle. Skipping the last step publishes an app with no ticket in it, which still opens on a Mac that can reach Apple and refuses on one that cannot — the machine least able to explain why.
+
+- **Decided: the gate is told which seal to demand, not left to read one.** `EXPECT_SEAL` follows from `SIGN_IDENTITY` and the release workflow spells out `notarized`. A gate that read the bundle and agreed with whatever it found would pass an unsigned release with a shrug.
+
+- **Measured: the mutation pass**, nine mutants against the new checks, final code:
+
+  | | Result |
+  | --- | --- |
+  | Mutants of the seal checks | 9 of 9 killed |
+  | Unmutated controls (ad hoc, signed, notarized) | 3 of 3 pass |
+
+  The mutants: no hardened runtime; no secure timestamp; an entitlement the repository does not keep; a helper left ad hoc inside a signed bundle; an ad-hoc build asked for `developer-id`; a signed build asked for `notarized`; a ticket that is present and is not a ticket; a binary changed after Apple saw it; and a signed build asked for `adhoc`.
+
+  **The harness had two blind spots of its own, and both were found by looking at which check did each killing.** The first version named every mutant bundle `mutant.app`, so the gate refused all of them on the member list without reaching a single check they were written for — six kills, nothing measured. Then two mutants survived, and neither was a gate defect: "no `--timestamp`" is not a mutation (see above), and re-signing a bundle with the same bytes and the same flags produces the same code hash, so the ticket still matched. A mutant has to be checked for being a mutant.
+
+## 9. Not verified
 
 - **A clean Mac.** There is no macOS virtual machine here (Parallels holds only a Windows VM). The stand-in for a clean machine was the quarantine attribute set by hand in Firefox's format, the operator's own screen, and stand-in bundles. A Mac without Claude Code, git or the Command Line Tools was not tried.
 - **A real browser download.** The attribute was stamped, not set by a browser. Safari unpacks "safe" downloads itself; that path was not tried.
 - **The first run of the real app from a release**, all the way to a working fleet. The Gatekeeper path was measured with stand-ins, the app's contents with the tests, and the two were never put together on one screen.
 - **The "damaged" dialog's exact words**, the second warning in the Open Anyway path, and whether a password was asked.
 - **The release workflow itself.** `make dist-app` runs in CI's macOS leg through the test, but the new steps of `release.yaml` run only on a tag, and no tag was made.
-- **The x86_64 slice on a real Intel Mac.** Every x86_64 slice is cross-compiled on an Apple silicon Mac: this machine, the macOS runner of CI's `check` job, and the release job's runner. It has been run only under Rosetta 2 on Apple silicon, which translates it and is not an Intel processor. It has never run on a real Intel Mac, and there is no Intel Mac here to run it on. "An Intel Mac can run the release" follows from how a universal binary works; it has not been measured.
+- **The x86_64 slice on a real Intel Mac.** Every x86_64 slice is cross-compiled on an Apple silicon Mac: this machine, the macOS runner of CI's `check` job, and the release job's runner. It has been run only under Rosetta 2 on Apple silicon, which translates it and is not an Intel processor. It has never run on a real Intel Mac, and there is no Intel Mac here to run it on. "An Intel Mac can run the release" follows from how a universal binary works; it has not been measured. (Section 8 is read from the same place for the x86_64 slice's signature: every slice of a universal binary is covered by the one bundle signature, and only the arm64 one has been run under it here.)
 - **A new version over an installed one:** whether Gatekeeper asks again. It is expected to, because the code is different.
