@@ -17,6 +17,8 @@ import {
   fleetEntries,
   switchFleet,
   belongsTo,
+  rememberFleet,
+  rememberedFleet,
 } from "../fleet.js";
 
 // The shape the server serves for fleet B of three: A, B, C.
@@ -126,4 +128,69 @@ test("switching forgets the open session and navigates to the fleet", () => {
   switchFleet("C", { storage, location });
   assert.deepEqual(removed, ["fleetdeck-open-session"]);
   assert.deepEqual(assigned, ["/?fleet=C"]);
+});
+
+// The exception: the start page carrying a page back into the fleet it
+// reloaded out of. The tab is going back where it was, so the session panel
+// that was up is this fleet's and must survive the hop.
+test("carrying a page back keeps the session it had open", () => {
+  const touched = [];
+  const storage = {
+    setItem: (key) => touched.push(`set:${key}`),
+    removeItem: (key) => touched.push(`remove:${key}`),
+  };
+  const assigned = [];
+  const location = { pathname: "/", search: "", assign: (url) => assigned.push(url) };
+  switchFleet("C", { storage, location, keepSession: true });
+  assert.deepEqual(touched, [], "the open session must not be touched when carrying back");
+  assert.deepEqual(assigned, ["/?fleet=C"]);
+});
+
+// The fleet the panel was last opened in, for the start page to mark. Written
+// to localStorage rather than the session storage the open session uses: the
+// point is the next launch of the application, which a tab's session storage
+// does not survive.
+test("the fleet last worked in is remembered across launches, not across a tab", () => {
+  const store = new Map();
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    value: {
+      getItem: (key) => store.get(key) ?? null,
+      setItem: (key, value) => store.set(key, value),
+    },
+    configurable: true,
+  });
+  try {
+    assert.equal(rememberedFleet(), "", "nothing remembered reads as no mark, never as a fleet");
+    rememberFleet("vpn");
+    assert.equal(store.get("fleetdeck-fleet"), "vpn");
+    assert.equal(rememberedFleet(), "vpn");
+  } finally {
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else delete globalThis.localStorage;
+  }
+});
+
+// A private window, or a browser with storage switched off, throws on either
+// call. It costs a mark on a list and must never take the page down with it.
+test("storage that throws costs the mark and nothing else", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    value: {
+      getItem() {
+        throw new Error("denied");
+      },
+      setItem() {
+        throw new Error("denied");
+      },
+    },
+    configurable: true,
+  });
+  try {
+    assert.equal(rememberedFleet(), "");
+    rememberFleet("vpn");
+  } finally {
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else delete globalThis.localStorage;
+  }
 });

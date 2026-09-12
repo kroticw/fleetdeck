@@ -170,9 +170,18 @@ func TestAPanelWithNoConfigurationIsSetUpFromItsPage(t *testing.T) {
 		return s.Cards[0].Title == "Первая карточка" && s.Cards[0].Stage == "new", body
 	})
 
+	// The setup surface is gone: the root is the start page now, and the panel
+	// is behind a named fleet (internal/server/static.go). Both are asserted,
+	// because "no longer the wizard" and "the panel is reachable" are two
+	// facts, and a handover that left only the first would be a panel nobody
+	// can open.
 	code, body = c.do(http.MethodGet, "/", "")
+	if code != http.StatusOK || !strings.Contains(body, `id="start"`) {
+		t.Fatalf("after setup the root is the start page: %d %.200s", code, body)
+	}
+	code, body = c.do(http.MethodGet, "/?fleet=", "")
 	if code != http.StatusOK || !strings.Contains(body, `id="board"`) {
-		t.Fatalf("after setup the root is the panel's own page: %d %.200s", code, body)
+		t.Fatalf("after setup the panel is served for its fleet: %d %.200s", code, body)
 	}
 	if code, _ := c.do(http.MethodPost, "/api/setup", `{"path":"/elsewhere"}`); code == http.StatusOK {
 		t.Fatal("a panel that is set up must not be set up a second time from its page")
@@ -331,9 +340,15 @@ func TestAPanelWithAConfigurationNeverShowsSetup(t *testing.T) {
 	}()
 	c := panelClient{t: t, base: fmt.Sprintf("http://127.0.0.1:%d", cfg.ServerPort)}
 	until(t, "the panel's own page", func() (bool, string) {
-		code, body := c.do(http.MethodGet, "/", "")
+		code, body := c.do(http.MethodGet, "/?fleet=", "")
 		return code == http.StatusOK && strings.Contains(body, `id="board"`), fmt.Sprint(code, body)
 	})
+	// And the root is the start page, never the wizard: a configured panel
+	// offering setup is what this test exists to catch, and the start page
+	// sits where the wizard used to be reachable from.
+	if code, root := c.do(http.MethodGet, "/", ""); code != http.StatusOK || !strings.Contains(root, `id="start"`) {
+		t.Fatalf("the root of a configured panel is the start page: %d %.200s", code, root)
+	}
 	if code, _ := c.do(http.MethodPost, "/api/setup", `{"path":"/elsewhere"}`); code == http.StatusOK {
 		t.Fatal("a configured panel must not offer setup")
 	}

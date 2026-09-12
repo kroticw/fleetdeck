@@ -8,6 +8,12 @@ import (
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 )
 
+// fleetParam is the one query key that names a fleet, in every route that
+// serves one and in the address the page itself builds (web/js/fleet.js). The
+// fleet lives there and nowhere else: there is no server-side "current fleet"
+// one tab could change under another.
+const fleetParam = "fleet"
+
 // ErrOrchestratorTaken is a pin refused because the session is already
 // another fleet's orchestrator: one session leading two fleets would read two
 // boards. The route answers it with 409, the reason in the body.
@@ -37,7 +43,7 @@ func (d Deps) forFleet(w http.ResponseWriter, r *http.Request) (Deps, bool) {
 	if d.Fleet == nil {
 		return d, true
 	}
-	f, err := d.Fleet(r.URL.Query().Get("fleet"))
+	f, err := d.Fleet(r.URL.Query().Get(fleetParam))
 	if err != nil {
 		fail(w, http.StatusNotFound, err.Error())
 		return d, false

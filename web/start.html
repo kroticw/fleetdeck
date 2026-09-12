@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fleetdeck</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="start-body">
+  <!-- Served in place of index.html at "/" when the address names no fleet
+       (internal/server/static.go). The panel itself is "/?fleet=<name>".
+       Filled by js/start.js. No terminal lives here, so xterm.js is not
+       loaded: this page holds no session open. -->
+  <main id="start" class="start"></main>
+  <script type="module" src="/js/start.js"></script>
+</body>
+</html>

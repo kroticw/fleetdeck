@@ -9,10 +9,28 @@ import { createNewCard } from "./newcard.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
+import { rememberFleet } from "./fleet.js";
 import { t } from "./i18n.js";
 
 subscribe((snap, connected) => {
   document.title = connected ? `fleetdeck (${snap?.sessions?.length ?? 0})` : "fleetdeck — offline";
+});
+
+// Which fleet this panel is showing, written down for the start page to mark
+// on its list next launch. Taken from the snapshot rather than the address:
+// an address with no fleet is served the first one, and the snapshot is the
+// only place that says which one that turned out to be.
+// Written once, not on every snapshot. Which fleet a tab shows is decided by
+// its address and never changes while the page lives, so writing it each
+// second would be a storage write a second in every open tab — and with two
+// tabs on two fleets the key would flip between them, making the start page's
+// mark whichever tab ticked last rather than where the operator was.
+let fleetRemembered = false;
+subscribe((snap) => {
+  const fleet = snap?.fleet ?? "";
+  if (!fleet || fleetRemembered) return;
+  fleetRemembered = true;
+  rememberFleet(fleet);
 });
 
 const sessionPanel = document.getElementById("session-panel");

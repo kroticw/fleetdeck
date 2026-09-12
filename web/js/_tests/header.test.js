@@ -33,7 +33,8 @@ import {
   gauge,
   isUsageStale,
   RATE_LIMITS_AGE_WORTH_SHOWING_MS,
-  fleetSwitcherHTML,
+  fleetMenuHTML,
+  nextMenuState,
   headerCounts,
 } from "../header.js";
 import { t } from "../i18n.js";
@@ -569,20 +570,83 @@ test("control case: age alone flips stale once past the threshold, with no usage
   assert.equal(isUsageStale(justOver, RATE_LIMITS_AGE_WORTH_SHOWING_MS + 1), true);
 });
 
-// --- the fleet switcher ---
+// --- the fleet menu ---
+//
+// The row of fleet buttons became one menu, and the menu is shown with one
+// fleet too. That is a deliberate change to what shipped: a control that
+// appeared only once a second fleet existed was a second fleet nobody could
+// find out about, and the way to make one now lives in this menu.
 
-test("the switcher names every fleet, marks this one and counts the others' waiting", () => {
-  const html = fleetSwitcherHTML([
+test("the menu names the fleet this tab shows, and is closed until it is opened", () => {
+  const html = fleetMenuHTML([{ name: "A", current: false, waiting: 0 }, { name: "B", current: true, waiting: 0 }], false);
+  assert.match(html, /class="fleet-menu-name">B</, "the trigger says which fleet is on screen");
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /fleet-menu-list/, "a closed menu has no list in the page at all");
+});
+
+test("one fleet still has a menu: it is where a second fleet comes from", () => {
+  const html = fleetMenuHTML([{ name: "A", current: true, waiting: 0 }], false);
+  assert.match(html, /class="fleet-menu-name">A</);
+  assert.match(fleetMenuHTML([{ name: "A", current: true, waiting: 0 }], true), /fleet-menu-new/);
+});
+
+test("an open menu lists every fleet, marks this one and counts the others' waiting", () => {
+  const html = fleetMenuHTML([
     { name: "A", current: false, waiting: 2 },
     { name: "B", current: true, waiting: 0 },
-  ]);
-  const entries = [...html.matchAll(/<button type="button" class="([^"]*)" data-fleet="([^"]*)"([^>]*)>(.*?)<\/button>/g)];
+  ], true);
+  const entries = [...html.matchAll(/<button type="button" class="(fleet-menu-entry[^"]*)" data-fleet-menu="pick" data-fleet="([^"]*)"([^>]*)>(.*?)<\/button>/g)];
   assert.deepEqual(entries.map((m) => m[2]), ["A", "B"]);
-  assert.equal(entries[0][1], "fleet-entry");
-  assert.match(entries[0][4], /class="fleet-entry-waiting">2</, "a fleet with waiting sessions says how many");
-  assert.equal(entries[1][1], "fleet-entry fleet-entry-current");
+  assert.equal(entries[0][1], "fleet-menu-entry");
+  assert.match(entries[0][4], /class="fleet-menu-waiting">2</, "a fleet with waiting sessions says how many");
+  assert.equal(entries[1][1], "fleet-menu-entry fleet-menu-entry-current");
   assert.match(entries[1][3], /aria-current="page"/);
-  assert.doesNotMatch(entries[1][4], /fleet-entry-waiting/, "no count where nothing waits");
+  assert.doesNotMatch(entries[1][4], /fleet-menu-waiting/, "no count where nothing waits");
+});
+
+test("an open menu offers the way back to the start page and the way to a new fleet", () => {
+  const html = fleetMenuHTML([{ name: "A", current: true, waiting: 0 }], true);
+  assert.match(html, /data-fleet-menu="all"/, "the way back to the start page");
+  assert.match(html, /data-fleet-menu="new"/, "the way to a fleet that does not exist yet");
+});
+
+test("a fleet's name reaches the menu only as escaped text", () => {
+  const html = fleetMenuHTML([
+    { name: '"><img src=x>', current: false, waiting: 0 },
+    { name: "B", current: true, waiting: 0 },
+  ], true);
+  assert.ok(!html.includes("<img"), "a name must never reach the DOM as markup");
+  assert.ok(html.includes('data-fleet="&quot;&gt;&lt;img src=x&gt;"'));
+});
+
+// What a click means is a function of its own, because a handler attached to
+// markup built with innerHTML is invisible to these tests: three mutants in
+// exactly such handlers survived every unit test once and were only killed on
+// a stand (docs/engineering/multiple-fleets.md §7).
+
+test("the trigger opens a closed menu and closes an open one", () => {
+  assert.deepEqual(nextMenuState(false, "toggle", ""), { open: true, go: null });
+  assert.deepEqual(nextMenuState(true, "toggle", ""), { open: false, go: null });
+});
+
+test("choosing the fleet already on screen closes the menu and goes nowhere", () => {
+  // It is a full page load, and reloading the panel a person is already
+  // looking at would close every terminal they have open.
+  assert.deepEqual(nextMenuState(true, "pick", "B", "B"), { open: false, go: null });
+});
+
+test("choosing another fleet leaves for it", () => {
+  assert.deepEqual(nextMenuState(true, "pick", "A", "B"), { open: false, go: { fleet: "A" } });
+});
+
+test("all fleets goes to the start page, and a new fleet goes to its form", () => {
+  assert.deepEqual(nextMenuState(true, "all", ""), { open: false, go: { path: "/" } });
+  assert.deepEqual(nextMenuState(true, "new", ""), { open: false, go: { path: "/#new" } });
+});
+
+test("anything else closes the menu without going anywhere", () => {
+  assert.deepEqual(nextMenuState(true, "away", ""), { open: false, go: null });
+  assert.deepEqual(nextMenuState(false, "away", ""), { open: false, go: null });
 });
 
 test("the counters count this fleet and the unclaimed, never another fleet's", () => {
@@ -596,16 +660,3 @@ test("the counters count this fleet and the unclaimed, never another fleet's", (
   assert.deepEqual(counts.stalled.map((s) => s.short), ["n1"]);
 });
 
-test("one fleet has no switcher at all", () => {
-  assert.equal(fleetSwitcherHTML([{ name: "A", current: true, waiting: 3 }]), "");
-  assert.equal(fleetSwitcherHTML([]), "");
-});
-
-test("a fleet's name reaches the switcher only as escaped text", () => {
-  const html = fleetSwitcherHTML([
-    { name: '"><img src=x>', current: false, waiting: 0 },
-    { name: "B", current: true, waiting: 0 },
-  ]);
-  assert.ok(!html.includes("<img"), "a name must never reach the DOM as markup");
-  assert.ok(html.includes('data-fleet="&quot;&gt;&lt;img src=x&gt;"'));
-});

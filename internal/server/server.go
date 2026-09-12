@@ -91,6 +91,22 @@ type Deps struct {
 	// own board, under a name made from the title.
 	CreateCard func(title, zone string) (string, error)
 
+	// CreateFleet makes a fleet from the start page: the folder with its board
+	// and documentation, and the line in the configuration naming them. It
+	// reports the steps setting up reports, and ok says whether the fleet is
+	// there. An error means the request itself was refused before any step was
+	// taken — an empty name, or a folder that is not a full path — and nothing
+	// was made.
+	//
+	// A name or a board the configuration would not take is NOT an error here:
+	// it comes back as a step that was refused, with ok false, because that is
+	// where `fleetdeck init --fleet` puts it and this route runs the same
+	// steps. The page shows it in the report rather than beside the form.
+	//
+	// A panel wired without it makes no fleets and says so (a stand). The fleet
+	// it makes is served after a restart, never at once: see handleCreateFleet.
+	CreateFleet func(name, path string) (steps []SetupStep, ok bool, err error)
+
 	// BoardDir is the only directory card writes may touch. Every path a card
 	// write arrives with is resolved and checked against it, and anything that
 	// lands elsewhere is refused before board.SetField — which will rewrite a
@@ -240,6 +256,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/text", d.handleSendText)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
+	mux.HandleFunc("POST /api/fleets", d.handleCreateFleet)
 	mux.HandleFunc("GET /api/docs", d.handleDocsList)
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)
 	mux.HandleFunc("POST /api/status", d.handleStatus)

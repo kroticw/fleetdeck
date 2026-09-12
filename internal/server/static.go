@@ -87,6 +87,26 @@ func staticHandler(build *buildinfo.Fingerprint) http.Handler {
 			// preset ETag and answers If-None-Match with 304 on its own.
 			w.Header().Set("ETag", etag)
 		}
+		// "/" with no fleet named at all is the start page, not the panel:
+		// the screen the application opens on, where a fleet is chosen or a
+		// new one made (web/js/start.js). The panel is "/?fleet=<name>".
+		//
+		// The parameter being *present and empty* is not the same thing: that
+		// is what withFleet builds for a panel that has never named a fleet,
+		// and fleet.Select already reads it as the first fleet. Only an
+		// address carrying no fleet key lands here.
+		//
+		// This is the one place where the rule "no parameter means the first
+		// fleet" (docs/engineering/multiple-fleets.md §3) no longer holds, and
+		// it holds everywhere else: every other route still reads the fleet
+		// through Deps.forFleet, where an absent parameter is the first fleet
+		// exactly as before.
+		if r.URL.Path == "/" && !r.URL.Query().Has(fleetParam) {
+			start := r.Clone(r.Context())
+			start.URL.Path = "/start.html"
+			fileServer.ServeHTTP(w, start)
+			return
+		}
 		if r.URL.Path != "/" || index == nil {
 			fileServer.ServeHTTP(w, r)
 			return

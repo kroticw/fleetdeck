@@ -15,6 +15,7 @@ let renderSetup;
 let requests;
 let routes;
 let reloaded;
+let panelAddress;
 
 function reply(status, body) {
   return { status, ok: status >= 200 && status < 300, async json() { return body; } };
@@ -60,7 +61,7 @@ beforeEach(async () => {
     "POST /api/setup": reply(200, OK_STEPS),
     "GET /api/snapshot": reply(200, {}),
   };
-  ({ renderSetup } = await import("../js/setup.js"));
+  ({ renderSetup, panelAddress } = await import("../js/setup.js"));
 });
 
 afterEach(() => {
@@ -479,4 +480,24 @@ test("wizard: a chosen session that stays stays chosen when the list is refreshe
 test("wizard: sessions the daemon cannot list are said so, with its words", async () => {
   await wizard({ sessions: [], daemonError: "daemon unavailable" });
   assert.match(root.querySelector("section.wizard-existing").textContent, /daemon unavailable/);
+});
+
+// Where the wizard leaves for. The root is the start page now, so finishing
+// the wizard without naming a fleet would land the person on a list of the one
+// fleet they have just made — a step backwards from where they already are.
+// The empty name is what the panel reads as "the first fleet".
+test("the wizard leaves for the panel, never for the start page", () => {
+  assert.equal(panelAddress(""), "/?fleet=");
+  assert.equal(panelAddress("vpn"), "/?fleet=vpn");
+  assert.equal(panelAddress("a fleet/with spaces"), "/?fleet=a%20fleet%2Fwith%20spaces");
+});
+
+// A person with no configuration never reaches the start page: there is no
+// panel yet, only this surface. So this is the screen the application opens on
+// for them, and it carries the same mark the start page does.
+test("the folder step shows the application's icon", async () => {
+  await render();
+  const icon = root.querySelector("div.setup-icon");
+  assert.notEqual(icon, null, "the first screen a new person sees has no icon on it");
+  assert.match(icon.innerHTML, /viewBox="0 0 64 64"/);
 });

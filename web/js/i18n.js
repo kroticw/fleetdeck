@@ -220,7 +220,39 @@ const en = {
   fleet_none: "No fleet",
   fleet_sessions: "sessions",
   fleet_waiting: "waiting",
+  // The menu that replaced the row of fleet buttons. It is shown with one
+  // fleet too, because a row that appears only at two fleets is a second
+  // fleet nobody can find out about.
+  fleet_menu: "fleet",
+  fleet_menu_all: "All fleets",
+  fleet_menu_new: "Start a fleet…",
   // --- end of fleets ---
+
+  // The start page (web/js/start.js): the screen the application opens on,
+  // where a fleet is chosen or a new one is made. start_new_text says what
+  // making one does and what it does not do — the panel serves the new fleet
+  // only after it is restarted — and it is above the button, not after it.
+  start_intro: "Choose a fleet, or start a new one.",
+  start_last: "you were here last time",
+  start_footer: "A fleet has a board, documentation and an orchestrator of its own. The machine's sessions are visible from every fleet.",
+  start_new: "Start a fleet",
+  start_new_title: "A new fleet",
+  start_new_text:
+    "fleetdeck makes the folder with a board and documentation in it, the same two the first run makes, and adds the fleet to the configuration. It is served after the panel is restarted — nothing that is running now is touched.",
+  start_new_name: "Name",
+  start_new_path: "Folder",
+  // What is written outside the folder being chosen, said before the button
+  // rather than found in the report after it — the wizard says the same thing
+  // in setup_outside, and making a fleet writes in the same two places.
+  start_new_outside:
+    "Outside that folder it adds the fleet to ~/.config/fleetdeck/config.yaml and the folder to permissions.additionalDirectories in ~/.claude/settings.json, so Claude Code sessions can write their cards. That file is rewritten as formatted JSON: a hand-ordered one does not come back in its own order.",
+  start_new_create: "Create the fleet",
+  start_new_cancel: "Cancel",
+  start_name_required: "Name the fleet",
+  start_new_unavailable: "This panel does not make fleets: it is a test stand.",
+  start_made: "The fleet is made. Restart the panel to work in it.",
+  start_failed: "The fleet was not made. What stopped it is named above; nothing after that step was done.",
+  start_offline: "The panel is not answering.",
   theme_auto: "theme: auto",
   theme_light: "theme: light",
   theme_dark: "theme: dark",
@@ -423,7 +455,29 @@ const ru = {
   fleet_none: "Без флота",
   fleet_sessions: "сессий",
   fleet_waiting: "ждут ответа",
+  fleet_menu: "флот",
+  fleet_menu_all: "Все флоты",
+  fleet_menu_new: "Завести флот…",
   // --- end of fleets ---
+
+  start_intro: "Выберите флот или заведите новый.",
+  start_last: "были здесь в прошлый раз",
+  start_footer: "У флота своя доска, своя документация и свой оркестратор. Сессии машины видны из любого флота.",
+  start_new: "Завести флот",
+  start_new_title: "Новый флот",
+  start_new_text:
+    "fleetdeck создаст папку, а в ней доску и документацию — те же две, что появляются при первом запуске, — и допишет флот в настройку. Панель начнёт его показывать после перезапуска; на то, что работает сейчас, это не влияет.",
+  start_new_name: "Имя",
+  start_new_path: "Папка",
+  start_new_outside:
+    "Вне этой папки флот будет дописан в ~/.config/fleetdeck/config.yaml, а сама папка — в permissions.additionalDirectories файла ~/.claude/settings.json, чтобы сессии Claude Code могли вести свои карточки. Этот файл будет перезаписан отформатированным JSON: если вы упорядочили ключи вручную, прежний порядок не вернётся.",
+  start_new_create: "Создать флот",
+  start_new_cancel: "Отмена",
+  start_name_required: "Укажите имя флота",
+  start_new_unavailable: "Эта панель не заводит флотов: это тестовый стенд.",
+  start_made: "Флот заведён. Перезапустите панель, чтобы в нём работать.",
+  start_failed: "Флот не заведён. Что помешало — написано выше; шаги после него не выполнялись.",
+  start_offline: "Панель не отвечает.",
   theme_auto: "тема: авто",
   theme_light: "тема: светлая",
   theme_dark: "тема: тёмная",

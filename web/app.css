@@ -423,12 +423,101 @@ body {
  * for an answer, in the waiting counter's colour, so a question there is seen
  * from here. Then, in the session list, the heading of the sessions no fleet
  * claims and one line per other fleet. */
-.fleet-switch {
+/* The fleet control: one menu with the application's icon and the name of the
+   fleet on screen, where a row of buttons used to be. It is shown with one
+   fleet too — the row was not, and a control that turns up only once a second
+   fleet exists is a second fleet nobody can find out about. */
+.fleet-menu {
+  position: relative;
   display: inline-flex;
-  gap: var(--gap-sm);
 }
 
-.fleet-entry,
+.fleet-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.fleet-menu-button:hover {
+  background: var(--surface-hover);
+}
+
+.fleet-menu-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.fleet-menu-chevron {
+  flex: none;
+  color: var(--text-muted);
+}
+
+/* Over the panel, not in the row: the header is a row of controls with no
+   room to grow, and a list that pushed it open would move every counter
+   beside it each time the menu opened. */
+.fleet-menu-list {
+  position: absolute;
+  top: calc(100% + var(--gap-sm));
+  left: 0;
+  z-index: 3;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: 0 4px 16px var(--shadow);
+}
+
+.fleet-menu-entry,
+.fleet-menu-other {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm) var(--gap);
+  cursor: pointer;
+}
+
+.fleet-menu-entry:hover,
+.fleet-menu-other:hover {
+  background: var(--surface-hover);
+}
+
+.fleet-menu-entry-current {
+  font-weight: 600;
+  background: var(--surface-hover);
+  cursor: default;
+}
+
+.fleet-menu-other {
+  color: var(--text-muted);
+}
+
+.fleet-menu-sep {
+  height: 1px;
+  margin: var(--gap-sm) 0;
+  background: var(--border);
+}
+
 .fleet-other {
   font: inherit;
   font-size: var(--fs-xs);
@@ -440,24 +529,29 @@ body {
   cursor: pointer;
 }
 
-.fleet-entry:hover,
 .fleet-other:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.fleet-entry-current {
-  color: var(--text);
-  font-weight: 600;
-  border-color: var(--accent);
-  cursor: default;
-}
-
-.fleet-entry-waiting,
+.fleet-menu-waiting,
 .fleet-other-waiting {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--danger);
+}
+
+/* The name takes what the row leaves, and a long one is cut rather than
+   pushing the counters off the end of the header. */
+.fleet-menu-name {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet-menu-entry {
+  justify-content: space-between;
 }
 
 .fleet-group-head {
@@ -2354,7 +2448,22 @@ body.is-resizing {
 
 .setup-title {
   font-size: var(--fs-md);
+  margin: 0;
+}
+
+/* The icon beside the title on the folder step. A person with no
+   configuration never reaches the start page, so this is the screen the
+   application opens on for them. */
+.setup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-lg);
   margin: var(--gap-lg) 0 0;
+}
+
+.setup-icon {
+  flex: none;
+  display: inline-flex;
 }
 
 .setup-intro,
@@ -2620,6 +2729,217 @@ body.is-resizing {
 }
 
 
+/* The start page (start.html, web/js/start.js): the screen the application
+   opens on. One column of the same width as the wizard's, because it is the
+   same kind of page — a few lines of text and a list to act on — and two
+   different column widths for the two screens a person meets first would read
+   as two different applications.
+
+   The panel's "main" button, the accent-filled one, was the wizard's alone.
+   It is here too now: this page exists to be acted on, and its one action is
+   making a fleet. Nowhere else has gained one. */
+.start-body {
+  display: block;
+  overflow-y: auto;
+}
+
+.start {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--gap-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  color: var(--text);
+}
+
+.start-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap);
+  padding: calc(var(--gap-lg) * 2) 0 var(--gap);
+  text-align: center;
+}
+
+.start-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin: 0;
+}
+
+.start-intro {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* Said, rather than shown as a machine with no fleets: an empty list and a
+   panel that is not answering look identical, and only one of them means the
+   operator has to do something. */
+.start-offline {
+  margin: 0;
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--attn);
+  line-height: 1.5;
+}
+
+.start-fleets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.start-fleet {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-lg);
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  padding: var(--gap) var(--gap-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.start-fleet:hover {
+  background: var(--surface-hover);
+}
+
+.start-fleet-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.start-fleet-name {
+  font-weight: 600;
+}
+
+/* The fleet the panel was last opened in. A mark on a row, never a decision:
+   the page opens nothing by itself (web/js/fleet.js rememberedFleet). */
+.start-fleet-last {
+  font-size: var(--fs-xs);
+  color: var(--accent-strong);
+}
+
+.start-fleet-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-lg);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The same colour the header's waiting counter uses, and for the same reason:
+   a question in a fleet is the one thing on this page a person has to act on. */
+.start-fleet-waiting {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--danger);
+}
+
+.start-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding-top: var(--gap);
+}
+
+.start-new {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent-strong);
+}
+
+.start-new:hover {
+  background: var(--accent-strong);
+}
+
+.start-new-form {
+  gap: var(--gap);
+}
+
+/* The two boxes are a name and a folder, and which is which has to be on
+   screen: aria-label alone left a form that could not be filled in without
+   guessing, found the first time it was used on a real page. */
+.start-field {
+  align-items: center;
+}
+
+.start-field-name {
+  flex: none;
+  width: 5rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.start-footer {
+  margin: 0;
+  padding-top: var(--gap-lg);
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* The application's icon (web/js/icon.js). Both variants are in the markup and
+   one of them is shown here, rather than the page picking one: "auto" is the
+   default theme and follows the system, which can change under a page that is
+   already open. Same three-block shape as the palette at the top of this file,
+   and for the same reason — no variant may have its only rule inside the media
+   query, or an explicit dark choice on a light system would show the light
+   drawing on a dark page. */
+.app-icon {
+  display: inline-flex;
+}
+
+/* No rule here may set display on the svg through a selector of its own —
+   ".app-icon svg" outranks ".app-icon-dark" (one class and a type beats one
+   class), and the first build of this shipped both drawings side by side in
+   the light theme. Every unit test passed; a live screen caught it. The
+   variants are the only rules that touch display, and they all weigh the
+   same. */
+.app-icon-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .app-icon-dark {
+    display: block;
+  }
+
+  :root:not([data-theme="light"]) .app-icon-light {
+    display: none;
+  }
+}
+
+:root[data-theme="dark"] .app-icon-dark {
+  display: block;
+}
+
+:root[data-theme="dark"] .app-icon-light {
+  display: none;
+}
 /* ---- Sessions that are no longer running -------------------------------
  *
  * Two states, drawn apart from the running ones and apart from each other.

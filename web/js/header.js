@@ -5,7 +5,13 @@ import { envelopeText } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
 import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
+import { fleetIconHTML } from "./icon.js";
 import { UPDATE_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
+
+// The icon beside the fleet's name in the header: small enough to sit in a
+// row of controls, large enough to be the application's mark rather than a
+// dot. The start page shows the same drawing much larger.
+const FLEET_ICON_SIZE = 20;
 
 // Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
 // Keep both lists and both functions in sync with that file if it ever
@@ -431,19 +437,67 @@ export function usageProblemHTML(severity, kind) {
   return "";
 }
 
-// fleetSwitcherHTML is the row of fleets a panel with more than one shows:
-// each fleet, this tab's marked, and on each the number of its own sessions
-// waiting for an answer, so a question in a fleet not on screen is still seen.
-// A panel with one fleet has no switcher: it looks as it did before fleets.
-export function fleetSwitcherHTML(entries) {
-  if (entries.length < 2) return "";
-  const buttons = entries.map((e) => {
-    const cls = e.current ? "fleet-entry fleet-entry-current" : "fleet-entry";
-    const current = e.current ? ' aria-current="page"' : "";
-    const waiting = e.waiting ? ` <span class="fleet-entry-waiting">${e.waiting}</span>` : "";
-    return `<button type="button" class="${cls}" data-fleet="${escapeHTML(e.name)}"${current}>${escapeHTML(e.name)}${waiting}</button>`;
+// fleetMenuHTML is the fleet control in the header: the icon, the name of the
+// fleet this tab shows, and — open — every fleet with the number of its own
+// sessions waiting for an answer, the way back to the start page and the way
+// to a fleet that does not exist yet.
+//
+// It replaced a row of buttons that appeared only on a panel with more than
+// one fleet, and it is shown with one fleet too. That is deliberate: a control
+// that turns up only once a second fleet exists is a second fleet nobody can
+// find out about, and making one is now a thing this menu leads to. The name
+// being on screen at all times is the other half — which fleet a tab shows was
+// readable only by its address before.
+//
+// Switching is still a navigation to ?fleet=<name>, a full page load, and this
+// changed none of that: what changed is how a fleet is chosen, not what
+// choosing one does (web/js/fleet.js).
+export function fleetMenuHTML(entries, open) {
+  const current = entries.find((e) => e.current) ?? entries[0];
+  const name = current ? current.name : t("fleet_none");
+  const items = entries.map((e) => {
+    const cls = e.current ? "fleet-menu-entry fleet-menu-entry-current" : "fleet-menu-entry";
+    const marked = e.current ? ' aria-current="page"' : "";
+    const waiting = e.waiting ? ` <span class="fleet-menu-waiting">${e.waiting}</span>` : "";
+    return `<button type="button" class="${cls}" data-fleet-menu="pick" data-fleet="${escapeHTML(e.name)}"${marked}>${escapeHTML(e.name)}${waiting}</button>`;
   });
-  return `<nav class="fleet-switch" aria-label="${escapeHTML(t("fleet_switch"))}">${buttons.join("")}</nav>`;
+  const list = open
+    ? `<div class="fleet-menu-list" role="menu">${items.join("")}<div class="fleet-menu-sep"></div>` +
+      `<button type="button" class="fleet-menu-other" data-fleet-menu="all">${escapeHTML(t("fleet_menu_all"))}</button>` +
+      `<button type="button" class="fleet-menu-other fleet-menu-new" data-fleet-menu="new">${escapeHTML(t("fleet_menu_new"))}</button></div>`
+    : "";
+  return (
+    `<div class="fleet-menu">` +
+    `<button type="button" class="fleet-menu-button" data-fleet-menu="toggle" aria-haspopup="true" aria-expanded="${open ? "true" : "false"}" aria-label="${escapeHTML(t("fleet_menu"))}">` +
+    `${fleetIconHTML(FLEET_ICON_SIZE)}<span class="fleet-menu-name">${escapeHTML(name)}</span>` +
+    `<svg class="fleet-menu-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4 L5 7 L8 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>` +
+    `</button>${list}</div>`
+  );
+}
+
+// nextMenuState is what a click means: whether the menu stays open, and where
+// the tab goes. A function of its own because the menu is built as markup, and
+// a handler attached to markup is invisible to the unit tests — three mutants
+// in exactly such handlers survived every test once, and only a stand killed
+// them (docs/engineering/multiple-fleets.md §7).
+//
+// Choosing the fleet already on screen goes nowhere on purpose: switching is a
+// full page load, and reloading the panel a person is looking at would close
+// every terminal they have open.
+export function nextMenuState(open, action, fleet, current) {
+  switch (action) {
+    case "toggle":
+      return { open: !open, go: null };
+    case "pick":
+      return { open: false, go: fleet && fleet !== current ? { fleet } : null };
+    case "all":
+      return { open: false, go: { path: "/" } };
+    case "new":
+      // The form lives on the start page; the fragment is what opens it there.
+      return { open: false, go: { path: "/#new" } };
+    default:
+      return { open: false, go: null };
+  }
 }
 
 // headerCounts is what the header's two counters count: this fleet's sessions
@@ -481,6 +535,25 @@ export function renderHeader(root) {
   // the thing being replaced. A repaint once a second showed a wait's time up
   // to a second after it passed two seconds (found on a live page, not in the
   // unit tests, which take the time as an argument).
+  // Whether the fleet menu is open, here rather than in the DOM: the header's
+  // markup is replaced whole roughly once a second, and a menu that lived only
+  // in that markup would shut itself under the operator's hand on the next
+  // snapshot. The last snapshot is kept beside it so the menu can be repainted
+  // on a click without waiting for one.
+  let menuOpen = false;
+  let lastSnapshot = null;
+  let lastPaint = () => {};
+  const applyMenu = (action, fleet) => {
+    const snap = lastSnapshot ?? {};
+    const current = snap.fleet ?? "";
+    const next = nextMenuState(menuOpen, action, fleet, current);
+    menuOpen = next.open;
+    lastPaint();
+    if (!next.go) return;
+    if (next.go.fleet) switchFleet(next.go.fleet, { storage: pageStorage() });
+    else globalThis.location.assign(next.go.path);
+  };
+
   const hostUpdate = typeof window[UPDATE_BINDING] === "function" ? () => window[UPDATE_BINDING]() : null;
   let update = initialState();
   const paintUpdate = () => {
@@ -505,19 +578,26 @@ export function renderHeader(root) {
       if (pressed.start) hostUpdate();
       return;
     }
-    const entry = event.target.closest(".fleet-entry");
-    if (entry) {
-      if (!entry.classList.contains("fleet-entry-current")) {
-        switchFleet(entry.dataset.fleet, { storage: pageStorage() });
-      }
+    const menu = event.target.closest("[data-fleet-menu]");
+    if (menu) {
+      applyMenu(menu.dataset.fleetMenu, menu.dataset.fleet ?? "");
       return;
     }
     const button = event.target.closest(".theme-toggle");
     if (!button) return;
-    button.textContent = t(themeLabelKey(cycleTheme()));
+    const label = t(themeLabelKey(cycleTheme()));
+    // The label is written to whatever button is in the page now, not to the
+    // node that was clicked. Clicking the theme with the fleet menu open
+    // closes the menu first, on the capture phase, and that repaints the
+    // header whole — the clicked node is detached by the time this runs, and
+    // writing to it would leave the header reading "theme: auto" on a page
+    // that had just turned light. The update button beside it has always
+    // re-queried for the same reason.
+    const live = root.querySelector(".theme-toggle") ?? button;
+    live.textContent = label;
   });
 
-  subscribe((rawSnap, connected) => {
+  const paint = (rawSnap, connected) => {
     const snap = rawSnap ?? {};
     const sessions = snap.sessions ?? [];
     const nowMs = Date.now();
@@ -533,7 +613,7 @@ export function renderHeader(root) {
 
     root.innerHTML = `
       ${brandHTML(snap.build)}
-      ${fleetSwitcherHTML(fleetEntries(snap, isWaiting))}
+      ${fleetMenuHTML(fleetEntries(snap, isWaiting), menuOpen)}
       ${themeButtonHTML()}
       ${hostUpdate ? updateHTML(update, nowMs) : ""}
       <div class="limits">
@@ -546,6 +626,39 @@ export function renderHeader(root) {
         <span class="counter counter-waiting ${waitingCount > 0 ? "counter-on" : ""}">${waitingCount} ${t("waiting_count")}</span>
         <span class="counter counter-stalled ${stalledCount > 0 ? "counter-on" : ""}">${stalledCount} ${t("stalled_count")} ${stalledList(stalledSessions)}</span>
       </div>`;
+  };
+
+  subscribe((rawSnap, connected) => {
+    lastSnapshot = rawSnap ?? {};
+    lastPaint = () => paint(rawSnap, connected);
+    paint(rawSnap, connected);
+  });
+
+  // An open menu closes on a click anywhere else and on Escape. Both are on
+  // the document, because the point is what happens outside the header: a menu
+  // that could only be closed by the control that opened it is a menu covering
+  // the panel until someone finds that control again.
+  // The click listener is on the capture phase, and that is load-bearing. On
+  // the bubble phase the header's own handler has already run and replaced the
+  // markup whole, so the clicked node is detached by the time this asks where
+  // it was: closest() then answers null for a click inside the menu, and the
+  // menu shuts itself in the same gesture that opened it. Seen on a live page,
+  // where opening it worked once and then did not — the unit tests cannot look
+  // here, because they never run a real event through a real document.
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!menuOpen) return;
+      if (event.target.closest?.(".fleet-menu")) return;
+      menuOpen = false;
+      lastPaint();
+    },
+    true,
+  );
+  document.addEventListener("keydown", (event) => {
+    if (!menuOpen || event.key !== "Escape") return;
+    menuOpen = false;
+    lastPaint();
   });
 }
 

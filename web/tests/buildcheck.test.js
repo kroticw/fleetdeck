@@ -14,6 +14,7 @@ import {
   takeReloadFrom,
   rememberReloadFrom,
   reloadNow,
+  takeReloadFleet,
   bannerHTML,
   brandHTML,
   readOwnBuild,
@@ -343,4 +344,31 @@ test("reaching storage never throws, even when the property itself does", () => 
     if (had) Object.defineProperty(globalThis, "sessionStorage", had);
     else delete globalThis.sessionStorage;
   }
+});
+
+// The window reloads by navigating to a fixed address, and that address is the
+// start page now. The fleet on screen is written down beside the build, so the
+// start page can carry the page back rather than stranding it on a list — see
+// web/js/start.js.
+test("a reload writes down the fleet it was in, and it is taken once", () => {
+  const map = new Map();
+  const storage = {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => map.set(key, value),
+    removeItem: (key) => map.delete(key),
+  };
+  reloadNow(storage, "aaa", () => {}, "vpn");
+  assert.equal(takeReloadFleet(storage), "vpn");
+  assert.equal(takeReloadFleet(storage), "", "taken twice, the second load would hop away for no reason");
+});
+
+test("a reload from a page with no fleet leaves nothing behind to carry back to", () => {
+  const map = new Map([["fleetdeck-reload-fleet", "stale"]]);
+  const storage = {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => map.set(key, value),
+    removeItem: (key) => map.delete(key),
+  };
+  reloadNow(storage, "aaa", () => {}, "");
+  assert.equal(takeReloadFleet(storage), "");
 });
