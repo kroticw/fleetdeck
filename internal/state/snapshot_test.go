@@ -37,6 +37,42 @@ func TestLinkKeysBySessionShortNotTranscriptID(t *testing.T) {
 	}
 }
 
+// TestLinkCarriesTheNumberOfTheCardItLinks pins that a session knows its card's
+// number, not only its path: the session list is where a person asks "what is
+// this one busy with", and the number is the answer they can say out loud.
+// The number comes from the same card the path does, never from another one.
+func TestLinkCarriesTheNumberOfTheCardItLinks(t *testing.T) {
+	sessions := []daemon.Session{{Short: "abc12345"}, {Short: "cafe0001"}, {Short: "deadbeef"}}
+	cards := []board.Card{
+		{Path: "/board/one.md", ID: "T-018", Session: "abc12345"},
+		{Path: "/board/two.md", Session: "cafe0001"},
+	}
+	views := Link(sessions, cards)
+	if views[0].CardPath != "/board/one.md" || views[0].CardID != "T-018" {
+		t.Fatalf("a linked session must carry its card's number: %+v", views[0])
+	}
+	if views[1].CardPath != "/board/two.md" || views[1].CardID != "" {
+		t.Fatalf("a card with no number must give its session none: %+v", views[1])
+	}
+	if views[2].CardID != "" {
+		t.Fatalf("a session no card names must carry no number: %+v", views[2])
+	}
+}
+
+// TestLinkTakesTheNumberFromTheCardThatWon pins that when two cards name one
+// session the number and the path come from the same card.
+func TestLinkTakesTheNumberFromTheCardThatWon(t *testing.T) {
+	sessions := []daemon.Session{{Short: "abc12345"}}
+	cards := []board.Card{
+		{Path: "/board/b.md", ID: "T-002", Session: "abc12345"},
+		{Path: "/board/a.md", ID: "T-001", Session: "abc12345"},
+	}
+	views := Link(sessions, cards)
+	if views[0].CardPath != "/board/a.md" || views[0].CardID != "T-001" {
+		t.Fatalf("path and number must come from one card: %+v", views[0])
+	}
+}
+
 func TestOrphanCardsReportsCardNamingDeadSession(t *testing.T) {
 	cards := []board.Card{{Path: "/board/one.md", Session: "gone1234"}}
 	orphans := OrphanCards(nil, cards)

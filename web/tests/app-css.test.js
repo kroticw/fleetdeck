@@ -95,6 +95,17 @@ test("the card's number is shaped differently from the session's short id", () =
   for (const selector of ["\\.knum-none", "\\.card-num-none"]) {
     assert.match(body(selector), /background:\s*none/, `${selector} must not wear the number's chip`);
   }
+
+  // On the session list's button (T-042). A live row is itself drawn on
+  // --surface-hover, the chip's own ground, so a chip left at that background
+  // vanishes into its row and the number is back to plain monospace — measured
+  // on a stand, where the two computed to the same colour in both themes.
+  const background = (selector) => /background:\s*([^;]+);/.exec(body(selector))?.[1].trim();
+  assert.ok(background("\\.srow \\.knum"), ".srow .knum has no background: the chip disappears into a live row");
+  assert.notEqual(background("\\.srow \\.knum"), background("\\.srow"),
+    "the chip on a live row wears the row's own background, so it cannot be seen");
+  assert.match(body("\\.srow \\.knum-none"), /background:\s*none/,
+    ".srow .knum-none must not be given the chip by the live row's rule");
 });
 
 test("the documentation section's rules are top-level rules", () => {

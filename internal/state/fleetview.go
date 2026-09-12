@@ -69,7 +69,7 @@ func ForFleet(whole Snapshot, name string) (Snapshot, error) {
 	view.StoppedCards = StoppedCards(whole.Sessions, own.Cards)
 	view.Sessions = make([]SessionView, len(whole.Sessions))
 	for i, v := range whole.Sessions {
-		v.CardPath = linked[i].CardPath
+		v.CardPath, v.CardID = linked[i].CardPath, linked[i].CardID
 		v.Fleets = claims[v.Short]
 		view.Sessions[i] = v
 	}

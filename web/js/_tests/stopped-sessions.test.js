@@ -155,6 +155,12 @@ test("a stopped session with a card keeps the button that opens it", () => {
     "the card is a file, not a session: opening it still works");
 });
 
+test("a stopped session's card button names the card's number too", () => {
+  const html = goneRowHtml({ short: "aa11", name: "n", lifecycle: "stopped", cardPath: "/b/c.md", cardId: "T-018" });
+  assert.match(html, /<button[^>]*class="scard"[^>]*>[\s\S]*class="knum"[^>]*>T-018<[\s\S]*<\/button>/,
+    "the question 'which card was this' outlives the session");
+});
+
 // --- the list ---
 
 class ListSocket {

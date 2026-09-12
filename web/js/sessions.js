@@ -31,6 +31,7 @@ import { pageStorage } from "./buildcheck.js";
 import { isLive, isResumable } from "./lifecycle.js";
 import { sessionMarks } from "./initials.js";
 import { isWaiting, isWaitingUnknown } from "./needs.js";
+import { cardNumberHTML } from "./cardnumber.js";
 
 // The text explaining *why* a session isn't moving. Where needs has words, they
 // are the words that matter. Where it has none -- a flags-only Stalled session,
@@ -192,7 +193,7 @@ export function rowHtml(s, stalledNow) {
   // "to this session's card". The full path stays in the title for whoever
   // needs it; the label is what the rest of us read.
   const cardHtml = s.cardPath
-    ? `<button type="button" class="scard" data-card="${escapeHtml(s.cardPath)}" title="${escapeHtml(t("open_card_hint"))}: ${escapeHtml(s.cardPath)}">${escapeHtml(t("open_card"))} &#8599;</button>`
+    ? `<button type="button" class="scard" data-card="${escapeHtml(s.cardPath)}" title="${escapeHtml(t("open_card_hint"))}: ${escapeHtml(s.cardPath)}">${escapeHtml(t("open_card"))} ${cardNumberHTML(s.cardId)} &#8599;</button>`
     : "";
 
   const costHtml =
@@ -307,7 +308,7 @@ export function goneRowHtml(s, state = {}) {
     : "";
 
   const cardHtml = s.cardPath
-    ? `<button type="button" class="scard" data-card="${escapeHtml(s.cardPath)}" title="${escapeHtml(t("open_card_hint"))}: ${escapeHtml(s.cardPath)}">${escapeHtml(t("open_card"))} &#8599;</button>`
+    ? `<button type="button" class="scard" data-card="${escapeHtml(s.cardPath)}" title="${escapeHtml(t("open_card_hint"))}: ${escapeHtml(s.cardPath)}">${escapeHtml(t("open_card"))} ${cardNumberHTML(s.cardId)} &#8599;</button>`
     : "";
 
   return `
