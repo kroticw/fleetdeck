@@ -196,6 +196,29 @@ test("downloading and checking are steps the person can see", () => {
 // A build that cannot update must not start one when the button is pressed
 // anyway -- by a keyboard, or by a click the browser delivered before the
 // answer arrived.
+// The window asks GitHub once a day, at startup, and says nothing unless
+// there is something to say. When there is, it has to be visible without
+// anybody having pressed anything -- that is the whole point of asking.
+test("a version found at startup is shown, and the button still works", () => {
+  const state = onProgress(initialState(), { step: "available", detail: "v0.4.0" }, 0);
+  const html = updateHTML(state, 0);
+
+  assert.ok(has(html, "update_available", { version: "v0.4.0" }), `nothing on screen: ${html}`);
+  assert.match(html, /class="update-button"/);
+  assert.doesNotMatch(html, /disabled/, "the button that would install it is not pressable");
+  assert.equal(onPress(state, { unsent: false, now: 1 }).start, true);
+});
+
+// A version offered at startup must not sit on screen once an update has
+// started: the state moves on with the update, like every other step.
+test("starting the update replaces the offer", () => {
+  const offered = onProgress(initialState(), { step: "available", detail: "v0.4.0" }, 0);
+
+  const pressed = onPress(offered, { unsent: false, now: 1 });
+
+  assert.equal(pressed.state.phase, "running");
+});
+
 test("pressing a button that cannot update starts nothing", () => {
   const state = onProgress(initialState(), { step: "cannot", reason: "built-here" }, 0);
 

@@ -616,6 +616,14 @@ body {
   font-weight: 600;
 }
 
+/* A version found at startup, with nobody having asked. It is news rather than
+   a problem, so it reads as the same weight as a refusal without borrowing a
+   refusal's colour. */
+.update-status.update-available {
+  color: var(--text);
+  font-weight: 600;
+}
+
 main {
   flex: 1;
   display: flex;

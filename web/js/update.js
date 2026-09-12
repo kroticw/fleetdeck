@@ -73,6 +73,10 @@ export function onProgress(state, { step, detail = "", reason = "" }, now) {
     // What the window answers when this build cannot update itself at all.
     case "cannot":
       return { phase: "cannot", reason };
+    // The window asked GitHub at startup, unprompted, and there is a newer
+    // version. Nobody pressed anything, so this has to show itself.
+    case "available":
+      return { phase: "available", detail };
     // The window's answer when it can. Nothing to show, and it must not be
     // taken for a step of an update that is not running.
     case "can":
@@ -165,6 +169,11 @@ export function updateHTML(state, now) {
       break;
     case "current":
       inner = button(t("update_button"), false) + status(fill("update_current", { rev: shortRev(state.detail) }));
+      break;
+    // Found at startup, with nobody asking. The button beside it is the one
+    // that installs it, and it stays pressable.
+    case "available":
+      inner = button(t("update_button"), false) + status(fill("update_available", { version: state.detail }), "update-available");
       break;
     case "busy":
       inner = button(t("update_button"), false) + status(t("update_busy"), "update-problem");

@@ -224,6 +224,12 @@ func main() {
 	}); err != nil {
 		log.Printf("fleetdeck-window: the update button will not work: %v", err)
 	}
+	// One question at startup, at most once a day, and silent unless there is
+	// an answer worth a person's attention. A window started by a handover
+	// asks nothing: it has just been installed, and it knows it is the newest.
+	if how.Source != nil && *handover == "" {
+		go askAtStart(w, how.Source)
+	}
 
 	// The window's own ground until the keeper's first word, which comes within
 	// one look at the URL.
