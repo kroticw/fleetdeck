@@ -45,7 +45,14 @@ const en = {
   // difference between knowing what happened and guessing.
   stopped_group: "Stopped",
   stopped_badge: "Stopped",
-  stopped_resume_hint: "resumes with its history",
+  // The button, what it promises, and what it says while it is keeping the
+  // promise. resume_working is not decoration: the resume can take the better
+  // part of a minute on a session with a long history, and a button that looks
+  // untouched for that long reads as one that did nothing.
+  resume: "Resume",
+  resume_hint: "Bring this session back with its history",
+  resume_working: "Resuming…",
+  resume_failed: "could not resume",
   gone_group: "Cannot be resumed",
   gone_badge: "Gone",
   gone_no_cwd: "its working directory no longer exists",
@@ -324,7 +331,10 @@ const ru = {
 
   stopped_group: "Остановлены",
   stopped_badge: "Остановлена",
-  stopped_resume_hint: "поднимается с историей",
+  resume: "Поднять",
+  resume_hint: "Вернуть сессию вместе с её историей",
+  resume_working: "Поднимаю…",
+  resume_failed: "не удалось поднять",
   gone_group: "Не поднять",
   gone_badge: "Не поднять",
   gone_no_cwd: "рабочего каталога больше нет",

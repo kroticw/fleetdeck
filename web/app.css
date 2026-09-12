@@ -2981,19 +2981,59 @@ body.is-resizing {
   color: var(--text-muted);
 }
 
-/* How to bring a stopped session back. The panel cannot do it itself, so
-   this is the row's only actionable content and has to stay readable at the
-   column's narrowest — it wraps rather than clipping. */
+/* How to bring a stopped session back. This used to be the command to type in
+   a terminal, because the panel could not do it itself; it is the button that
+   does it now.
+
+   It is the only pressable thing on a row that is otherwise all text, and it
+   is drawn to look like one — the same lesson .col-size-unfold above paid a
+   screenshot for. The obligation runs the other way too, and is the reason the
+   badge, the last state and the reason beside them are left exactly as they
+   were: on a row with one control, anything else that took on a border and a
+   surface would read as a second one. */
 .sresume {
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  margin-top: 4px;
-  overflow-wrap: anywhere;
+  margin-top: 6px;
 }
 
-.sresume code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text);
+.sresume-btn {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  /* Big enough to aim at without a second thought. The row is narrow and the
+     button is small, and a target a person has to be careful with is one they
+     press twice. */
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.sresume-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--accent-strong);
+}
+
+/* Pressed and working. The resume does not answer until the session is up or
+   has failed to come up, which on a long history is the better part of a
+   minute, so this state is on screen long enough to be read and has to say
+   plainly that something is happening rather than merely looking inert. */
+.sresume-btn:disabled {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: var(--surface);
+  cursor: progress;
+}
+
+/* Why the last attempt failed, in the words it failed in. It stays until
+   something changes it, so it must survive being long: the daemon's own
+   reasons are sentences, not codes, and this wraps rather than clipping them
+   to a width nobody can read. */
+.sresume-error {
+  font-size: var(--fs-2xs);
+  color: var(--attn);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 /* The job store could not be read, so whether anything is stopped is

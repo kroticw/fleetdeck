@@ -792,6 +792,17 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		Snapshot:    p.snapshot,
 		CreateFleet: fleetMaker(configPath),
 		SendText:    func(session, text string) error { return dc.SendText(ctx, session, text) },
+		// Resuming reads the job store and the transcripts on every press
+		// rather than off the snapshot: the button in front of the operator
+		// was drawn from a reading that may be hours old, and a working
+		// directory deleted since then is exactly the case this must not
+		// dispatch into. See resume.go.
+		ResumeSession: resumeSession(resumeDeps{
+			jobStore: jobStoreDir,
+			projects: projectsDir(),
+			listed:   func(lctx context.Context) ([]daemon.Session, error) { return dc.ListSessions(lctx) },
+			resume:   func(rctx context.Context, spec daemon.ResumeSpec) error { return dc.Resume(rctx, spec) },
+		}),
 		// Returned through a local, not directly: a nil *daemon.Attachment put straight
 		// into the interface would be a non-nil Terminal holding nothing.
 		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {

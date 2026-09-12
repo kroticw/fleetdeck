@@ -525,6 +525,16 @@ type Client struct {
 	protoMu         sync.Mutex    // guards proto; the client is shared between a poller and request handlers
 	proto           int           // cached protocol number from ping
 	defaultDeadline time.Duration // default deadline when context carries none (default 30s)
+
+	// How long Resume waits for a dispatched worker, and how often it asks.
+	// Fields rather than constants purely so the tests can shorten them: a
+	// test of the timeout that actually waited thirty seconds would be
+	// skipped by whoever ran the suite next. Their real values, and why they
+	// are those, are on resume.go's own constants.
+	resumeTimeout    time.Duration
+	resumeSettle     time.Duration
+	resumePoll       time.Duration
+	resumeRetryDelay time.Duration
 }
 
 // New creates a daemon client bound to an explicit socket path for its whole lifetime.
@@ -540,9 +550,13 @@ func New(socketPath string, key func() (string, error)) *Client {
 		key = stubKeyFunc
 	}
 	return &Client{
-		socketPath:      socketPath,
-		keyFunc:         key,
-		defaultDeadline: 30 * time.Second,
+		socketPath:       socketPath,
+		keyFunc:          key,
+		defaultDeadline:  30 * time.Second,
+		resumeTimeout:    resumeTimeout,
+		resumeSettle:     resumeSettle,
+		resumePoll:       resumePoll,
+		resumeRetryDelay: resumeRetryDelay,
 	}
 }
 

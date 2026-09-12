@@ -101,6 +101,25 @@ type Record struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
+	// RespawnFlags and LinkScanPath are read for the resume descriptor alone
+	// (internal/daemon.Client.Resume) and for nothing this package's callers
+	// display.
+	//
+	// RespawnFlags is the command line the session was started with, as the
+	// store recorded it — its name, its model, its permission mode, its
+	// settings. A resume that drops them brings the session back as a
+	// different session: same history, other model. Nothing here interprets
+	// them; they are carried to the daemon exactly as they were found, which
+	// is also why they never leave the Go side — a flag list can hold a
+	// --settings blob, and the browser has no business with it.
+	//
+	// LinkScanPath is the store's own note of where the session's transcript
+	// was last seen. It is a hint, not an answer: it is checked for still
+	// existing and naming this session before it is used, and the ordinary
+	// search under ~/.claude/projects is what answers otherwise.
+	RespawnFlags []string
+	LinkScanPath string
+
 	// Resumable reports whether this session can be brought back in place,
 	// with its full history, as opposed to being really dead. The rule is
 	// claude-agents-mcp's own (internal/agents/resume.go): it needs an id to
@@ -114,17 +133,19 @@ type Record struct {
 // state is the subset of state.json this package reads. Every field is
 // optional and none is required to produce a usable record.
 type state struct {
-	SessionID       string `json:"sessionId"`
-	ResumeSessionID string `json:"resumeSessionId"`
-	Name            string `json:"name"`
-	CWD             string `json:"cwd"`
-	State           string `json:"state"`
-	Detail          string `json:"detail"`
-	Intent          string `json:"intent"`
-	Backend         string `json:"backend"`
-	CLIVersion      string `json:"cliVersion"`
-	CreatedAt       string `json:"createdAt"`
-	UpdatedAt       string `json:"updatedAt"`
+	SessionID       string   `json:"sessionId"`
+	ResumeSessionID string   `json:"resumeSessionId"`
+	Name            string   `json:"name"`
+	CWD             string   `json:"cwd"`
+	State           string   `json:"state"`
+	Detail          string   `json:"detail"`
+	Intent          string   `json:"intent"`
+	Backend         string   `json:"backend"`
+	CLIVersion      string   `json:"cliVersion"`
+	CreatedAt       string   `json:"createdAt"`
+	UpdatedAt       string   `json:"updatedAt"`
+	RespawnFlags    []string `json:"respawnFlags"`
+	LinkScanPath    string   `json:"linkScanPath"`
 }
 
 // Dir returns the job store's location, ~/.claude/jobs.
@@ -216,14 +237,22 @@ func parse(short string, body []byte) Record {
 		CLIVersion:      s.CLIVersion,
 		CreatedAt:       parseTime(s.CreatedAt),
 		UpdatedAt:       parseTime(s.UpdatedAt),
+		RespawnFlags:    s.RespawnFlags,
+		LinkScanPath:    s.LinkScanPath,
 	}
-	r.Resumable = r.resumeID() != "" && !cwdMissing(r.CWD)
+	r.Resumable = r.ResumeID() != "" && !cwdMissing(r.CWD)
 	return r
 }
 
-// resumeID is the id the daemon would resume this session by: the explicit
+// ResumeID is the id the daemon would resume this session by: the explicit
 // resume id when the store carries one, the transcript id otherwise.
-func (r Record) resumeID() string {
+//
+// Exported because the resume path outside this package has to apply exactly
+// the rule Resumable applied inside it. A second copy of "which id do we
+// resume by" is a copy that can disagree, and the disagreement is silent: a
+// session this package calls resumable, dispatched under an id the daemon
+// does not know.
+func (r Record) ResumeID() string {
 	if r.ResumeSessionID != "" {
 		return r.ResumeSessionID
 	}

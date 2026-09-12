@@ -46,6 +46,18 @@ var ErrFieldWrittenNotCommitted = errors.New("field written but not committed")
 // operator would create the card again and get a second one.
 var ErrCardWrittenNotCommitted = errors.New("card written but not committed")
 
+// ErrSessionNotResumable is what ResumeSession wraps when the session itself is
+// the reason the resume cannot happen — no id to resume by, a working directory
+// that is gone, no transcript to resume from — as opposed to the daemon having
+// failed at it.
+//
+// It exists because those two failures call for different things and read
+// identically as a bare error. The daemon failing is worth another press; a
+// session that cannot come back is not, and nothing the operator does to this
+// panel changes it. The words reach them either way — only the status code
+// differs, for whatever else reads this API.
+var ErrSessionNotResumable = errors.New("session cannot be resumed")
+
 // Deps holds everything the HTTP surface needs from the rest of the program.
 //
 // Every field is optional. A nil function means a panel wired without that
@@ -63,6 +75,19 @@ type Deps struct {
 	// parameter because the daemon's reply operation has no such option — see
 	// daemon.Client.SendText.
 	SendText func(session, text string) error
+
+	// ResumeSession brings a stopped session back in place, under its own short
+	// id and with its history, and returns only once it is up or certainly not
+	// coming. It takes the short id and nothing else: everything the daemon
+	// needs to rebuild the session — the id to resume by, the working
+	// directory, the flags it ran with — is read on the far side of this
+	// function from Claude Code's job store, and none of it has any business
+	// passing through a browser.
+	//
+	// An error wrapping ErrSessionNotResumable means the session is why it
+	// cannot happen; anything else means the attempt failed. A panel wired
+	// without it resumes nothing and says so.
+	ResumeSession func(short string) error
 
 	// SetCardField writes one field of one card, and records it in the board's git
 	// history if the caller wired it to do so. The server does not decide which
@@ -254,6 +279,7 @@ func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
 	mux.HandleFunc("POST /api/sessions/{id}/text", d.handleSendText)
+	mux.HandleFunc("POST /api/sessions/{id}/resume", d.handleResume)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
 	mux.HandleFunc("POST /api/fleets", d.handleCreateFleet)
