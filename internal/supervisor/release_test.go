@@ -119,8 +119,9 @@ func TestLatestSaysThereAreNoReleasesYet(t *testing.T) {
 }
 
 // The archive's name is a contract with scripts/build-dist-app.sh, which
-// writes fleetdeck-<version>-macos.zip. TestTheReleaseArchiveIsNamedTheWayTheBuildNamesIt
-// in cmd/fleetdeck-window holds the two spellings together.
+// writes fleetdeck-<version>-macos.zip. TestDistAppBuildsAnAppAPersonCanInstall
+// in cmd/fleetdeck-window holds the two spellings together: it names the zip in
+// Go and then requires the real `make dist-app` to leave that exact path.
 func TestArchiveURLNamesTheZipTheReleaseCarries(t *testing.T) {
 	got := (&Releases{Base: "https://github.com/kroticw/fleetdeck"}).ArchiveURL("v0.4.0")
 	want := "https://github.com/kroticw/fleetdeck/releases/download/v0.4.0/fleetdeck-v0.4.0-macos.zip"
