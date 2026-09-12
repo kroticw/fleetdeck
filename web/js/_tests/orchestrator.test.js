@@ -450,6 +450,66 @@ test("the row goes away on the cycle after the working order is written, without
   assert.equal(c.root.querySelector(".o-error-brief"), null, "the file is there and the row still says it is not");
 });
 
+// A file at the brief's path that fleetdeck did not write is the quieter
+// sibling of a missing one: an orchestrator notices an absent brief when it
+// goes to read it, but a foreign one it reads and works by. The wizard
+// refuses to replace such a file, so telling the operator to run the wizard
+// would send them straight into that refusal — the row has to say what is in
+// the way.
+
+const FOREIGN = {
+  ...structuredClone(PIN),
+  orchestratorBriefForeign: true,
+  orchestratorBriefPath: "/board/docs/orchestrator.md",
+};
+
+test("a pin beside a file fleetdeck did not write says so, names the file, and does not call it missing", () => {
+  const said = briefWarning(FOREIGN);
+  assert.ok(said.includes(t("orchestrator_brief_foreign")), "the row does not say the file is not fleetdeck's");
+  assert.ok(said.includes("/board/docs/orchestrator.md"), "the row does not say which file is in the way");
+  assert.ok(!said.includes(t("orchestrator_brief_missing")), "a file that is on disk is called missing");
+});
+
+test("a foreign brief with nothing pinned raises no row", () => {
+  assert.equal(briefWarning({ ...FOREIGN, orchestratorSession: "", orchestratorBriefForeign: false }), "");
+});
+
+test("the foreign working order is on screen in the working-order row", async () => {
+  const c = await column(structuredClone(FOREIGN));
+  const row = c.root.querySelector(".o-error-brief");
+  assert.ok(row, "a pinned orchestrator beside a foreign brief is shown as nothing at all");
+  assert.ok(row.textContent.includes(t("orchestrator_brief_foreign")), "the row is there but does not say what is wrong");
+});
+
+test("the foreign-brief row goes away on the cycle after the wizard writes its own, without a reload", async () => {
+  const c = await column(structuredClone(FOREIGN));
+  assert.ok(c.root.querySelector(".o-error-brief"), "the row was never there to begin with");
+
+  await c.push({ ...structuredClone(PIN), orchestratorBriefPath: "/board/docs/orchestrator.md" });
+  assert.equal(c.root.querySelector(".o-error-brief"), null, "the brief is fleetdeck's now and the row still says it is not");
+});
+
+// Missing and foreign are both a row in the same place, so a signature that
+// only knew "there is a row" would keep the first text on screen when the
+// state turned into the other one — a file deleted, a person's file put in
+// its place, and the column still saying "run the wizard".
+test("the row follows a missing brief turning into a foreign one", async () => {
+  const c = await column({ ...structuredClone(PIN), orchestratorBriefMissing: true, orchestratorBriefPath: "/board/docs/orchestrator.md" });
+  assert.ok(c.root.querySelector(".o-error-brief").textContent.includes(t("orchestrator_brief_missing")));
+
+  await c.push(structuredClone(FOREIGN));
+  const rows = c.root.querySelectorAll(".o-error-brief");
+  assert.equal(rows.length, 1, "the two states each put up a row of their own");
+  assert.ok(rows[0].textContent.includes(t("orchestrator_brief_foreign")), "the row still says what was true a cycle ago");
+});
+
+test("the view signature tells a missing brief, a foreign one and a sound one apart", () => {
+  const sound = { ...structuredClone(PIN), orchestratorBriefPath: "/board/docs/orchestrator.md" };
+  const missing = { ...sound, orchestratorBriefMissing: true };
+  const signatures = new Set([sound, missing, FOREIGN].map((s) => viewSignature(s, true)));
+  assert.equal(signatures.size, 3, "two of the three brief states redraw as the same column");
+});
+
 // Requirement 5 of the first-run wizard's card: the wizard can be run again,
 // and the column the orchestrator lives in is where a person looks for it —
 // pinned or not, since "nothing pinned" is exactly when it is wanted.

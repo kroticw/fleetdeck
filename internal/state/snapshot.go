@@ -215,8 +215,18 @@ type Snapshot struct {
 	//
 	// Missing is never true with nothing pinned: an absent brief claims
 	// nothing when no session is claimed to have been given one.
+	//
+	// OrchestratorBriefForeign says that OrchestratorSession names a session
+	// while the file at that path was not written by fleetdeck
+	// (internal/orchestrator.ReadBriefState). It is the quieter of the two: an
+	// orchestrator notices a missing brief when it goes to read it, but reads
+	// a foreign one and works by it. The wizard refuses to replace such a file
+	// (orchestrator.ErrNotOurs); the dropdown pins beside it without asking.
+	// Missing and Foreign are never both true, and Foreign is never true with
+	// nothing pinned, for the same reason Missing is not.
 	OrchestratorBriefPath    string `json:"orchestratorBriefPath,omitempty"`
 	OrchestratorBriefMissing bool   `json:"orchestratorBriefMissing,omitempty"`
+	OrchestratorBriefForeign bool   `json:"orchestratorBriefForeign,omitempty"`
 
 	// Build describes the panel that produced this snapshot. A page open for
 	// hours compares Build.Web with the fingerprint its own document arrived
@@ -245,12 +255,13 @@ type FleetBoard struct {
 	Fleet      fleet.Fleet
 	Cards      []board.Card
 	BoardError string
-	// BriefPath and BriefMissing are this fleet's own answer to the pair of
-	// snapshot fields of the same name, filled per fleet because each fleet
-	// has its own orchestrator and its own documentation directories, and so
-	// its own brief in its own place.
+	// BriefPath, BriefMissing and BriefForeign are this fleet's own answer to
+	// the snapshot fields of the same names, filled per fleet because each
+	// fleet has its own orchestrator and its own documentation directories,
+	// and so its own brief in its own place.
 	BriefPath    string
 	BriefMissing bool
+	BriefForeign bool
 }
 
 // Link attaches each session to the card that names it. A card names a

@@ -52,7 +52,8 @@ export function resolveOrchestrator(snap) {
 }
 
 // briefWarning is what the column says when the pin stands for a working
-// order that is not on disk, and "" when there is nothing to say.
+// order that is not on disk, or for a file at its place that fleetdeck did not
+// write, and "" when there is nothing to say.
 //
 // The pin means one thing: this session has been given the fleet's working
 // order. The dropdown in this column's own head moves the pin and writes
@@ -67,13 +68,29 @@ export function resolveOrchestrator(snap) {
 // brief written and later removed is indistinguishable on disk from one never
 // written, so only a standing answer covers both.
 //
+// A file at that place that fleetdeck did not write is the quieter form of the
+// same failure: an orchestrator notices a missing brief when it goes to read
+// it, but reads a foreign one and works by it. It shares the row, since it is
+// the same claim contradicted, and not the text: the wizard refuses to
+// replace such a file, so "run the wizard" would send the operator into that
+// refusal. The collector never sets both flags; missing is checked first all
+// the same, so a snapshot that somehow did would still not hide a brief that
+// is not there.
+//
+// The text, not only whether there is one, is what viewSignature tracks: both
+// states put a row in the same place, and a missing brief turning into a
+// foreign one has to redraw it.
+//
 // The path is appended because the row has to be actionable. "Something is
 // missing" with nowhere to look is the kind of warning an operator learns to
 // scroll past.
 export function briefWarning(snap) {
-  if (!snap?.orchestratorBriefMissing) return "";
+  let key;
+  if (snap?.orchestratorBriefMissing) key = "orchestrator_brief_missing";
+  else if (snap?.orchestratorBriefForeign) key = "orchestrator_brief_foreign";
+  else return "";
   const path = snap.orchestratorBriefPath ?? "";
-  const said = t("orchestrator_brief_missing");
+  const said = t(key);
   return path ? `${said}: ${path}` : said;
 }
 

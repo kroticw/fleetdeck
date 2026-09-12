@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -37,6 +38,56 @@ const briefName = "orchestrator.md"
 
 // ErrNotOurs is WriteBrief refusing a file fleetdeck did not write.
 var ErrNotOurs = errors.New("not written by fleetdeck")
+
+// ours is the one rule for "fleetdeck wrote this": the content starts with the
+// marker. WriteBrief refuses by it and ReadBriefState reports by it, so the
+// panel cannot call a file foreign that the wizard would replace, or ours one
+// the wizard refuses.
+func ours(content []byte) bool {
+	return bytes.HasPrefix(content, []byte(marker))
+}
+
+// BriefState is what stands at a brief's path, as a session told to read it
+// would find it.
+type BriefState int
+
+const (
+	// BriefNone is nothing a session could read as a working order: no file,
+	// something that is not a regular file, or a file that cannot be opened.
+	BriefNone BriefState = iota
+	// BriefOurs is a brief fleetdeck wrote.
+	BriefOurs
+	// BriefForeign is a readable file fleetdeck did not write: the one
+	// WriteBrief refuses with ErrNotOurs, and the one a session pinned beside
+	// it reads as its working order without anything telling it otherwise.
+	BriefForeign
+)
+
+// ReadBriefState says what is at path. Only as many bytes as the marker has
+// are read, so a large file costs no more than a small one.
+//
+// The path is looked at before it is opened: opening a named pipe that has no
+// writer blocks, and a collect cycle must not stop on one.
+func ReadBriefState(path string) BriefState {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return BriefNone
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return BriefNone
+	}
+	defer func() { _ = f.Close() }()
+	head := make([]byte, len(marker))
+	n, err := io.ReadFull(f, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return BriefNone
+	}
+	if ours(head[:n]) {
+		return BriefOurs
+	}
+	return BriefForeign
+}
 
 // Lang is the language the working order is given in: Russian for any "ru"
 // tag, English for everything else — the two languages it is written in.
@@ -120,7 +171,7 @@ func WriteBrief(path string, content []byte) error {
 	existing, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		if !bytes.HasPrefix(existing, []byte(marker)) {
+		if !ours(existing) {
 			return fmt.Errorf("%s is %w: move it aside or rename it, and the wizard will write its own", path, ErrNotOurs)
 		}
 	case !errors.Is(err, fs.ErrNotExist):

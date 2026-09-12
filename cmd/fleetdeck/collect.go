@@ -404,29 +404,45 @@ func (c *Collector) pruneContextCache(live map[string]struct{}) {
 }
 
 // briefState says where f's orchestrator brief belongs and whether f is
-// pinned to a session that has none. It is asked on every collect cycle, and
-// deliberately not once at appointment time: a brief written and then removed
-// by hand is indistinguishable on disk from one never written, so only a
-// standing check reports both.
+// pinned to a session that has none, or has one fleetdeck did not write. It is
+// asked on every collect cycle, and deliberately not once at appointment time:
+// a brief written and then removed by hand is indistinguishable on disk from
+// one never written, and a person's file put there afterwards is no different
+// from one that was there first, so only a standing check reports them.
 //
 // Anything that is not a readable regular file at that path counts as none.
-// A directory of that name, or a path the panel may not stat, is not a
+// A directory of that name, or a path the panel may not read, is not a
 // working order any orchestrator can read, and calling either of them "there"
-// would be the same silence in a new place. Nothing is reported when no
-// session is pinned: an absent brief claims nothing when no session is
-// claimed to have been given one.
-func briefState(f fleet.Fleet) (path string, missing bool) {
+// would be the same silence in a new place. A readable file without the
+// wizard's marker is foreign: the session reads it as its working order, and
+// the wizard will not replace it (orchestrator.ErrNotOurs).
+//
+// Reading the file's first line rather than only its metadata costs a few
+// microseconds a fleet, against the milliseconds the same cycle spends
+// reading that fleet's board, so it is read every time rather than only when
+// its metadata has moved -- a cache would add its own way of going stale for
+// nothing measurable.
+//
+// Nothing is reported when no session is pinned: a brief claims nothing when
+// no session is claimed to have been given one.
+func briefState(f fleet.Fleet) (path string, missing, foreign bool) {
 	if f.BoardPath == "" && len(f.DocsPaths) == 0 {
 		// Nowhere to put one, and an appointment is refused outright
 		// (orchestrator.ErrNoBoard), so there is no claim to contradict.
-		return "", false
+		return "", false, false
 	}
 	path = orchestrator.BriefPath(orchestrator.Paths{Board: f.BoardPath, Docs: f.DocsPaths})
 	if f.Orchestrator == "" {
-		return path, false
+		return path, false, false
 	}
-	info, err := os.Stat(path)
-	return path, err != nil || !info.Mode().IsRegular()
+	switch orchestrator.ReadBriefState(path) {
+	case orchestrator.BriefOurs:
+		return path, false, false
+	case orchestrator.BriefForeign:
+		return path, false, true
+	default:
+		return path, true, false
+	}
 }
 
 // Collect asks each source separately. A failure fills that source's own error field
@@ -470,13 +486,14 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 				fb.Cards = scanned
 			}
 		}
-		fb.BriefPath, fb.BriefMissing = briefState(f)
+		fb.BriefPath, fb.BriefMissing, fb.BriefForeign = briefState(f)
 		snap.Boards = append(snap.Boards, fb)
 		cards = append(cards, fb.Cards...)
 	}
 	snap.BoardError = snap.Boards[0].BoardError
 	snap.OrchestratorBriefPath = snap.Boards[0].BriefPath
 	snap.OrchestratorBriefMissing = snap.Boards[0].BriefMissing
+	snap.OrchestratorBriefForeign = snap.Boards[0].BriefForeign
 
 	// The daemon's list is the live sessions and only those. Everything the
 	// panel knows about a stopped session comes from Claude Code's job store
