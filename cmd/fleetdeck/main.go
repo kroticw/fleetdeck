@@ -461,7 +461,7 @@ func serve(parent context.Context, o runOpts) error {
 	serveErr := make(chan error, 1)
 	startServing := func(what string) {
 		go func() {
-			log.Printf("fleetdeck %s %s on http://%s", version.String(), what, ln.Addr())
+			log.Print(servingLine(version.String(), what, ln.Addr().String(), buildinfo.Executable()))
 			serveErr <- srv.Serve(ln)
 		}()
 	}
@@ -546,6 +546,19 @@ func serve(parent context.Context, o runOpts) error {
 	stop()
 	wg.Wait()
 	return shutdown(srv)
+}
+
+// servingLine is the log line a panel starts serving with. It names the binary
+// serving, not only the version and the address: one update starts two panels
+// of the same version on the same address, first from the staged bundle and
+// then from the canonical one, and without the path the two starts read as
+// two crashes (docs/engineering/window-and-panel.md).
+func servingLine(ver, what, addr, exe string) string {
+	line := fmt.Sprintf("fleetdeck %s %s on http://%s", ver, what, addr)
+	if exe != "" {
+		line += " from " + exe
+	}
+	return line
 }
 
 func shutdown(srv *http.Server) error {

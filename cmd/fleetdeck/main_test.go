@@ -435,6 +435,31 @@ func TestBindFailureNeverLogsSuccess(t *testing.T) {
 	}
 }
 
+// TestTheServingLineSaysWhichBinaryServes pins what tells the two starts of one
+// update apart. The window starts a panel from the staged bundle and then again
+// from the canonical one (docs/engineering/window-and-panel.md), both of the
+// same version on the same address; a line naming only those reads as two
+// crashes. The same line announces setup on a first run, and it names the
+// binary there too.
+func TestTheServingLineSaysWhichBinaryServes(t *testing.T) {
+	staged := "/Applications/.fleetdeck-update/fleetdeck.app/Contents/MacOS/fleetdeck"
+	canonical := "/Applications/fleetdeck.app/Contents/MacOS/fleetdeck"
+	for _, tc := range []struct {
+		what, exe, want string
+	}{
+		{"listening", staged, "fleetdeck v0.6.0 listening on http://127.0.0.1:7777 from " + staged},
+		{"listening", canonical, "fleetdeck v0.6.0 listening on http://127.0.0.1:7777 from " + canonical},
+		{"waiting to be set up", canonical, "fleetdeck v0.6.0 waiting to be set up on http://127.0.0.1:7777 from " + canonical},
+		// A binary that cannot find itself still announces it serves, and
+		// claims no path rather than an empty one.
+		{"listening", "", "fleetdeck v0.6.0 listening on http://127.0.0.1:7777"},
+	} {
+		if got := servingLine("v0.6.0", tc.what, "127.0.0.1:7777", tc.exe); got != tc.want {
+			t.Errorf("servingLine(%q, %q):\n got %q\nwant %q", tc.what, tc.exe, got, tc.want)
+		}
+	}
+}
+
 // TestSetOrchestratorSessionSurgicallyEditsAnExistingFile pins the whole
 // point of routing this write through config.SetField instead of config.Save:
 // a comment the operator wrote by hand must survive a pin change made from
