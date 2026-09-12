@@ -47,7 +47,15 @@ const KEYS = [
   // whole reason the row is there.
   "stopped_group",
   "stopped_badge",
-  "stopped_resume_hint",
+  // The resume button and everything it can say. resume_working and
+  // resume_failed matter as much as the label: they are the only two things
+  // on screen during and after a resume, and either of them falling back to
+  // its own key would leave the operator reading "resume_failed" as the
+  // reason a session did not come back.
+  "resume",
+  "resume_hint",
+  "resume_working",
+  "resume_failed",
   "gone_group",
   "gone_badge",
   "gone_no_cwd",

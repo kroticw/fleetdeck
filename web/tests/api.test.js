@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, sendText, fetchDigest, fetchTerminalToken, createCard, setOrchestratorSession } from "../js/api.js";
+import { setCardField, sendText, resumeSession, fetchDigest, fetchTerminalToken, createCard, setOrchestratorSession } from "../js/api.js";
 
 let calls = [];
 let realFetch;
@@ -123,6 +123,47 @@ test("a session id is escaped into the path", async () => {
 test("a refused session write throws", async () => {
   stubFetch(answer({ status: 502, body: { error: "daemon: EAUTH" } }));
   await assert.rejects(() => sendText("a1b2c3", "hello"), { message: "daemon: EAUTH" });
+});
+
+// A resume is addressed by short id, not by the transcript UUID its
+// neighbouring routes take: a stopped session is one the daemon no longer
+// lists, and the short id is what the job store names its directory by.
+//
+// The empty object is not an oversight. There is nothing to send beyond the id
+// in the path, and the server's guard answers 415 to a POST that is not
+// application/json — so the body is empty JSON rather than nothing at all.
+test("a resume posts to the session's short id and sends no arguments", async () => {
+  stubFetch(answer({ status: 204 }));
+
+  await resumeSession("bb22cc33");
+
+  assert.equal(calls[0].url, "/api/sessions/bb22cc33/resume");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {});
+});
+
+test("a short id is escaped into the resume path", async () => {
+  stubFetch(answer({ status: 204 }));
+  await resumeSession("a/b c");
+  assert.equal(calls[0].url, "/api/sessions/a%2Fb%20c/resume");
+});
+
+// Both refusals the route can give have to arrive as words. 502 is the daemon
+// having failed at it, 409 is the session being the reason it cannot happen,
+// and the operator decides what to do next from the sentence, not the code.
+test("a resume that failed throws the server's own words", async () => {
+  stubFetch(answer({ status: 502, body: { error: "resumed worker crashed during startup: exit 1" } }));
+  await assert.rejects(() => resumeSession("bb22cc33"),
+    { message: "resumed worker crashed during startup: exit 1" });
+});
+
+test("a session that cannot be resumed throws the reason it cannot", async () => {
+  stubFetch(answer({
+    status: 409,
+    body: { error: "session cannot be resumed: bb22cc33 has no transcript to resume from — it was never prompted" },
+  }));
+  await assert.rejects(() => resumeSession("bb22cc33"), /never prompted/);
 });
 
 // The digest is read here rather than taken from the snapshot because it is too

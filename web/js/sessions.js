@@ -22,7 +22,7 @@
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
-import { setSessionLabel } from "./api.js";
+import { setSessionLabel, resumeSession } from "./api.js";
 import { createStalledTracker } from "./header.js";
 import { SESSIONS_KEYS } from "./columnwidth.js";
 import { mountColumnResize } from "./columnresize.js";
@@ -261,7 +261,12 @@ export function rowHtml(s, stalledNow) {
 // the click handler that opens a session's terminal (see renderSessions):
 // there is no terminal to attach to. The card button inside it still works,
 // because that opens a file rather than a session.
-export function goneRowHtml(s) {
+// state is what this row knows about a resume the operator started: {busy} while
+// one is in flight, {error} once one has failed. Both are the column's own,
+// held outside the snapshot — nothing about a press the operator made comes
+// back from the daemon, and a row rebuilt by the next poll two seconds later
+// would otherwise forget both.
+export function goneRowHtml(s, state = {}) {
   const resumable = isResumable(s);
   const classes = ["sgone"];
   classes.push(resumable ? "sgone-stopped" : "sgone-dead");
@@ -287,11 +292,38 @@ export function goneRowHtml(s) {
     ? `<div class="sreason" title="${escapeHtml(s.cwd)}">${escapeHtml(t("gone_no_cwd"))}: ${escapeHtml(s.cwd)}</div>`
     : "";
 
-  // What a person can actually do about it. The panel cannot resume a
-  // session itself, so it says the one thing that can — rather than leaving
-  // a row that plainly wants an action with no way to take one.
+  // What a person can actually do about it, as a control rather than as a
+  // sentence. This row used to print the command to type in a terminal
+  // instead, because the panel could not resume a session itself; now it can,
+  // and two ways to do one thing in a column this narrow is one too many.
+  //
+  // It is drawn as a button and nothing else on this row is, which is the
+  // lesson the fold control paid for in web/app.css: a control that does not
+  // look like a control does not exist for the person who needs it. The
+  // converse is the obligation here — the badge, the last state and the
+  // reason beside it are text, and none of them may end up looking pressable.
+  //
+  // Disabled while a resume is in flight, with the label saying so. The call
+  // does not return until the session is up or has failed to come up, which
+  // on a long history is the better part of a minute; a button that looks
+  // untouched for that long invites a second press, and a second press is how
+  // one resume becomes two.
   const how = resumable
-    ? `<div class="sresume">${escapeHtml(t("stopped_resume_hint"))}: <code>claude resume ${escapeHtml(s.short)}</code></div>`
+    ? `<div class="sresume">
+        <button type="button" class="sresume-btn" data-short="${escapeHtml(s.short)}"${state.busy ? " disabled" : ""} title="${escapeHtml(t("resume_hint"))}">${escapeHtml(state.busy ? t("resume_working") : t("resume"))}</button>
+      </div>`
+    : "";
+
+  // Why the last attempt did not work, in the words it failed in — the
+  // daemon's, or the panel's own about a session that cannot come back.
+  //
+  // It stays until something changes it: another attempt, or the session
+  // actually coming back. Deliberately not the one-render-and-gone treatment
+  // the name editor's failure gets above — a render happens on every poll,
+  // which is every two seconds, and an error shown for one of them is an
+  // error the operator sees only if they happen to be looking at that moment.
+  const failure = state.error
+    ? `<div class="sresume-error" title="${escapeHtml(state.error)}">${escapeHtml(t("resume_failed"))}: ${escapeHtml(state.error)}</div>`
     : "";
 
   const cardHtml = s.cardPath
@@ -309,6 +341,7 @@ export function goneRowHtml(s) {
       </div>
       ${why}
       ${how}
+      ${failure}
       ${cardHtml}
     </article>`;
 }
@@ -451,6 +484,14 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
   // later, successful edit does not leave a stale failure on screen.
   let labelError = "";
 
+  // What the operator has asked this column to do, which no snapshot knows
+  // about: which sessions have a resume in flight, and which ones had one
+  // fail. Both are keyed by short id and both survive the re-render every
+  // poll performs, because the whole DOM of this column is rewritten every
+  // two seconds and anything held in it would not.
+  const resuming = new Set();
+  const resumeErrors = new Map();
+
   // setBody is the one place root.innerHTML is written. The fold/unfold
   // strip goes first in every state (matching the orchestrator's own: it is
   // the one control that must stay reachable however the rest of the column
@@ -559,9 +600,17 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
     const jobsErrorHtml = snap.jobsError
       ? `<div class="fleet-group-head sgone-error" title="${escapeHtml(snap.jobsError)}">${escapeHtml(t("stopped_unknown"))}</div>`
       : "";
+    // A failure is about a row that is still there. Once the session has come
+    // back it is drawn by rowHtml instead, and keeping its old error would
+    // have it reappear the next time that session stops — as a report of
+    // something that happened hours ago.
+    for (const short of resumeErrors.keys()) {
+      if (!gone.some((s) => s.short === short)) resumeErrors.delete(short);
+    }
+
     const goneGroup = (list, label) => (list.length
       ? `<div class="fleet-group-head">${escapeHtml(label)} <span class="kcount">${list.length}</span></div>`
-        + list.map(goneRowHtml).join("")
+        + list.map((s) => goneRowHtml(s, { busy: resuming.has(s.short), error: resumeErrors.get(s.short) })).join("")
       : "");
     const goneHtml = jobsErrorHtml
       + goneGroup(gone.filter(isResumable), t("stopped_group"))
@@ -586,6 +635,17 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
       });
     }
 
+    for (const btn of root.querySelectorAll(".sresume-btn")) {
+      btn.addEventListener("click", (event) => {
+        // The row this sits in is not a .srow and binds no click of its own,
+        // so nothing would run after this today. Stopped all the same: the
+        // card button next to it learned this the hard way, and a row that
+        // grows a handler later must not turn the resume into two actions.
+        event.stopPropagation();
+        startResume(btn.dataset.short);
+      });
+    }
+
     for (const btn of root.querySelectorAll(".label-edit-btn")) {
       btn.addEventListener("click", (event) => {
         // Editing a name must never also select the row it lives in — the
@@ -595,6 +655,37 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
         const session = [...ordered, ...orderedUnclaimed].find((s) => s.short === row.dataset.short);
         if (session) startEditing(row, session);
       });
+    }
+  };
+
+  // startResume presses the button once and reports what came of it.
+  //
+  // The whole of it is guarded by `resuming`, which is why that set exists
+  // rather than the button's own disabled attribute being the guard: the
+  // column rewrites its DOM on every poll, so the element the operator
+  // pressed is gone two seconds later and its disabled state with it. The
+  // press is idempotent on this side either way — a second one while the
+  // first is in flight is dropped, because two dispatches for one session is
+  // how one resume becomes two workers.
+  const startResume = async (short) => {
+    if (!short || resuming.has(short)) return;
+    resuming.add(short);
+    // The previous failure goes at the start of the new attempt, not at its
+    // end: leaving it on screen beside a button that now says "Resuming…"
+    // would be the panel reporting a past failure and a present attempt as
+    // one state.
+    resumeErrors.delete(short);
+    render(lastSnap, lastConnected);
+    try {
+      await resumeSession(short);
+    } catch (err) {
+      // Whatever the server said, verbatim. It is the daemon's own words for
+      // a worker that crashed, or the panel's own for a session that cannot
+      // come back at all, and neither survives being summarised.
+      resumeErrors.set(short, err.message);
+    } finally {
+      resuming.delete(short);
+      render(lastSnap, lastConnected);
     }
   };
 

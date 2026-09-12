@@ -131,6 +131,27 @@ export function sendText(sessionId, text, submit = true) {
   return post(`/api/sessions/${encodeURIComponent(sessionId)}/text`, { text, submit });
 }
 
+// resumeSession brings a stopped session back, under its own short id and with
+// its history, and resolves only once it is actually up.
+//
+// It is addressed by short id, not by the transcript UUID sendText's
+// neighbours use: a stopped session is one the daemon is no longer listing, and
+// the short id is what Claude Code's job store — the only source that still
+// knows anything about it — names its directory by.
+//
+// It sends an empty object rather than no body at all. There is nothing to say
+// beyond the id in the path, but the server's guard requires application/json
+// on every POST, and a POST with a content type and no body is a shape not
+// worth being clever about.
+//
+// This one call can take the better part of a minute: the panel does not
+// answer until it has watched the session come up or fail to, because a resume
+// reported as "started" and then silently dead is exactly the silence the
+// button replaces. The caller must show that it is waiting.
+export function resumeSession(short) {
+  return post(`/api/sessions/${encodeURIComponent(short)}/resume`, {});
+}
+
 // uploadSessionImage writes an image into the panel's own store and returns the
 // path it was written to. It sends nothing into the session: the path goes into
 // the operator's message, and the operator presses send.
