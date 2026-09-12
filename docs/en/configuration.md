@@ -4,11 +4,14 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 
 ## Configuration keys
 
+<!-- fleetdeck:config-keys: this table is checked against internal/config by TestConfigurationPageListsEveryKey. A key declared there must have a row here, in both languages, with all four columns filled. -->
+
 | YAML path | Type | Default | What breaks on a bad value |
 | --- | --- | --- | --- |
 | `board.path` | string | unset (empty) | not validated |
 | `docs.paths` | list of strings | unset (empty) | not validated |
 | `orchestrator.session` | string | unset (empty) | not validated |
+| `session_labels` | map of session UUID to string | unset (empty) | not validated; a key that is not a session's UUID is kept and matches nothing |
 | `notify.enabled.waiting` | boolean | `true` | not validated (must be a boolean) |
 | `notify.enabled.failed` | boolean | `true` | not validated (must be a boolean) |
 | `notify.enabled.silent` | boolean | `true` | not validated (must be a boolean) |
@@ -17,8 +20,16 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 | `daemon.poll_interval` | duration | `2s` | zero or negative: `daemon.poll_interval must be positive, got %s`. Bare number, non-scalar value, or invalid text: the same three shapes as `notify.silence_after` above |
 | `usage.enabled` | boolean | `true` | not validated (must be a boolean) |
 | `server.port` | integer | `7777` | outside the range 1 to 65535: `server.port must be between 1 and 65535, got %d` |
+| `statusline.wrap` | string (shell command) | unset (no wrapping) | not validated before it runs; a command that cannot be run, or that exits non-zero, is taken as no wrapping at all and `fleetdeck-status` prints its own line |
+| `statusline.rate_limits_path` | string (file path) | unset (nothing is written) | not validated; a path that cannot be written is reported nowhere, and the panel reads the account's limits over the network instead |
 | `name` | string | the folder above `board.path`, `main` when that says nothing | empty, spaces around it or a control character: `the top-level fleet: name ...`; the name of another fleet: see [Several fleets](#several-fleets) |
 | `fleets` | list of fleets | unset (empty) | see [Several fleets](#several-fleets) |
+| `fleets[].name` | string | none: required | empty, spaces around it or a control character: `fleets[N]: name ...`; the name of another fleet: `fleets[1]: name "clining" is already the name of fleets[0]` |
+| `fleets[].board.path` | string | none: required | missing: `fleets[N]: board path must be set`; another fleet's board: `fleets[1]: board "..." is already the board of the top-level fleet ("main")` |
+| `fleets[].docs.paths` | list of strings | unset (empty) | not validated, as `docs.paths` |
+| `fleets[].orchestrator.session` | string | unset (empty) | another fleet's orchestrator: `fleets[1]: orchestrator "06a1f607" is already the orchestrator of the top-level fleet ("main")` |
+
+`fleets[]` stands for any entry of the `fleets` list: the entries are alike, so the page describes their keys once rather than per fleet.
 
 Switching one of the `notify.enabled.*` keys on turns a rule on, not a guarantee that its banner is seen — see the README's [Limitations](../../README.md#limitations) section for why.
 
@@ -26,11 +37,15 @@ Switching one of the `notify.enabled.*` keys on turns a rule on, not a guarantee
 
 `docs.paths` names the directories the panel's documentation section reads. Every markdown file under them is listed, and a document is served only when it resolves to somewhere inside one of them: a symlink inside a documentation directory that points out of it is refused, exactly as a card write outside the board directory is. Nothing but markdown is served, so a directory holding notes and credentials side by side hands out only the notes. Configuring no directory at all, and configuring directories that turn out not to be readable, are both reported as such rather than shown as an empty documentation set — "there is no documentation" and "the directory you named is not there" are different statements, and only one of them is fixed by editing this file.
 
+`session_labels` is the operator's own name for a session, keyed by the session's transcript UUID rather than by its short id: the daemon may hand a short id to another session later, and a label that survives that is the whole reason to key on the UUID instead. The panel writes these entries — renaming a session in the orchestrator column adds, changes or removes exactly one of them — and an empty name removes the entry rather than recording a blank one, so a configuration that only ever gained entries cannot fill up with labels for sessions nobody remembers. A session the daemon already reports a name for needs no entry here; this is for the sessions that started without one and cannot be renamed after the fact.
+
+`statusline.wrap` and `statusline.rate_limits_path` are read by `fleetdeck-status`, the statusline reporter Claude Code runs for every session, and only when its own `-wrap` and `-rate-limits-path` flags were not given. `wrap` names a statusline command of your own: `fleetdeck-status` passes its stdin through to it and prints what came back unchanged, so a status line you already like keeps working with the panel behind it. `rate_limits_path` is the file the rate-limit windows on that stdin are written to, and that file is the panel's first source for the account's limits, ahead of the network. Both are unset by default, and unset means off: no wrapping, and nothing written. There is deliberately no fallback path for `rate_limits_path` — an implicit one that a hand-run invocation touched without meaning to caused two incidents in one evening.
+
 ## Several fleets
 
 One panel can keep several fleets — each with its own board, documentation and orchestrator — and a browser tab shows one of them at a time, the way an IDE shows one project.
 
-The top-level `board`, `docs` and `orchestrator` keys are the first fleet, exactly as in a configuration written before there were fleets, and `name` names it. Every further fleet is an entry of `fleets` with the same keys; its `board.path` is required:
+The top-level `board`, `docs` and `orchestrator` keys are the first fleet, exactly as in a configuration written before there were fleets, and `name` names it. Every further fleet is an entry of `fleets` with the same keys, listed in the table above as `fleets[].*`; its `board.path` is required:
 
 ```yaml
 board:
