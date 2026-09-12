@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -125,6 +126,62 @@ func TestMakingTheSameFleetTwiceKeepsIt(t *testing.T) {
 	}
 	if len(cfg.Fleets) != 1 {
 		t.Fatalf("the fleet was added twice: %+v", cfg.Fleets)
+	}
+}
+
+// A name another fleet already has, on a different board, is refused — and it
+// is refused as a step, not as a bad request: `init --fleet` puts the
+// configuration's refusal in its config step, and this route runs the same
+// steps. Pinned because the two look alike from the page and are answered
+// differently: 200 with ok false here, 400 for a request that never got as far
+// as a step.
+func TestAFleetNameAnotherFleetHasIsRefusedAsAStep(t *testing.T) {
+	home, c, cfgPath := panelOnOneFleet(t)
+
+	first := fmt.Sprintf(`{"name":"vpn","path":%q}`, filepath.Join(home, "work", "vpn"))
+	if code, got := c.do(http.MethodPost, "/api/fleets", first); code != http.StatusOK || !strings.Contains(got, `"ok":true`) {
+		t.Fatalf("the first fleet was not made: %d %s", code, got)
+	}
+
+	again := fmt.Sprintf(`{"name":"vpn","path":%q}`, filepath.Join(home, "work", "elsewhere"))
+	code, body := c.do(http.MethodPost, "/api/fleets", again)
+	if code != http.StatusOK {
+		t.Fatalf("want 200 with a refused step, got %d %s", code, body)
+	}
+	if !strings.Contains(body, `"ok":false`) {
+		t.Fatalf("a name another fleet has must not report the fleet as made: %s", body)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Fleets) != 1 {
+		t.Fatalf("the refused fleet was written anyway: %+v", cfg.Fleets)
+	}
+}
+
+// The verdict is about every step that decides, not only the configuration's.
+// A fleet already in the configuration whose folder cannot be made leaves the
+// config step reporting "kept" with no error, beside a board step that failed:
+// fleetSteps decides "kept" before it looks at the board. Reported as made,
+// that would put "The fleet is made" directly above the line saying its
+// workspace could not be.
+func TestAFleetWhoseWorkspaceFailedIsNotReportedAsMade(t *testing.T) {
+	steps := []initStep{
+		{name: "workspace", err: errors.New("mkdir /x: permission denied")},
+		{name: "config", note: "kept, fleet vpn is already there"},
+		{name: "statusline", err: errors.New("no fleetdeck-status found")},
+		{name: "permissions", note: "added"},
+	}
+	if fleetMade(steps) {
+		t.Fatal("a fleet whose workspace step failed must not be reported as made")
+	}
+
+	// The control case: the same steps with the workspace made. A statusline
+	// that could not be wired is reported and decides nothing.
+	steps[0] = initStep{name: "workspace", note: "made"}
+	if !fleetMade(steps) {
+		t.Fatal("a refused statusline must not keep a made fleet from being reported as made")
 	}
 }
 

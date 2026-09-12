@@ -147,6 +147,56 @@ test("the panel not answering is said, rather than shown as a fleetless machine"
   assert.deepEqual(texts(".start-fleet-name"), []);
 });
 
+// The first paint of a connected panel carries no fleets: state.ForFleet
+// serves the zero snapshot until the first collect cycle has run, and this
+// page is the first screen the application opens. Read as a dead panel, "the
+// panel is not answering" would be on screen at almost every launch.
+test("a connected panel whose first snapshot is empty is not called dead", () => {
+  start();
+  push({ fleets: [], sessions: [] }, true);
+  assert.equal(root.querySelector(".start-offline").hidden, true);
+});
+
+// The window reloads itself by navigating to a fixed address, and that address
+// is this page now. Landing here after a reload the operator did not ask for
+// would lose the fleet they were in — and with it the session panel that was
+// open, since this page never runs takeOpenSession and leaving for a fleet
+// clears the key. So a reload carries the page back.
+test("a page that reloaded itself goes straight back to the fleet it was in", () => {
+  start({ carryBackTo: "vpn" });
+  push(snapshot(["fleetdeck", "vpn"]));
+  assert.deepEqual(navigated, ["vpn"]);
+});
+
+test("and it keeps the open session, because it is not leaving a fleet", () => {
+  const kept = [];
+  renderStart(root, {
+    subscribe: fakeSubscribe,
+    fetch: fakeFetch,
+    carryBackTo: "vpn",
+    navigate: (name, keepSession) => kept.push([name, keepSession]),
+  });
+  push(snapshot(["fleetdeck", "vpn"]));
+  assert.deepEqual(kept, [["vpn", true]]);
+});
+
+test("carrying back happens once, not on every snapshot", () => {
+  start({ carryBackTo: "vpn" });
+  push(snapshot(["fleetdeck", "vpn"]));
+  push(snapshot(["fleetdeck", "vpn"]));
+  push(snapshot(["fleetdeck", "vpn"]));
+  assert.deepEqual(navigated, ["vpn"]);
+});
+
+// A fleet dropped from the configuration since the reload would answer 404 for
+// its snapshot: the list is what to show then, not a dead address.
+test("a fleet the panel no longer serves is not carried back into", () => {
+  start({ carryBackTo: "gone" });
+  push(snapshot(["fleetdeck", "vpn"]));
+  assert.deepEqual(navigated, []);
+  assert.deepEqual(texts(".start-fleet-name"), ["fleetdeck", "vpn"]);
+});
+
 test("the new-fleet form is out of the way until it is asked for", () => {
   start();
   push(snapshot(["fleetdeck"]));
@@ -241,7 +291,12 @@ test("a refused step is shown with its reason and nothing is called done", async
 });
 
 test("the panel's own refusal is shown as it was worded, never reworded here", async () => {
-  routes["POST /api/fleets"] = reply(409, { error: 'fleet "vpn" is already there' });
+  // 400, not 409: the route answers 400 for a request refused before any step
+  // was taken, and a name the configuration would not take comes back as a
+  // refused step with 200 instead (internal/server/server.go, CreateFleet).
+  // A status this route cannot return would have made the test agree with
+  // code that does not exist.
+  routes["POST /api/fleets"] = reply(400, { error: '"vpn" is not a full path: give one starting with / or ~/' });
   start();
   push(snapshot(["fleetdeck"]));
   fireEvent(root.querySelector(".start-new"), "click");
@@ -249,7 +304,7 @@ test("the panel's own refusal is shown as it was worded, never reworded here", a
   root.querySelector(".start-new-path").value = "~/vpn";
   fireEvent(root.querySelector(".start-new-create"), "click");
   await settle();
-  assert.equal(root.querySelector(".setup-error").textContent, 'fleet "vpn" is already there');
+  assert.equal(root.querySelector(".setup-error").textContent, '"vpn" is not a full path: give one starting with / or ~/');
 });
 
 test("a panel that makes no fleets says so instead of offering a button that cannot work", async () => {

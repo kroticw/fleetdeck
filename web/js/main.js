@@ -20,9 +20,17 @@ subscribe((snap, connected) => {
 // on its list next launch. Taken from the snapshot rather than the address:
 // an address with no fleet is served the first one, and the snapshot is the
 // only place that says which one that turned out to be.
+// Written once, not on every snapshot. Which fleet a tab shows is decided by
+// its address and never changes while the page lives, so writing it each
+// second would be a storage write a second in every open tab — and with two
+// tabs on two fleets the key would flip between them, making the start page's
+// mark whichever tab ticked last rather than where the operator was.
+let fleetRemembered = false;
 subscribe((snap) => {
   const fleet = snap?.fleet ?? "";
-  if (fleet) rememberFleet(fleet);
+  if (!fleet || fleetRemembered) return;
+  fleetRemembered = true;
+  rememberFleet(fleet);
 });
 
 const sessionPanel = document.getElementById("session-panel");

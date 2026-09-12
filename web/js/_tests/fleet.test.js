@@ -130,6 +130,22 @@ test("switching forgets the open session and navigates to the fleet", () => {
   assert.deepEqual(assigned, ["/?fleet=C"]);
 });
 
+// The exception: the start page carrying a page back into the fleet it
+// reloaded out of. The tab is going back where it was, so the session panel
+// that was up is this fleet's and must survive the hop.
+test("carrying a page back keeps the session it had open", () => {
+  const touched = [];
+  const storage = {
+    setItem: (key) => touched.push(`set:${key}`),
+    removeItem: (key) => touched.push(`remove:${key}`),
+  };
+  const assigned = [];
+  const location = { pathname: "/", search: "", assign: (url) => assigned.push(url) };
+  switchFleet("C", { storage, location, keepSession: true });
+  assert.deepEqual(touched, [], "the open session must not be touched when carrying back");
+  assert.deepEqual(assigned, ["/?fleet=C"]);
+});
+
 // The fleet the panel was last opened in, for the start page to mark. Written
 // to localStorage rather than the session storage the open session uses: the
 // point is the next launch of the application, which a tab's session storage

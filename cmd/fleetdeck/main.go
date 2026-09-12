@@ -642,17 +642,32 @@ func reportedSteps(steps []initStep) []server.SetupStep {
 	return out
 }
 
-// stepSucceeded reports whether the named step was performed. Which step
-// decides is not a position in the list: fleetSteps puts the board first and
-// the configuration second, initSteps the other way round, and reading the
-// wrong one would report a fleet as made because its folder was.
-func stepSucceeded(steps []initStep, name string) bool {
+// Steps whose refusal does not keep a fleet from existing: the statusline is
+// Claude Code's, and the permission is what lets sessions write in the new
+// folder. Both are reported; neither decides.
+var fleetStepsThatDoNotDecide = map[string]bool{"statusline": true, "permissions": true}
+
+// fleetMade reports whether the fleet is there, from the steps that made it.
+//
+// Every deciding step has to have succeeded, not only the one named "config".
+// fleetSteps reports the configuration as kept — no error — when the fleet was
+// already listed, and it decides that before it looks at whether the board step
+// failed. So a fleet already in the configuration whose folder cannot be read
+// leaves a config step with no error beside a board step with one, and reading
+// only the config step would tell the operator "the fleet is made" directly
+// above a line saying its workspace could not be.
+func fleetMade(steps []initStep) bool {
+	decided := false
 	for _, s := range steps {
-		if s.name == name {
-			return s.err == nil
+		if fleetStepsThatDoNotDecide[s.name] {
+			continue
 		}
+		if s.err != nil {
+			return false
+		}
+		decided = true
 	}
-	return false
+	return decided
 }
 
 // fleetMaker is the start page's one write: `fleetdeck init --fleet`, the same
@@ -681,10 +696,7 @@ func fleetMaker(configPath string) func(name, path string) ([]server.SetupStep, 
 			return nil, false, err
 		}
 		steps := fleetSteps(configPath, initEnv{home: home, binary: binary, workspace: root, config: configPath, fleet: named})
-		// The configuration step alone says whether the fleet exists: it is
-		// written only over a board that was made, and the statusline and the
-		// permissions are reported without deciding anything.
-		return reportedSteps(steps), stepSucceeded(steps, "config"), nil
+		return reportedSteps(steps), fleetMade(steps), nil
 	}
 }
 

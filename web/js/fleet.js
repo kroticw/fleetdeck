@@ -126,7 +126,12 @@ export function rememberFleet(name) {
 
 // switchFleet shows another fleet in this tab. The session a reload would
 // otherwise reopen is forgotten first: it belongs to the fleet being left.
-export function switchFleet(fleet, { storage, location = globalThis.location } = {}) {
-  rememberOpenSession(storage, "");
+//
+// keepSession is the one case where it does not: the start page carrying a
+// page back into the fleet it reloaded out of (web/js/start.js). Nothing is
+// being left there — the tab is going back where it was a moment ago — and
+// forgetting the session would finish the job the reload started.
+export function switchFleet(fleet, { storage, location = globalThis.location, keepSession = false } = {}) {
+  if (!keepSession) rememberOpenSession(storage, "");
   location.assign(`${location.pathname}${fleetSearch(location.search, fleet)}`);
 }

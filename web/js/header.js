@@ -534,7 +534,16 @@ export function renderHeader(root) {
     }
     const button = event.target.closest(".theme-toggle");
     if (!button) return;
-    button.textContent = t(themeLabelKey(cycleTheme()));
+    const label = t(themeLabelKey(cycleTheme()));
+    // The label is written to whatever button is in the page now, not to the
+    // node that was clicked. Clicking the theme with the fleet menu open
+    // closes the menu first, on the capture phase, and that repaints the
+    // header whole — the clicked node is detached by the time this runs, and
+    // writing to it would leave the header reading "theme: auto" on a page
+    // that had just turned light. The update button beside it has always
+    // re-queried for the same reason.
+    const live = root.querySelector(".theme-toggle") ?? button;
+    live.textContent = label;
   });
 
   const paint = (rawSnap, connected) => {

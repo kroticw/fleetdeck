@@ -27,7 +27,7 @@ import { belongsTo, fleetEntries, rememberedFleet, switchFleet } from "./fleet.j
 import { isWaiting } from "./header.js";
 import { fleetIconHTML } from "./icon.js";
 import { showSteps } from "./steplist.js";
-import { pageStorage } from "./buildcheck.js";
+import { pageStorage, takeReloadFleet } from "./buildcheck.js";
 
 // The icon at the size the start page shows it. The header shows the same
 // drawing much smaller; nothing else in the page uses it.
@@ -62,9 +62,17 @@ async function readJSON(response) {
  * lastFleet (which fleet the panel wrote down last) and choose — the window's
  * folder chooser, which exists only inside the fleetdeck window.
  */
-export function renderStart(root, { subscribe = storeSubscribe, fetch: get = globalThis.fetch, navigate, lastFleet, choose, openNew = false } = {}) {
-  const leave = navigate ?? ((name) => switchFleet(name, { storage: pageStorage() }));
+export function renderStart(root, { subscribe = storeSubscribe, fetch: get = globalThis.fetch, navigate, lastFleet, choose, openNew = false, carryBackTo } = {}) {
+  const leave = navigate ?? ((name, keepSession) => switchFleet(name, { storage: pageStorage(), keepSession }));
   const remembered = lastFleet ?? (() => rememberedFleet());
+  // A page that reloaded itself lands here: the window reloads by navigating
+  // to a fixed address, and that address is this page now. It was in a fleet a
+  // moment ago, possibly with a session panel open, and it goes straight back
+  // rather than making the operator find their way again — the reload was the
+  // application's doing, not theirs (web/js/buildcheck.js writes the fleet
+  // down before reloading). Taken once, so only that one load carries back;
+  // every other visit stays on the list.
+  const carryBack = carryBackTo ?? takeReloadFleet(pageStorage());
 
   const icon = el("div", "start-icon");
   icon.innerHTML = fleetIconHTML(ICON_SIZE);
@@ -152,9 +160,27 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
   // what that fleet's panel will show (fleet.js belongsTo) — and, separately,
   // the questions waiting in it, which are counted on the fleet that claims
   // them alone, so one unclaimed question is not shown as waiting everywhere.
+  let carried = false;
   const draw = (snap, connected) => {
     const fleets = snap?.fleets ?? [];
-    offline.hidden = connected && fleets.length > 0;
+    // Only into a fleet this panel still serves: one dropped from the
+    // configuration would answer 404 for its snapshot, and the page would have
+    // sent the operator to a dead address instead of showing them the list.
+    if (carryBack && !carried && fleets.includes(carryBack)) {
+      carried = true;
+      // Keeping the open session: the tab is going back where it was, not
+      // leaving a fleet, and the session panel that was up belongs to this
+      // fleet (web/js/fleet.js switchFleet).
+      leave(carryBack, true);
+      return;
+    }
+    // Said only when the panel is not answering. A connected panel whose
+    // snapshot carries no fleets yet is the ordinary first paint —
+    // state.ForFleet serves the zero snapshot until the first collect cycle
+    // has run — and this page is the first screen the application opens, so
+    // reading an empty list as a dead panel would put that sentence on
+    // screen at almost every launch.
+    offline.hidden = connected;
     const waitingBy = new Map(fleetEntries(snap, isWaiting).map((e) => [e.name, e.waiting]));
     const last = remembered();
     list.replaceChildren(
@@ -192,7 +218,13 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
     if (busy || createButton.disabled) return;
     const named = name.value.trim();
     const folder = path.value.trim();
+    // Everything the last press left on screen goes before this one is
+    // judged, not after it: refused here, the steps and the verdict of a
+    // fleet made a minute ago would stand above "Name the fleet" and read as
+    // this press's own outcome.
     error.textContent = "";
+    steps.replaceChildren();
+    status.textContent = "";
     if (named === "") {
       error.textContent = t("start_name_required");
       return;
@@ -203,8 +235,6 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
     }
     busy = true;
     createButton.disabled = true;
-    steps.replaceChildren();
-    status.textContent = "";
     try {
       const response = await get("/api/fleets", {
         method: "POST",

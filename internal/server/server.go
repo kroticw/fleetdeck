@@ -94,9 +94,14 @@ type Deps struct {
 	// CreateFleet makes a fleet from the start page: the folder with its board
 	// and documentation, and the line in the configuration naming them. It
 	// reports the steps setting up reports, and ok says whether the fleet is
-	// there. An error means the request itself was refused — an empty name, a
-	// folder that is not a full path, a name the configuration would not take —
-	// and nothing was made.
+	// there. An error means the request itself was refused before any step was
+	// taken — an empty name, or a folder that is not a full path — and nothing
+	// was made.
+	//
+	// A name or a board the configuration would not take is NOT an error here:
+	// it comes back as a step that was refused, with ok false, because that is
+	// where `fleetdeck init --fleet` puts it and this route runs the same
+	// steps. The page shows it in the report rather than beside the form.
 	//
 	// A panel wired without it makes no fleets and says so (a stand). The fleet
 	// it makes is served after a restart, never at once: see handleCreateFleet.

@@ -79,9 +79,39 @@ export function rememberReloadFrom(storage, own) {
   }
 }
 
+// Which fleet the page was showing when it reloaded itself.
+//
+// The window reloads by navigating to a fixed address (cmd/fleetdeck-window
+// binds fleetdeckReload against its -url flag), and that address is the start
+// page now. Without this the page would come back on a list of fleets: the
+// fleet the operator was in is lost, and with it the open session, since the
+// start page never runs takeOpenSession and the first fleet it is sent to
+// clears the key. So the fleet is written down here, beside the build, and the
+// start page carries the page back — see web/js/start.js.
+//
+// Session storage, like everything else here: it belongs to this tab and to
+// this reload, and it is taken once.
+const RELOAD_FLEET_KEY = "fleetdeck-reload-fleet";
+
+export function takeReloadFleet(storage) {
+  try {
+    const value = storage?.getItem(RELOAD_FLEET_KEY) ?? "";
+    storage?.removeItem(RELOAD_FLEET_KEY);
+    return value;
+  } catch {
+    return "";
+  }
+}
+
 // Written down before reloading, not after: after is a different page.
-export function reloadNow(storage, own, reload) {
+export function reloadNow(storage, own, reload, fleet = "") {
   rememberReloadFrom(storage, own);
+  try {
+    if (fleet) storage?.setItem(RELOAD_FLEET_KEY, fleet);
+    else storage?.removeItem(RELOAD_FLEET_KEY);
+  } catch {
+    // The page comes back on the start page, one click from where it was.
+  }
   reload();
 }
 
@@ -243,13 +273,18 @@ export function renderBuildBanner(
   const doReload = hostReload ?? reload;
   let shown = null;
   let reloading = false;
+  // The fleet on screen, for the reload to carry. Taken from the snapshot and
+  // not from the address: an address naming no fleet is served the first one,
+  // and only the snapshot says which that is.
+  let fleet = "";
 
   root.addEventListener("click", (event) => {
     if (!event.target.closest(".build-reload")) return;
-    reloadNow(storage, own, doReload);
+    reloadNow(storage, own, doReload, fleet);
   });
 
   subscribe((snap) => {
+    fleet = snap?.fleet ?? fleet;
     if (reloading) return;
     const state = buildState(own, snap?.build?.web, reloadFrom);
     const unsent = hasUnsentText(doc);
@@ -260,7 +295,7 @@ export function renderBuildBanner(
       // and each would otherwise ask for another one.
       reloading = true;
       if (state === "reloadFailed") rememberAttempts(storage, attempts + 1);
-      reloadNow(storage, own, doReload);
+      reloadNow(storage, own, doReload, fleet);
       return;
     }
 

@@ -22,6 +22,7 @@ import { t, langCode } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { belongsTo, fleetFromSearch, withFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
+import { showSteps } from "./steplist.js";
 
 // What the panel names the workspace folder inside a directory the person
 // picked with the window's chooser.
@@ -80,19 +81,6 @@ async function readJSON(response) {
   } catch {
     return null;
   }
-}
-
-// showSteps lists what a write did, step by step, a refused step with its
-// reason. The folder step and the orchestrator step report the same way.
-function showSteps(target, list) {
-  target.replaceChildren(
-    ...list.map((step) => {
-      const item = el("li", step.error ? "setup-step setup-step-skipped" : "setup-step");
-      item.textContent = step.error ? `${step.name}: ${t("setup_skipped")}: ${step.error}` : `${step.name}: ${step.note}`;
-      if (step.detail) item.append(el("div", "setup-step-detail", step.detail));
-      return item;
-    }),
-  );
 }
 
 /**

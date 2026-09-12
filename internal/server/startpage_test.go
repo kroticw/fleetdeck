@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -79,6 +80,45 @@ func TestStartPageCarriesTheSameContentSecurityPolicy(t *testing.T) {
 func TestStartPageIsAlsoServedByItsOwnPath(t *testing.T) {
 	if got := body(t, "/start.html"); !strings.Contains(got, `id="start"`) {
 		t.Fatal("/start.html must serve the start page")
+	}
+}
+
+// "/index.html" is not "/", so it goes to the file server, which redirects
+// ".../index.html" to "./" — the start page now, where it used to be the
+// panel. The query survives that redirect, so the address that names a fleet
+// still lands on the panel. Pinned because it is the one other spelling of the
+// root a person may have bookmarked, and the cost differs: with a fleet
+// nothing changes, without one it is a click.
+func TestIndexHTMLFollowsTheRootItRedirectsTo(t *testing.T) {
+	d, _ := testDeps()
+	for target, want := range map[string]string{
+		"/index.html":           `id="start"`,
+		"/index.html?fleet=vpn": `id="board"`,
+	} {
+		rec := httptest.NewRecorder()
+		New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code == http.StatusMovedPermanently {
+			// The file server redirects to a relative "./", which has to be
+			// resolved against the address that was asked for before it can be
+			// requested again.
+			base, err := url.Parse(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loc, err := url.Parse(rec.Header().Get("Location"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec2 := httptest.NewRecorder()
+			New(d).ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, base.ResolveReference(loc).String(), nil))
+			rec = rec2
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: want 200, got %d", target, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("%s: want %s in the body", target, want)
+		}
 	}
 }
 
