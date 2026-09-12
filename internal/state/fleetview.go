@@ -59,7 +59,12 @@ func ForFleet(whole Snapshot, name string) (Snapshot, error) {
 	view.Cards = own.Cards
 	view.BoardError = own.BoardError
 	view.OrchestratorSession = chosen.Orchestrator
-	view.OrphanCards = OrphanCards(daemonSessions, own.Cards)
+	// Both card lists are computed from the whole snapshot's own views, not
+	// from daemonSessions: the lifecycle of a session is carried by the view
+	// (see SessionView.Lifecycle), and a daemon.Session alone cannot say
+	// whether a session is stopped, dead or running.
+	view.OrphanCards = OrphanCards(whole.Sessions, own.Cards)
+	view.StoppedCards = StoppedCards(whole.Sessions, own.Cards)
 	view.Sessions = make([]SessionView, len(whole.Sessions))
 	for i, v := range whole.Sessions {
 		v.CardPath = linked[i].CardPath

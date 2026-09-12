@@ -30,6 +30,32 @@ const (
 	LimitsSourceNetwork = "network"
 )
 
+// The three states a session can be in, and the only values
+// SessionView.Lifecycle takes.
+//
+// They are three and not two on purpose. "Not live" folds together a session
+// that is paused and comes back with its whole history, and one that can
+// never come back at all — and those are different things to a person and
+// different things to act on: the first is work waiting to be picked up, the
+// second is work that has to be started again.
+//
+// An empty Lifecycle reads as live. Nothing that builds a snapshot leaves it
+// empty, but a view built by Link alone has not been told yet, and a session
+// the daemon is listing is exactly what that is.
+const (
+	// LifecycleLive: the daemon's own list carries this session.
+	LifecycleLive = "live"
+	// LifecycleStopped: the daemon no longer lists it, but the job store
+	// still has it and it can be resumed in place, with its full history.
+	LifecycleStopped = "stopped"
+	// LifecycleDead: the job store has it, and it cannot be brought back —
+	// no id to resume by, or its working directory is gone. It is still
+	// shown: a person has to be able to see that the work is there and that
+	// it is not coming back, which is not the same as the row silently
+	// disappearing.
+	LifecycleDead = "dead"
+)
+
 // SessionView is a daemon session enriched with what the other two sources
 // know about it.
 type SessionView struct {
@@ -37,6 +63,29 @@ type SessionView struct {
 	Context   *transcript.Usage `json:"context,omitempty"`
 	CardPath  string            `json:"cardPath,omitempty"`
 	SilentFor time.Duration     `json:"silentFor"`
+
+	// Lifecycle is which of the three states above this session is in. It is
+	// derived, never read off the wire: the control protocol has no `live`
+	// and no `resumable` field, and says so (docs/protocol/
+	// daemon-control-socket.md section 4). The caller (cmd/fleetdeck's
+	// Collector) decides it from the daemon's list and Claude Code's job
+	// store together, which is the only place both are known.
+	Lifecycle string `json:"lifecycle,omitempty"`
+
+	// LastState is the state a session that is no longer running recorded
+	// before it went away. Empty for a live session, which carries its state
+	// in Session.State like it always did.
+	//
+	// It is a separate field, and not simply Session.State filled in from the
+	// job store, because State is a vocabulary rules key on: "blocked" there
+	// means stalled (daemon.Session.Stalled, and the same rule again in the
+	// browser), and a session that stopped while blocked would go on being
+	// counted as stalled every poll, forever, with nobody able to unstick it.
+	// Keeping the frozen value out of the field those rules read makes that
+	// impossible rather than something every future caller has to remember —
+	// and the value is still shown, as what it is: the last state, not the
+	// current one.
+	LastState string `json:"lastState,omitempty"`
 
 	// Model and CostUSD come from the statusline reporter and from nowhere else.
 	// Claude Code hands the model display name and the session's running cost to
@@ -76,6 +125,20 @@ type SessionView struct {
 	Fleets []string `json:"fleets,omitempty"`
 }
 
+// Live reports whether the daemon is still running this session. An unset
+// Lifecycle reads as live, per the constants' own doc comment.
+func (v SessionView) Live() bool {
+	return v.Lifecycle != LifecycleStopped && v.Lifecycle != LifecycleDead
+}
+
+// Resumable reports whether this session is stopped and can be brought back
+// in place with its full history. False for a live session — there is
+// nothing to resume — and false for a dead one, which is the whole point of
+// telling those two apart.
+func (v SessionView) Resumable() bool {
+	return v.Lifecycle == LifecycleStopped
+}
+
 // Snapshot is everything the panel shows at one moment, assembled from
 // whatever each of the three sources could produce. A source that failed
 // fills its own error field and leaves the rest of the snapshot untouched —
@@ -102,9 +165,22 @@ type Snapshot struct {
 	// pointing at nothing. The list is the caller's to fill from OrphanCards();
 	// this package computes it but never assembles a Snapshot itself.
 	OrphanCards []string `json:"orphanCards,omitempty"`
-	DaemonError string   `json:"daemonError,omitempty"`
-	BoardError  string   `json:"boardError,omitempty"`
-	UsageError  string   `json:"usageError,omitempty"`
+	// StoppedCards holds the path of every card whose session is stopped but
+	// resumable — paused work, not lost work. Kept apart from OrphanCards
+	// rather than folded into it: the board says something different about
+	// each, and a card the panel calls orphaned while its session waits in
+	// the job store is the lie this field exists to stop.
+	StoppedCards []string `json:"stoppedCards,omitempty"`
+	DaemonError  string   `json:"daemonError,omitempty"`
+	BoardError   string   `json:"boardError,omitempty"`
+	// JobsError is set when Claude Code's job store could not be read, which
+	// is what stopped and dead sessions are known from. The live sessions in
+	// this snapshot are unaffected and are still shown: a source that failed
+	// fills its own field and leaves the rest alone (spec section 7). It
+	// matters that the panel says so rather than showing an empty stopped
+	// group, which looks exactly like a fleet where nothing is stopped.
+	JobsError  string `json:"jobsError,omitempty"`
+	UsageError string `json:"usageError,omitempty"`
 	// UsageErrorKind classifies UsageError for the frontend's wording choice:
 	// "auth" when sign-in would actually fix it (usage.ErrNoToken or
 	// usage.ErrUnauthorized), "rate_limit" when it is the account's own
@@ -199,20 +275,49 @@ func Link(sessions []daemon.Session, cards []board.Card) []SessionView {
 	return views
 }
 
-// OrphanCards lists the path of every card whose Session field names a short
-// id that is not among sessions. A card whose Session field is empty is not
-// reported: it never claimed a session in the first place, which is a
+// OrphanCards lists the path of every card whose Session field names a
+// session that is not coming back: one no session in the list has, or one
+// whose session is dead (LifecycleDead). A card whose Session field is empty
+// is not reported: it never claimed a session in the first place, which is a
 // different fact from a claim that turned out to be dead — a check that
 // folded the two together could no longer tell "looked and found nothing
 // wrong" apart from "there was nothing to look at".
-func OrphanCards(sessions []daemon.Session, cards []board.Card) []string {
-	alive := map[string]bool{}
+//
+// A card whose session is merely stopped is NOT an orphan, and this is the
+// half of the fix that shows up on the board. "Card lost its session" is
+// what the panel said about every card whose agent had been stopped, while
+// the session was sitting in the job store with its whole history, waiting
+// to be resumed. StoppedCards reports those instead, as what they are.
+func OrphanCards(sessions []SessionView, cards []board.Card) []string {
+	return cardsWhere(sessions, cards, func(v SessionView, found bool) bool {
+		return !found || v.Lifecycle == LifecycleDead
+	})
+}
+
+// StoppedCards lists the path of every card whose session is stopped but
+// resumable. The board marks these apart from both a working card and an
+// orphaned one: the work is paused, not lost.
+func StoppedCards(sessions []SessionView, cards []board.Card) []string {
+	return cardsWhere(sessions, cards, func(v SessionView, found bool) bool {
+		return found && v.Resumable()
+	})
+}
+
+// cardsWhere reports the cards whose named session satisfies want. found is
+// false when no session in the list carries the card's short id at all,
+// which is a state no SessionView value can stand for.
+func cardsWhere(sessions []SessionView, cards []board.Card, want func(v SessionView, found bool) bool) []string {
+	byShort := make(map[string]SessionView, len(sessions))
 	for _, s := range sessions {
-		alive[s.Short] = true
+		byShort[s.Short] = s
 	}
 	var out []string
 	for _, c := range cards {
-		if c.Session != "" && !alive[c.Session] {
+		if c.Session == "" {
+			continue
+		}
+		v, found := byShort[c.Session]
+		if want(v, found) {
 			out = append(out, c.Path)
 		}
 	}
