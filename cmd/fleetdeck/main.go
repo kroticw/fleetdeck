@@ -611,14 +611,7 @@ func setupDeps(configPath string, ready chan struct{}) server.SetupDeps {
 				return nil, false, err
 			}
 			steps := initSteps(initEnv{home: home, binary: binary, workspace: root, config: configPath})
-			out := make([]server.SetupStep, 0, len(steps))
-			for _, s := range steps {
-				step := server.SetupStep{Name: s.name, Note: s.note, Detail: s.detail}
-				if s.err != nil {
-					step.Error = s.err.Error()
-				}
-				out = append(out, step)
-			}
+			out := reportedSteps(steps)
 			// The configuration is what the panel runs on, and it is written only
 			// over a board that exists (saveNewConfig), so its step alone says
 			// whether the panel can run. The statusline and the permissions are
@@ -630,6 +623,68 @@ func setupDeps(configPath string, ready chan struct{}) server.SetupDeps {
 			}
 			return out, ok, nil
 		},
+	}
+}
+
+// reportedSteps is how a sequence of writes reaches a page: the steps
+// `fleetdeck init` prints, each with what it did or why it was refused. The
+// setup surface and the start page report the same way because they perform
+// the same writes.
+func reportedSteps(steps []initStep) []server.SetupStep {
+	out := make([]server.SetupStep, 0, len(steps))
+	for _, s := range steps {
+		step := server.SetupStep{Name: s.name, Note: s.note, Detail: s.detail}
+		if s.err != nil {
+			step.Error = s.err.Error()
+		}
+		out = append(out, step)
+	}
+	return out
+}
+
+// stepSucceeded reports whether the named step was performed. Which step
+// decides is not a position in the list: fleetSteps puts the board first and
+// the configuration second, initSteps the other way round, and reading the
+// wrong one would report a fleet as made because its folder was.
+func stepSucceeded(steps []initStep, name string) bool {
+	for _, s := range steps {
+		if s.name == name {
+			return s.err == nil
+		}
+	}
+	return false
+}
+
+// fleetMaker is the start page's one write: `fleetdeck init --fleet`, the same
+// steps and the same report, against the configuration file this panel reads.
+//
+// Serialised, because two of these at once would each read the configuration,
+// each append a fleet to what they read, and the second would write over the
+// first. The wizard's own write is on the setup surface, which no longer
+// exists by the time this one can be reached.
+//
+// The fleet is not served until the panel is restarted, and nothing here
+// pretends otherwise (internal/server/fleets.go says why).
+func fleetMaker(configPath string) func(name, path string) ([]server.SetupStep, bool, error) {
+	home, _ := os.UserHomeDir()
+	binary, _ := os.Executable()
+	var mu sync.Mutex
+	return func(name, path string) ([]server.SetupStep, bool, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		named := strings.TrimSpace(name)
+		if named == "" {
+			return nil, false, errors.New("name the fleet")
+		}
+		root, err := workspacePath(path, home)
+		if err != nil {
+			return nil, false, err
+		}
+		steps := fleetSteps(configPath, initEnv{home: home, binary: binary, workspace: root, config: configPath, fleet: named})
+		// The configuration step alone says whether the fleet exists: it is
+		// written only over a board that was made, and the statusline and the
+		// permissions are reported without deciding anything.
+		return reportedSteps(steps), stepSucceeded(steps, "config"), nil
 	}
 }
 
@@ -722,8 +777,9 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		}
 	}
 	return server.Deps{
-		Snapshot: p.snapshot,
-		SendText: func(session, text string) error { return dc.SendText(ctx, session, text) },
+		Snapshot:    p.snapshot,
+		CreateFleet: fleetMaker(configPath),
+		SendText:    func(session, text string) error { return dc.SendText(ctx, session, text) },
 		// Returned through a local, not directly: a nil *daemon.Attachment put straight
 		// into the interface would be a non-nil Terminal holding nothing.
 		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {
