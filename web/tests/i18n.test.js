@@ -246,6 +246,12 @@ const KEYS = [
   "fleet_menu",
   "fleet_menu_all",
   "fleet_menu_new",
+
+  // web/js/sessions.js's badge for a session silent inside one tool call. The label
+  // is followed by the call's name, so a label falling back to its own key would read
+  // "waiting_in_call Read" on the one row that most needs to be understood.
+  "waiting_in_call",
+  "waiting_in_call_hint",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

@@ -30,7 +30,7 @@ import { isMultiFleet, groupSessions, switchFleet } from "./fleet.js";
 import { pageStorage } from "./buildcheck.js";
 import { isLive, isResumable } from "./lifecycle.js";
 import { sessionMarks } from "./initials.js";
-import { isWaiting, isWaitingUnknown } from "./needs.js";
+import { isWaiting, isWaitingUnknown, isSilencedInCall } from "./needs.js";
 import { cardNumberHTML } from "./cardnumber.js";
 
 // The text explaining *why* a session isn't moving. Where needs has words, they
@@ -129,6 +129,20 @@ function applyContextWidths(root) {
 // tracker, said "0 stalled" in the same screenshot. Omitting stalledNow
 // (every existing caller that is not testing the badge itself) reads as
 // false, matching a session that has not been through the tracker at all.
+// The not-known badge has two causes and says which. A source that never reports
+// whether anyone is waiting gets "not reported". A session that has stood inside one
+// tool call, silent, past the limit gets the call named instead: that is the one fact
+// the panel has about it, and it is stated as a fact -- the call has not come back --
+// never as a guess about why. Both are the same verdict and the same badge class, so
+// every counter that reads isWaitingUnknown treats them alike.
+function unknownBadge(s) {
+  if (isSilencedInCall(s)) {
+    const label = `${t("waiting_in_call")} ${s.inCall.tool}`;
+    return `<span class="sbadge sbadge-unknown sbadge-incall" title="${escapeHtml(t("waiting_in_call_hint"))}">${escapeHtml(label)}</span>`;
+  }
+  return `<span class="sbadge sbadge-unknown" title="${escapeHtml(t("waiting_unknown_hint"))}">${escapeHtml(t("waiting_unknown"))}</span>`;
+}
+
 export function rowHtml(s, stalledNow) {
   const waiting = isWaiting(s);
   const stalled = Boolean(stalledNow);
@@ -152,7 +166,7 @@ export function rowHtml(s, stalledNow) {
     : stalled
       ? `<span class="sbadge sbadge-stalled">${escapeHtml(t("stalled"))}</span>`
       : unknown
-        ? `<span class="sbadge sbadge-unknown" title="${escapeHtml(t("waiting_unknown_hint"))}">${escapeHtml(t("waiting_unknown"))}</span>`
+        ? unknownBadge(s)
         : "";
 
   // The reason is clipped to a few lines by the stylesheet, with the whole of

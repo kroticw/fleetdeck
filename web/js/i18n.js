@@ -34,11 +34,16 @@ const en = {
   // way of saying no, and the difference between the two is what this marker is for.
   waiting_unknown: "not reported",
   waiting_unknown_hint: "this session's source does not report whether a person is waiting — which is not the same as nobody waiting",
+  // Shown instead when the session has stood inside one tool call, saying nothing,
+  // for longer than any ordinary call runs. The label is followed by the call's name.
+  // It states what is known and nothing more: slow and never-returning look the same.
+  waiting_in_call: "silent inside",
+  waiting_in_call_hint: "this session has been inside one tool call and has said nothing for longer than an ordinary call runs, so it has not been able to report whether a person is waiting. A slow call and one that will never return look the same from outside",
   open_card: "card",
   open_card_hint: "Open this session's card",
   silent_unmeasured: "not measured",
   waiting_count: "waiting for you",
-  waiting_unknown_count: "some sessions do not report whether anyone is waiting — the number beside this mark counts only the ones that do",
+  waiting_unknown_count: "some sessions do not or cannot report whether anyone is waiting — the number beside this mark counts only the ones that do",
   stalled_count: "stalled",
   limit_5h: "5h",
   limit_7d: "7d",
@@ -367,6 +372,8 @@ const ru = {
   waiting: "Ждёт",
   stalled: "Застряла",
   context_unknown: "транскрипта пока нет",
+  waiting_in_call: "молчит внутри",
+  waiting_in_call_hint: "сессия стоит внутри одного вызова инструмента и молчит дольше, чем идёт обычный вызов, поэтому сказать, ждёт ли она человека, она не могла. Медленный вызов и вызов, который не вернётся, снаружи выглядят одинаково",
   open_card: "карточка",
   open_card_hint: "Открыть карточку этой сессии",
   silent_unmeasured: "не измерено",
