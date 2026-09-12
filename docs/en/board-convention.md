@@ -32,7 +32,7 @@ The fields below and their allowed values are the schema enforced by the board's
 
 | Field | Type | Required | Allowed values |
 | --- | --- | --- | --- |
-| `id` | string | no, as far as this repository's validator script is concerned | the card's permanent number, `T-` and at least three digits (`T-018`) |
+| `id` | string | yes | the card's permanent number, `T-` and at least three digits (`T-018`) |
 | `zone` | string | yes | one of `urgent`, `unplanned`, `planned`, `niceToHave` |
 | `stage` | string | yes | one of `new`, `active`, `review`, `done`, `blocked` |
 | `progress` | integer | yes | one of `0`, `10`, `20`, `40`, `60`, `80`, `100` |
@@ -48,9 +48,9 @@ The validator also tolerates four fields that Obsidian's own property panel can 
 
 The panel shows it in both places a card appears — on the card in its column and in the open card, beside `stage` and `progress` — as a monospaced chip, which is what keeps it from being mistaken for the session's short id sitting next to it.
 
-A card with no `id` is a card created without the board's `new_card.py`, not a broken one: it is read and shown normally, and the panel says in words that the card has no number rather than leaving a blank where one would be. A card whose frontmatter does not parse says nothing about its number at all — nothing is known about it.
+A number is handed out in exactly two places, and both claim it the same way — an empty marker file `.ids/T-NNN` created with `O_EXCL`: the board's `scripts/new_card.py` and the panel's new-card button. One claim rather than two independent counters: cards are started in parallel by the operator, by the orchestrator and by the sessions themselves, and "read the maximum, add one" gives one number to two cards when two of them start at once. The marker is never removed — not when a card is renamed, not when it moves to the archive — so a number can neither be released nor reused.
 
-Note that this repository's validator template (`plugin/templates/board/scripts/validate_cards.py`) does not yet know the field, so on a board created from the template a card carrying `id` is rejected as an unknown field. The panel reads the field either way; the template is what has to catch up.
+A card with no `id` is one created by hand past both paths, or inherited from a board older than the numbers: the validator rejects it, while the panel reads and shows it anyway, saying in words that the card has no number rather than leaving a blank where one would be. Cards created before the scheme existed are given their numbers by `scripts/backfill_ids.py`. A card whose frontmatter does not parse says nothing about its number at all — nothing is known about it.
 
 ## Cross-field rules
 
@@ -90,7 +90,7 @@ The Go code the panel uses to read cards (`internal/board`) and the Python valid
 | Check | Go reader (`ParseCard`) | Go writer (`SetField`) | Validator script |
 | --- | --- | --- | --- |
 | Unknown frontmatter field | ignored | ignored | rejected |
-| `id` | read and shown; absence shown as "no number" | never written | not known to the template's script yet — rejected as unknown |
+| `id` | read and shown; absence shown as "no number" | written once, when the card is created, and never again | required; the format, the match with the file name, the absence of duplicates and the claim in the registry are all checked |
 | Required fields present | not checked | not checked | required: `zone`, `stage`, `progress`, `created` |
 | `zone` is one of the four allowed values | not checked | not checked | enforced |
 | `created` matches `YYYY-MM-DD` | not checked | not checked | enforced |
