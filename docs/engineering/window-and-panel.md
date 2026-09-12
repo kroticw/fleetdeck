@@ -81,10 +81,24 @@ Where the new app comes from is the one thing that differs between builds, and i
 3. It has the source put the new app into `.fleetdeck-update/` beside the installed bundle: built there from the tree, or downloaded there and checked — signed with a Developer ID, by the same Apple team as the running app, and notarized — before anything else happens. A download that fails any check is deleted and the update stops.
 4. It pauses its own keeper. A keeper left running would race the new window for the port; a test holds this.
 5. It starts the new window from the build with `--handover <file> --canonical <installed bundle>`.
-6. The new window reports `alive`, stops the old panel, and starts its own from the staged bundle. Its keeper starts only after the old panel is stopped, so the replacement rules above never come into play here.
+6. The new window reports `alive`, stops the old panel, and starts its own from the staged bundle — the only place the new build exists at this moment, since nothing has touched the canonical path yet. Its keeper starts only after the old panel is stopped, so the replacement rules above never come into play here.
 7. It checks that the new panel answers with the build the window is, then reports `panel`.
 8. It exchanges the staged and installed bundles in one system call: `renamex_np` with `RENAME_SWAP` on macOS, `renameat2` with `RENAME_EXCHANGE` on Linux. Then it reports `swapped`.
-9. It restarts its panel from the canonical path, so the panel reports where it really runs from, and reports `done`. The old window quits.
+9. It restarts its panel, this time from the canonical path, and reports `done` once that panel has answered. The old window quits.
+
+### The panel is started twice, and both starts are load-bearing
+
+Steps 6 and 9 are two starts of two panel processes by one window, from two different directories, and an update therefore shows up in `~/Library/Logs/fleetdeck.log` as two `shutting down` / `listening` pairs about a second apart. The lines are indistinguishable — both name the new version and the same URL, and neither says which bundle it was started from — so one update reads as two crashes. It was read that way by the operator on 2026-09-12 (T-033), which is why this section exists.
+
+Neither start can go. The first one cannot be from the canonical path: the old version is still there, and it stays there until the new build has shown it works, which is the invariant. The second one is needed for three separate reasons, any one of which would be enough:
+
+- **The staged path holds the old version once the swap has happened.** The keeper starts a panel by path, not by inode, so a panel left running from `.fleetdeck-update/` leaves the keeper's `Bin` pointing at the bundle that was swapped out. The first time that panel died, the keeper would start the *previous* version — a silent downgrade at an arbitrary moment. Measured on 2026-09-12: after an update from v0.5.0, `.fleetdeck-update/fleetdeck.app` answers `v0.5.0`.
+- **Nothing would ever have run the installed app from the path it is installed at.** The restart is the one execution of the canonical bundle from its final path before `done` is reported, while the old window is still alive to be told that it failed. This is the same standard the release path's acceptance holds itself to: the app at the canonical path is asked what it is by running its panel, not by reading metadata around it.
+- **The panel writes its own path outward.** `os.Executable()` is the path it was started from. It reaches `/api/snapshot` as `executable` — which is how "which panel answers on the port" is decided — and it reaches `~/.claude/settings.json`: `ensureStatusline` in `cmd/fleetdeck/init.go` writes the `fleetdeck-status` beside the running panel into `statusLine.command`. A panel left running from `.fleetdeck-update/` would write a path inside the directory the *next* update removes with `os.RemoveAll`.
+
+Setting `Keeper.Bin` without restarting would answer the first reason and neither of the other two.
+
+Swapping first and starting the panel once would be one start instead of two, and is refused for the invariant: the exchange would then happen before anything had shown the new build works, and a broken build would be sitting at the canonical path.
 
 The handover was designed while the panel still outlived its window, and it came through the change to "the panel lives exactly as long as the app" (#108) with no step changed:
 
