@@ -45,7 +45,23 @@ After that the quarantine flags changed from `0083` to `00c3`, and the app opene
 
 The control is the same archives unstamped: no attribute on anything. So unpacking in Terminal is not a way around Gatekeeper, and nothing about the archive format is. The codesign seal survived every round trip.
 
-**Measured: App Translocation.** Opened from outside Applications, even after approval, the stand-in ran from `/private/var/folders/…/T/AppTranslocation/<uuid>/d/fleetdeck.app/…`. **Read:** first-run setup takes the statusline command's path from `os.Executable()` beside the panel (`ensureStatusline` in `cmd/fleetdeck/init.go`), so a first launch from Downloads would record a path that later disappears. Hence the guide's step "drag it to Applications before the first launch". **Not measured:** that a Finder move keeps a quarantined app from being translocated.
+**Measured: App Translocation.** Opened from outside Applications, even after approval, the stand-in ran from `/private/var/folders/…/T/AppTranslocation/<uuid>/d/fleetdeck.app/…`. **Read:** first-run setup takes the statusline command's path from `os.Executable()` beside the panel (`ensureStatusline` in `cmd/fleetdeck/init.go`), so a first launch from Downloads would record a path that later disappears. Hence the guide's step "drag it to Applications before the first launch".
+
+**Measured on 2026-09-12, on the real v0.3.0 release downloaded by Firefox: the drag is the thing, and being in Applications is not.**
+
+| How the app got into `/Applications` | Where it ran from |
+| --- | --- |
+| `mv` in a shell | `/private/var/folders/…/AppTranslocation/…` |
+| Finder's own `move`, over an Apple Event | `/private/var/folders/…/AppTranslocation/…` |
+| Dragged with a mouse in Finder | `/Applications/…`, and the quarantine attribute still on it |
+
+So the guide's step 2 does what it was written to do, and a person who follows it gets an app that knows where it lives. What does **not** work is installing the app by moving it programmatically — an installer, a `make` target, a script copied off a page — and that is worth knowing before anyone writes one.
+
+Removing `com.apple.quarantine` also stops translocation, which is the other half of the mechanism: it is the attribute that arms it, and the drag that disarms it.
+
+**Read off the attribute, not from Apple's documentation:** a pristine download carries flags `0081`; after a mouse drag into Applications and a launch the bundle carries `01c1` and the binaries inside `00c1`. The `01` appears to be the mark of the user's own move, but that reading is inference from three observations, not something Apple states here.
+
+**One confound, stated rather than hidden:** the scripted-move row was measured on a copy that had already been launched once (flags `00c1`), while the mouse-drag row started from a pristine `0081`. The two rows differ in the starting flags as well as in how the app was moved, so "Finder's scripted move does not clear translocation" is measured for that starting state and not isolated from it. The row that matters for a person — the pristine copy, dragged, untranslocated — has no such confound.
 
 ## 4. Building one app for both architectures
 
@@ -138,12 +154,26 @@ The mutants: no bundle seal; one architecture only; no plist version; `treeDir` 
 
   **The harness had two blind spots of its own, and both were found by looking at which check did each killing.** The first version named every mutant bundle `mutant.app`, so the gate refused all of them on the member list without reaching a single check they were written for — six kills, nothing measured. Then two mutants survived, and neither was a gate defect: "no `--timestamp`" is not a mutation (see above), and re-signing a bundle with the same bytes and the same flags produces the same code hash, so the ticket still matched. A mutant has to be checked for being a mutant.
 
+### The acceptance, on the real release
+
+**Measured, 2026-09-12, v0.3.0.** Not "the command worked" — the app a person gets:
+
+- Downloaded with Firefox from the releases page. The quarantine attribute it arrived with is a real one, set by the browser: `0081;<hex time>;Firefox Developer Edition;<uuid>`. Every earlier measurement in this page used an attribute stamped by hand in that format; this one was not stamped.
+- Unpacked by double-clicking the zip, which is Archive Utility. The quarantine attribute was on the bundle afterwards **and** on each binary inside it.
+- `spctl --assess --type execute -vv` on the downloaded, quarantined copy: `accepted`, `source=Notarized Developer ID`. The same command on the ad-hoc build of the same app, minutes earlier: `rejected`, status 3.
+- Put in Applications and opened. No dialog. `open` returned at once rather than waiting on one — on a quarantined app it does not return until any Gatekeeper dialog is closed, which is how the previous session had to screenshot the refusal from a second command. Nothing about fleetdeck appears in syspolicyd's log: no `rejecting due to lack of matching active rule`, no rejection record, no user intent. The quarantine flags went from `0081` to `00c1` with nobody touching anything; the ad-hoc path needed two confirmations to go from `0083` to `00c3`.
+- The window opened on the operator's own running fleet, showing the board and the live sessions.
+
+**Measured: the release app does not take a running panel away from its window.** The operator's panel was answering on 7777, started by their own window, while this was done. `Keeper.replaceable` returns false when the answering panel's owner process is alive (`internal/supervisor/keeper.go`), and that is what happened: the new window used the panel it found, and the operator's window and panel were still running afterwards.
+
+**Not measured, and the loose end of this release:** a first run of the release app all the way through first-run setup, on a machine with no fleet. The app opened on a fleet that already existed, so `ensureStatusline` never ran from a downloaded copy. Section 3 says the path it would record is the right one as long as the person dragged the app in Finder, which the guide tells them to do — but that is the path not yet walked end to end.
+
 ## 9. Not verified
 
 - **A clean Mac.** There is no macOS virtual machine here (Parallels holds only a Windows VM). The stand-in for a clean machine was the quarantine attribute set by hand in Firefox's format, the operator's own screen, and stand-in bundles. A Mac without Claude Code, git or the Command Line Tools was not tried.
-- **A real browser download.** The attribute was stamped, not set by a browser. Safari unpacks "safe" downloads itself; that path was not tried.
-- **The first run of the real app from a release**, all the way to a working fleet. The Gatekeeper path was measured with stand-ins, the app's contents with the tests, and the two were never put together on one screen.
+- ~~**A real browser download.**~~ Closed on 2026-09-12: v0.3.0 was downloaded with Firefox and carried the browser's own quarantine attribute through Archive Utility to the bundle and its binaries (section 8). Safari, which unpacks "safe" downloads itself, was still not tried.
+- **The first run of the real app from a release**, all the way to a working fleet, on a machine with no fleet already set up. The Gatekeeper path is now measured on the real app rather than on stand-ins (section 8), and the app opened on a fleet that already existed — but first-run setup itself has still never run from a downloaded copy, and section 3 says what would happen to the path it records if it did.
 - **The "damaged" dialog's exact words**, the second warning in the Open Anyway path, and whether a password was asked.
-- **The release workflow itself.** `make dist-app` runs in CI's macOS leg through the test, but the new steps of `release.yaml` run only on a tag, and no tag was made.
+- ~~**The release workflow itself.**~~ Closed on 2026-09-12: v0.3.0 was cut, and every step ran — the certificate imported into a keychain made for the job, the app signed, Apple's answer waited for, the ticket stapled, the gate passed under `EXPECT_SEAL=notarized`, and the signing material deleted afterwards.
 - **The x86_64 slice on a real Intel Mac.** Every x86_64 slice is cross-compiled on an Apple silicon Mac: this machine, the macOS runner of CI's `check` job, and the release job's runner. It has been run only under Rosetta 2 on Apple silicon, which translates it and is not an Intel processor. It has never run on a real Intel Mac, and there is no Intel Mac here to run it on. "An Intel Mac can run the release" follows from how a universal binary works; it has not been measured. (Section 8 is read from the same place for the x86_64 slice's signature: every slice of a universal binary is covered by the one bundle signature, and only the arm64 one has been run under it here.)
-- **A new version over an installed one:** whether Gatekeeper asks again. It is expected to, because the code is different.
+- **A new version over an installed one:** whether Gatekeeper asks again. A notarized app is expected not to ask at all, whatever its code hash, but that has not been tried with two signed releases.
