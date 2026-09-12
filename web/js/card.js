@@ -196,6 +196,29 @@ export function renderCard(root, path, onClose, options = {}) {
     }
 
     const meta = el("div", "card-meta");
+    // The card's number, first in the row and right under stage and progress:
+    // this is the identifier an operator reads off the screen and says out
+    // loud, and card_path.py is what they hand it to. It shares the row with
+    // the session's short id and must not share its look — the session's
+    // identifier is temporary and changes with every run, so naming it instead
+    // leads nowhere. Hence a class of its own, a shape of its own in app.css,
+    // and a title saying which of the two this is.
+    //
+    // Skipped entirely for a card that does not parse: nothing is known about
+    // the number of a card whose frontmatter could not be read, and "no
+    // number" would be an invented fact stacked on a real failure.
+    if (!card.parseError) {
+      const numbered = Boolean(card.id);
+      const number = el(
+        "span",
+        numbered ? "card-num" : "card-num card-num-none",
+        numbered ? card.id : t("card_no_number"),
+      );
+      // A card written around the board's new_card.py has no number at all.
+      // The word says so; an empty space would read as a panel that lost it.
+      number.setAttribute("title", numbered ? t("card_number_hint") : t("card_no_number_hint"));
+      meta.append(number);
+    }
     if (card.session) {
       if (onOpenSession) {
         // A button, not an <a> with no href: an anchor without one is not

@@ -29,7 +29,14 @@ var (
 )
 
 type Card struct {
-	Path       string   `json:"path"`
+	Path string `json:"path"`
+	// ID is the card's permanent identifier, "T-NNN" as the board's
+	// new_card.py writes it: the one thing about a card that a person can
+	// read off the screen, say out loud, and hand to card_path.py to get
+	// back to the same file. It is empty for a card written around that
+	// script, which is a card with no number rather than a broken one —
+	// see ParseCard.
+	ID         string   `json:"id"`
 	Zone       string   `json:"zone"`
 	Stage      string   `json:"stage"`
 	Progress   int      `json:"progress"`
@@ -43,6 +50,7 @@ type Card struct {
 }
 
 type frontmatter struct {
+	ID       string `yaml:"id"`
 	Zone     string `yaml:"zone"`
 	Stage    string `yaml:"stage"`
 	Progress int    `yaml:"progress"`
@@ -69,7 +77,7 @@ func ParseCard(path string) (Card, error) {
 		c.ParseError = "frontmatter: " + err.Error()
 		return c, nil
 	}
-	c.Zone, c.Stage, c.Progress = fm.Zone, fm.Stage, fm.Progress
+	c.ID, c.Zone, c.Stage, c.Progress = fm.ID, fm.Zone, fm.Stage, fm.Progress
 	c.Session, c.Repo, c.Created = fm.Session, fm.Repo, fm.Created
 	c.Body = string(raw[len(m[0]):])
 

@@ -1156,6 +1156,35 @@ main {
   font-size: var(--fs-sm);
 }
 
+/* The card's number in the open panel, first in the meta row and directly
+   under stage and progress — where an operator settles on which card they are
+   about to talk about. Same chip as on the board (.knum) on purpose: one shape
+   means one kind of thing wherever it appears, so the number is recognised
+   here without being learned twice. The session's id in the same row keeps its
+   plain monospace, and the card's number is the one wearing the chip.
+
+   Full-strength text here, unlike .knum on the board: the session's id in this
+   row inherits --text, and a card's own number drawn fainter than the session
+   beside it would say the temporary identifier is the one that matters. On the
+   board both are --text-muted, and the parity holds there the other way. */
+.card-num {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--gap-sm);
+}
+
+/* No number, said in words rather than left as a gap — see .knum-none. */
+.card-num-none {
+  font-family: inherit;
+  font-style: italic;
+  color: var(--text-faint);
+  background: none;
+  padding: 0;
+}
+
 .card-session {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -1422,10 +1451,58 @@ main {
   overflow-wrap: break-word;
 }
 
+/* The service row under the title: the card's own number and the short id of
+   the session working it. Neither is the card's name, so both live below the
+   title and both stay small; the row wraps because a dead or stopped session
+   spells out its state here and a narrow column cannot hold that beside a
+   number. The 2px the session line used to carry itself now belongs to the
+   row, so the two boxes sit on one baseline instead of one nudging the other
+   down. */
+.kmeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  margin-top: 2px;
+}
+
+/* The card's number, and the one rule it has to obey: it cannot be mistaken
+   for the session's short id sitting beside it. The two are different
+   identifiers with different lifetimes — the card's is permanent and is what
+   gets said out loud, the session's changes with every run — and an operator
+   naming the wrong one gets nowhere.
+   They are told apart by shape, not by colour: same size, same grey, but the
+   number sits in a quiet chip and is monospaced, so it reads as a label
+   attached to the card and survives a screenshot, a greyscale screen and a
+   person who never hovers over anything. Monospace is not decoration here
+   either — this string gets read out character by character, and 0/O and
+   1/l trading places is exactly the failure that costs a second attempt. */
+.knum {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--gap-sm);
+}
+
+/* A card with no number: a word in the number's place, and deliberately not
+   shaped like a number — no chip, no monospace, italic. An empty space here
+   reads as a panel that lost the number; a chip with a dash in it reads as a
+   number nobody can make out. This says the card has none, which is the fact,
+   and the title attribute says why. */
+.knum-none {
+  font-family: inherit;
+  font-style: italic;
+  color: var(--text-faint);
+  background: none;
+  padding: 0;
+}
+
 .ksession {
   font-size: var(--fs-2xs);
   color: var(--text-muted);
-  margin-top: 2px;
 }
 
 /* A dead session, on a card in any other stage, still needs a person's
