@@ -83,15 +83,25 @@ Two cases end in a refusal rather than an edit, both for the same reason — `in
 
 ## Adding a second fleet
 
-A fleet is a board, its documentation and its orchestrator. The first one is the workspace the first launch or `fleetdeck init` makes. Another one is added to the same configuration:
+A fleet is a board, its documentation and its orchestrator. The first one is the workspace the first launch or `fleetdeck init` makes. Another one is added from the start page — **Start a fleet**, a name and a folder — or from a terminal:
 
 ```bash
 fleetdeck init --fleet clining --workspace ~/clining-fleet
 ```
 
-This makes the workspace — a board and docs, as above — adds the fleet to `fleets` in the configuration only once its board exists, and lets Claude Code sessions write in the new folder. `--board <path>` makes a board alone instead. A name or a board another fleet already has is refused before anything is made; running the same command again keeps what the first run added.
+Both do the same thing: they make the workspace — a board and docs, as above — add the fleet to `fleets` in the configuration only once its board exists, and let Claude Code sessions write in the new folder. `--board <path>` makes a board alone instead. A name or a board another fleet already has is refused before anything is made; running the same command again keeps what the first run added.
 
-Restart the panel, and the header shows a switcher: one entry per fleet, each with how many of its sessions wait for an answer. Appoint the new fleet's orchestrator from its own tab: the wizard opened from a fleet's orchestrator column writes that fleet's working order and pins that fleet's orchestrator. See [Several fleets](configuration.md#several-fleets) for what the fleets share and how a session comes to be in one.
+Either way the panel serves the new fleet only after it is restarted. The panel reads the configuration when it starts and not again, and the page says so before the button and after it.
+
+Restart the panel, and the new fleet is on the start page and in the header's menu, with how many of its sessions wait for an answer. Appoint its orchestrator from its own tab: the wizard opened from a fleet's orchestrator column writes that fleet's working order and pins that fleet's orchestrator. See [Several fleets](configuration.md#several-fleets) for what the fleets share and how a session comes to be in one.
+
+## The start page
+
+The application opens on the start page: the fleets, what waits in each, and the way to a new one. Choosing one opens the panel on it; the fleet you worked in last time is marked.
+
+The panel itself is one fleet's, and its address says which: `http://127.0.0.1:7777/?fleet=clining`. The bare address, `http://127.0.0.1:7777/`, is the start page. In the panel, the fleet's name in the header opens a menu that switches fleets, goes back to the start page, and starts a new one; switching reloads the page, which closes any terminal that tab had open and touches nothing in the fleet being left.
+
+A machine with no configuration file at all has no panel yet, so it has no start page either: it opens the setup page instead — see [First launch](#first-launch-choosing-the-workspace).
 
 ## The app and the panel
 
@@ -136,7 +146,7 @@ An app installed from a release has no Update button: it was built by the releas
 
 The panel listens on `http://127.0.0.1:7777` — the loopback interface only, on the port `server.port` sets (see [`configuration.md`](configuration.md)). Open the fleetdeck app to have it started for you, or run `fleetdeck` in a terminal.
 
-A browser pointed at that address gets the panel. The routes the page uses are callable directly too — `GET /api/snapshot` for the state of the whole fleet, `GET /ws` for a live stream of it, `GET /api/sessions/{id}/pty` for a live two-way terminal on one session (a WebSocket whose geometry is given as `?cols=&rows=`), `GET /api/docs` and `GET /api/docs/content` for the directories `docs.paths` names, `POST /api/sessions/{id}/image` to attach an image, and the routes that type into a session and move a card. Only pages the panel served itself may call them: a request carrying any other `Origin` is refused with 403, and a request body that is not `application/json` with 415. The terminal socket carries no request body, so it has a check of its own in place of the second one: its first message must be the panel's terminal token, which `GET /api/terminal-token` hands to the panel's own page and, carrying no CORS headers, to no page on any other origin. The token is new with every start of the panel, and the page reads it again for every terminal it opens.
+A browser pointed at that address gets the start page, and `?fleet=<name>` on it gets that fleet's panel. The routes the page uses are callable directly too — `GET /api/snapshot` for the state of the whole fleet, `GET /ws` for a live stream of it, `GET /api/sessions/{id}/pty` for a live two-way terminal on one session (a WebSocket whose geometry is given as `?cols=&rows=`), `GET /api/docs` and `GET /api/docs/content` for the directories `docs.paths` names, `POST /api/sessions/{id}/image` to attach an image, and the routes that type into a session and move a card. Only pages the panel served itself may call them: a request carrying any other `Origin` is refused with 403, and a request body that is not `application/json` with 415. The terminal socket carries no request body, so it has a check of its own in place of the second one: its first message must be the panel's terminal token, which `GET /api/terminal-token` hands to the panel's own page and, carrying no CORS headers, to no page on any other origin. The token is new with every start of the panel, and the page reads it again for every terminal it opens.
 
 An image is attached by pasting it: copy it, put the caret in an input box — the orchestrator column's or the session panel's — and press Cmd+V. The panel uploads it and puts the file's path in the box, leaving whatever you had already typed where it was. Pasting ordinary text works as it always did.
 
