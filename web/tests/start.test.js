@@ -155,6 +155,15 @@ test("the new-fleet form is out of the way until it is asked for", () => {
   assert.equal(root.querySelector(".start-new-form").hidden, false);
 });
 
+// The header's menu leaves for the start page with a fragment meaning "make
+// one". Landing on a closed form after pressing "start a fleet" would be a
+// second button to find, where the menu had already promised the form.
+test("the form is open from the start when the menu sent the person to make one", () => {
+  start({ openNew: true });
+  push(snapshot(["fleetdeck"]));
+  assert.equal(root.querySelector(".start-new-form").hidden, false);
+});
+
 test("a fleet with no name is refused here, without asking the panel", async () => {
   start();
   push(snapshot(["fleetdeck"]));

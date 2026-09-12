@@ -423,12 +423,101 @@ body {
  * for an answer, in the waiting counter's colour, so a question there is seen
  * from here. Then, in the session list, the heading of the sessions no fleet
  * claims and one line per other fleet. */
-.fleet-switch {
+/* The fleet control: one menu with the application's icon and the name of the
+   fleet on screen, where a row of buttons used to be. It is shown with one
+   fleet too — the row was not, and a control that turns up only once a second
+   fleet exists is a second fleet nobody can find out about. */
+.fleet-menu {
+  position: relative;
   display: inline-flex;
-  gap: var(--gap-sm);
 }
 
-.fleet-entry,
+.fleet-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.fleet-menu-button:hover {
+  background: var(--surface-hover);
+}
+
+.fleet-menu-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.fleet-menu-chevron {
+  flex: none;
+  color: var(--text-muted);
+}
+
+/* Over the panel, not in the row: the header is a row of controls with no
+   room to grow, and a list that pushed it open would move every counter
+   beside it each time the menu opened. */
+.fleet-menu-list {
+  position: absolute;
+  top: calc(100% + var(--gap-sm));
+  left: 0;
+  z-index: 3;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: 0 4px 16px var(--shadow);
+}
+
+.fleet-menu-entry,
+.fleet-menu-other {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm) var(--gap);
+  cursor: pointer;
+}
+
+.fleet-menu-entry:hover,
+.fleet-menu-other:hover {
+  background: var(--surface-hover);
+}
+
+.fleet-menu-entry-current {
+  font-weight: 600;
+  background: var(--surface-hover);
+  cursor: default;
+}
+
+.fleet-menu-other {
+  color: var(--text-muted);
+}
+
+.fleet-menu-sep {
+  height: 1px;
+  margin: var(--gap-sm) 0;
+  background: var(--border);
+}
+
 .fleet-other {
   font: inherit;
   font-size: var(--fs-xs);
@@ -440,24 +529,29 @@ body {
   cursor: pointer;
 }
 
-.fleet-entry:hover,
 .fleet-other:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.fleet-entry-current {
-  color: var(--text);
-  font-weight: 600;
-  border-color: var(--accent);
-  cursor: default;
-}
-
-.fleet-entry-waiting,
+.fleet-menu-waiting,
 .fleet-other-waiting {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--danger);
+}
+
+/* The name takes what the row leaves, and a long one is cut rather than
+   pushing the counters off the end of the header. */
+.fleet-menu-name {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet-menu-entry {
+  justify-content: space-between;
 }
 
 .fleet-group-head {

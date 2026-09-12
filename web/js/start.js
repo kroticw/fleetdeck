@@ -62,7 +62,7 @@ async function readJSON(response) {
  * lastFleet (which fleet the panel wrote down last) and choose — the window's
  * folder chooser, which exists only inside the fleetdeck window.
  */
-export function renderStart(root, { subscribe = storeSubscribe, fetch: get = globalThis.fetch, navigate, lastFleet, choose } = {}) {
+export function renderStart(root, { subscribe = storeSubscribe, fetch: get = globalThis.fetch, navigate, lastFleet, choose, openNew = false } = {}) {
   const leave = navigate ?? ((name) => switchFleet(name, { storage: pageStorage() }));
   const remembered = lastFleet ?? (() => rememberedFleet());
 
@@ -119,7 +119,10 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
   unavailable.hidden = true;
 
   const form = el("section", "start-new-form wizard-section");
-  form.hidden = true;
+  // Open from the start when the header's menu sent the person here to make
+  // one: "start a fleet" in the panel promises the form, not another button
+  // to find.
+  form.hidden = !openNew;
   form.append(
     el("h2", "", t("start_new_title")),
     el("p", "", t("start_new_text")),
@@ -230,7 +233,14 @@ if (typeof document !== "undefined" && typeof document.getElementById === "funct
   if (root) {
     initTheme();
     const chooser = globalThis.fleetdeckChooseFolder;
-    renderStart(root, { choose: typeof chooser === "function" ? (message, prompt) => chooser(message, prompt) : undefined });
+    renderStart(root, {
+      choose: typeof chooser === "function" ? (message, prompt) => chooser(message, prompt) : undefined,
+      // The fragment the header's menu leaves for (web/js/header.js
+      // nextMenuState). A fragment rather than a query parameter: it never
+      // reaches the server, and it cannot be mistaken for the fleet parameter
+      // that decides what the root serves.
+      openNew: globalThis.location?.hash === "#new",
+    });
     connect();
   }
 }

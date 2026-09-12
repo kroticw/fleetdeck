@@ -36,6 +36,19 @@ const HANDOVER_PAUSE_MS = 200;
 // a session is busy with is the point of the list, and it changes.
 const SESSIONS_EVERY_MS = 2000;
 
+// panelAddress is where the wizard leaves for: the panel, showing the fleet
+// the wizard was run for.
+//
+// The fleet is always named, even when the wizard does not know which one it
+// was — the first launch has one fleet and no name for it yet. An address with
+// no fleet at all is the start page now (internal/server/static.go), and
+// finishing the wizard by landing on a list of one fleet would be a step
+// backwards from where the person already is. The empty value is what
+// fleet.Select reads as "the first fleet".
+export function panelAddress(fleet) {
+  return `/?fleet=${encodeURIComponent(fleet)}`;
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -94,7 +107,7 @@ export function renderSetup(root, { fetch: get = globalThis.fetch, reload, wait,
   // parameter, and is served as it always was.
   const fleet = fleetFromSearch(globalThis.location?.search ?? "");
   const fleetGet = (url, init) => get(withFleet(url, fleet), init);
-  const open = reload ?? (() => globalThis.location.replace(withFleet("/", fleet)));
+  const open = reload ?? (() => globalThis.location.replace(panelAddress(fleet)));
   const repeat =
     every ??
     ((fn, ms) => {
