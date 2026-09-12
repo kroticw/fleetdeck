@@ -52,7 +52,7 @@ make test-web  # the frontend's tests, under node's own runner
 make lint      # go vet, gofmt -l, golangci-lint run
 ```
 
-`make test` stays Go-only, so a checkout without node still gets a complete Go check. CI runs both.
+`make test` runs the Go tests and, through them, the board's Python tests, so it needs `python3` and fails in words when it is missing. It does not need node: a checkout without node still gets a complete check of everything else. CI runs both.
 
 ## Documentation
 
