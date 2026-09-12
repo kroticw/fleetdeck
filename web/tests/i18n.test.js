@@ -45,6 +45,11 @@ const KEYS = [
   // badges above all: a row falling back to "stopped_badge" would say
   // nothing about what is wrong with the session it sits on, which is the
   // whole reason the row is there.
+  // web/js/sessions.js's folded strip. Both are titles on a bare number, and
+  // a title falling back to its own key would leave the number unexplained —
+  // which is the state the strip was added to end.
+  "folded_running",
+  "folded_unknown",
   "stopped_group",
   "stopped_badge",
   // The resume button and everything it can say. resume_working and

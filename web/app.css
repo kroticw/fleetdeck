@@ -694,7 +694,25 @@ main {
   min-width: 0;
 }
 
-.col[data-folded="1"] > *:not(.col-size) {
+/* The sessions column folded is wider than that, because it has something to
+   say: one mark per running session (web/js/sessions.js, foldedStripHtml).
+   The width is the one the marks need and not a pixel more — folding is for
+   the space it frees, and a strip that took a tenth of the window back would
+   be answering the wrong request.
+
+   Measured, not chosen. The mark is 34px; the strip is 48, which leaves 7px
+   either side — near enough the 5px between one mark and the next that the
+   spacing reads as even. 42px was tried and leaves 4px, which has the marks
+   nearly touching the strip's own edges; 64px leaves 15px, and at that point
+   the strip stops reading as an edge and starts reading as a third column
+   that happens to be narrow, which is the opposite of what folding was for.
+   Compared side by side on the operator's own screen at 1200px wide, in both
+   themes, against a fleet of one, of five and of fifteen. */
+.col-sessions[data-folded="1"] {
+  flex: 0 0 48px;
+}
+
+.col[data-folded="1"] > *:not(.col-size):not(.sfold) {
   display: none;
 }
 
@@ -2368,6 +2386,101 @@ main {
 
 .col[data-folded="1"] .col-size-fold {
   display: none;
+}
+
+/* The folded sessions column's own content: who is running, without unfolding
+ * anything.
+ *
+ * Rendered on every snapshot and hidden while the column is open, the same way
+ * each of the two fold buttons above is hidden in the state it does not belong
+ * to. The alternative — building it only while folded — would put a second
+ * answer to "are we folded" in the JavaScript, next to the one this stylesheet
+ * already holds. */
+.sfold {
+  display: none;
+}
+
+.col-sessions[data-folded="1"] .sfold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: var(--gap-sm) 0 var(--gap);
+  /* A fleet can outgrow the height. It scrolls rather than shrinking the
+     marks: a mark too small to read is worse than one that has to be scrolled
+     to, and shrinking would also make the buttons harder to hit. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* How many are running. Text, and deliberately not drawn as anything
+   pressable: this is the one thing on the strip that does nothing, and on a
+   strip whose every other element is a button it must not look like one. */
+.sfold-count {
+  flex: none;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  padding-bottom: 2px;
+}
+
+/* Not knowing is its own state and reads as its own thing — an em dash, not a
+   zero. "Nobody is running" and "nobody has been asked" are different facts
+   and the strip has room for exactly one character to tell them apart. */
+.sfold-unknown {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* One session. A button, because pressing it opens that session — the same
+   thing pressing its row does when the column is open.
+
+   Drawn as a control, which on this strip is not a preference: the fold
+   button a few rules above is here because a bare chevron at this size read
+   as decoration and a control that does not look like one does not exist for
+   the person who needs it. Same size, same reasoning. The count above is the
+   other half of that promise — it does nothing, so it is drawn as text. */
+.sfold-mark {
+  flex: none;
+  width: 34px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sfold-mark:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-strong);
+}
+
+/* Waiting and stalled, in the colours the open column badges them with — the
+   same two facts have to read the same in both states of the column, or a
+   person folding it would have to learn a second vocabulary. */
+.sfold-waiting {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.sfold-waiting:hover {
+  background: var(--danger);
+  border-color: var(--text);
+}
+
+.sfold-stalled {
+  background: var(--surface);
+  border-style: dashed;
+  color: var(--text-muted);
 }
 
 /* The edge a person drags to resize a column.
