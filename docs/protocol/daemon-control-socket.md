@@ -118,6 +118,59 @@ With an `attachId` the daemon updates that attacher's recorded size, resizes the
 - **An unknown `attachId` is answered `{"ok": true}` and does nothing.** Measured: a resize addressed to an id no attacher holds left the PTY exactly as it was. The reply therefore confirms nothing about the effect; see `attachId` under `attach` for what a client has to do about that.
 - **Zero is refused** the same way it is on `attach`: `{"ok": false, "error": "malformed request: Invalid input", "code": "EUNKNOWN"}`.
 
+### `dispatch` — start a session, and the one way to resume a stopped one
+
+**Requires auth.**
+
+This is the only operation in this document that starts a process. Everything else reads a session, types into one, or resizes one; this one brings a session that is not running back into the daemon's own list, under its own short id, with its history.
+
+```text
+request:  {"proto": <n>, "op": "dispatch", "d": <descriptor>, "timeoutMs": <int>, "auth": "<control key>"}
+response: {"ok": true, "op": "dispatch", "short": "<short id>"}
+```
+
+The descriptor, for a resume. Every key below was sent in the request that resumed a real stopped session on 2026-09-12 against CLI 2.1.263; nothing here is guessed from a shape that looked plausible.
+
+```json
+{
+  "proto": 1,
+  "short": "<the session's own short id>",
+  "nonce": "<8 hex characters, fresh per dispatch>",
+  "sessionId": "<the id the session is known by>",
+  "createdAt": 1789200000000,
+  "source": "fleet",
+  "cwd": "<the directory the session ran in>",
+  "launch": {
+    "mode": "resume",
+    "sessionId": "<the id to resume BY>",
+    "fork": false,
+    "flagArgs": ["--model", "..."],
+    "transcriptPath": "<optional>"
+  },
+  "env": {},
+  "isolation": "none",
+  "respawnFlags": ["--model", "..."],
+  "seed": {"intent": "<the last prompt>", "name": "<the session's name>"}
+}
+```
+
+Five things about it are load-bearing, and four of them are silent when got wrong.
+
+- **`launch.sessionId` is the id resumed *by*, which is not always the id in `sessionId`.** They are equal on an ordinary session and differ on one that was itself resumed from another — Claude Code's job store carries both, as `sessionId` and `resumeSessionId`. Both are UUIDs, so swapping them resumes a different conversation and nothing in the protocol objects.
+- **`launch.fork` must be `false`.** True starts a second session beside the stopped one rather than bringing that one back.
+- **`transcriptPath` is present or absent, never empty.** The daemon reads the key's presence; an empty string points the resumed worker at nothing instead of letting it find the transcript itself. Where it is absent, the worker looks the conversation up relative to `cwd`.
+- **`flagArgs` and `respawnFlags` are the session's own command line** — its name, its model, its permission mode, its settings — and a resume that omits them brings the history back as a different session. The job store records them as `respawnFlags`.
+- **`nonce` is fresh per dispatch.** Eight hex characters is the shape the daemon's other clients send.
+
+**The reply says nothing about the session.** `{"ok": true}` means the daemon accepted the descriptor. The worker is started after it, and every way it can fail to start happens past that point — so a client that treats the reply as the answer reports success for a resume that never came up. The answer is in `list` afterwards: the session appears there, and a resume is done when it has held a state other than `""`, `"resuming"` and `"crashed"` for long enough to be more than a flicker.
+
+**A resumed worker that dies is respawned, several times, before the daemon gives up.** Measured on 2026-09-12 by dispatching a resume that could not work — a session with no transcript at all (see `claude-jobs-store.md` §4 for why such a session still reads as resumable). The `list` record went to `state: "crashed"`, `detail: "exit 1; respawning"`, and stayed listed as live for tens of seconds while the daemon tried again, before the session settled back to not-running. Two consequences for a client:
+
+- the first `crashed` reading is the answer, not a state to wait through: the daemon's respawns of a worker that cannot start are not going to produce a different outcome, and waiting out a full timeout only delays the report;
+- nothing needs cleaning up afterwards. The daemon retires the session itself, and there is no operation in this protocol to retire one with — `claude stop` is a CLI command, not a socket op.
+
+The cost is paid by the person watching: for as long as the respawns last, a session they asked to resume is listed as live and crashed. That is the argument for a client checking what it can before dispatching — an id to resume by, a working directory that still exists, a transcript that exists — rather than dispatching and relaying whatever comes back.
+
 ## 4. The job record
 
 These are the keys a `list` reply can carry on a job record — eighteen in total. Not every record carries every optional key; a key that was never set for a given session is simply absent rather than present with an empty value.
@@ -202,6 +255,8 @@ Rules governing the key, binding on every code path that touches it:
 | `ERESPAWNING` | The session is mid-respawn; the caller should retry shortly. |
 | `ESTARTING` | The daemon itself is still starting up. |
 | (absent, or any other value) | An error the client has no specific mapping for. When `code` is present but unrecognised, report it verbatim; when `code` is absent entirely, report a clean, generic message rather than a code-shaped string with nothing after it. |
+
+An error response may also carry an `error` field holding the daemon's own sentence about what went wrong. For most operations that sentence adds nothing the code does not already say, which is why the table above is the whole mapping. `dispatch` is the exception: its refusals are the only ones a client has no closed vocabulary for, and the sentence is what distinguishes a daemon that is restarting from a session that is already running. A client should carry it through for that one operation rather than flattening every refusal to its code.
 
 ## 8. Kick detection
 
