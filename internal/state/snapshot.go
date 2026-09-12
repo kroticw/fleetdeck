@@ -195,6 +195,28 @@ type Snapshot struct {
 	// column, copied from configuration by the caller (cmd/fleetdeck's
 	// Collector). Empty means nothing is pinned; the panel then offers a picker.
 	OrchestratorSession string `json:"orchestratorSession,omitempty"`
+	// OrchestratorBriefPath is where this fleet's orchestrator brief belongs
+	// (internal/orchestrator.BriefPath), and OrchestratorBriefMissing says
+	// that OrchestratorSession names a session while nothing is there.
+	//
+	// The two together are the standing form of one silent failure: the pin
+	// means "this session has been given the fleet's working order", and it
+	// can be set by a path that writes no working order at all -- the
+	// orchestrator column's dropdown, which moves the pin and sends nothing.
+	// The wizard cannot leave that state behind (it writes the brief as its
+	// first step and stops there if it cannot), but the dropdown can, and so
+	// can deleting the file afterwards.
+	//
+	// That is why this is read every cycle rather than checked once when an
+	// appointment is made. A file written and later removed by hand is
+	// indistinguishable on disk from one never written, and a check that only
+	// ran at appointment time would report neither -- it would fix half the
+	// failure while looking like the whole of it.
+	//
+	// Missing is never true with nothing pinned: an absent brief claims
+	// nothing when no session is claimed to have been given one.
+	OrchestratorBriefPath    string `json:"orchestratorBriefPath,omitempty"`
+	OrchestratorBriefMissing bool   `json:"orchestratorBriefMissing,omitempty"`
 
 	// Build describes the panel that produced this snapshot. A page open for
 	// hours compares Build.Web with the fingerprint its own document arrived
@@ -223,6 +245,12 @@ type FleetBoard struct {
 	Fleet      fleet.Fleet
 	Cards      []board.Card
 	BoardError string
+	// BriefPath and BriefMissing are this fleet's own answer to the pair of
+	// snapshot fields of the same name, filled per fleet because each fleet
+	// has its own orchestrator and its own documentation directories, and so
+	// its own brief in its own place.
+	BriefPath    string
+	BriefMissing bool
 }
 
 // Link attaches each session to the card that names it. A card names a

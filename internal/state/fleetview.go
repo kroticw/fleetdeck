@@ -59,6 +59,8 @@ func ForFleet(whole Snapshot, name string) (Snapshot, error) {
 	view.Cards = own.Cards
 	view.BoardError = own.BoardError
 	view.OrchestratorSession = chosen.Orchestrator
+	view.OrchestratorBriefPath = own.BriefPath
+	view.OrchestratorBriefMissing = own.BriefMissing
 	// Both card lists are computed from the whole snapshot's own views, not
 	// from daemonSessions: the lifecycle of a session is carried by the view
 	// (see SessionView.Lifecycle), and a daemon.Session alone cannot say
