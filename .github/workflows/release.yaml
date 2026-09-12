@@ -25,7 +25,10 @@ jobs:
     # execute. Building them elsewhere would still produce archives, but nothing would
     # ever have run one before it was published.
     runs-on: macos-latest
-    timeout-minutes: 30
+    # Longer than a build needs, because notarization is Apple's queue and not ours.
+    # It answered in about a minute when this was set up; Apple documents no bound,
+    # and a release that times out half way through is worse than one that waits.
+    timeout-minutes: 60
     permissions:
       contents: write
     steps:
@@ -41,6 +44,49 @@ jobs:
       - name: Test
         run: make test
 
+      # Signing material, for this job and no longer. Both steps are here rather than
+      # in a script because what they do is put secrets on a disk, and that should be
+      # readable in the workflow rather than one indirection away.
+      #
+      # The certificate goes into a keychain created for this run, with a password
+      # invented for this run: nothing is added to the runner's own login keychain,
+      # and the whole thing is deleted in the cleanup step below however this job
+      # ends. set-key-partition-list is what lets codesign use the key without a
+      # dialog nobody is there to answer -- without it the signing step hangs until
+      # the job times out.
+      #
+      # How to produce these secrets is in docs/engineering/signing-secrets.md.
+      - name: Import the Developer ID certificate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -hex 32)
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | sed 's/[" ]//g')
+          rm -f "$RUNNER_TEMP/certificate.p12"
+
+      # The notarization key is a file on disk because that is the only shape
+      # notarytool takes it in. It is written under umask 077 into the runner's own
+      # temporary directory, and its path -- not its contents -- is what the later
+      # steps see.
+      - name: Write the App Store Connect key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -eu
+          umask 077
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/asc.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/asc.p8" >> "$GITHUB_ENV"
+
       # The tag reaches the build through the environment rather than being
       # interpolated into the shell command, so a tag name is data here and never a
       # fragment of the script that runs with a token that can write to this
@@ -50,15 +96,31 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
-      # The app a person installs: fleetdeck.app, universal, sealed ad-hoc, zipped. It
-      # goes into the same dist/ after the archives, and removes only zips of its own.
-      # This is the reason the job must run on macOS rather than merely prefer it: the
-      # window is built with cgo against WebKit, and the bundle with lipo, codesign and
-      # ditto.
+      # The app a person installs: fleetdeck.app, universal, signed with the Developer
+      # ID imported above, zipped. It goes into the same dist/ after the archives, and
+      # removes only zips of its own. This is the reason the job must run on macOS
+      # rather than merely prefer it: the window is built with cgo against WebKit, and
+      # the bundle with lipo, codesign and ditto.
+      #
+      # SIGN_IDENTITY is what turns the ad-hoc seal every other build gets into a real
+      # one. If the secret is missing or misspelt the build stops before it compiles
+      # anything, rather than producing an app Gatekeeper would refuse.
       - name: Build the release app
         run: make dist-app VERSION="$RELEASE_VERSION"
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+
+      # Apple's half: they look at the app, and their answer is stapled into the
+      # bundle so a Mac with no network still has it. This is the step that decides
+      # whether a person who downloads the release opens it with a double click or is
+      # told the app cannot be verified. It goes over the network and waits.
+      - name: Notarize the app
+        run: make notarize-app VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
       # make dist verifies what it just built, so this step normally passes on work
       # already done. It is a step of its own anyway: the gate between building an
@@ -79,8 +141,15 @@ jobs:
       # verifying; and the panel inside answering with the tag. It also proves the window
       # carries no source tree -- the runner's checkout must not become an Update button
       # on somebody else's Mac.
+      #
+      # EXPECT_SEAL=notarized is the demand this step exists to make, and it is spelt
+      # out here rather than inherited: a Developer ID signature, the hardened runtime,
+      # the entitlements this repository keeps, Apple's ticket stapled into the bundle,
+      # and Gatekeeper answering "accepted" when asked about the app. That last one is
+      # the whole point of signing at all, and it is asked before the release exists
+      # rather than after somebody downloads it.
       - name: Verify the app before anything is published
-        run: make verify-dist-app VERSION="$RELEASE_VERSION"
+        run: make verify-dist-app VERSION="$RELEASE_VERSION" EXPECT_SEAL=notarized
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
@@ -89,3 +158,12 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # However this job ended -- published, failed, cancelled -- the private key and
+      # the keychain holding the certificate go. A runner is thrown away after a job,
+      # but that is GitHub's promise to keep, not ours.
+      - name: Remove the signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/certificate.p12"
