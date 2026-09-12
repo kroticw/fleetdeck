@@ -64,6 +64,13 @@ type SessionView struct {
 	CardPath  string            `json:"cardPath,omitempty"`
 	SilentFor time.Duration     `json:"silentFor"`
 
+	// InCall is the tool call the session's transcript shows it standing inside, nil
+	// when it is not inside one. It is a fact read off the transcript, not a verdict:
+	// a slow call and a call that will never return look the same from outside. What
+	// the panel concludes from it -- that after CallSilenceLimit of silence inside one
+	// call the daemon's "no question" is no longer an answer -- is Waiting's to say.
+	InCall *transcript.Call `json:"inCall,omitempty"`
+
 	// CardID is the number of the card at CardPath ("T-NNN"), empty when that
 	// card has none or there is no card. It rides beside the path so the
 	// session list can name the card a session is busy with.
