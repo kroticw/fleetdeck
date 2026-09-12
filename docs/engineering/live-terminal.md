@@ -119,10 +119,11 @@ The remaining rules:
 
 ## 9. Measuring: the stand
 
-- A stand is this tree's panel on its own port and config, plus a headless Chrome with its own profile, driven over the DevTools Protocol. The Chrome extension cannot reach loopback addresses, and headless Chrome has no browser zoom at all.
+- A stand is this tree's panel on its own port and config, plus a headless Chrome with its own profile, driven over the DevTools Protocol. Headless Chrome has no browser zoom at all.
   - `Input.dispatchKeyEvent` with `modifiers` as a bitmask (Alt 1, Ctrl 2, Meta 4, Shift 8).
   - `Input.dispatchMouseEvent` for wheel, press, move and release, with modifiers for Option-drag.
   - `Page.addScriptToEvaluateOnNewDocument` to wrap `WebSocket.prototype.send` and record every resize and key frame the page sends.
+- **Measured (2026-09-12, Chrome 153.0.8010.37):** the Chrome extension reaches loopback. A throwaway server on `127.0.0.1:7791` was navigated, screenshotted and read through the extension, and that server's own log holds the browser's `GET /` and its favicon request — it really fetched the page. This section said the opposite until now, which is a reason to reach for headless Chrome that does not exist. The reasons that do exist: a profile of its own, no browser zoom, and `--lang`, the only way to fix the language the page reads from `navigator.language` (`web/js/i18n.js`).
 - **A stand is not isolated from the real daemon.** It lists the operator's sessions, and opening any of them resizes that session for the operator (#107 adds a way for a stand to refuse the real daemon). When a real session is needed, create a disposable one, pin it in the stand's config, open nothing else, and delete it afterwards.
 - Prove that the condition happened before reading the result: for example, that the focus really is in the terminal before pressing Escape. And give every measurement a control that shows the instrument can see what it is looking for.
 - Anything visible on the operator's screen (a window, a screenshot of their screen) needs their go-ahead first.
