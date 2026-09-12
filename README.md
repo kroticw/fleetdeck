@@ -32,7 +32,7 @@ What exists and works today: the Go packages behind the panel — reading and wr
 
 Install by building from source, or from a GitHub Release: pushing a `v*` tag runs the `release` workflow (`.github/workflows/release.yaml`), which tests, builds `darwin-arm64` and `darwin-amd64` archives with `make dist`, verifies them, and publishes them.
 
-A release also carries the app, `fleetdeck-<version>-macos.zip`: unpack it, drag `fleetdeck.app` into Applications and open it. The app is not signed with an Apple Developer ID, so the first time macOS refuses to open it until you allow it in System Settings, and that button appears only after the first attempt. See [Installing the app from a release](docs/en/getting-started.md#installing-the-app-from-a-release) for the steps, in order, and for what they are and are not.
+A release also carries the app, `fleetdeck-<version>-macos.zip`: unpack it, drag `fleetdeck.app` into Applications and open it. From v0.3.0 the app is signed with an Apple Developer ID and notarized, so macOS opens it with a double click and asks nothing. See [Installing the app from a release](docs/en/getting-started.md#installing-the-app-from-a-release) for the two steps, in order, and for what to do with a release older than that.
 
 `make build` produces both binaries in `bin/`: `fleetdeck`, the panel, and `fleetdeck-status`, the statusline reporter. Keep the two together — `init` looks for the reporter beside the panel binary and records that path in Claude Code's settings.
 

@@ -73,7 +73,12 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 		}
 	}
 
-	cmd := exec.Command("make", "dist-app", "VERSION="+releaseAppVersion, "DISTDIR="+distDir)
+	// SIGN_IDENTITY is emptied on the command line, where make lets nothing
+	// override it, rather than left to the environment: this test is about the
+	// build every machine without a certificate makes -- a developer's, and CI's
+	// check job -- and it must measure that same build on the one machine that
+	// does have a certificate and may well have the variable exported.
+	cmd := exec.Command("make", "dist-app", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -187,6 +192,24 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 		}
 	})
 
+	t.Run("a build given no identity says so in the signature", func(t *testing.T) {
+		// The point is not that ad hoc is good -- it is that an unsigned build
+		// must be visibly unsigned. A release must never leave this state
+		// (the workflow's gate demands `notarized`), and the way to be sure the
+		// two builds are really different builds is to check that this one
+		// carries neither a Developer ID nor the hardened runtime.
+		info := sealOf(t, app)
+		if !strings.Contains(info, "Signature=adhoc") {
+			t.Errorf("a build with no SIGN_IDENTITY is sealed with something other than an ad-hoc signature:\n%s", info)
+		}
+		if strings.Contains(info, "Authority=Developer ID Application") {
+			t.Error("a build with no SIGN_IDENTITY picked up a Developer ID certificate from somewhere")
+		}
+		if strings.Contains(info, "(runtime)") {
+			t.Error("a build with no SIGN_IDENTITY claims the hardened runtime, which nothing has measured it under")
+		}
+	})
+
 	t.Run("the panel beside the window reports the tag", func(t *testing.T) {
 		out, err := exec.Command(panelBinary(window), "version").CombinedOutput()
 		if err != nil || strings.TrimSpace(string(out)) != releaseAppVersion {
@@ -267,4 +290,81 @@ func fatSlices(t *testing.T, path string) map[string]slice {
 		slices[cpu] = s
 	}
 	return slices
+}
+
+// sealOf reads what codesign says about a bundle or a binary. --display writes
+// to standard error, which is why this is CombinedOutput and not Output.
+func sealOf(t *testing.T, path string) string {
+	t.Helper()
+	out, err := exec.Command("codesign", "--display", "--verbose=4", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("codesign --display %s: %v\n%s", path, err, out)
+	}
+	return string(out)
+}
+
+// wantEntitlements is every exception to the hardened runtime the release app may
+// ask for. It is empty, and that is a result, not an omission: on 2026-09-12 a
+// probe signed exactly the way a release is -- Developer ID, --options runtime,
+// this very file -- did from inside a bundle each thing the app does, and every
+// one of them was allowed with no entitlement at all: the osascript banner
+// internal/notify sends, starting a system binary, starting the panel beside it
+// in the bundle, listening on a loopback port, and reading the home directory.
+// The system log was watched throughout, with a control event in it to prove the
+// watcher was not blind, and it recorded no denial.
+//
+// The list freshman-desktop keeps is four entries long and none of them belongs
+// here. allow-jit and allow-unsigned-executable-memory are Chromium's: V8
+// compiles in the browser process itself. This window is WKWebView, whose
+// JavaScript runs in Apple's own WebContent process under Apple's own signature.
+// disable-library-validation is for loading native modules built by somebody
+// else; this app links system frameworks and nothing more, which
+// TestWindowBinaryLinksAgainstWebKit already holds it to. And network.client is
+// an App Sandbox entitlement, which means nothing outside a sandbox.
+//
+// Every entry added here is a hole in the hardened runtime, and a hole opened by
+// copying someone else's list is one nobody measured. Add one when a measurement
+// says the app is denied without it, and write down which denial.
+var wantEntitlements = map[string]any{}
+
+// TestTheReleaseAppAsksForNoHardenedRuntimeExceptionsItHasNotMeasured holds the
+// file the release is signed with to the list above. A signature weakened by an
+// extra entitlement still verifies, still notarizes and still opens: nothing
+// downstream of this test would notice.
+func TestTheReleaseAppAsksForNoHardenedRuntimeExceptionsItHasNotMeasured(t *testing.T) {
+	got := plistKeys(t, "entitlements.plist")
+	if !reflect.DeepEqual(got, wantEntitlements) {
+		t.Errorf("entitlements.plist asks for exceptions this app has not been measured to need:\nfile %v\nwant %v", got, wantEntitlements)
+	}
+}
+
+// TestABuildToldToSignWithAnIdentityItHasNotStops covers the other way a release
+// can go quietly wrong: the workflow sets SIGN_IDENTITY from a secret, and a
+// secret that is empty, renamed or misspelt would otherwise build an ad-hoc app
+// and carry it happily to the gate. The build refuses instead, and refuses before
+// it spends four cross builds on it.
+func TestABuildToldToSignWithAnIdentityItHasNotStops(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	distDir := t.TempDir()
+	cmd := exec.Command("make", "dist-app",
+		"VERSION="+releaseAppVersion, "DISTDIR="+distDir,
+		"SIGN_IDENTITY=Developer ID Application: Nobody This Machine Has (ZZZZZZZZZZ)")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("make dist-app built a release with an identity that is not in the keychain:\n%s", out)
+	}
+	if !strings.Contains(string(out), "no codesigning identity matching") {
+		t.Fatalf("make dist-app failed, but not by refusing the identity: %v\n%s", err, out)
+	}
+	zips, err := filepath.Glob(filepath.Join(distDir, "*.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(zips) != 0 {
+		t.Fatalf("a build that could not sign still left %v behind", zips)
+	}
 }

@@ -5,11 +5,25 @@
 # unpacked from the zip, from the outside, and trusting nothing build-dist-app.sh says
 # about what it did.
 #
-# Usage: verify-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags>
+# Usage: verify-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal>
+#
+# <expect-seal> is the seal this zip is required to carry, and the gate demands
+# exactly it:
+#
+#   adhoc         no certificate was involved. What a developer's machine and CI's
+#                 check job build, and what nobody may publish.
+#   developer-id  signed with a Developer ID, hardened runtime on, secure
+#                 timestamp, and the entitlements this repository keeps.
+#   notarized     the above, plus Apple's ticket stapled into the bundle and
+#                 Gatekeeper actually accepting the app.
+#
+# It is told rather than deduced. A gate that read the bundle and agreed with
+# whatever it found would pass an unsigned release with a shrug -- and an
+# unsigned release is exactly the one that must never reach a person.
 set -eu
 
-if [ "$#" -ne 5 ]; then
-	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags>" >&2
+if [ "$#" -ne 6 ]; then
+	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal>" >&2
 	exit 2
 fi
 
@@ -18,6 +32,7 @@ version=$2
 arches=$3
 binaries=$4
 ldflags=$5
+expect_seal=$6
 
 work=
 
@@ -40,6 +55,10 @@ lipo_arch() {
 
 [ -d "$dist_dir" ] || fail "$dist_dir is not a directory"
 [ -n "$version" ] || fail "version is empty"
+case $expect_seal in
+	adhoc | developer-id | notarized) ;;
+	*) fail "unknown seal '$expect_seal': expected adhoc, developer-id or notarized" ;;
+esac
 [ -n "$ldflags" ] || fail "ldflags is empty: nothing would stamp a version into the binaries"
 
 zip_name="fleetdeck-$version-macos.zip"
@@ -59,6 +78,17 @@ expected_members=$(
 		for b in $binaries; do echo "fleetdeck.app/Contents/MacOS/$b"; done
 		printf '%s\n' fleetdeck.app/Contents/Resources/ fleetdeck.app/Contents/Resources/icon.icns
 		printf '%s\n' fleetdeck.app/Contents/_CodeSignature/ fleetdeck.app/Contents/_CodeSignature/CodeResources
+		# The notarization ticket, which stapler writes into the bundle. Measured
+		# on a notarized app on this machine: Contents/CodeResources, beside
+		# _CodeSignature rather than inside it, magic "s8ch". A notarized release
+		# without it would ask Apple over the network at every first launch
+		# instead of carrying its own answer -- and would fail on a Mac offline.
+		# An `if`, not a `[ ... ] &&`: the last command of this group decides the
+		# command substitution's status, and a false test there would end the
+		# script under set -e with every check below unrun.
+		if [ "$expect_seal" = notarized ]; then
+			printf '%s\n' fleetdeck.app/Contents/CodeResources
+		fi
 	} | sort
 )
 members=$(unzip -Z1 "$zip" | sort)
@@ -129,9 +159,81 @@ for b in $binaries; do
 	done
 done
 
-# The seal over the whole bundle. Without it a downloaded copy is "damaged" to
+# The seal over the whole bundle. Without one a downloaded copy is "damaged" to
 # Gatekeeper rather than merely unverified.
 codesign --verify --deep --strict "$app" || fail "the bundle's signature does not verify"
+
+# codesign --display writes to standard error, so every reader below folds it in.
+seal_of() { codesign --display --verbose=4 "$1" 2>&1; }
+
+# entitlements_of writes one piece's entitlements to $2 as JSON. A piece signed
+# with no entitlements at all has no blob to print, and that is the same thing as
+# an empty list -- so it is normalised to one rather than left to compare as an
+# empty file against a plist.
+entitlements_of() {
+	codesign --display --entitlements :- "$1" >"$work/entitlements.raw" 2>/dev/null || :
+	if [ -s "$work/entitlements.raw" ]; then
+		plutil -convert json -o "$2" "$work/entitlements.raw" ||
+			fail "$1 carries an entitlements blob that is not a property list"
+	else
+		echo '{}' >"$2"
+	fi
+}
+
+# The one thing the hardened runtime is: a set of restrictions a process runs
+# under, recorded as a flag in the signature. Everything in entitlements.plist is
+# a hole in it, which is why the gate compares that file byte for byte with what
+# the bundle actually carries -- an entitlement added to a build and not to the
+# file, or the other way round, is a difference nobody meant.
+developer_id_seal() {
+	_piece=$1
+	_info=$(seal_of "$_piece")
+	echo "$_info" | grep -q '^Authority=Developer ID Application:' ||
+		fail "$_piece is not signed with a Developer ID Application certificate"
+	echo "$_info" | grep -q '^Authority=Developer ID Certification Authority$' ||
+		fail "$_piece: the signing certificate does not chain to Apple's Developer ID authority"
+	echo "$_info" | grep -q '^Authority=Apple Root CA$' ||
+		fail "$_piece: the signing certificate does not chain to the Apple root"
+	echo "$_info" | grep -q '^Timestamp=' ||
+		fail "$_piece was signed without a secure timestamp, and notarization rejects a submission without one"
+	echo "$_info" | grep -q '^TeamIdentifier=[A-Z0-9]' ||
+		fail "$_piece carries no team identifier"
+	echo "$_info" | grep -qE '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' ||
+		fail "$_piece was signed without the hardened runtime, which notarization requires"
+	entitlements_of "$_piece" "$work/got-entitlements.json"
+	plutil -convert json -o "$work/want-entitlements.json" "$src/entitlements.plist"
+	cmp -s "$work/got-entitlements.json" "$work/want-entitlements.json" ||
+		fail "$_piece carries entitlements this repository does not keep -- every one of them is a hole in the hardened runtime
+  bundle: $(cat "$work/got-entitlements.json")
+  $src/entitlements.plist: $(cat "$work/want-entitlements.json")"
+}
+
+case $expect_seal in
+	adhoc)
+		seal_of "$app" | grep -q '^Signature=adhoc' ||
+			fail "the app is sealed with something other than an ad-hoc signature, and this build was not told to expect that"
+		;;
+	developer-id | notarized)
+		developer_id_seal "$app"
+		for b in $binaries; do
+			[ "$b" = "$executable" ] && continue
+			developer_id_seal "$app/Contents/MacOS/$b"
+		done
+		;;
+esac
+
+if [ "$expect_seal" = notarized ]; then
+	xcrun stapler validate "$app" >/dev/null 2>&1 ||
+		fail "no notarization ticket is stapled to the bundle: a Mac with no network would refuse this app"
+	# The question the whole release is for, asked of the app rather than of the
+	# process that made it: does Gatekeeper let a person open this.
+	assessment=$(spctl --assess --type execute -vv "$app" 2>&1) ||
+		fail "Gatekeeper rejects the app, which is what a person would see on opening it:
+$assessment"
+	echo "$assessment" | grep -q 'source=Notarized Developer ID' ||
+		fail "Gatekeeper accepts the app for some reason other than its notarization:
+$assessment"
+fi
 
 # Asking the program is not the same as reading its metadata: the linker accepts an
 # -X target that does not exist without complaint. The panel is the one command that
@@ -141,4 +243,4 @@ reported=$("$app/Contents/MacOS/fleetdeck" version)
 
 rm -rf "$work"
 # This line is the proof the gate reached its end; the Go test asserts it.
-echo "verify-dist-app: $zip ok (contents, version $version in plist and binaries, ${want_archs% }, sealed)"
+echo "verify-dist-app: $zip ok (contents, version $version in plist and binaries, ${want_archs% }, $expect_seal)"
