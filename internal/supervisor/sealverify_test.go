@@ -212,6 +212,42 @@ func TestVerifyRefusesAnUnnotarizedDeveloperIDApp(t *testing.T) {
 	}
 }
 
+// The attack this feature exists to stop, on a real signature rather than a
+// made-up team: an app signed with a certificate belonging to somebody else.
+// Everything about it is genuine -- a real Apple certificate, a real
+// timestamp, the hardened runtime -- and `codesign --verify` passes it with
+// status 0. Only the team says it is not ours.
+//
+// The bundle is signed outside the test, because signing needs a private key
+// this machine may not have and may ask a person for:
+//
+//	ditto /Applications/fleetdeck.app /tmp/otherteam.app
+//	codesign --force --sign "<some other identity>" --options runtime \
+//	    --timestamp --deep /tmp/otherteam.app
+//	FLEETDECK_OTHER_TEAM_APP=/tmp/otherteam.app go test ./internal/supervisor/
+func TestVerifyRefusesARealSignatureFromAnotherTeam(t *testing.T) {
+	app := os.Getenv("FLEETDECK_OTHER_TEAM_APP")
+	if app == "" {
+		t.Skip("set FLEETDECK_OTHER_TEAM_APP to a bundle signed by a different Apple team")
+	}
+	ours := teamIDOfInstalledApp(t)
+	theirs, err := TeamIDOf(context.Background(), "/usr/bin/codesign", app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if theirs == ours {
+		t.Fatalf("%s is signed by our own team %s; there is nothing to measure", app, ours)
+	}
+
+	err = realSeal(ours).Verify(context.Background(), app)
+
+	var sealErr *SealError
+	if !errors.As(err, &sealErr) {
+		t.Fatalf("an app signed by team %s was accepted for team %s: %v", theirs, ours, err)
+	}
+	t.Logf("refused an app signed by team %s: %s", theirs, sealErr.Reason)
+}
+
 // TeamIDOf is how the window learns which team to demand: its own. Hard-coding
 // one would stop anyone else's fork from updating itself.
 func TestTeamIDOfReadsTheTeamAnAppIsSignedBy(t *testing.T) {

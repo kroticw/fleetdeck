@@ -40,6 +40,22 @@ The two bold cells are the whole argument:
 
 **Decided: integrity first, then identity, then the system's own verdict.** `Seal.Verify` runs them in that order, and the order is load-bearing rather than tidy.
 
+**Measured on a real signature from another team, 2026-09-12.** A copy of the installed app was re-signed with a different Apple certificate that happens to be on this machine — `--options runtime --timestamp --deep`, so everything about it is as a release would be:
+
+```text
+Authority=Apple Development: … (D3P4AYQ2B2)
+Authority=Apple Worldwide Developer Relations Certification Authority
+Authority=Apple Root CA
+Timestamp=12 Sep 2026 at 13:26:26
+TeamIdentifier=GPTSXA3D2U          ← not ours
+codesign --verify --deep --strict  → status 0
+spctl --assess --type execute      → rejected, status 3
+```
+
+`Verify` refused it as `not-developer-id`: an **Apple Development** certificate is not a **Developer ID Application** one, and the chain goes through Apple's Worldwide Developer Relations authority rather than the Developer ID one. So a signature that is real, current and made by a real Apple developer still does not get an app installed here. `codesign --verify` passing it with status 0 is the third time on this page that integrity alone proves nothing.
+
+**Not measured: a genuine Developer ID certificate belonging to another team**, which would be refused as `wrong-team` rather than `not-developer-id`. There is one Developer ID on this machine. That path is covered by a test that asks for a team the installed app is not signed by.
+
 - **Decided: the team identifier is read from the running app, not written into the code.** `TeamIDOf` asks `codesign` about the bundle the window is running from. A constant would stop anybody else's fork from ever updating itself; reading it means a fork updates from its own releases and nothing signed by anyone else can replace this app. An attacker who can already rewrite `/Applications/fleetdeck.app` has won before this question is asked, so reading from there costs nothing.
 - **Measured: `stapler` lives inside Xcode.** `xcrun --find stapler` answers `/Applications/Xcode.app/Contents/Developer/usr/bin/stapler`. `scripts/verify-dist-app.sh` may use it — that gate runs on a CI runner — but the app may not: it runs on a person's Mac, which need never have had Xcode. `codesign` (`/usr/bin`) and `spctl` (`/usr/sbin`) are part of macOS. Both are called by absolute path, never through `PATH`.
 - **Decided: `spctl` answering `accepted` is not enough on its own.** A rule added to a machine makes it accept an app for a reason that is not notarization, so the source line is checked too: only `source=Notarized Developer ID` counts. This is the check a mutation pass found missing (section 5).
@@ -93,10 +109,22 @@ The survivor was a real hole: nothing asked whether Gatekeeper had accepted the 
 
 A code the page does not know still shows the detail rather than an empty line: an older window talking to a newer page must not produce a blank where a refusal belongs.
 
-## 8. Not verified
+## 8. What the acceptance measured, and on what
 
-- **The whole thing on two real releases.** Everything below the handover is the code the tree path has used since 2026-09-11, and the download and the checks are measured against the real releases page (`FLEETDECK_NETWORK_TEST=1`), but an installed release replacing itself with the next one has not been done end to end. It needs two published releases carrying this code.
-- **That the updated app runs untranslocated** (section 3).
+**Measured, 2026-09-12, against the real releases page** (`FLEETDECK_NETWORK_TEST=1`, `TestARealReleaseCanReplaceAnInstalledApp`). Not a stand-in server and not a local file:
+
+- The releases page was asked what was newest and answered `v0.4.0` — published that morning, and not by this work.
+- The 39.6 MB archive was downloaded from GitHub, unpacked with `ditto`, and put through all three checks. It passed: whole, Developer ID, team `PTLLPQ8LY4` — the same team as the app being replaced — notarized, `source=Notarized Developer ID`.
+- A bundle at a canonical path of the test's own, holding v0.3.0, was exchanged with it through `renamex_np(RENAME_SWAP)`.
+- The app at the canonical path was then asked what it was, by running its panel rather than by reading anything around it: `v0.4.0`. The bundle swapped out, kept beside it, still answered `v0.3.0`.
+- No quarantine attribute anywhere on the installed app (section 3).
+
+The whole thing took 8.5 seconds.
+
+## 9. Not verified
+
+- **The last mile, on a person's screen.** What the acceptance above leaves out is the window: no web view, no handover between two windows, no panel on a port. Those are the same code the tree path has used since 2026-09-11 and the end-to-end tests cover them — but an installed release replacing itself with the next one, from the button, on a screen, has not been done. It needs two published releases carrying this code.
+- **That the updated app runs untranslocated** (section 3). The attribute is measured to be absent, which is the thing that arms translocation; that the app then runs from `/Applications` was not watched.
 - **A machine with no Xcode and no Command Line Tools.** `codesign` and `spctl` are part of macOS and are called by absolute path, so this is expected to hold; it is read from where the binaries live, not measured on such a machine.
 - **A person not in the admin group**, who cannot write beside the installed app. The refusal exists and is tested with a stand-in path; it has not been met by a real account.
 - **What Apple revoking a certificate looks like from inside the app.** `spctl` is expected to refuse, and the refusal would arrive as `seal:not-notarized`.

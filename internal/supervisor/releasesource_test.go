@@ -268,6 +268,86 @@ func TestStageDownloadsTheRealReleaseFromGitHub(t *testing.T) {
 	t.Logf("downloaded %s, checked it, and staged it at %s", tag, staged)
 }
 
+// The replacement itself, on real bytes: a bundle at a canonical path, the
+// real newest release downloaded and checked, and the swap that puts one in
+// place of the other. What is left out is the window -- no web view, no
+// handover, no panel on a port, because those are the same code the tree path
+// has used since 2026-09-11 and the end-to-end tests above cover them.
+//
+// What this adds is that the thing swapped in is a release that came off
+// GitHub minutes earlier and passed every check on the way.
+func TestARealReleaseCanReplaceAnInstalledApp(t *testing.T) {
+	if os.Getenv("FLEETDECK_NETWORK_TEST") != "1" {
+		t.Skip("set FLEETDECK_NETWORK_TEST=1 to download from the real releases page")
+	}
+	installed := developerIDBundle(t)
+	teamID, err := TeamIDOf(context.Background(), "/usr/bin/codesign", installed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A canonical path of this test's own, so nothing here can reach the app
+	// the operator is running.
+	canonical := filepath.Join(t.TempDir(), BundleName)
+	if out, err := exec.Command("/usr/bin/ditto", installed, canonical).CombinedOutput(); err != nil {
+		t.Fatalf("put a bundle at the canonical path: %v\n%s", err, out)
+	}
+	before := versionOfBundle(t, canonical)
+
+	src := &ReleaseSource{
+		Releases: &Releases{Base: "https://github.com/kroticw/fleetdeck"},
+		Seal:     realSeal(teamID),
+		Ditto:    "/usr/bin/ditto",
+		Running:  "v0.0.1",
+	}
+	tag, err := src.Check(context.Background())
+	if err != nil || tag == "" {
+		t.Fatalf("Check: %q, %v", tag, err)
+	}
+
+	staging := StagingDir(canonical)
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := src.Stage(context.Background(), staging, tag, nil)
+	if err != nil {
+		t.Fatalf("the real %s did not pass the checks: %v", tag, err)
+	}
+	if err := Swap(staged, canonical); err != nil {
+		t.Fatal(err)
+	}
+
+	// The app at the canonical path is the release now, and it says so itself
+	// rather than being taken on the file's word: asking the program is not
+	// the same as reading the metadata around it.
+	if after := versionOfBundle(t, canonical); after != tag {
+		t.Fatalf("the app at the canonical path reports %q, want %q (it was %q)", after, tag, before)
+	}
+	// And the one that was replaced is kept beside it, as the tree path keeps
+	// it: an update that is wrong must leave something to go back to.
+	if kept := versionOfBundle(t, filepath.Join(staging, BundleName)); kept != before {
+		t.Errorf("the bundle swapped out reports %q, want the previous %q", kept, before)
+	}
+	// Nothing here gave the downloaded app a quarantine attribute, and nothing
+	// must: it is what arms App Translocation, and an app that runs
+	// translocated records paths that disappear (docs/engineering/release-app.md
+	// section 3).
+	if out, _ := exec.Command("/usr/bin/xattr", "-p", "com.apple.quarantine", canonical).CombinedOutput(); len(out) > 0 &&
+		!strings.Contains(string(out), "No such xattr") {
+		t.Errorf("the installed app carries a quarantine attribute: %s", out)
+	}
+	t.Logf("replaced %s with %s at the canonical path", before, tag)
+}
+
+// versionOfBundle asks the panel inside a bundle what version it is.
+func versionOfBundle(t *testing.T, bundle string) string {
+	t.Helper()
+	out, err := exec.Command(PanelIn(bundle), "version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("ask %s its version: %v\n%s", bundle, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // Check is the question the button asks first, and its three answers are: a
 // newer version, this one, and cannot tell.
 func TestCheckReportsANewerRelease(t *testing.T) {
