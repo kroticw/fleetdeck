@@ -2,98 +2,66 @@
 
 [Русская версия](README.ru.md)
 
-fleetdeck is meant to be one local window for a fleet of Claude Code background sessions: their live state, a kanban board of the work they are doing, and the notes and docs around that work, all in one place instead of scattered across terminals and a separate notes app.
+One window for a fleet of Claude Code background sessions: what each is doing, the board they share, and the notes around it.
 
-## Why fleetdeck exists
+![The fleetdeck panel: an orchestrator's terminal, the board, and the session list](docs/images/panel-en.png)
 
-A fleet of background Claude Code sessions runs into the same three problems once it grows past two or three sessions:
+## What it is
 
-- A session stops and waits for a person, and nobody notices in time. One recorded case: three sessions stood idle for two hours after the usage limit that had stopped them had already reset, because nothing surfaced the stop.
-- Understanding what one session is doing means reading its terminal screen, where the text that matters is mixed in with spinners and redraw fragments left over from the terminal UI.
-- The Obsidian board used to track the work is built for notes, not for a control panel. It has no idea which sessions are alive, waiting, or stuck.
+Run more than two or three background sessions and you start losing them. One stops to ask something and nobody notices for an hour. Reading what another is doing means squinting at a terminal full of spinners.
 
-fleetdeck's answer is a panel that watches the sessions and the board together, and a single field — `session` — that connects a board card to the session working on it, without ever copying session state into the card itself. See [`docs/en/getting-started.md`](docs/en/getting-started.md) for why that field is the only connection allowed.
+fleetdeck watches the sessions and a markdown kanban board together, on one local page. A card and its session are linked by one field, `session`. Nothing else passes between them. You can type into a session from the page, and keep its terminal open next to the board.
 
-## Status
+One panel serves several fleets, switched the way an IDE switches projects.
 
-This repository is under active development. As of this writing:
+macOS only, and it talks to the Claude Code daemon on your own machine — see [limitations](docs/en/limitations.md).
 
-- Two binaries build from source: `fleetdeck`, the panel, and `fleetdeck-status`, the statusline reporter (see "Packages" below).
-- The panel runs and serves on `127.0.0.1:7777`: the web interface, the fleet snapshot behind it, a WebSocket stream of that snapshot, and the routes that type into a session and move a card.
-- `fleetdeck init` exists. On a machine with no configuration it makes a workspace — `~/fleetdeck` by default — holding an empty board made from the board template in `plugin/templates/board` and a docs directory, and writes the configuration naming both. It points Claude Code's `statusLine` at `fleetdeck-status` and adds the workspace to Claude Code's `permissions.additionalDirectories`. A step that would overwrite something you configured yourself refuses and says how to proceed instead.
-- A panel with no configuration file shows a setup page instead of the board: it does what `init` does, for a folder chosen on the page — with the system's folder chooser inside the app — and then becomes the panel.
-- The board's **+ card** button starts a card from a title and a zone.
-- The fleetdeck app builds with `make window-app` into `bin/fleetdeck.app`: a native window around the panel, carrying the panel inside the bundle. It starts the panel when none answers and starts it again when it stops; the panel it starts lives exactly as long as the app — hiding the window keeps it, quitting or a crash of the app stops it; the panel's log is `~/Library/Logs/fleetdeck.log`. Its header has an Update button: it brings the source checkout forward, builds beside the installed app, and lets the new version put itself in place once its panel answers.
-- Building from source works (`make build`), and so does a tagged release: pushing a `v*` tag runs `.github/workflows/release.yaml`, which tests, builds `darwin-arm64` and `darwin-amd64` archives with `make dist` and the app with `make dist-app`, verifies them, and publishes them as a GitHub Release. See "Installation" below.
+## The app
 
-What exists and works today: the Go packages behind the panel — reading and writing board cards, loading configuration, talking to the Claude Code daemon's control socket, reading session transcripts, reading account usage limits, and sending macOS notifications — the `fleetdeck` panel binary that assembles them, the `fleetdeck-status` statusline reporter, and the Claude Code plugin under `plugin/`. Each is described under "Packages" below.
+![The fleetdeck app: the same panel in a native window](docs/images/app-en.png)
 
-## Installation
+`fleetdeck.app` is the same panel in a native window. It starts the panel, and starts it again if it stops. Built from a checkout, it also updates itself from the Update button in its header.
 
-Install by building from source, or from a GitHub Release: pushing a `v*` tag runs the `release` workflow (`.github/workflows/release.yaml`), which tests, builds `darwin-arm64` and `darwin-amd64` archives with `make dist`, verifies them, and publishes them.
+## Install
 
-A release also carries the app, `fleetdeck-<version>-macos.zip`: unpack it, drag `fleetdeck.app` into Applications and open it. From v0.3.0 the app is signed with an Apple Developer ID and notarized, so macOS opens it with a double click and asks nothing. See [Installing the app from a release](docs/en/getting-started.md#installing-the-app-from-a-release) for the two steps, in order, and for what to do with a release older than that.
+From a release — [the latest one](https://github.com/kroticw/fleetdeck/releases/latest) carries `fleetdeck-<version>-macos.zip`:
 
-`make build` produces both binaries in `bin/`: `fleetdeck`, the panel, and `fleetdeck-status`, the statusline reporter. Keep the two together — `init` looks for the reporter beside the panel binary and records that path in Claude Code's settings.
+1. Unpack it, and drag `fleetdeck.app` into Applications **before** opening it. Opened from Downloads it records a temporary path in Claude Code's settings.
+2. Open it from Applications. The setup page takes over from there.
 
-Then run `fleetdeck init`, or open the app and choose the workspace on its setup page. `init` makes the workspace (`~/fleetdeck` by default, or `--workspace <path>`) with an empty board and a docs directory, writes `~/.config/fleetdeck/config.yaml` naming them if there is none, and wires `fleetdeck-status` and the workspace into `~/.claude/settings.json`. It prints one line per step, including the steps it refused and why: a statusline you configured yourself is left alone unless you pass `--force`, and one refused step does not stop the others. A launch agent an earlier `init` wrote is named, with the two commands that remove it. Then build the app with `make window-app` and open `bin/fleetdeck.app`: it starts the panel. See [`docs/en/getting-started.md`](docs/en/getting-started.md) for the whole flow.
+From v0.3.0 the app is signed with an Apple Developer ID and notarized, so macOS asks nothing. Releases before that are unsigned, and macOS will not open one without an exception — [getting started](docs/en/getting-started.md#installing-the-app-from-a-release) walks through it.
 
-## Limitations
-
-- **macOS only.** Two pieces of this project shell out to macOS-specific tools with no fallback: reading the Anthropic OAuth token from the macOS Keychain (via the `security` command-line tool), and showing notification banners (via `osascript`). Neither has a cross-platform equivalent in this codebase today.
-- **Local daemon only.** fleetdeck talks to the Claude Code daemon over its Unix domain control socket on the local machine. There is no remote or networked mode.
-- **The board needs git and python3.** The board's history is a git repository, and the card validator agents run is a Python script. On a Mac without the Command Line Tools, `/usr/bin/git` and `/usr/bin/python3` are stubs that offer to install them. The board is made without them, but the panel then cannot commit its card writes, and agents cannot validate their cards. `xcode-select --install` provides both.
-- **Reads files under the user's home directory.** Specifically: the macOS Keychain item that holds the Claude Code OAuth credentials, any markdown files under the configured board path together with the git repository that contains them, and session transcript files that Claude Code writes for each session.
-- **A banner is not confirmed delivery.** `osascript`'s exit code is the only signal fleetdeck has, and a zero exit means the command ran, not that a banner appeared: macOS drops notifications silently when permission is denied or a Focus mode is on, and `osascript` still exits zero. Nothing here checks on-screen delivery, since that would mean reading an undocumented private database. A banner that never appears is therefore not an error fleetdeck can report — the panel's own counters, which do not depend on any of this, are what to trust for whether something is waiting.
-- **The page allows inline styles, for one library.** The panel's Content-Security-Policy is `'self'` everywhere except `style-src`, which also carries `'unsafe-inline'`: the vendored xterm.js builds `<style>` elements at runtime and fills them with the terminal's measured cell size and theme colours, and that version has no nonce option. Without the keyword the terminal draws in a proportional font with no colour. `script-src` and `default-src` stay `'self'`, so what this allows is an injected appearance, not injected behaviour — see the comment on `contentSecurityPolicy` in `internal/server/static.go`.
-- **Credentials touch exactly one endpoint.** fleetdeck reads the Anthropic OAuth token from the macOS Keychain via the `security` command-line tool, and sends it to exactly one host, `api.anthropic.com`. It never logs the token, never writes it to disk, and never passes it to a browser.
-
-## Building and testing
-
-Requires Go 1.27 (see `go.mod`) and, for linting, `golangci-lint` v2.13.2 on `PATH`.
+From source, with Go 1.27:
 
 ```sh
-make build    # every binary under cmd/* into bin/
-make test     # go test ./... -race -count=1
-make test-web # runs every *.test.js under web/ (the frontend; needs node, no npm)
-make lint     # go vet, gofmt -l, golangci-lint run
+make build            # the binaries, into bin/
+./bin/fleetdeck init  # workspace, empty board, Claude Code's statusline
+make window-app       # bin/fleetdeck.app
 ```
 
-`make test-web` runs the frontend's tests under node's own test runner. It is not part of `make test`, which stays Go-only so that a checkout without node still gets a complete Go check; CI runs both. There is no npm install and no dependency to fetch.
+`init` looks for the statusline reporter beside the panel binary, so keep the two together. A panel with no configuration asks for a folder and makes the board itself, which makes `init` optional. [Getting started](docs/en/getting-started.md) has the whole flow.
 
-`make verify-ldflags` builds and runs the one test that checks the release build's version-injection symbol path (`internal/version`) actually still resolves; it is not part of `make test` because it requires its own `-ldflags`, and CI runs it as a separate step.
+## Build and test
 
-For configuration, see [`docs/en/configuration.md`](docs/en/configuration.md).
+```sh
+make build     # every binary under cmd/* into bin/
+make test      # go test ./... -race -count=1
+make test-web  # the frontend's tests, under node's own runner
+make lint      # go vet, gofmt -l, golangci-lint run
+```
 
-## Packages
-
-- `internal/buildinfo` — says which build of the panel is running: a hash of the embedded web interface, the path of the binary, the commit it was built from and when the binary was built. The page compares the web hash with the one its own document arrived with, which is how it learns that the panel under it has been replaced by one serving a different interface.
-- `internal/board` — reads and writes the fleet board: markdown cards with YAML frontmatter. The panel owns exactly two fields of a card, `stage` and `progress`, and can start a card from a title and a zone; everything else belongs to the agents. Depends on `github.com/fsnotify/fsnotify` for watching the board directory and `gopkg.in/yaml.v3` for the frontmatter, in addition to the standard library.
-- `internal/config` — loads and saves the YAML configuration file described in [`docs/en/configuration.md`](docs/en/configuration.md). A missing file is a set of defaults, not a failure; a malformed file is a failure.
-- `internal/daemon` — a client for the daemon's Unix control socket: discovery, ownership/security checks on the socket and the control key file, and the `ping`, `list`, `reply`, and `attach` (screen read / key send) operations. The full wire protocol it implements is documented in [`docs/protocol/daemon-control-socket.md`](docs/protocol/daemon-control-socket.md) — read that first before changing anything in this package.
-- `internal/notify` — shows macOS banners through `osascript`. The decision to notify belongs to the panel, not the browser: the panel knows the state, and a banner must not depend on whether a browser tab happens to be open.
-- `internal/server` — exposes the panel's snapshot over HTTP and WebSocket and accepts the four writes the panel performs: text into a session, keys into a session, one field of one card, and a statusline reporter's report. It also starts a card, and for a panel with no configuration it serves the setup surface (`NewSetup`) in place of all of that. It performs no I/O of its own beyond the connection it is answering: every source it needs arrives as a function in a `Deps` struct, and `cmd/fleetdeck` is what fills that struct in. Depends on `github.com/coder/websocket`, in addition to the standard library and `internal/board`, `internal/daemon`, and `internal/state`.
-- `internal/supervisor` — keeps the panel up to date and running without a terminal: finds git, go and make by absolute path and runs make in an environment that carries go to its recipes (an app started from the Dock gets no PATH of its own), fast-forwards the source tree while refusing in words to touch a tree on another branch, with edits, or with commits of its own, starts the panel as the window's own direct child in a session of its own, so the window's signals do not reach it, stops a panel that holds the port only when it answers as a fleetdeck panel, and lets one update run at a time. Its keeper is what makes the app the panel's owner: it uses a panel already answering at the panel's URL — one started from a terminal, or one of another window still open — replaces a panel whose window is gone, starts one when none answers, starts it again when it dies — unless it dies within ten seconds of starting — and reports why, with the end of the panel's log, when it will not start. An update builds the app to the side, and the new version's window takes the panel over, stops a panel that holds the port whoever started it, and swaps its bundle into place in one system call once its panel answers with its build. No cgo, so it is tested on every CI leg.
-- `internal/state` — holds the snapshot type the panel would render from and the rules for deciding which state transitions are worth a banner. It performs no I/O of its own: every source reaches it as a plain value, so the rules are testable without a daemon, a board directory, or a network.
-- `internal/transcript` — reads Claude Code session transcripts from the tail: locating a session's `.jsonl` file, a digest of its most recent conversational steps, and an estimate of context-window occupancy for when the statusline reporter is not installed. It is the source for what a session did; it never reports what a session is doing right now.
-- `internal/usage` — reads account rate-limit windows from the Anthropic OAuth usage endpoint. The OAuth token is read from the macOS Keychain, sent only to that endpoint, never logged, and never stored.
-- `internal/workspace` — makes a workspace: `board`, a git repository laid out from the board template, and `docs`. A board appears whole or not at all, and a board directory that already holds files is never touched.
-- `plugin/templates` — carries the board template (`plugin/templates/board`) into the binary, so a new board gets the same validator, README and archive without a checkout of this repository.
-- `internal/version` — the build version, injected at link time by `make build`/`make verify-ldflags`; see that package's own tests for how the injection is verified.
-- `cmd/fleetdeck` — the panel itself: it assembles every package above into one running program, polls the daemon, watches the board, fires the notification banners the settings leave switched on, and serves the whole view on `127.0.0.1`.
-- `cmd/fleetdeck-status` — the statusline reporter. Claude Code runs it for every session: it prints the status line and, best effort, forwards the same data to the local panel over HTTP, which has no other way to get it.
-
-`internal/daemon` and `internal/transcript` are standard-library-only. `internal/config` and `internal/board` also depend on `gopkg.in/yaml.v3`, and `internal/board` additionally depends on `fsnotify`. `internal/server` is the one package that knows about a web server: besides the standard library and `internal/board`, `internal/daemon`, and `internal/state`, it depends on `github.com/coder/websocket`.
+`make test` stays Go-only, so a checkout without node still gets a complete Go check. CI runs both.
 
 ## Documentation
 
-- [`docs/en/getting-started.md`](docs/en/getting-started.md) — installing the panel and connecting a board card to a session.
-- [`docs/en/board-convention.md`](docs/en/board-convention.md) — the card file format, its frontmatter fields, and who is allowed to write what.
-- [`docs/en/configuration.md`](docs/en/configuration.md) — every configuration key, its default, and what happens when it is set wrong.
-- [`docs/engineering/live-terminal.md`](docs/engineering/live-terminal.md) — for whoever changes the live terminal, the window, or builds a test stand: measured facts about the terminal bridge, the session's shared size, kicks, Claude Code and xterm.js inside a terminal, WKWebView, and the traps each of them sets. Read it before changing `web/js/liveterminal.js`, `internal/server/pty.go` or `cmd/fleetdeck-window`.
-- [`docs/engineering/window-and-panel.md`](docs/engineering/window-and-panel.md) — for whoever changes the app, the panel it starts, or the Update button: who owns the panel and how it goes with its window, the PID reuse trap, launchd's throttle and the keeper, why a taken port 7777 is reported rather than worked around, how a new version takes the panel over with the measured handover times, test stands next to a live fleet, and cleaning up test processes on a machine several sessions share. Read it before changing `cmd/fleetdeck-window`, `internal/supervisor` or `cmd/fleetdeck/owner.go`.
-- [`docs/engineering/orchestrator-wizard.md`](docs/engineering/orchestrator-wizard.md) — for whoever changes the orchestrator wizard or anything that sends text into a session, and for whoever writes a test or stand that could start a Claude Code session: why a stray daemon's socket can sort ahead of the real one and take the panel with it, why a session is sent one line and a file rather than the working order itself, how a byte-for-byte transcript prefix proves an appointment erased nothing, what happens to a line sent to a working session, and why a stand must be unable to start a session rather than merely not start one. Read it before changing `internal/orchestrator` or `cmd/fleetdeck/orchestrator.go`.
-- [`docs/engineering/multiple-fleets.md`](docs/engineering/multiple-fleets.md) — for whoever changes how the panel serves several fleets, or adds anything to the page that holds a connection open: how the browser's back/forward cache kept a left fleet's terminals attached, measured on a stand and missed by every test; why a session's fleet is derived rather than stored; why every fleet shares port 7777 and a statusline fan-out was rejected; how the operator's configuration is edited without being rewritten, proven byte for byte; the breaking change and how to roll back; and where one orchestrator per fleet is enforced. Read it before changing `internal/fleet`, `internal/state/fleetview.go`, `cmd/fleetdeck/fleets.go` or `web/js/fleet.js`.
-- [`docs/engineering/workspace.md`](docs/engineering/workspace.md) — for whoever changes the workspace, the empty board, the board template or first setup, and for whoever writes any flow that makes something and records it: how writing the configuration before the board it names locked a failed setup in, found by planning a mutation rather than by a test; why a board appears whole or not at all; why the sign of a board is its `cards` directory, not a card; the embedded template and the test that keeps it equal to its directory; how Claude Code's settings are edited without touching what is not ours; and what was documented but not measured. Read it before changing `internal/workspace`, `plugin/templates` or the setup steps in `cmd/fleetdeck/init.go`.
-- [`docs/engineering/release-app.md`](docs/engineering/release-app.md) — for whoever changes the release app, its build or its verification, and for whoever writes a shell script that is a gate: why an unsealed download is "damaged" with no way in while a sealed one can be allowed, the path a person takes reconstructed from the log, quarantine surviving every unpacker, building one app for both architectures, a gate that passed on its own syntax error, and what was not verified.
-- [`docs/engineering/session-findings-2026-09-11.md`](docs/engineering/session-findings-2026-09-11.md) — cross-cutting field notes: the statusline and its local rate-limits file, why a wrapper with no way to tell real use from a manual check must never default its own output path, a concurrency bug caught with real OS processes rather than goroutines, the column-resize generalization and how its backward compatibility was proven against literal storage-key strings, isolating a test stand from a live daemon, working around a broken browser-automation tool, and building the macOS app icon.
+- [Getting started](docs/en/getting-started.md) — installing, first launch, and linking a card to a session.
+- [Configuration](docs/en/configuration.md) — every key, its default, and what a wrong value does.
+- [Board convention](docs/en/board-convention.md) — the card format and who writes which field.
+- [Orchestrating a fleet](docs/en/orchestrator.md) — the working order for the session that runs the others.
+- [Limitations](docs/en/limitations.md) — what fleetdeck does not do, and what it reads on your machine.
+- [Packages](docs/engineering/packages.md) — what each Go package is for.
+- [`docs/engineering/`](docs/engineering) — field notes for whoever changes the code.
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).

@@ -2940,3 +2940,77 @@ body.is-resizing {
 :root[data-theme="dark"] .app-icon-light {
   display: none;
 }
+/* ---- Sessions that are no longer running -------------------------------
+ *
+ * Two states, drawn apart from the running ones and apart from each other.
+ * A stopped session is paused work — it comes back with its whole history —
+ * so it is quiet and plain, not an alarm: nothing is wrong. A dead one
+ * cannot come back, so it is dimmer still and marked with the same dashed
+ * edge the board uses for a card that has lost what it pointed at.
+ *
+ * Neither carries .srow, deliberately: that class is what the session list
+ * binds its open-the-terminal click to, and there is no terminal to open.
+ * The look is shared with .srow through the grouped selector below rather
+ * than copied, so a change to the row's shape reaches both.
+ */
+.sgone {
+  margin: var(--gap) var(--gap) 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.sgone-stopped {
+  border-left: 3px solid var(--border-strong);
+}
+
+.sgone-dead {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.sbadge-stopped {
+  background: var(--border-strong);
+  color: var(--text);
+}
+
+.sbadge-gone {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+}
+
+/* How to bring a stopped session back. The panel cannot do it itself, so
+   this is the row's only actionable content and has to stay readable at the
+   column's narrowest — it wraps rather than clipping. */
+.sresume {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.sresume code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+}
+
+/* The job store could not be read, so whether anything is stopped is
+   unknown. Said in the group heading's own place, since that is where the
+   answer would otherwise have been. */
+.sgone-error {
+  color: var(--attn);
+}
+
+/* A card whose session is stopped. Marked, but not alarming and not
+   orphaned: the session exists and the work is paused, which is the whole
+   point of telling this apart from .kcard-orphan above. */
+.kcard-stopped {
+  border-left: 3px solid var(--border-strong);
+}
+
+.ksession-stopped {
+  color: var(--text-muted);
+  font-weight: 600;
+}

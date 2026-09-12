@@ -24,6 +24,7 @@ import { subscribe as storeSubscribe, connect } from "./store.js";
 import { t } from "./i18n.js";
 import { initTheme } from "./theme.js";
 import { belongsTo, fleetEntries, rememberedFleet, switchFleet } from "./fleet.js";
+import { isLive } from "./lifecycle.js";
 import { isWaiting } from "./header.js";
 import { fleetIconHTML } from "./icon.js";
 import { showSteps } from "./steplist.js";
@@ -156,10 +157,15 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
 
   root.replaceChildren(head, offline, list, newRow, form, error, steps, status, footer);
 
-  // What a fleet's row says: its own sessions and the ones no fleet claims —
-  // what that fleet's panel will show (fleet.js belongsTo) — and, separately,
-  // the questions waiting in it, which are counted on the fleet that claims
-  // them alone, so one unclaimed question is not shown as waiting everywhere.
+  // What a fleet's row says: the sessions running in it — its own and the ones
+  // no fleet claims (fleet.js belongsTo) — and, separately, the questions
+  // waiting in it, counted on the fleet that claims them alone, so one
+  // unclaimed question is not shown as waiting everywhere.
+  //
+  // Running ones only, the same rule the header's counters follow
+  // (fleet.js headerSessions): a stopped session is paused work, and a number
+  // here that counted it would send someone into a fleet on the strength of
+  // sessions that are not doing anything.
   let carried = false;
   const draw = (snap, connected) => {
     const fleets = snap?.fleets ?? [];
@@ -190,7 +196,7 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
         const head = el("span", "start-fleet-head");
         head.append(el("span", "start-fleet-name", fleet));
         if (fleet === last) head.append(el("span", "start-fleet-last", t("start_last")));
-        const sessions = (snap?.sessions ?? []).filter((s) => belongsTo(s, fleet)).length;
+        const sessions = (snap?.sessions ?? []).filter((s) => isLive(s) && belongsTo(s, fleet)).length;
         const meta = el("span", "start-fleet-meta");
         meta.append(el("span", "start-fleet-sessions", `${t("fleet_sessions")}: ${sessions}`));
         const waiting = waitingBy.get(fleet) ?? 0;

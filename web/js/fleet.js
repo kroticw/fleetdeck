@@ -14,6 +14,7 @@
 // tab stops looking.
 
 import { rememberOpenSession } from "./buildcheck.js";
+import { isLive } from "./lifecycle.js";
 
 const PARAM = "fleet";
 
@@ -82,9 +83,15 @@ export function belongsTo(session, fleet) {
 // fleet's switcher entry instead, so it is neither lost nor mistaken for this
 // fleet's. With one fleet it is every session, as it always was: each is that
 // fleet's or unclaimed, and a snapshot with no fleets tags none of them.
+//
+// Only the running ones. The counters say how many sessions want a person
+// right now, and a session that is not running wants nothing: it is not
+// waiting for an answer and it is not stuck, it stopped. Counting the
+// stopped ones would put a number beside "waiting for you" that no answer
+// can ever bring down — which is exactly how a counter stops being read.
 export function headerSessions(snap) {
   const { own, unclaimed } = groupSessions(snap);
-  return [...own, ...unclaimed];
+  return [...own, ...unclaimed].filter(isLive);
 }
 
 // fleetEntries is the switcher's list: every fleet, which one this tab shows,

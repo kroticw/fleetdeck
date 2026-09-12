@@ -7,12 +7,14 @@ import (
 	"math"
 	"os"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/jobs"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
@@ -71,6 +73,22 @@ var usageTimeout = 10 * time.Second
 // statusline last ran. A var for the same reason as usageTimeout: a test
 // points it at its own temp file rather than the real machine's.
 var localRateLimitsPath = usage.LocalFilePath()
+
+// jobStoreDir is Claude Code's own job store, which is where a stopped
+// session still exists — the daemon's control socket cannot report one at
+// all (see internal/jobs' package doc). A var for the same reason
+// localRateLimitsPath is one: a test points it at a store it built rather
+// than at the machine's real one.
+//
+// Empty when there is no home directory to find it under, which reads as a
+// machine with no stopped sessions rather than as a failure.
+var jobStoreDir = func() string {
+	dir, err := jobs.Dir()
+	if err != nil {
+		return ""
+	}
+	return dir
+}()
 
 // cachedUsage remembers the last context estimate together with the file state it was
 // computed from, so an idle session costs no reads at all. Transcripts reach tens of
@@ -329,6 +347,18 @@ func (c *Collector) enrich(views []state.SessionView, labels map[string]string) 
 			continue
 		}
 		views[i].Label = labels[id]
+		// A label survives a session stopping — it is the operator's own
+		// name for the work, and the row still shows it. The readings below
+		// do not: silence is the age of the last write to a transcript
+		// nothing is writing any more, which would report a session that
+		// stopped this morning as having been silent for hours, and the
+		// context bar would draw a reading frozen at the moment it stopped
+		// as if it were current. Neither is measured for a session that is
+		// not running; the panel shows nothing there rather than something
+		// stale.
+		if !views[i].Live() {
+			continue
+		}
 		if path, err := transcript.Locate(c.projectsDir, id); err == nil {
 			live[path] = struct{}{}
 			estimate, haveEstimate, silentFor := c.transcriptState(path)
@@ -417,9 +447,34 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	}
 	snap.BoardError = snap.Boards[0].BoardError
 
+	// The daemon's list is the live sessions and only those. Everything the
+	// panel knows about a stopped session comes from Claude Code's job store
+	// instead, read here and merged in below; a store that cannot be read
+	// fills its own error field and leaves the live list alone.
+	var records []jobs.Record
+	if jobStoreDir != "" {
+		var err error
+		records, err = jobs.Load(jobStoreDir)
+		if err != nil {
+			snap.JobsError = err.Error()
+		}
+	}
+	entries := mergeStopped(sessions, records)
+	listed := make([]daemon.Session, len(entries))
+	for i, e := range entries {
+		listed[i] = e.session
+	}
+
 	snap.Cards = cards
-	snap.Sessions = state.Link(sessions, cards)
-	snap.OrphanCards = state.OrphanCards(sessions, snap.Boards[0].Cards)
+	snap.Sessions = state.Link(listed, cards)
+	// Link returns one view per session, in order, which is what makes this
+	// index-for-index stamping safe — see its own doc comment.
+	for i := range snap.Sessions {
+		snap.Sessions[i].Lifecycle = entries[i].lifecycle
+		snap.Sessions[i].LastState = entries[i].lastState
+	}
+	snap.OrphanCards = state.OrphanCards(snap.Sessions, snap.Boards[0].Cards)
+	snap.StoppedCards = state.StoppedCards(snap.Sessions, snap.Boards[0].Cards)
 	c.pruneContextCache(c.enrich(snap.Sessions, cfg.SessionLabels))
 
 	if cfg.UsageEnabled && c.usage != nil {
@@ -456,6 +511,108 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		}
 	}
 	return snap
+}
+
+// listedSession is one row of the merged list: the session as the panel will
+// show it, which of the three states it is in, and — for one that is no
+// longer running — the state it last recorded.
+type listedSession struct {
+	session   daemon.Session
+	lifecycle string
+	lastState string
+}
+
+// mergeStopped puts the daemon's live sessions and the job store's records
+// into one list, saying for each which of the three states it is in.
+//
+// A record the daemon is already listing is dropped, not merged: the live
+// reply is the authority on a running session, and the record on disk is a
+// frozen copy of what that session last wrote. Keying on the short id is
+// what makes that work — it is the id the store names its directories by and
+// the id the daemon lists sessions under, and it is the id a board card
+// names a session with.
+//
+// The stopped ones come after every live one, most recently active first, so
+// that the session just stopped is at the top of its group rather than
+// wherever the alphabet put its short id. A record with no timestamp sorts
+// last among them, by short id, rather than claiming to be the oldest or the
+// newest.
+func mergeStopped(live []daemon.Session, records []jobs.Record) []listedSession {
+	listed := make(map[string]bool, len(live))
+	for _, s := range live {
+		listed[s.Short] = true
+	}
+
+	stopped := make([]jobs.Record, 0, len(records))
+	for _, r := range records {
+		if listed[r.Short] {
+			continue
+		}
+		stopped = append(stopped, r)
+	}
+	sort.SliceStable(stopped, func(i, j int) bool {
+		a, b := stopped[i], stopped[j]
+		if a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.Short < b.Short
+		}
+		// A zero time is "not known", which must not sort as the year zero
+		// and drag an undated record to the bottom of a list ordered by
+		// recency — it goes last among its own kind instead.
+		if a.UpdatedAt.IsZero() != b.UpdatedAt.IsZero() {
+			return b.UpdatedAt.IsZero()
+		}
+		return a.UpdatedAt.After(b.UpdatedAt)
+	})
+
+	merged := make([]listedSession, 0, len(live)+len(stopped))
+	for _, s := range live {
+		merged = append(merged, listedSession{session: s, lifecycle: state.LifecycleLive})
+	}
+	for _, r := range stopped {
+		lifecycle := state.LifecycleDead
+		if r.Resumable {
+			lifecycle = state.LifecycleStopped
+		}
+		merged = append(merged, listedSession{
+			session:   sessionFromRecord(r),
+			lifecycle: lifecycle,
+			lastState: r.State,
+		})
+	}
+	return merged
+}
+
+// sessionFromRecord shapes a job-store record as the session the panel draws.
+//
+// What it deliberately leaves empty is the point of it. Tempo, Needs, State
+// and Dying are live readings of a running process: a stopped session has no
+// tempo, is not waiting on anyone's answer, is not in any state right now,
+// and is not being killed. Copying a frozen value into any of them would let
+// a session that stopped hours ago keep asking for attention — State most of
+// all, since "blocked" there means stalled to every rule that reads it, and
+// a session that stopped while blocked would be counted as stalled every
+// poll, forever, with nobody able to unstick it. The state it did record
+// goes to SessionView.LastState, which no rule keys on. PID and StartedAt
+// are left at zero for the same reason: nothing is running.
+//
+// Detail and Intent are carried as they are. They are prose — the last thing
+// the session said about itself, and what it was last asked to do — and no
+// rule keys on either.
+func sessionFromRecord(r jobs.Record) daemon.Session {
+	s := daemon.Session{
+		Short:      r.Short,
+		SessionID:  r.SessionID,
+		CWD:        r.CWD,
+		Backend:    r.Backend,
+		Detail:     r.Detail,
+		Intent:     r.Intent,
+		Name:       r.Name,
+		CLIVersion: r.CLIVersion,
+	}
+	if !r.CreatedAt.IsZero() {
+		s.CreatedAt = r.CreatedAt.UnixMilli()
+	}
+	return s
 }
 
 // classifyUsageError turns a usage.Fetcher error into the three buckets the

@@ -316,6 +316,124 @@ test("no exception for any particular session identity, orchestrator included", 
   );
 });
 
+// --- the silence condition on a flag-only stall -------------------------
+//
+// A blocked flag on its own is not evidence that a session has stopped:
+// state is set by a mechanism the session does not control and has been
+// observed holding "blocked" while the session was demonstrably working.
+// silentFor -- the age of the last write to the session's transcript -- is
+// the measurement that answers "is it alive right now", and it travels in
+// the same snapshot, on the same row, beside the flag that contradicts it.
+//
+// So a flag-only stall counts only once the session has also been silent for
+// BLOCKED_SETTLE_MS. silentFor is a Go time.Duration on the wire, so it
+// arrives in nanoseconds; NS below keeps the fixtures readable.
+const NS = 1e6; // nanoseconds in a millisecond
+
+test("the operator's case: a stuck blocked flag with a fresh transcript is not stalled", () => {
+  // Observed live on 2026-09-12, fleet session 512ed1ad: tempo=active,
+  // state=blocked, needs="" held through 55% of a sampling window while
+  // silentFor never passed 35.5s -- the session was writing to its
+  // transcript the whole time. Before the silence condition the badge lit
+  // anyway: the tracker's own clock had run past the threshold during an
+  // earlier, real stall, and the sticky flag never let it reset.
+  const tracker = createStalledTracker();
+  const s = {
+    short: "512ed1ad",
+    needs: "",
+    tempo: "active",
+    state: "blocked",
+    detail: "",
+    silentFor: 23 * 1000 * NS,
+  };
+  tracker.update([s], 0);
+  const wellPastTheThreshold = tracker.update([s], BLOCKED_SETTLE_MS * 4);
+  assert.deepEqual(
+    wellPastTheThreshold,
+    [],
+    "a session that wrote to its transcript 23 seconds ago has not stalled, whatever state says",
+  );
+});
+
+test("control case e4fa5037: an hour-long real stall with tempo=active is still counted", () => {
+  // internal/daemon/testdata/list_sessions.json's record "e4fa5037" is an
+  // attested hour-long stall with exactly this flag shape (tempo=active,
+  // state=blocked, needs=""). Dropping state in favour of tempo alone was
+  // tried and rejected once, in commit 96ba6d4, because it loses this case;
+  // the silence condition must not lose it either. A session parked for an
+  // hour has written nothing for an hour, so silentFor is what tells it
+  // apart from the case above -- the flags are identical in both.
+  const tracker = createStalledTracker();
+  const s = {
+    short: "e4fa5037",
+    needs: "",
+    tempo: "active",
+    state: "blocked",
+    detail: "awaiting user decision on a dependency version",
+    silentFor: 60 * 60 * 1000 * NS,
+  };
+  assert.deepEqual(
+    tracker.update([s], 0),
+    [s],
+    "an hour of silence behind a blocked flag is a stall, and counts on first sight",
+  );
+});
+
+test("the silence threshold is BLOCKED_SETTLE_MS, to the millisecond", () => {
+  const tracker = createStalledTracker();
+  const at = { short: "at", needs: "", state: "blocked", detail: "", silentFor: BLOCKED_SETTLE_MS * NS };
+  const under = { short: "under", needs: "", state: "blocked", detail: "", silentFor: (BLOCKED_SETTLE_MS - 1) * NS };
+  const counted = tracker.update([at, under], 0).map((s) => s.short);
+  assert.deepEqual(counted, ["at"], "exactly the threshold counts; one millisecond short does not");
+});
+
+test("a session that goes quiet, is counted, then writes again leaves the count at once", () => {
+  // The stall clock must reset when the session comes back rather than
+  // accumulate across the resumption. Nothing here resets anything:
+  // silentFor is an age, not an accumulator, so one write to the transcript
+  // is the whole reset, and there is no stale timestamp left to carry over.
+  const tracker = createStalledTracker();
+  const base = { short: "a", needs: "", tempo: "active", state: "blocked", detail: "" };
+  const quiet = { ...base, silentFor: (BLOCKED_SETTLE_MS + 1000) * NS };
+  const alive = { ...base, silentFor: 2 * 1000 * NS };
+  assert.deepEqual(tracker.update([quiet], 0), [quiet], "silent past the threshold: counted");
+  assert.deepEqual(
+    tracker.update([alive], 1000),
+    [],
+    "one write to the transcript ends the stall, with no accumulated clock left over",
+  );
+  assert.deepEqual(
+    tracker.update([{ ...base, silentFor: 30 * 1000 * NS }], 2000),
+    [],
+    "and the next quiet half-minute starts from zero, not from where the old count stood",
+  );
+});
+
+test("an unmeasured silentFor falls back to the tracker's own clock, not to silence", () => {
+  // silentFor === 0 means "no transcript to stat", never "silent for zero
+  // time" -- cmd/fleetdeck/collect.go's transcriptState and sessions.js's
+  // silentLabel both read it that way. Taking that absence for "not silent
+  // enough" would hide a session that stalled before writing anything, so
+  // for as long as there is nothing to measure the flag's own age decides,
+  // exactly as it did before this rule existed.
+  const tracker = createStalledTracker();
+  const s = { short: "a", needs: "", state: "blocked", detail: "", silentFor: 0 };
+  assert.deepEqual(tracker.update([s], 0), [], "unmeasured and just seen: not yet");
+  assert.deepEqual(
+    tracker.update([s], BLOCKED_SETTLE_MS),
+    [s],
+    "unmeasured and blocked for the whole threshold: counted, as before this rule existed",
+  );
+});
+
+test("a needs-based stall ignores silentFor entirely, however fresh the transcript is", () => {
+  // The daemon's own words are real the instant they appear. The silence
+  // condition exists only to disambiguate a bare flag, which has no words.
+  const tracker = createStalledTracker();
+  const s = { short: "a", needs: "usage limit reached", state: "working", silentFor: 1000 * NS };
+  assert.deepEqual(tracker.update([s], 0), [s], "a worded stall counts at any silentFor");
+});
+
 // --- createUsageErrorTracker -------------------------------------------
 
 test("usageError inactive reads as none", () => {

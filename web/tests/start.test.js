@@ -96,6 +96,25 @@ test("a fleet's own sessions and the sessions no fleet claims are counted togeth
   assert.deepEqual(texts(".start-fleet-sessions"), [`${t("fleet_sessions")}: 2`, `${t("fleet_sessions")}: 2`]);
 });
 
+// The same rule the header's counters follow (fleet.js headerSessions): a
+// stopped session is paused work, and counting it here would send someone into
+// a fleet on the strength of sessions that are not doing anything — and would
+// have the start page and the header say different numbers about one fleet.
+test("sessions that are no longer running are not counted", () => {
+  start();
+  push(
+    snapshot(
+      ["fleetdeck"],
+      [
+        { short: "a1", fleets: ["fleetdeck"] },
+        { short: "a2", fleets: ["fleetdeck"], lifecycle: "stopped" },
+        { short: "a3", fleets: ["fleetdeck"], lifecycle: "dead" },
+      ],
+    ),
+  );
+  assert.deepEqual(texts(".start-fleet-sessions"), [`${t("fleet_sessions")}: 1`]);
+});
+
 test("a question waiting in a fleet is counted on that fleet alone", () => {
   start();
   push(

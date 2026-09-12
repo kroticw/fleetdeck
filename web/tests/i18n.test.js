@@ -40,6 +40,20 @@ const KEYS = [
   "fleet_none",
   "fleet_sessions",
   "fleet_waiting",
+  // web/js/sessions.js's two groups for the sessions that are not running,
+  // and web/js/board.js's mark for a card whose session is stopped. The
+  // badges above all: a row falling back to "stopped_badge" would say
+  // nothing about what is wrong with the session it sits on, which is the
+  // whole reason the row is there.
+  "stopped_group",
+  "stopped_badge",
+  "stopped_resume_hint",
+  "gone_group",
+  "gone_badge",
+  "gone_no_cwd",
+  "last_state",
+  "stopped_unknown",
+  "session_stopped",
   // web/js/newcard.js. The missing-commit note especially: it is the one line
   // that says the card is on the board and not in its history, and falling
   // through to its own key would print "new_card_not_committed" instead.
