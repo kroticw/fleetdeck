@@ -10,6 +10,7 @@ import (
 )
 
 const sample = `---
+id: T-007
 zone: planned
 stage: review
 progress: 80
@@ -40,11 +41,37 @@ func TestParseCardReadsFieldsTitleAndLinks(t *testing.T) {
 	if c.Zone != "planned" || c.Stage != "review" || c.Progress != 80 || c.Session != "abc12345" {
 		t.Fatalf("fields wrong: %+v", c)
 	}
+	// The card's own permanent identifier: the one a person reads off the board
+	// and says out loud. Whatever the file holds, the panel can show nothing
+	// the parsed card does not carry.
+	if c.ID != "T-007" {
+		t.Fatalf("id wrong: %q", c.ID)
+	}
 	if c.Title != "BS-1 — заголовок" {
 		t.Fatalf("title wrong: %q", c.Title)
 	}
 	if len(c.Links) != 2 || c.Links[0] != "other-card" || c.Links[1] != "third" {
 		t.Fatalf("links wrong: %v", c.Links)
+	}
+}
+
+// A card written by hand, or by anything that goes around new_card.py, carries
+// no id at all. That is a card whose number is missing, not a card that cannot
+// be read: the absence arrives as an empty string and everything else about the
+// card still arrives with it.
+func TestParseCardWithoutIDIsReadNormallyWithAnEmptyID(t *testing.T) {
+	c, err := ParseCard(writeCard(t, t.TempDir(), "noid.md", strings.Replace(sample, "id: T-007\n", "", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ParseError != "" {
+		t.Fatalf("a card without an id must still parse: %q", c.ParseError)
+	}
+	if c.ID != "" {
+		t.Fatalf("a card without an id must not invent one, got %q", c.ID)
+	}
+	if c.Stage != "review" || c.Title == "" {
+		t.Fatalf("the rest of the card must still be read: %+v", c)
 	}
 }
 
