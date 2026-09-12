@@ -9,7 +9,7 @@
       "startedAt": 1788951600000,
       "createdAt": 1788951600000,
       "cwd": "/repo/fleetdeck",
-      "backend": "claude",
+      "backend": "daemon",
       "tempo": "active",
       "state": "working",
       "detail": "writing the card panel",
@@ -17,7 +17,7 @@
       "name": "ui5",
       "agent": "claude",
       "cliVersion": "2.1.263",
-      "source": "daemon",
+      "source": "shell",
       "needs": "",
       "dying": false,
       "context": {

@@ -12,20 +12,31 @@ var (
 
 // Session represents a Claude Code session in the daemon.
 type Session struct {
-	Short      string `json:"short"`
-	Nonce      string `json:"nonce"`
-	SessionID  string `json:"sessionId"`
-	PID        int    `json:"pid"`
-	Attempt    int    `json:"attempt"`
-	StartedAt  int64  `json:"startedAt"`
-	CreatedAt  int64  `json:"createdAt"`
-	CWD        string `json:"cwd"`
-	Backend    string `json:"backend"`
-	Tempo      string `json:"tempo"`
-	State      string `json:"state"`
-	Detail     string `json:"detail"`
-	Intent     string `json:"intent"`
-	Name       string `json:"name"`
+	Short     string `json:"short"`
+	Nonce     string `json:"nonce"`
+	SessionID string `json:"sessionId"`
+	PID       int    `json:"pid"`
+	Attempt   int    `json:"attempt"`
+	StartedAt int64  `json:"startedAt"`
+	CreatedAt int64  `json:"createdAt"`
+	CWD       string `json:"cwd"`
+	Backend   string `json:"backend"`
+	Tempo     string `json:"tempo"`
+	State     string `json:"state"`
+	Detail    string `json:"detail"`
+	Intent    string `json:"intent"`
+	Name      string `json:"name"`
+	// Agent is the name of the agent *definition* the session runs under -- the
+	// value of Claude Code's `--agent` flag ("Agent for the current session.
+	// Overrides the 'agent' setting."), naming a role from .claude/agents/, which
+	// for this fleet's own sessions is literally "claude". It is not the vendor,
+	// not the CLI, and not the model: nothing on this wire names a model at all.
+	// The model reaches the panel only through the statusline reporter
+	// (cmd/fleetdeck-status), so the daemon does not know it and this field is not
+	// a stand-in for it. Reading Agent as "which CLI is this" and drawing an icon
+	// from it shows the operator something the field never meant. Empty (absent on
+	// the wire) for a session started without --agent, which is the common case;
+	// see docs/protocol/daemon-control-socket.md section 4.
 	Agent      string `json:"agent"`
 	CLIVersion string `json:"cliVersion"`
 	Source     string `json:"source"`
@@ -39,7 +50,8 @@ type Session struct {
 
 // stalledNeedsPrefixes is the closed "no person needed" vocabulary: the daemon's own
 // non-question needs renderings, matched by prefix, case-sensitively, against the
-// daemon's own wording. Extracted from the installed CLI 2.1.263 binary (see
+// daemon's own wording. First extracted from the installed CLI 2.1.263 binary and
+// re-checked against 2.1.269, where all seven still render verbatim (see
 // docs/protocol/daemon-control-socket.md section 5), it covers the design spec's
 // four stall categories:
 //

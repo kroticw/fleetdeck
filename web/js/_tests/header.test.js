@@ -2,7 +2,9 @@
 //
 // Mirrors internal/daemon/types.go's Session.Waiting()/.Stalled() test cases
 // (and the fixtures in internal/state/events_test.go) so the JS restatement
-// in header.js cannot silently drift from the Go source of truth.
+// cannot silently drift from the Go source of truth. That restatement lives
+// in needs.js, shared by header.js and sessions.js; the cases stay here,
+// beside the header's own counters, which are what they were written against.
 //
 // This file lives under a leading-underscore directory (_tests/) on purpose:
 // web/embed.go's `//go:embed index.html app.css js` is a plain (non "all:")
@@ -19,8 +21,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  isWaiting,
-  isStalled,
   stallReason,
   escapeHTML,
   stalledList,
@@ -37,6 +37,7 @@ import {
   nextMenuState,
   headerCounts,
 } from "../header.js";
+import { isWaiting, isStalled } from "../needs.js";
 import { t } from "../i18n.js";
 
 // The reasons a person actually sees, in order. Each reason is its own

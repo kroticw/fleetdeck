@@ -30,50 +30,14 @@ import { isMultiFleet, groupSessions, switchFleet } from "./fleet.js";
 import { pageStorage } from "./buildcheck.js";
 import { isLive, isResumable } from "./lifecycle.js";
 import { sessionMarks } from "./initials.js";
-
-// Closed vocabulary of "no person needed" needs strings, copied verbatim
-// (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
-// in internal/daemon/types.go. Deliberately narrow: an unrecognized prefix
-// must fall through to Waiting, never Stalled.
-const STALLED_NEEDS_PREFIXES = [
-  "usage limit reached",
-  "login required",
-  "API error",
-  "API overloaded",
-  "API unavailable",
-  "invalid API request",
-  "rate limited",
-];
-
-function isStalledNeeds(needs) {
-  return STALLED_NEEDS_PREFIXES.some((p) => needs.startsWith(p));
-}
-
-// Waiting: needs decides alone. Never look at state/tempo here — those are
-// mechanism flags a session does not control and cannot tell "waiting on a
-// person" apart from "waiting on its own subagents".
-function isWaiting(s) {
-  if (s.dying) return false;
-  if (!s.needs) return false;
-  return !isStalledNeeds(s.needs);
-}
-
-// Stalled: mutually exclusive with isWaiting by construction. Kept exactly
-// as daemon.Session.Stalled() mirrors it in header.js's own copy -- this is
-// the per-instant rule, not the row's own display decision (see rowHtml's
-// own comment for why the two are no longer the same question).
-function isStalled(s) {
-  if (s.dying) return false;
-  if (s.needs) return isStalledNeeds(s.needs);
-  return s.state === "blocked" || s.tempo === "blocked";
-}
+import { isWaiting } from "./needs.js";
 
 // The text explaining *why* a Waiting/Stalled session isn't moving. For a
 // flags-only Stalled session (needs empty) detail is the only field that
 // still says anything; everywhere else needs is the words that matter.
 // stalled is the row's own tracker-backed decision (rowHtml's stalledNow),
-// not a fresh isStalled(s) call: a flag-only stall not yet counted by the
-// tracker must not show detail either, or the row would carry a "why it
+// not a fresh isStalled(s) call (needs.js): a flag-only stall not yet counted
+// by the tracker must not show detail either, or the row would carry a "why it
 // stopped" reason for a stop the badge itself does not yet claim happened.
 function reasonText(s, stalled) {
   if (stalled && !s.needs) return s.detail || "";
@@ -155,7 +119,7 @@ function applyContextWidths(root) {
 // stalledNow is the row's own Stalled verdict, already decided by the same
 // createStalledTracker the header's counter shares -- see the header.js
 // import above and renderSessions' own use of it below. Never recomputed
-// here from isStalled(s) directly: that per-instant check is what put a
+// here from needs.js's isStalled(s) directly: that per-instant check is what put a
 // "Stalled" badge on a session's very first blocked tick, several times an
 // hour, for as long as its conversation with the orchestrator ran -- the
 // header's own counter, watching the same session through the same
