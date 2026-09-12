@@ -20,7 +20,7 @@ macOS only, and it talks to the Claude Code daemon on your own machine — see [
 
 ![The fleetdeck app: the same panel in a native window](docs/images/app-en.png)
 
-`fleetdeck.app` is the same panel in a native window. It starts the panel, and starts it again if it stops. Built from a checkout, it also updates itself from the Update button in its header.
+`fleetdeck.app` is the same panel in a native window. It starts the panel, and starts it again if it stops. It also updates itself from the Update button in its header: a build from a checkout brings that checkout forward, and one installed from a release downloads the next release — after checking that what came down is signed by the same Apple team and notarized by Apple.
 
 ## Install
 
