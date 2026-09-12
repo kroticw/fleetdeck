@@ -19,6 +19,13 @@ const en = {
   column_drag: "drag to resize the column",
   column_fold: "fold the column away",
   column_unfold: "bring the column back",
+
+  // The folded sessions column. Both of these are titles on a number that has
+  // no room to explain itself: "6" alone could be anything, and the em dash
+  // standing for "not known" could be read as "none" by someone who has not
+  // seen the other state.
+  folded_running: "sessions running",
+  folded_unknown: "how many are running is not known — the panel is not connected",
   waiting: "Waiting",
   stalled: "Stalled",
   context_unknown: "no transcript yet",
@@ -310,6 +317,8 @@ const ru = {
   column_drag: "потяните, чтобы изменить ширину колонки",
   column_fold: "свернуть колонку",
   column_unfold: "развернуть колонку",
+  folded_running: "сессий в работе",
+  folded_unknown: "сколько в работе — неизвестно, панель не на связи",
   waiting: "Ждёт",
   stalled: "Застряла",
   context_unknown: "транскрипта пока нет",

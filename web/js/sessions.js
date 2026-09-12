@@ -29,6 +29,7 @@ import { mountColumnResize } from "./columnresize.js";
 import { isMultiFleet, groupSessions, switchFleet } from "./fleet.js";
 import { pageStorage } from "./buildcheck.js";
 import { isLive, isResumable } from "./lifecycle.js";
+import { sessionMarks } from "./initials.js";
 
 // Closed vocabulary of "no person needed" needs strings, copied verbatim
 // (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
@@ -415,6 +416,63 @@ function sizeControlsHtml() {
   </div>`;
 }
 
+// The column folded away, which is the only part of it a person can see once
+// they have put it aside.
+//
+// It used to be the fold strip and nothing else: one button, and empty dark
+// space for the rest of the column's height. Folding freed the space and cost
+// the whole fleet — to learn who was in it you unfolded again, which is the
+// one thing folding was supposed to save you.
+//
+// So the strip carries the running sessions, one mark each, in the same order
+// the open column lists them: whoever is waiting for a person first. Each mark
+// is two letters taken from that session's own name (web/js/initials.js, which
+// is where the difficulty of that lives) and coloured by the same three states
+// the open column badges — waiting, stalled, working.
+//
+// Only the running ones. This machine's fleet has twenty-odd stopped sessions
+// against a handful of live ones, and marking those here would bury the ones
+// that are actually working under the ones that are not.
+//
+// Every mark is a button and presses like the row it stands for: it opens that
+// session. The lesson in web/app.css's own fold control runs both ways — what
+// can be pressed must look like it — so these are drawn as controls, and the
+// count above them, which does nothing, is drawn as text.
+// A null list means the panel does not know — it is connecting, or the daemon
+// is not answering. That is not the same fact as an empty fleet, and a strip
+// that showed "0" in that state would be reporting a quiet fleet when what is
+// actually happening is that nobody has been asked.
+export function foldedStripHtml(sessions, stalledNow) {
+  if (sessions == null) {
+    return `<div class="sfold"><div class="sfold-count sfold-unknown" title="${escapeHtml(t("folded_unknown"))}">—</div></div>`;
+  }
+
+  const running = waitingFirst(sessions.filter(isLive));
+  const marks = sessionMarks(running);
+
+  const countLabel = escapeHtml(t("folded_running"));
+  const head = `<div class="sfold-count" title="${countLabel}">${running.length}</div>`;
+
+  const items = running.map((s) => {
+    const waiting = isWaiting(s);
+    const stalled = !waiting && stalledNow?.has?.(s.short);
+    const classes = ["sfold-mark"];
+    if (waiting) classes.push("sfold-waiting");
+    else if (stalled) classes.push("sfold-stalled");
+
+    // The whole name, plus the state in words. The mark is two letters and
+    // cannot say more than that on its own; this is where the rest of it is,
+    // and it is what makes two sessions whose marks look alike still tellable
+    // apart without unfolding anything.
+    const name = s.label || s.name || s.short || "";
+    const state = waiting ? ` — ${t("waiting")}` : stalled ? ` — ${t("stalled")}` : "";
+
+    return `<button type="button" class="${classes.join(" ")}" data-session="${escapeHtml(s.short)}" title="${escapeHtml(name + state)}">${escapeHtml(marks.get(s.short) ?? "")}</button>`;
+  }).join("");
+
+  return `<div class="sfold">${head}${items}</div>`;
+}
+
 // onOpenCard is optional: without it the card control is not offered at all,
 // because a control that cannot do what it says is the defect this replaced.
 // `now` defaults to the real clock; a test overrides it to prove the tracker
@@ -498,10 +556,20 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
   // reads) and its buttons are rewired every time, the same as every other
   // interactive element in this column — see the querySelectorAll loops
   // below, which do the same for rows, the card link and the edit pencil.
-  const setBody = (bodyHtml) => {
-    root.innerHTML = sizeControlsHtml() + bodyHtml;
+  // foldedHtml is the strip's own content, written on every render alongside
+  // the body and hidden by the stylesheet whenever the column is open — the
+  // same way the fold and unfold buttons are each hidden in the state they do
+  // not belong to. Rendering it unconditionally is what keeps the folded view
+  // current: this column is rewritten wholesale on every snapshot, and asking
+  // "are we folded right now" here would put a second answer to that question
+  // next to the one the stylesheet already has.
+  const setBody = (bodyHtml, foldedHtml = "") => {
+    root.innerHTML = sizeControlsHtml() + foldedHtml + bodyHtml;
     root.querySelector(".col-size-unfold")?.addEventListener("click", () => resize.width.unfold());
     root.querySelector(".col-size-fold")?.addEventListener("click", () => resize.width.fold());
+    for (const mark of root.querySelectorAll(".sfold-mark")) {
+      mark.addEventListener("click", () => onSelect(mark.dataset.session));
+    }
   };
 
   const render = (snap, connected) => {
@@ -509,12 +577,12 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
     // frame, snapshot is null and connected is false — render a neutral
     // connecting state rather than dereferencing a snapshot that isn't there.
     if (!snap || !connected) {
-      setBody(`${HEAD}<div class="sempty">${escapeHtml(t("connecting"))}</div>`);
+      setBody(`${HEAD}<div class="sempty">${escapeHtml(t("connecting"))}</div>`, foldedStripHtml(null));
       return;
     }
 
     if (snap.daemonError) {
-      setBody(`${HEAD}<div class="sempty sempty-error">${escapeHtml(t("daemon_down"))}</div>`);
+      setBody(`${HEAD}<div class="sempty sempty-error">${escapeHtml(t("daemon_down"))}</div>`, foldedStripHtml(null));
       return;
     }
 
@@ -561,7 +629,7 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
       ? `<div class="sempty">${escapeHtml(scope.length === 0 ? t("no_sessions") : t("only_orchestrator"))}</div>`
       : "";
     if (sessions.length === 0 && unclaimed.length === 0 && others.length === 0) {
-      setBody(HEAD + emptyHtml);
+      setBody(HEAD + emptyHtml, foldedStripHtml([], new Set()));
       return;
     }
 
@@ -616,7 +684,15 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
       + goneGroup(gone.filter(isResumable), t("stopped_group"))
       + goneGroup(gone.filter((s) => !isResumable(s)), t("gone_group"));
 
-    setBody(HEAD + errorHtml + emptyHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""));
+    // The strip stands for the same sessions the column's own rows do: this
+    // fleet's, and the ones no fleet claims, which the open column lists
+    // together below them. Not `all` — that would put another fleet's sessions
+    // on a strip whose open form does not list them, and not the other fleets'
+    // summary lines either, which are not sessions at all.
+    setBody(
+      HEAD + errorHtml + emptyHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""),
+      foldedStripHtml([...sessions, ...unclaimed], stalledNow),
+    );
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
