@@ -72,17 +72,22 @@ func testSpec() ResumeSpec {
 	}
 }
 
-// listReply renders a list response holding one session in the given state.
-func listReply(short, state, detail string) []byte {
+// theShort is the session every test in this file resumes. One id throughout,
+// because none of these tests is about telling two sessions apart — they are
+// about what happens to the one being resumed.
+const theShort = "aa11bb22"
+
+// listReply renders a list response holding the session in the given state.
+func listReply(state, detail string) []byte {
 	body, _ := json.Marshal(map[string]any{
 		"ok": true, "op": "list",
-		"jobs": []map[string]any{{"short": short, "state": state, "detail": detail}},
+		"jobs": []map[string]any{{"short": theShort, "state": state, "detail": detail}},
 	})
 	return append(body, '\n')
 }
 
 var emptyList = []byte(`{"ok":true,"op":"list","jobs":[]}` + "\n")
-var dispatchOK = []byte(`{"ok":true,"op":"dispatch","short":"aa11bb22"}` + "\n")
+var dispatchOK = []byte(`{"ok":true,"op":"dispatch","short":"` + theShort + `"}` + "\n")
 
 func resumeClient(t *testing.T, listener net.Listener) *Client {
 	t.Helper()
@@ -114,7 +119,7 @@ func TestResumeSendsTheDescriptorTheDaemonExpects(t *testing.T) {
 			mu.Unlock()
 			return dispatchOK
 		}
-		return listReply("aa11bb22", "working", "")
+		return listReply("working", "")
 	})
 
 	spec := testSpec()
@@ -222,7 +227,7 @@ func TestResumeOmitsTranscriptPathWhenThereIsNone(t *testing.T) {
 			mu.Unlock()
 			return dispatchOK
 		}
-		return listReply("aa11bb22", "working", "")
+		return listReply("working", "")
 	})
 
 	if err := resumeClient(t, listener).Resume(context.Background(), testSpec()); err != nil {
@@ -277,7 +282,7 @@ func TestResumeStopsAtOnceWhenTheWorkerCrashes(t *testing.T) {
 		if n == 0 {
 			return dispatchOK
 		}
-		return listReply("aa11bb22", "crashed", "exit 1")
+		return listReply("crashed", "exit 1")
 	})
 
 	start := time.Now()
@@ -305,11 +310,11 @@ func TestResumeReportsAWorkerThatLeavesTheRoster(t *testing.T) {
 	defer listener.Close()
 
 	go serveN(t, listener, func(n int, _ []byte) []byte {
-		switch {
-		case n == 0:
+		switch n {
+		case 0:
 			return dispatchOK
-		case n == 1:
-			return listReply("aa11bb22", "resuming", "")
+		case 1:
+			return listReply("resuming", "")
 		default:
 			return emptyList
 		}
@@ -339,7 +344,7 @@ func TestResumeDoesNotAcceptAWorkerStillResuming(t *testing.T) {
 		if n == 0 {
 			return dispatchOK
 		}
-		return listReply("aa11bb22", "resuming", "")
+		return listReply("resuming", "")
 	})
 
 	err = resumeClient(t, listener).Resume(context.Background(), testSpec())
@@ -396,7 +401,7 @@ func TestResumeWaitsOutTheSettleWindow(t *testing.T) {
 		mu.Lock()
 		lists++
 		mu.Unlock()
-		return listReply("aa11bb22", "working", "")
+		return listReply("working", "")
 	})
 
 	c := resumeClient(t, listener)

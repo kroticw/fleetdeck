@@ -43,13 +43,19 @@ func newResumeStand(t *testing.T) *resumeStand {
 	return &resumeStand{jobs: t.TempDir(), projects: t.TempDir()}
 }
 
-// record writes one session into the stand's job store. cwd is created unless
+// theShort is the session every test in this file resumes. One id throughout,
+// because none of these tests is about telling two sessions apart — the one
+// that asks about an unknown id simply asks for an id no record was written
+// for.
+const theShort = "aaaa1111"
+
+// record writes the session into the stand's job store. cwd is created unless
 // it is the literal "gone", which stands for a working directory that is not
 // there any more — a deleted worktree, the commonest way a session stops being
 // resumable.
-func (s *resumeStand) record(t *testing.T, short, sessionID, cwd, body string) {
+func (s *resumeStand) record(t *testing.T, sessionID, cwd, body string) {
 	t.Helper()
-	dir := filepath.Join(s.jobs, short)
+	dir := filepath.Join(s.jobs, theShort)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -87,10 +93,10 @@ const aSessionID = "aaaa1111-0000-4000-8000-000000000001"
 func TestResumeSessionBuildsTheSpecFromTheStore(t *testing.T) {
 	s := newResumeStand(t)
 	cwd := filepath.Join(t.TempDir(), "worktree")
-	s.record(t, "aaaa1111", aSessionID, cwd, "")
+	s.record(t, aSessionID, cwd, "")
 	path := s.transcript(t, aSessionID)
 
-	if err := s.resumer()("aaaa1111"); err != nil {
+	if err := s.resumer()(theShort); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	if len(s.dispatched) != 1 {
@@ -126,9 +132,9 @@ func TestResumeSessionBuildsTheSpecFromTheStore(t *testing.T) {
 // thing — and it leaves a dead worker behind to be cleaned up by hand.
 func TestResumeSessionRefusesASessionWithNoTranscript(t *testing.T) {
 	s := newResumeStand(t)
-	s.record(t, "aaaa1111", aSessionID, filepath.Join(t.TempDir(), "worktree"), "")
+	s.record(t, aSessionID, filepath.Join(t.TempDir(), "worktree"), "")
 
-	err := s.resumer()("aaaa1111")
+	err := s.resumer()(theShort)
 	if !errors.Is(err, server.ErrSessionNotResumable) {
 		t.Fatalf("err = %v, want it to wrap ErrSessionNotResumable", err)
 	}
@@ -142,10 +148,10 @@ func TestResumeSessionRefusesASessionWithNoTranscript(t *testing.T) {
 
 func TestResumeSessionRefusesAMissingWorkingDirectory(t *testing.T) {
 	s := newResumeStand(t)
-	s.record(t, "aaaa1111", aSessionID, "gone", `{"sessionId":"`+aSessionID+`","cwd":"/no/such/worktree"}`)
+	s.record(t, aSessionID, "gone", `{"sessionId":"`+aSessionID+`","cwd":"/no/such/worktree"}`)
 	s.transcript(t, aSessionID)
 
-	err := s.resumer()("aaaa1111")
+	err := s.resumer()(theShort)
 	if !errors.Is(err, server.ErrSessionNotResumable) {
 		t.Fatalf("err = %v, want it to wrap ErrSessionNotResumable", err)
 	}
@@ -161,9 +167,9 @@ func TestResumeSessionRefusesAMissingWorkingDirectory(t *testing.T) {
 
 func TestResumeSessionRefusesASessionWithNoIDToResumeBy(t *testing.T) {
 	s := newResumeStand(t)
-	s.record(t, "aaaa1111", "", "", `{"name":"no id here"}`)
+	s.record(t, "", "", `{"name":"no id here"}`)
 
-	if err := s.resumer()("aaaa1111"); !errors.Is(err, server.ErrSessionNotResumable) {
+	if err := s.resumer()(theShort); !errors.Is(err, server.ErrSessionNotResumable) {
 		t.Fatalf("err = %v, want it to wrap ErrSessionNotResumable", err)
 	}
 	if len(s.dispatched) != 0 {
@@ -177,11 +183,11 @@ func TestResumeSessionRefusesASessionWithNoIDToResumeBy(t *testing.T) {
 // about a duplicate job.
 func TestResumeSessionRefusesASessionThatIsAlreadyRunning(t *testing.T) {
 	s := newResumeStand(t)
-	s.record(t, "aaaa1111", aSessionID, filepath.Join(t.TempDir(), "worktree"), "")
+	s.record(t, aSessionID, filepath.Join(t.TempDir(), "worktree"), "")
 	s.transcript(t, aSessionID)
 	s.live = []daemon.Session{{Short: "aaaa1111", State: "working"}}
 
-	err := s.resumer()("aaaa1111")
+	err := s.resumer()(theShort)
 	if !errors.Is(err, server.ErrSessionNotResumable) {
 		t.Fatalf("err = %v, want it to wrap ErrSessionNotResumable", err)
 	}
@@ -211,11 +217,11 @@ func TestResumeSessionRefusesAnUnknownShortID(t *testing.T) {
 // resumed is not.
 func TestResumeSessionRelaysADaemonFailureUnchanged(t *testing.T) {
 	s := newResumeStand(t)
-	s.record(t, "aaaa1111", aSessionID, filepath.Join(t.TempDir(), "worktree"), "")
+	s.record(t, aSessionID, filepath.Join(t.TempDir(), "worktree"), "")
 	s.transcript(t, aSessionID)
 	s.dispatchErr = errors.New("resumed worker crashed during startup: exit 1")
 
-	err := s.resumer()("aaaa1111")
+	err := s.resumer()(theShort)
 	if err == nil {
 		t.Fatal("resume succeeded against a failing daemon")
 	}
@@ -235,15 +241,15 @@ func TestResumeSessionRelaysADaemonFailureUnchanged(t *testing.T) {
 func TestResumeSessionIgnoresAStaleTranscriptHint(t *testing.T) {
 	s := newResumeStand(t)
 	cwd := filepath.Join(t.TempDir(), "worktree")
-	s.record(t, "aaaa1111", aSessionID, cwd,
+	s.record(t, aSessionID, cwd,
 		`{"sessionId":"`+aSessionID+`","cwd":"`+cwd+`","linkScanPath":"/gone/projects/-old/`+aSessionID+`.jsonl"}`)
-	real := s.transcript(t, aSessionID)
+	found := s.transcript(t, aSessionID)
 
-	if err := s.resumer()("aaaa1111"); err != nil {
+	if err := s.resumer()(theShort); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if got := s.dispatched[0].TranscriptPath; got != real {
-		t.Errorf("TranscriptPath = %q, want the transcript that exists (%q)", got, real)
+	if got := s.dispatched[0].TranscriptPath; got != found {
+		t.Errorf("TranscriptPath = %q, want the transcript that exists (%q)", got, found)
 	}
 }
 
@@ -253,11 +259,11 @@ func TestResumeSessionResumesByTheResumeID(t *testing.T) {
 	const resumeID = "bbbb2222-0000-4000-8000-000000000002"
 	s := newResumeStand(t)
 	cwd := filepath.Join(t.TempDir(), "worktree")
-	s.record(t, "aaaa1111", aSessionID, cwd,
+	s.record(t, aSessionID, cwd,
 		`{"sessionId":"`+aSessionID+`","resumeSessionId":"`+resumeID+`","cwd":"`+cwd+`"}`)
 	path := s.transcript(t, resumeID)
 
-	if err := s.resumer()("aaaa1111"); err != nil {
+	if err := s.resumer()(theShort); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	spec := s.dispatched[0]
@@ -276,11 +282,11 @@ func TestResumeSessionResumesByTheResumeID(t *testing.T) {
 func TestResumeSessionProceedsWhenTheLiveListCannotBeRead(t *testing.T) {
 	s := newResumeStand(t)
 	cwd := filepath.Join(t.TempDir(), "worktree")
-	s.record(t, "aaaa1111", aSessionID, cwd, "")
+	s.record(t, aSessionID, cwd, "")
 	s.transcript(t, aSessionID)
 	s.liveErr = errors.New("daemon unavailable")
 
-	if err := s.resumer()("aaaa1111"); err != nil {
+	if err := s.resumer()(theShort); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	if len(s.dispatched) != 1 {
