@@ -60,7 +60,27 @@ DISTDIR  ?= dist
 # project (spec section 1), so this is the whole list, not a default subset.
 DIST_ARCHES ?= arm64 amd64
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app window-app install icon
+# SIGN_IDENTITY is the codesign identity `dist-app` seals the release app with: a
+# "Developer ID Application: ..." name, or empty for an ad-hoc seal. Empty by default
+# and set from the outside -- the release workflow's environment, or a command line --
+# for three reasons. A machine that happens to hold a certificate must not quietly
+# start signing every build with it. CI's check job runs `make test`, which runs the
+# real `make dist-app`, on a runner that has no certificate and never will. And the
+# identity names a person and a team, which is the kind of thing that belongs in a
+# secret rather than in a file everyone can read.
+#
+# EXPECT_SEAL is what the gate then demands of the zip, and it follows from
+# SIGN_IDENTITY rather than being a second switch someone can set to "adhoc" to make a
+# red gate go green. `notarize-app` overrides it on its own command line, which is the
+# one place a stronger demand is legitimate.
+SIGN_IDENTITY ?=
+ifeq ($(strip $(SIGN_IDENTITY)),)
+EXPECT_SEAL := adhoc
+else
+EXPECT_SEAL := developer-id
+endif
+
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app notarize-app window-app install icon
 
 # Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
 # see BUILD_BIN_NAMES above.
@@ -175,8 +195,9 @@ verify-dist:
 # dist-app builds the release app: fleetdeck-$(VERSION)-macos.zip in $(DISTDIR), holding
 # the fleetdeck.app `window-app` builds, made into one a person can download, drag to
 # Applications and open -- every command in it, both architectures in every binary, the
-# tag as its version, and an ad-hoc seal over the whole bundle. What each of those is
-# for, and what is left out on purpose, is in scripts/build-dist-app.sh.
+# tag as its version, and a seal over the whole bundle -- Developer ID when
+# SIGN_IDENTITY says so, ad hoc otherwise. What each of those is for, and what is left
+# out on purpose, is in scripts/build-dist-app.sh.
 #
 # It takes every command there is (BIN_NAMES), not DIST_BIN_NAMES: the window is the
 # app, and the exclusion that keeps it out of `dist` is about a plain GOARCH switch
@@ -187,14 +208,27 @@ verify-dist:
 # making, so `make dist dist-app` leaves the whole release there. macOS only: the
 # window needs cgo against WebKit, and the bundle needs lipo, codesign and ditto.
 dist-app:
-	@scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)"
+	@scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(SIGN_IDENTITY)"
 	@$(MAKE) --no-print-directory verify-dist-app
 
 # verify-dist-app interrogates the zip dist-app wrote, the way it reaches a person:
 # unpacked, then looked at from the outside. The release workflow runs it as a step of
 # its own, for the same reason it runs verify-dist.
 verify-dist-app:
-	@scripts/verify-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)"
+	@scripts/verify-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)"
+
+# notarize-app sends the signed zip to Apple, waits for the answer, staples the ticket
+# to the bundle inside it and writes the zip again -- see scripts/notarize-dist-app.sh
+# for why the order is exactly that. It is a target of its own, and not part of
+# dist-app, because it goes over the network and takes minutes, while dist-app has to
+# stay something `make test` can run offline on any machine.
+#
+# It then runs the gate again under its strongest demand: a stapled ticket and
+# Gatekeeper actually accepting the app. That last check is the whole point of the
+# task, so it runs before anything is published rather than after someone downloads it.
+notarize-app:
+	@scripts/notarize-dist-app.sh "$(DISTDIR)" "$(VERSION)"
+	@$(MAKE) --no-print-directory verify-dist-app EXPECT_SEAL=notarized
 
 run: build
 	@if [ ! -x $(BINDIR)/fleetdeck ]; then \
