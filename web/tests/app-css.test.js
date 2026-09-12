@@ -69,6 +69,34 @@ test("the card panel's rules are top-level rules", () => {
   }
 });
 
+// The card's number is the one identifier a person reads off the screen and
+// says out loud, and the session's short id sits beside it in both places it
+// appears. Unstyled, the two are the same line of small grey text — which is
+// the one way this feature fails while looking like it works, since the panel
+// would still be showing both.
+test("the card's number is shaped differently from the session's short id", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const body = (selector) => {
+    const match = new RegExp(`(^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`, "m").exec(stripped);
+    assert.ok(match, `${selector} has no rule in web/app.css`);
+    return match[2];
+  };
+
+  // On the board and in the open panel. Both carry a background of their own:
+  // that chip, not the colour, is what a greyscale screen and a screenshot
+  // with no hover still tell apart.
+  for (const selector of ["\\.knum", "\\.card-num"]) {
+    assert.match(body(selector), /font-family:\s*ui-monospace/, `${selector} must be monospaced: its value gets read out character by character`);
+    assert.match(body(selector), /background:\s*var\(--/, `${selector} lost the chip that separates it from the session's short id`);
+  }
+
+  // "No number" is a word, and must not be dressed as a number: a chip here
+  // would read as a number too small to make out rather than as one absent.
+  for (const selector of ["\\.knum-none", "\\.card-num-none"]) {
+    assert.match(body(selector), /background:\s*none/, `${selector} must not wear the number's chip`);
+  }
+});
+
 test("the documentation section's rules are top-level rules", () => {
   const { topLevel } = scan(css);
   const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));

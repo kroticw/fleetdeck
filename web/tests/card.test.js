@@ -164,6 +164,46 @@ test("a live session is shown without a dead marker", () => {
   assert.equal(root.querySelector(".card-session-dead"), null);
 });
 
+// --- the card's number ---
+//
+// The open card is where an operator settles on which card they are talking
+// about, so it is where the number has to be readable — beside stage and
+// progress, and never mistakable for the session's short id sitting next to it.
+
+test("the open card shows its own number", () => {
+  const { root } = open(snapshot());
+  assert.equal(root.querySelector(".card-num").textContent, "T-004");
+});
+
+test("the number is not drawn as the session's short id", () => {
+  const { root } = open(snapshot());
+  // Two identifiers, one panel: the card's is permanent and gets said out
+  // loud, the session's is per-run. Told apart by class, so app.css can give
+  // them different shapes rather than two identical lines of small text.
+  assert.equal(root.querySelector(".card-session").textContent, "a1b2c3");
+  assert.ok(!root.querySelector(".card-session").classList.contains("card-num"));
+  assert.ok(!root.querySelector(".card-num").classList.contains("card-session"));
+  assert.ok(root.querySelector(".card-num").getAttribute("title"), "the number must say which identifier it is");
+});
+
+test("a card with no number says so instead of leaving a gap", () => {
+  const snap = snapshot();
+  delete snap.cards[0].id;
+  const { root } = open(snap);
+  const missing = root.querySelector(".card-num-none");
+  assert.ok(missing, "a card without a number must say that it has none");
+  assert.equal(missing.textContent, t("card_no_number"));
+  assert.ok(!/T-/.test(missing.textContent), "a missing number must never be invented");
+});
+
+test("an unreadable card claims nothing about its number", () => {
+  const { root } = open(snapshot(), BROKEN);
+  // Its frontmatter did not parse: whether it has a number is unknown, and
+  // "no number" would be a second invented fact on top of the real failure.
+  assert.equal(root.querySelector(".card-num"), null);
+  assert.equal(root.querySelector(".card-num-none"), null);
+});
+
 test("a backlink is listed and moves the panel to that card", () => {
   const { root } = open(snapshot());
   const backlink = root.querySelector(".card-backlink");

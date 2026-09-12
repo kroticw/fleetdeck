@@ -34,6 +34,7 @@
   "cards": [
     {
       "path": "/board/fleet-ui.md",
+      "id": "T-004",
       "zone": "planned",
       "stage": "active",
       "progress": 40,
@@ -49,6 +50,7 @@
     },
     {
       "path": "/board/card-keeping.md",
+      "id": "T-011",
       "zone": "niceToHave",
       "stage": "review",
       "progress": 80,
@@ -63,6 +65,7 @@
     },
     {
       "path": "/board/broken.md",
+      "id": "",
       "zone": "",
       "stage": "",
       "progress": 0,

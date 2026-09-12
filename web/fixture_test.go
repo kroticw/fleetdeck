@@ -82,6 +82,7 @@ func snapshotFixture() state.Snapshot {
 		Cards: []board.Card{
 			{
 				Path:     "/board/fleet-ui.md",
+				ID:       "T-004",
 				Zone:     "planned",
 				Stage:    "active",
 				Progress: 40,
@@ -97,6 +98,7 @@ func snapshotFixture() state.Snapshot {
 				// path is in OrphanCards below. It also links back to the card
 				// above, which is what the panel's backlink list renders.
 				Path:     "/board/card-keeping.md",
+				ID:       "T-011",
 				Zone:     "niceToHave",
 				Stage:    "review",
 				Progress: 80,

@@ -34,6 +34,28 @@ function clampProgress(progress) {
   return Math.max(0, Math.min(100, progress));
 }
 
+// The card's number (frontmatter `id`, "T-NNN"), which is the one identifier a
+// person reads off the board and says out loud — and then hands to
+// card_path.py to reach the file again.
+//
+// It is drawn beside the session's short id and has to stay distinguishable
+// from it: the two are different identifiers with different lifetimes (the
+// card's is permanent and spoken, the session's changes with every run), and an
+// operator naming the wrong one gets nowhere. So the number is not merely
+// another line of small grey text — it carries its own class, its own shape in
+// app.css, and a title saying which of the two it is.
+//
+// A card with no number gets a word saying so rather than an empty space: a
+// gap reads as a panel that lost the number, and inventing one is worse than
+// either. A card that does not parse is handled before this is reached, and
+// says nothing about its number at all — nothing is known about it.
+function numberHTML(c) {
+  if (!c.id) {
+    return `<span class="knum knum-none" title="${escapeHTML(t("card_no_number_hint"))}">${escapeHTML(t("card_no_number"))}</span>`;
+  }
+  return `<span class="knum" title="${escapeHTML(t("card_number_hint"))}">${escapeHTML(c.id)}</span>`;
+}
+
 // orphanPaths and stoppedPaths are the two things that can be wrong with a
 // card's session, and they are two rather than one for the reason the whole
 // change exists: a card whose agent was stopped used to be marked orphaned,
@@ -71,7 +93,7 @@ function cardHTML(c, orphanPaths, stoppedPaths) {
   return `
     <article class="kcard ${zoneClass(c.zone)}${mark}" data-path="${path}">
       <div class="ktitle">${title}</div>
-      ${sessionHTML}
+      <div class="kmeta">${numberHTML(c)}${sessionHTML}</div>
       <div class="kprog"><i data-progress="${clampProgress(c.progress)}"></i></div>
     </article>`;
 }

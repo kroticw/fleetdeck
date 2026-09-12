@@ -84,6 +84,15 @@ const en = {
   // they cannot type into a card. A dead session reuses session_dead above
   // rather than restating the same sentence under a second name.
   //
+  // The card's number and the two things a person needs to know about it: that
+  // it belongs to the card rather than to the session shown beside it, and,
+  // when it is missing, that it is missing rather than mislaid. The words are
+  // deliberate: an em dash or a blank space in place of a number reads as the
+  // panel having lost it.
+  card_number_hint: "the card's own number — this is the one to say out loud",
+  card_no_number: "no number",
+  card_no_number_hint: "this card has no number: it was created without the board's new_card.py script",
+
   card_close: "close",
   card_waiting: "waiting for the first snapshot",
   card_gone: "card is gone",
@@ -381,6 +390,10 @@ const ru = {
   not_pinned: "не закреплено",
   no_orchestrator_thread: "оркестратор не закреплён — выберите его выше",
   orchestrator_pin_failed: "изменение не сохранено — после перезагрузки страницы оно исчезнет",
+
+  card_number_hint: "номер самой карточки — вслух называют его",
+  card_no_number: "без номера",
+  card_no_number_hint: "у этой карточки нет номера: её завели не через new_card.py",
 
   card_close: "закрыть",
   card_waiting: "ждём первый снимок",
