@@ -28,6 +28,7 @@ import { SESSIONS_KEYS } from "./columnwidth.js";
 import { mountColumnResize } from "./columnresize.js";
 import { isMultiFleet, groupSessions, switchFleet } from "./fleet.js";
 import { pageStorage } from "./buildcheck.js";
+import { isLive, isResumable } from "./lifecycle.js";
 
 // Closed vocabulary of "no person needed" needs strings, copied verbatim
 // (case-sensitive prefix match, exact order) from daemon.stalledNeedsPrefixes
@@ -246,6 +247,72 @@ export function rowHtml(s, stalledNow) {
     </article>`;
 }
 
+// A session that is no longer running, drawn as itself.
+//
+// Deliberately not rowHtml with a third state bolted on. Half of what a row
+// shows is a live reading — a context bar, a silence measurement, a "why it
+// stopped" reason, a Waiting or Stalled badge — and none of that means
+// anything about a session that is not running: the readings are frozen at
+// the moment it went away, and the badges are about a person being needed
+// now. Showing them stale is how a stopped session ends up looking like a
+// working one that hung.
+//
+// It carries the class `sgone` and NOT `srow`, which is what keeps it out of
+// the click handler that opens a session's terminal (see renderSessions):
+// there is no terminal to attach to. The card button inside it still works,
+// because that opens a file rather than a session.
+export function goneRowHtml(s) {
+  const resumable = isResumable(s);
+  const classes = ["sgone"];
+  classes.push(resumable ? "sgone-stopped" : "sgone-dead");
+
+  const badge = resumable
+    ? `<span class="sbadge sbadge-stopped">${escapeHtml(t("stopped_badge"))}</span>`
+    : `<span class="sbadge sbadge-gone">${escapeHtml(t("gone_badge"))}</span>`;
+
+  const name = s.label || s.name || s.short || "";
+
+  // The last state the session recorded, said as the last one. It arrives in
+  // its own field (internal/state's LastState) rather than in `state`,
+  // precisely so that nothing reads it as a reading of now.
+  const last = s.lastState
+    ? `<span class="sstate">${escapeHtml(t("last_state"))}: ${escapeHtml(s.lastState)}</span>`
+    : "";
+
+  // Why it cannot be resumed, for a dead one: the working directory it was
+  // started in is gone, which on this machine is nearly always a deleted
+  // worktree. Naming the directory is the difference between a person
+  // knowing what happened and guessing.
+  const why = !resumable && s.cwd
+    ? `<div class="sreason" title="${escapeHtml(s.cwd)}">${escapeHtml(t("gone_no_cwd"))}: ${escapeHtml(s.cwd)}</div>`
+    : "";
+
+  // What a person can actually do about it. The panel cannot resume a
+  // session itself, so it says the one thing that can — rather than leaving
+  // a row that plainly wants an action with no way to take one.
+  const how = resumable
+    ? `<div class="sresume">${escapeHtml(t("stopped_resume_hint"))}: <code>claude resume ${escapeHtml(s.short)}</code></div>`
+    : "";
+
+  const cardHtml = s.cardPath
+    ? `<button type="button" class="scard" data-card="${escapeHtml(s.cardPath)}" title="${escapeHtml(t("open_card_hint"))}: ${escapeHtml(s.cardPath)}">${escapeHtml(t("open_card"))} &#8599;</button>`
+    : "";
+
+  return `
+    <article class="${classes.join(" ")}" data-short="${escapeHtml(s.short)}">
+      <div class="srow-head">
+        <span class="sname">${escapeHtml(name)}</span>
+        ${badge}
+      </div>
+      <div class="smeta">
+        ${last}
+      </div>
+      ${why}
+      ${how}
+      ${cardHtml}
+    </article>`;
+}
+
 // Waiting sessions float to the top; everything else (stalled and running)
 // keeps its relative order. Stalled must NOT be promoted here — conflating it
 // with Waiting throws away the distinction the whole task exists to draw.
@@ -263,13 +330,18 @@ function waitingFirst(sessions) {
 // for an answer — so a question there is seen from here — and switching to
 // that fleet when pressed.
 function fleetOtherHtml({ name, sessions }) {
-  const waiting = sessions.filter(isWaiting).length;
+  // Its running sessions, not every session it has ever had: this line is
+  // how busy that fleet is right now, and counting its stopped ones would
+  // make a fleet nobody has touched in a week look like the busiest one on
+  // the machine.
+  const running = sessions.filter(isLive);
+  const waiting = running.filter(isWaiting).length;
   const waitingHtml = waiting
     ? `<span class="fleet-other-waiting">${escapeHtml(t("fleet_waiting"))}: ${waiting}</span>`
     : "";
   return `<button type="button" class="fleet-other" data-fleet="${escapeHtml(name)}">`
     + `<span class="fleet-other-name">${escapeHtml(name)}</span>`
-    + `<span class="fleet-other-count">${escapeHtml(t("fleet_sessions"))}: ${sessions.length}</span>`
+    + `<span class="fleet-other-count">${escapeHtml(t("fleet_sessions"))}: ${running.length}</span>`
     + `${waitingHtml}</button>`;
 }
 
@@ -426,10 +498,25 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
     const unclaimed = multi ? groups.unclaimed : [];
     const others = multi ? groups.others : [];
 
+    // The sessions that are no longer running are drawn apart, below
+    // everything that is, in their own two groups. They are kept out of the
+    // running list rather than mixed into it because every ordering and
+    // every badge above is about a session that is working: a stopped one
+    // sorted among them by how long it has been "silent" would sit at the
+    // top of the column claiming the attention of a person it no longer
+    // needs.
+    //
+    // This fleet's stopped sessions and the unclaimed ones share the two
+    // groups. Whose fleet a session belongs to is a question about work in
+    // progress, and there is none here; splitting these four ways would cost
+    // a person three extra headings to read past to reach the running fleet.
+    const running = sessions.filter(isLive);
+    const gone = [...sessions, ...unclaimed].filter((s) => !isLive(s));
+
     // "Every session there is, is the orchestrator" and "there are no
     // sessions" are different facts, and a person reading an empty column
     // needs to know which one they are looking at.
-    const emptyHtml = sessions.length === 0
+    const emptyHtml = running.length === 0 && gone.length === 0
       ? `<div class="sempty">${escapeHtml(scope.length === 0 ? t("no_sessions") : t("only_orchestrator"))}</div>`
       : "";
     if (sessions.length === 0 && unclaimed.length === 0 && others.length === 0) {
@@ -437,15 +524,22 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
       return;
     }
 
-    const ordered = waitingFirst(sessions);
-    const orderedUnclaimed = waitingFirst(unclaimed);
+    const ordered = waitingFirst(running);
+    const orderedUnclaimed = waitingFirst(unclaimed.filter(isLive));
 
     // Fed `all`, not the pinned-out `sessions`: the tracker's own per-session
     // answer must match what header.js's identically-fed instance would say
     // for the same session, and excluding the pinned orchestrator session
     // here (it is never rendered as a row in this column) would only cost
     // that one session's own tracked state for no benefit.
-    const stalledNow = new Set(stalledTracker.update(all, now()).map((s) => s.short));
+    //
+    // The sessions that are not running are filtered out first, and that is
+    // the same filter header.js's counter applies through fleet.js's
+    // headerSessions — so the two instances still agree. A stall is a
+    // session that has stopped making progress and needs something; one that
+    // is not running has already stopped, for good, and cannot be unstuck by
+    // anyone.
+    const stalledNow = new Set(stalledTracker.update(all.filter(isLive), now()).map((s) => s.short));
 
     const errorHtml = labelError ? `<div class="sname-edit-error">${escapeHtml(labelError)}</div>` : "";
     labelError = ""; // shown once; a later render must not keep repeating it
@@ -458,7 +552,22 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
     const unclaimedHtml = orderedUnclaimed.length
       ? `<div class="fleet-group-head">${escapeHtml(t("fleet_none"))}</div>${rows(orderedUnclaimed)}`
       : "";
-    setBody(HEAD + errorHtml + emptyHtml + rows(ordered) + unclaimedHtml + others.map(fleetOtherHtml).join(""));
+
+    // A job store that could not be read is said out loud rather than shown
+    // as an empty group: no stopped sessions and no way to tell whether
+    // there are any look identical, and only one of the two is good news.
+    const jobsErrorHtml = snap.jobsError
+      ? `<div class="fleet-group-head sgone-error" title="${escapeHtml(snap.jobsError)}">${escapeHtml(t("stopped_unknown"))}</div>`
+      : "";
+    const goneGroup = (list, label) => (list.length
+      ? `<div class="fleet-group-head">${escapeHtml(label)} <span class="kcount">${list.length}</span></div>`
+        + list.map(goneRowHtml).join("")
+      : "");
+    const goneHtml = jobsErrorHtml
+      + goneGroup(gone.filter(isResumable), t("stopped_group"))
+      + goneGroup(gone.filter((s) => !isResumable(s)), t("gone_group"));
+
+    setBody(HEAD + errorHtml + emptyHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""));
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
