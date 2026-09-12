@@ -211,4 +211,134 @@ func TestCollectRecognizesABriefTheWizardWouldWrite(t *testing.T) {
 	if snap.OrchestratorBriefMissing {
 		t.Error("the wizard's own brief is not recognized as one")
 	}
+	if snap.OrchestratorBriefForeign {
+		t.Error("the wizard's own brief is called one fleetdeck did not write")
+	}
+}
+
+// A file at the brief's path that fleetdeck did not write is quieter than no
+// file at all. An orchestrator notices an absent brief the moment it goes to
+// read it; a foreign one it reads, and works by. The wizard already refuses
+// to replace such a file (orchestrator.ErrNotOurs), but the column's dropdown
+// pins without asking the disk anything, so the panel has to say it.
+//
+// These put a file without the marker where the brief belongs and look at
+// what the snapshot says -- checked on disk rather than argued.
+
+// foreignDocsDir is a documentation directory holding an orchestrator.md that
+// a person wrote.
+func foreignDocsDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "orchestrator.md"), []byte("# my own notes about orchestrating\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestCollectReportsAPinnedOrchestratorBesideAForeignBrief(t *testing.T) {
+	docs := foreignDocsDir(t)
+	cfg := briefConfig(t, docs, "06a1f607")
+
+	snap := NewCollector(cfg, deadDaemon(t), nil, t.TempDir()).Collect(context.Background())
+
+	if !snap.OrchestratorBriefForeign {
+		t.Error("a session is pinned beside a file fleetdeck did not write, and the snapshot does not say so — the session will read it as its working order")
+	}
+	if snap.OrchestratorBriefMissing {
+		t.Error("the file is on disk; calling it missing sends the operator to a wizard that will refuse to overwrite it")
+	}
+	if want := filepath.Join(docs, "orchestrator.md"); snap.OrchestratorBriefPath != want {
+		t.Errorf("brief path = %q, want %q", snap.OrchestratorBriefPath, want)
+	}
+}
+
+// Nothing pinned claims nothing, the same as for a missing brief: a person's
+// own orchestrator.md in a docs directory is their business until a session
+// is said to work by it.
+func TestCollectSaysNothingOfAForeignBriefWhenNothingIsPinned(t *testing.T) {
+	cfg := briefConfig(t, foreignDocsDir(t), "")
+
+	snap := NewCollector(cfg, deadDaemon(t), nil, t.TempDir()).Collect(context.Background())
+
+	if snap.OrchestratorBriefForeign || snap.OrchestratorBriefMissing {
+		t.Errorf("foreign %v, missing %v; nothing is pinned, so neither", snap.OrchestratorBriefForeign, snap.OrchestratorBriefMissing)
+	}
+}
+
+// The way out the wizard itself names -- move the file aside, run the wizard --
+// clears the report on the very next cycle. A report that outlived the fix
+// would be as wrong as the silence it replaces.
+func TestCollectStopsReportingAForeignBriefOnceTheWizardHasWrittenItsOwn(t *testing.T) {
+	docs := foreignDocsDir(t)
+	cfg := briefConfig(t, docs, "06a1f607")
+	collector := NewCollector(cfg, deadDaemon(t), nil, t.TempDir())
+
+	if !collector.Collect(context.Background()).OrchestratorBriefForeign {
+		t.Fatal("the foreign brief was never reported to begin with")
+	}
+
+	path := filepath.Join(docs, "orchestrator.md")
+	if err := os.Rename(path, path+".mine"); err != nil {
+		t.Fatal(err)
+	}
+	paths := orchestrator.Paths{Board: cfg.BoardPath, Docs: cfg.DocsPaths}
+	brief, err := orchestrator.Brief("en", paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.WriteBrief(path, brief); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := collector.Collect(context.Background())
+	if snap.OrchestratorBriefForeign || snap.OrchestratorBriefMissing {
+		t.Errorf("foreign %v, missing %v after the wizard wrote its own brief; want neither", snap.OrchestratorBriefForeign, snap.OrchestratorBriefMissing)
+	}
+}
+
+// Each fleet is asked about its own file: a person's orchestrator.md in one
+// fleet's docs says nothing about another fleet whose brief is the wizard's.
+func TestCollectAsksEveryFleetWhetherItsOwnBriefIsOurs(t *testing.T) {
+	firstDocs := docsDir(t, false)
+	firstBoard := boardWithCards(t)
+	paths := orchestrator.Paths{Board: firstBoard, Docs: []string{firstDocs}}
+	brief, err := orchestrator.Brief("en", paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.WriteBrief(orchestrator.BriefPath(paths), brief); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.UsageEnabled = false
+	cfg.Name = "A"
+	cfg.BoardPath = firstBoard
+	cfg.DocsPaths = []string{firstDocs}
+	cfg.OrchestratorSession = "a0000001"
+	cfg.Fleets = []fleet.Fleet{{
+		Name:         "B",
+		BoardPath:    boardWithCards(t),
+		DocsPaths:    []string{foreignDocsDir(t)},
+		Orchestrator: "b0000001",
+	}}
+
+	whole := NewCollector(cfg, deadDaemon(t), nil, t.TempDir()).Collect(context.Background())
+
+	if len(whole.Boards) != 2 {
+		t.Fatalf("want a board per fleet, got %d", len(whole.Boards))
+	}
+	if whole.Boards[0].BriefForeign || whole.OrchestratorBriefForeign {
+		t.Error("fleet A's brief is the wizard's own")
+	}
+	if !whole.Boards[1].BriefForeign {
+		t.Error("fleet B is pinned beside a person's file, and its own board entry does not say so")
+	}
+	view, err := state.ForFleet(whole, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.OrchestratorBriefForeign {
+		t.Error("B's own view does not carry B's foreign brief")
+	}
 }

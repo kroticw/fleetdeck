@@ -229,3 +229,69 @@ func TestPreviewIsWhatAnAppointmentWillDo(t *testing.T) {
 		t.Errorf("a preview wrote the brief: %v", err)
 	}
 }
+
+// The panel and the wizard answer "is this fleetdeck's brief?" with one rule.
+// If they drifted, the panel could call a file ours that the wizard then
+// refuses to replace, or call foreign a file the wizard would overwrite
+// without a word -- and the operator would be told to move aside something
+// that was never in the way. So ReadBriefState says foreign exactly when
+// WriteBrief refuses with ErrNotOurs, for every shape of content the rule can
+// see.
+func TestReadBriefStateAgreesWithWriteBrief(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    BriefState
+	}{
+		{"the wizard's own brief", marker + "\n\n> written\n", BriefOurs},
+		{"the marker and nothing else", marker, BriefOurs},
+		{"a person's file", "# my orchestrator notes\n", BriefForeign},
+		{"an empty file", "", BriefForeign},
+		{"the marker cut short", marker[:20], BriefForeign},
+		{"the marker below a first line", "# notes\n" + marker + "\n", BriefForeign},
+		{"the marker after a space", " " + marker + "\n", BriefForeign},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "orchestrator.md")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := ReadBriefState(path); got != tc.want {
+				t.Errorf("ReadBriefState = %v, want %v", got, tc.want)
+			}
+			refused := errors.Is(WriteBrief(path, []byte(marker+"\n")), ErrNotOurs)
+			if refused != (tc.want == BriefForeign) {
+				t.Errorf("the panel says %v and WriteBrief refused = %v: the two rules have drifted", tc.want, refused)
+			}
+		})
+	}
+}
+
+// Nothing at the path, a directory of that name, and a file the panel may not
+// read are none of them a working order a session can read -- and none of
+// them is something WriteBrief refuses as not ours. Calling any of them
+// foreign would tell the operator to move aside a file that is not in the way.
+func TestReadBriefStateCountsWhatCannotBeReadAsNone(t *testing.T) {
+	if got := ReadBriefState(filepath.Join(t.TempDir(), "orchestrator.md")); got != BriefNone {
+		t.Errorf("nothing there: ReadBriefState = %v, want BriefNone", got)
+	}
+
+	asDir := filepath.Join(t.TempDir(), "orchestrator.md")
+	if err := os.Mkdir(asDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadBriefState(asDir); got != BriefNone {
+		t.Errorf("a directory: ReadBriefState = %v, want BriefNone", got)
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file whatever its mode")
+	}
+	locked := filepath.Join(t.TempDir(), "orchestrator.md")
+	if err := os.WriteFile(locked, []byte("# mine\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadBriefState(locked); got != BriefNone {
+		t.Errorf("an unreadable file: ReadBriefState = %v, want BriefNone", got)
+	}
+}

@@ -238,3 +238,28 @@ func TestForFleetCarriesThatFleetsBriefState(t *testing.T) {
 		}
 	}
 }
+
+// A brief fleetdeck did not write is a fleet's own fact in the same way a
+// missing one is.
+func TestForFleetCarriesThatFleetsForeignBrief(t *testing.T) {
+	whole := wholeTwoFleets()
+	whole.Boards[0].BriefPath = "/a/docs/orchestrator.md"
+	whole.Boards[1].BriefPath = "/b/docs/orchestrator.md"
+	whole.Boards[1].BriefForeign = true
+
+	for _, tc := range []struct {
+		fleet   string
+		foreign bool
+	}{
+		{"A", false},
+		{"B", true},
+	} {
+		view, err := ForFleet(whole, tc.fleet)
+		if err != nil {
+			t.Fatalf("ForFleet(%q): %v", tc.fleet, err)
+		}
+		if view.OrchestratorBriefForeign != tc.foreign {
+			t.Errorf("fleet %s: foreign %v, want %v", tc.fleet, view.OrchestratorBriefForeign, tc.foreign)
+		}
+	}
+}
