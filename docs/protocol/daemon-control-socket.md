@@ -212,7 +212,7 @@ tempo=active   state=blocked  needs=""                                          
 tempo=blocked  state=blocked  needs="choose: (1) ... (2) ... (3) ..."                                    -> waiting  (rule 1: words outrank both flags)
 ```
 
-The closed "no person needed" vocabulary — matched by prefix, case-sensitively, against the daemon's own wording, extracted from the installed CLI 2.1.263 binary:
+The closed "no person needed" vocabulary — matched by prefix, case-sensitively, against the daemon's own wording. First extracted from the installed CLI 2.1.263 binary and re-checked against 2.1.269, where every one of these seven prefixes still renders verbatim; the list below is therefore unchanged between those two builds:
 
 ```text
 usage limit reached   (limit)
@@ -224,7 +224,7 @@ invalid API request   /
 rate limited           (rate limit)
 ```
 
-This list is closed **on purpose**. The vocabulary belongs to the daemon and will grow, and this client cannot know in advance whether a future prefix means "no person needed" or "someone must act". So an unfamiliar value is never guessed into the quiet counter — it always falls to **waiting**, the loud one. Calling someone unnecessarily is a cost that gets noticed and corrected on the spot; staying silent about a session that actually needed a person is a cost that is never noticed at all. The daemon also emits a few other non-question forms that this client deliberately does **not** treat as "no person needed" — `"account on hold ..."`, `"org disabled OAuth ..."`, and `"request too large ..."` (fixing the last one means a person running `/compact` inside the session) — so these fall to waiting under rule 1 above, same as any unrecognised value.
+This list is closed **on purpose**. The vocabulary belongs to the daemon and will grow, and this client cannot know in advance whether a future prefix means "no person needed" or "someone must act". So an unfamiliar value is never guessed into the quiet counter — it always falls to **waiting**, the loud one. Calling someone unnecessarily is a cost that gets noticed and corrected on the spot; staying silent about a session that actually needed a person is a cost that is never noticed at all. The daemon also emits other non-question forms that this client deliberately does **not** treat as "no person needed" — `"account on hold ..."`, `"org disabled OAuth ..."`, `"request too large ..."` (fixing that one means a person running `/compact` inside the session), and, new in 2.1.269, `"cloud credentials unavailable ..."` and `"organization verification required ..."`. Every one of them needs a person to go and do something, so they fall to waiting under rule 1 above, same as any unrecognised value — which is exactly what the two new ones did on the day they appeared, before anyone here knew they existed. That is the rule earning its keep, not a gap to be closed by listing them: this enumeration is a record of what has been seen, never a set the code consults.
 
 Waiting and stalled are mutually exclusive by construction under this rule: a session with `needs` non-empty lands in exactly one of the two depending on whether it matches the closed vocabulary; a session with `needs` empty can only be stalled (via the flags) or neither — never waiting.
 

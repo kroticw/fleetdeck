@@ -50,7 +50,8 @@ type Session struct {
 
 // stalledNeedsPrefixes is the closed "no person needed" vocabulary: the daemon's own
 // non-question needs renderings, matched by prefix, case-sensitively, against the
-// daemon's own wording. Extracted from the installed CLI 2.1.263 binary (see
+// daemon's own wording. First extracted from the installed CLI 2.1.263 binary and
+// re-checked against 2.1.269, where all seven still render verbatim (see
 // docs/protocol/daemon-control-socket.md section 5), it covers the design spec's
 // four stall categories:
 //
