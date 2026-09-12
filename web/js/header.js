@@ -64,7 +64,8 @@ function isFlagOnlyStalled(s) {
   return s.state === "blocked" || s.tempo === "blocked";
 }
 
-// How long a flag-only stall must hold before the counter shows it.
+// How long a flag-only stall must go without a sign of life before the
+// counter shows it.
 //
 // A bare blocked flag (state or tempo, needs empty) is genuinely ambiguous,
 // not just briefly noisy: it covers both a message still mid-delivery
@@ -78,16 +79,48 @@ function isFlagOnlyStalled(s) {
 // genuinely waiting), so the threshold has to sit clearly above the
 // transient case without crowding the real one.
 //
-// Three numbers, not one: measured lower bound of the transient case, 2.5
-// minutes (observed live on an 8-session fleet under load; the flag had not
-// cleared by the end of that observation window, so this is a floor, not a
-// full duration); known duration of the real case, roughly an hour
-// (client_test.go's own attested capture, record e4fa5037); chosen
-// threshold, 10 minutes -- comfortably above the measured floor, far below
-// the attested real case. The transient case's true upper bound is still
-// being measured on a live fleet; if it turns out closer to ten minutes than
-// to three, this single constant is what to revisit.
+// What this threshold measures changed once, and the number did not. It used
+// to be the age of the flag itself, counted from the tracker's first sight of
+// it; state, however, sticks. A session observed live on 2026-09-12 (fleet
+// session 512ed1ad) held state=blocked through 55% of a sampling window while
+// writing to its transcript every few seconds, and the badge stayed lit
+// through all of it, because the clock had run out during an earlier, real
+// stall and the sticky flag never let it restart. So the threshold is now
+// measured against silentFor -- the age of the last write to the session's
+// transcript, the one value in the snapshot that is a measurement rather than
+// a flag. "Has been silent continuously for T" is simply silentFor >= T, with
+// no clock of our own to accumulate and nothing to reset: a single write to
+// the transcript is the reset.
+//
+// The number, 10 minutes, is measured rather than reasoned. Every transcript
+// on this machine over the 30 days to 2026-09-12 (103 files, 98 665 gaps
+// between consecutive writes while the session was working rather than
+// waiting on a person) puts a live session's silence at p99 = 55s,
+// p99.9 = 5.5m, p99.99 = 17.8m, longest 34.9m. Ten minutes therefore sits at
+// roughly twice the p99.9 knee: 42 of those 98 665 gaps reach it, about 1.4 a
+// day across the whole fleet, and each still needs a stuck blocked flag
+// alongside it to light anything. The step up to 15 minutes was measured too
+// and rejected: it removes about one false badge a day and delays every one
+// of the ~10 real stalls a day by a further five minutes. The attested real
+// case (e4fa5037, roughly an hour) clears any of these by a wide margin.
 export const BLOCKED_SETTLE_MS = 10 * 60 * 1000;
+
+// silentFor is a Go time.Duration crossing the wire (internal/state's
+// SessionView), so it arrives in nanoseconds.
+const NS_PER_MS = 1e6;
+
+// How long this session has been silent, in milliseconds, or 0 for "not
+// measured". Zero on the wire means there was no transcript to stat, never
+// "silent for zero time" -- cmd/fleetdeck/collect.go's transcriptState says
+// so, and sessions.js's silentLabel renders it as unknown for the same
+// reason. Absent and zero are the same answer here, and both mean the caller
+// must fall back to something else rather than read a session as freshly
+// alive.
+function silentForMs(s) {
+  const ns = s.silentFor;
+  if (!ns) return 0;
+  return ns / NS_PER_MS;
+}
 
 // Session identity for tracking how long a flag-only stall has held.
 // Mirrors the field sessions.js keys its own DOM rows on (data-short).
@@ -95,13 +128,25 @@ function sessionKey(s) {
   return s.short ?? s.sessionId ?? "";
 }
 
-// createStalledTracker holds, per session, the moment a flag-only stall was
-// first observed. update(sessions, nowMs) is called once per snapshot and
-// returns the sessions the counter should show as stalled right now: every
-// needs-based stall immediately, plus every flag-only stall that has held
-// continuously for at least BLOCKED_SETTLE_MS. nowMs is always supplied by
-// the caller rather than read from Date.now() in here, so a test can drive
-// the threshold without waiting on a real clock.
+// createStalledTracker decides which sessions the counter and the row badge
+// should call stalled right now. update(sessions, nowMs) is called once per
+// snapshot and returns every needs-based stall immediately, plus every
+// flag-only stall that has also been silent for at least BLOCKED_SETTLE_MS.
+//
+// Two ways of establishing that silence, because one of them is not always
+// available:
+//
+//   - silentFor measured: it is the answer outright. It is an age, not an
+//     accumulator, so it needs no state here and cannot survive the session
+//     coming back to life -- which is exactly the failure this replaced.
+//   - silentFor unmeasured (no transcript to stat yet): fall back to the age
+//     of the flag itself, held per session in `since`, as this tracker did
+//     for every session before silentFor was consulted. A session that
+//     stalls before writing anything must still be counted, and there is
+//     nothing else left to measure it by.
+//
+// nowMs is always supplied by the caller rather than read from Date.now() in
+// here, so a test can drive the fallback without waiting on a real clock.
 export function createStalledTracker() {
   const since = new Map();
   return {
@@ -114,6 +159,11 @@ export function createStalledTracker() {
           continue;
         }
         if (!isFlagOnlyStalled(s)) continue;
+        const silentMs = silentForMs(s);
+        if (silentMs > 0) {
+          if (silentMs >= BLOCKED_SETTLE_MS) result.push(s);
+          continue;
+        }
         const key = sessionKey(s);
         seen.add(key);
         let startedAt = since.get(key);
@@ -123,9 +173,10 @@ export function createStalledTracker() {
         }
         if (nowMs - startedAt >= BLOCKED_SETTLE_MS) result.push(s);
       }
-      // Forget sessions no longer flag-only stalled -- resolved, gone, or now
-      // carrying needs text -- so a later re-entry starts a fresh clock
-      // instead of reusing a stale timestamp from an unrelated stall.
+      // Forget sessions no longer being timed by the fallback -- resolved,
+      // gone, now carrying needs text, or now measurable through silentFor --
+      // so a later re-entry starts a fresh clock instead of reusing a stale
+      // timestamp from an unrelated stall.
       for (const key of since.keys()) {
         if (!seen.has(key)) since.delete(key);
       }
