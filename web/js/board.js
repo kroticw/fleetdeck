@@ -34,7 +34,14 @@ function clampProgress(progress) {
   return Math.max(0, Math.min(100, progress));
 }
 
-function cardHTML(c, orphanPaths) {
+// orphanPaths and stoppedPaths are the two things that can be wrong with a
+// card's session, and they are two rather than one for the reason the whole
+// change exists: a card whose agent was stopped used to be marked orphaned,
+// which says the card lost its session — about a session sitting in the job
+// store with its whole history, one resume away. A stopped card is marked as
+// paused; only a session that cannot come back, or one that is in no list at
+// all, orphans the card that names it.
+function cardHTML(c, orphanPaths, stoppedPaths) {
   const path = escapeHTML(c.path);
   if (c.parseError) {
     return `
@@ -46,24 +53,30 @@ function cardHTML(c, orphanPaths) {
 
   const title = escapeHTML(c.title || basename(c.path));
   const dead = c.session && orphanPaths.has(c.path);
+  const stopped = c.session && !dead && stoppedPaths.has(c.path);
 
   let sessionHTML = "";
   if (c.session) {
     const sessionId = escapeHTML(c.session);
-    sessionHTML = dead
-      ? `<div class="ksession ksession-dead">${sessionId} — ${escapeHTML(t("session_dead"))}</div>`
-      : `<div class="ksession">${sessionId}</div>`;
+    if (dead) {
+      sessionHTML = `<div class="ksession ksession-dead">${sessionId} — ${escapeHTML(t("session_dead"))}</div>`;
+    } else if (stopped) {
+      sessionHTML = `<div class="ksession ksession-stopped">${sessionId} — ${escapeHTML(t("session_stopped"))}</div>`;
+    } else {
+      sessionHTML = `<div class="ksession">${sessionId}</div>`;
+    }
   }
 
+  const mark = dead ? " kcard-orphan" : stopped ? " kcard-stopped" : "";
   return `
-    <article class="kcard ${zoneClass(c.zone)}${dead ? " kcard-orphan" : ""}" data-path="${path}">
+    <article class="kcard ${zoneClass(c.zone)}${mark}" data-path="${path}">
       <div class="ktitle">${title}</div>
       ${sessionHTML}
       <div class="kprog"><i data-progress="${clampProgress(c.progress)}"></i></div>
     </article>`;
 }
 
-export function columnHTML(label, stage, cards, orphanPaths) {
+export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new Set()) {
   // An empty column is a real drop target, not dead space -- it must never
   // become unreachable -- but it has nothing that needs reading, so it has
   // no reason to claim the same width as a column carrying thirty cards.
@@ -73,7 +86,7 @@ export function columnHTML(label, stage, cards, orphanPaths) {
   return `
     <div class="kcol${empty ? " kcol-empty" : ""}" data-stage="${escapeHTML(stage)}">
       <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span></h5>
-      ${cards.map((c) => cardHTML(c, orphanPaths)).join("")}
+      ${cards.map((c) => cardHTML(c, orphanPaths, stoppedPaths)).join("")}
     </div>`;
 }
 
@@ -95,12 +108,13 @@ function render(root, snap) {
 
   const cards = snap?.cards ?? [];
   const orphanPaths = new Set(snap?.orphanCards ?? []);
+  const stoppedPaths = new Set(snap?.stoppedCards ?? []);
 
   const known = STAGES.map((stage) => cards.filter((c) => c.stage === stage));
   const other = cards.filter((c) => !STAGES.includes(c.stage));
 
-  const columns = STAGES.map((stage, i) => columnHTML(stage, stage, known[i], orphanPaths)).join("");
-  const otherColumn = columnHTML("other", "other", other, orphanPaths);
+  const columns = STAGES.map((stage, i) => columnHTML(stage, stage, known[i], orphanPaths, stoppedPaths)).join("");
+  const otherColumn = columnHTML("other", "other", other, orphanPaths, stoppedPaths);
 
   root.innerHTML = columns + otherColumn;
 

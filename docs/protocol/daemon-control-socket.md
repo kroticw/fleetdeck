@@ -136,6 +136,7 @@ Notes on specific fields:
 - There is no `id`, `title`, `label`, `status`, `kind`, `effect`, `streamTail`, `options`, `live`, `pinned`, or `resumable` field on the wire. Anything using those names is synthesised elsewhere, not carried by the socket.
 - `pinned` is out of scope for this client entirely: carrying it through would add a fourth source of truth to a design that intentionally has three (daemon session state, transcript, board card).
 - "Live" and "resumable", where a caller wants them, are derived rather than read: a session's mere presence in a `list` reply with no `dying` flag means it is alive.
+- **A stopped session is not in the reply at all**, and nothing in the protocol reports one. It leaves no flag on its way out, so over this socket alone "stopped" and "never existed" are the same answer. They are not the same thing — a stopped session resumes with its full history — and telling them apart needs a second source: Claude Code's own job store under `~/.claude/jobs`, which is documented, with the dependency it creates, in [claude-jobs-store.md](claude-jobs-store.md).
 
 ## 5. Determining whether a session is waiting for a human, or merely stalled
 

@@ -48,7 +48,7 @@ func TestOrphanCardsReportsCardNamingDeadSession(t *testing.T) {
 func TestOrphanCardsSilentWhenSessionIsAlive(t *testing.T) {
 	sessions := []daemon.Session{{Short: "live1234"}}
 	cards := []board.Card{{Path: "/board/one.md", Session: "live1234"}}
-	orphans := OrphanCards(sessions, cards)
+	orphans := OrphanCards(Link(sessions, cards), cards)
 	if len(orphans) != 0 {
 		t.Fatalf("a card naming a live session must not be reported: %v", orphans)
 	}
@@ -124,7 +124,7 @@ func TestSnapshotAssembledFromEveryInconvenientForm(t *testing.T) {
 	}
 
 	views := Link(sessions, cards)
-	orphans := OrphanCards(sessions, cards)
+	orphans := OrphanCards(views, cards)
 
 	if len(views) != len(sessions) {
 		t.Fatalf("Link must produce exactly one view per session, got %d", len(views))
@@ -184,10 +184,11 @@ func TestSnapshotAssembledFromEveryInconvenientForm(t *testing.T) {
 func TestSnapshotCarriesOrphanCards(t *testing.T) {
 	sessions := []daemon.Session{{Short: "live1234"}}
 	cards := []board.Card{{Path: "/board/orphan.md", Session: "gone1234"}}
+	views := Link(sessions, cards)
 	snap := Snapshot{
-		Sessions:    Link(sessions, cards),
+		Sessions:    views,
 		Cards:       cards,
-		OrphanCards: OrphanCards(sessions, cards),
+		OrphanCards: OrphanCards(views, cards),
 		At:          time.Now(),
 	}
 	if len(snap.OrphanCards) != 1 || snap.OrphanCards[0] != "/board/orphan.md" {

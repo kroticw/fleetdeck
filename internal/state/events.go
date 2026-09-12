@@ -63,6 +63,16 @@ func standingRules(s SessionView, silenceAfter time.Duration) map[string]bool {
 	if s.Dying {
 		return rules
 	}
+	// A session that is not running satisfies nothing, for the same reason a
+	// dying one does not: nobody has to act on it. It cannot be waiting for
+	// an answer, it did not just fail, and it is not silent — it stopped,
+	// which is a thing that already happened rather than a thing going
+	// wrong. The State it carries is the last one it recorded before it went
+	// away, frozen; read as a live reading it would raise a "failed" banner
+	// for every session that ever ended badly, on every poll, forever.
+	if !s.Live() {
+		return rules
+	}
 	if s.Waiting() {
 		rules[kindWaiting] = true
 	}

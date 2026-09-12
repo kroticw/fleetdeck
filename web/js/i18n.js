@@ -37,6 +37,21 @@ const en = {
   offline: "disconnected",
   card_broken: "unreadable card",
   session_dead: "session is dead",
+
+  // The three states a session can be in (web/js/lifecycle.js). A stopped
+  // session is paused work: it comes back with its whole history, which is
+  // why it is worded as a pause and not as an ending. A dead one cannot come
+  // back, and the row says why — naming the directory that is gone is the
+  // difference between knowing what happened and guessing.
+  stopped_group: "Stopped",
+  stopped_badge: "Stopped",
+  stopped_resume_hint: "resumes with its history",
+  gone_group: "Cannot be resumed",
+  gone_badge: "Gone",
+  gone_no_cwd: "its working directory no longer exists",
+  last_state: "last state",
+  stopped_unknown: "stopped sessions are unknown — the job store could not be read",
+  session_stopped: "session is stopped",
   pick_orchestrator: "pick the orchestrator session",
   session_not_listed: "session is not currently listed by the daemon",
   not_pinned: "not pinned",
@@ -274,6 +289,16 @@ const ru = {
   offline: "нет связи",
   card_broken: "карточка не разбирается",
   session_dead: "сессия мертва",
+
+  stopped_group: "Остановлены",
+  stopped_badge: "Остановлена",
+  stopped_resume_hint: "поднимается с историей",
+  gone_group: "Не поднять",
+  gone_badge: "Не поднять",
+  gone_no_cwd: "рабочего каталога больше нет",
+  last_state: "последнее состояние",
+  stopped_unknown: "остановленные сессии неизвестны — каталог заданий не прочитан",
+  session_stopped: "сессия остановлена",
   pick_orchestrator: "выберите сессию оркестратора",
   session_not_listed: "сессия сейчас не в списке демона",
   not_pinned: "не закреплено",
