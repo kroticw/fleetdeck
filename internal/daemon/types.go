@@ -40,7 +40,13 @@ type Session struct {
 	Agent      string `json:"agent"`
 	CLIVersion string `json:"cliVersion"`
 	Source     string `json:"source"`
-	Needs      string `json:"needs"`
+	// Needs is the daemon's own words about why the session stopped, and a pointer
+	// because absent and empty are different facts. Present and empty means the daemon
+	// looked and has no question outstanding; absent means the source never spoke about
+	// it at all, and Waiting answers Unknown rather than No. Today's daemon always sends
+	// the key (measured on 2.1.269: 7 live records of 7), so nil comes from a source
+	// that does not speak this field.
+	Needs *string `json:"needs,omitempty"`
 	// Dying is true when the job is being killed or retired (see
 	// docs/protocol/daemon-control-socket.md section 4). A session's presence in
 	// a `list` reply with no `dying` flag is what marks it as alive; without this field
@@ -86,7 +92,59 @@ func isStalledNeeds(needs string) bool {
 	return false
 }
 
-// Waiting reports whether a person must answer before this session can move.
+// Says wraps a daemon utterance for Session.Needs, whose nil means the source never
+// spoke rather than spoke and had nothing to report. Constructing the field by hand
+// takes a temporary variable and reads like a workaround; this reads like what it is,
+// and puts the two cases side by side at the call site: Says("") is a daemon saying
+// there is no question, nil is no daemon saying anything.
+func Says(needs string) *string {
+	return &needs
+}
+
+// Verdict is a three-valued answer to a yes-or-no question about a session: yes, no,
+// or "the source did not say". The third value is the point of the type.
+//
+// A plain bool cannot carry it. A source that does not know whether a session is
+// waiting for a person has to return something, and with a bool that something is
+// false -- indistinguishable, to every caller and to the panel, from a source that
+// looked and found the session not waiting. The panel would then not stay quiet: it
+// would state, in as many words, that nobody is waiting.
+//
+// That is the more expensive of the two errors, and the one that never gets corrected.
+// Calling someone who did not need calling is noticed within the minute and complained
+// about; failing to call someone who was waiting is noticed by nobody, because the
+// person waiting does not know they were dropped and the panel looks calm. The whole
+// rule set in docs/protocol/daemon-control-socket.md section 5 is built around that
+// asymmetry, and a boolean quietly discards it.
+//
+// Unknown is the zero value on purpose: a Verdict nobody has assigned yet has not been
+// told anything, which is exactly what Unknown means.
+type Verdict uint8
+
+const (
+	// Unknown: the source said nothing this question can be answered from. Not "no".
+	Unknown Verdict = iota
+	// No: the source spoke, and the answer is no.
+	No
+	// Yes: the source spoke, and the answer is yes.
+	Yes
+)
+
+// String makes a Verdict readable in test failures and logs, where "%v" on a bare
+// uint8 would print 0, 1, 2 and force the reader to go and look up which is which.
+func (v Verdict) String() string {
+	switch v {
+	case Yes:
+		return "yes"
+	case No:
+		return "no"
+	default:
+		return "unknown"
+	}
+}
+
+// Waiting reports whether a person must answer before this session can move: yes, no,
+// or unknown when the source never said.
 //
 // Only the daemon's words (Needs) decide this — never State or Tempo. State and Tempo
 // are set by a mechanism the session does not control, so a session waiting on its own
@@ -94,26 +152,46 @@ func isStalledNeeds(needs string) bool {
 // only Needs (and, in the flag-only case documented on Stalled, Detail) says in words
 // what is actually happening. See docs/protocol/daemon-control-socket.md section 5.
 //
-// Needs empty means never Waiting: with no words from the daemon, there is nothing to
-// tell "waiting on a person" apart from "waiting on my own subagents", and guessing the
-// former from a bare flag is exactly the ambiguity this rule exists to avoid.
+// The three cases, and the difference between the last two, which is the whole reason
+// this returns a Verdict rather than a bool:
 //
-// Needs non-empty decides alone: a value matching stalledNeedsPrefixes (a usage limit,
-// a login prompt, an API error, a rate limit) means the session is Stalled, not
-// Waiting -- no answer fixes it. Everything else, including an unfamiliar prefix,
-// means Waiting: the closed list is deliberately narrow, so an unrecognised value must
-// land in the counter a person actually watches.
+//   - Needs absent (nil) — Unknown. The source never mentioned the field, so it has
+//     said nothing about whether anyone is waiting. Today's daemon always sends the
+//     key, empty string and all (measured against 2.1.269 on a live fleet: 7 records
+//     of 7 carried it), so this case does not arise from it at all. It arises from a
+//     source that does not speak this field — and answering "no" on its behalf, which
+//     is what a bool forces, would have the panel announce that nobody is waiting on
+//     the strength of never having asked.
 //
-// A Dying session is never Waiting, regardless of what Needs says: it is being killed
-// or retired, so no one has to answer it.
-func (s Session) Waiting() bool {
+//   - Needs present and empty — No. This is a statement, not a silence: the daemon
+//     looked and has no question outstanding. With no words there is still nothing to
+//     tell "waiting on a person" apart from "waiting on my own subagents", so a bare
+//     blocked flag never promotes it (see Stalled, rule 2) -- but the source did answer,
+//     and the answer was no.
+//
+//   - Needs present and non-empty — it decides alone. A value matching
+//     stalledNeedsPrefixes (a usage limit, a login prompt, an API error, a rate limit)
+//     means the session is Stalled, not Waiting: no answer fixes it, so No. Everything
+//     else, including an unfamiliar prefix, is Yes — the closed list is deliberately
+//     narrow, so an unrecognised value must land in the counter a person watches.
+//
+// A Dying session is No, regardless of what Needs says, and regardless of whether Needs
+// says anything at all: it is being killed or retired, so no one has to answer it, and
+// that is a real answer rather than an absence of one.
+func (s Session) Waiting() Verdict {
 	if s.Dying {
-		return false
+		return No
 	}
-	if s.Needs == "" {
-		return false
+	if s.Needs == nil {
+		return Unknown
 	}
-	return !isStalledNeeds(s.Needs)
+	if *s.Needs == "" {
+		return No
+	}
+	if isStalledNeeds(*s.Needs) {
+		return No
+	}
+	return Yes
 }
 
 // Stalled reports whether the session is stopped for a reason no answer will fix, or
@@ -121,29 +199,41 @@ func (s Session) Waiting() bool {
 //
 //  1. Needs non-empty and matching stalledNeedsPrefixes (a usage limit, a login
 //     prompt, an API error, a rate limit): stalled, exactly the complement of Waiting's
-//     first rule.
-//  2. Needs empty and State == "blocked" or Tempo == "blocked": stalled, never
-//     Waiting -- per Waiting's own doc comment, a bare flag with no words cannot be
-//     told apart from a session waiting on its own subagents, so it is never promoted
-//     to the counter a person is expected to act on. It still must not be hidden
-//     entirely: docs/protocol/daemon-control-socket.md section 5 requires a session
-//     stalled by this rule to be presented with Detail shown verbatim, since Detail is
-//     the only field that can still distinguish "awaiting a decision from a person"
-//     from "awaiting my own work" once Needs has nothing to say.
+//     third rule.
+//  2. Needs with nothing to say -- empty, or absent altogether -- and State ==
+//     "blocked" or Tempo == "blocked": stalled, never Waiting. Per Waiting's own doc
+//     comment, a bare flag with no words cannot be told apart from a session waiting on
+//     its own subagents, so it is never promoted to the counter a person is expected to
+//     act on. It still must not be hidden entirely: docs/protocol/daemon-control-socket.md
+//     section 5 requires a session stalled by this rule to be presented with Detail
+//     shown verbatim, since Detail is the only field that can still distinguish
+//     "awaiting a decision from a person" from "awaiting my own work" once Needs has
+//     nothing to say.
 //
-// Every session with Needs non-empty lands in exactly one of Waiting or Stalled (rule 1
-// above is a full partition of that case); a session with Needs empty can only be
-// Stalled (via the flags) or neither, never Waiting. The UI shows Waiting and Stalled
-// as two separate counters, and a session counted in both would make the totals lie.
+// This stays a bool while Waiting does not, and that is deliberate rather than an
+// oversight. Stalled has the same defect in principle -- a source that cannot say
+// reads as "not stalled" -- but it lies far more softly, because a session stalled
+// under a source this client cannot read still reaches a person through the silence
+// rule in internal/state: a session quiet for longer than the threshold calls someone
+// regardless of any flag. That rule is the only one of the three that survives a change
+// of source, because it measures time rather than trusting the meaning of a field.
+// Making Stalled three-valued is a separate change with its own consequences for the
+// quiet counter, and is not made here.
 //
-// A Dying session is never Stalled, for the same reason Waiting excludes it: it needs
-// no one's attention, not even the kind Stalled reports.
+// Every session whose Needs says something lands in exactly one of Waiting == Yes or
+// Stalled (rule 1 is a full partition of that case); a session whose Needs says nothing
+// can only be Stalled (via the flags) or neither, never Waiting == Yes. The UI shows
+// Waiting and Stalled as two separate counters, and a session counted in both would
+// make the totals lie.
+//
+// A Dying session is never Stalled, for the same reason Waiting answers No for one: it
+// needs no one's attention, not even the kind Stalled reports.
 func (s Session) Stalled() bool {
 	if s.Dying {
 		return false
 	}
-	if s.Needs != "" {
-		return isStalledNeeds(s.Needs)
+	if s.Needs != nil && *s.Needs != "" {
+		return isStalledNeeds(*s.Needs)
 	}
 	return s.State == "blocked" || s.Tempo == "blocked"
 }

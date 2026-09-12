@@ -584,10 +584,9 @@ func mergeStopped(live []daemon.Session, records []jobs.Record) []listedSession 
 
 // sessionFromRecord shapes a job-store record as the session the panel draws.
 //
-// What it deliberately leaves empty is the point of it. Tempo, Needs, State
-// and Dying are live readings of a running process: a stopped session has no
-// tempo, is not waiting on anyone's answer, is not in any state right now,
-// and is not being killed. Copying a frozen value into any of them would let
+// What it deliberately leaves empty is the point of it. Tempo, State and
+// Dying are live readings of a running process: a stopped session has no
+// tempo, is not in any state right now, and is not being killed. Copying a frozen value into any of them would let
 // a session that stopped hours ago keep asking for attention — State most of
 // all, since "blocked" there means stalled to every rule that reads it, and
 // a session that stopped while blocked would be counted as stalled every
@@ -608,6 +607,16 @@ func sessionFromRecord(r jobs.Record) daemon.Session {
 		Intent:     r.Intent,
 		Name:       r.Name,
 		CLIVersion: r.CLIVersion,
+
+		// Needs is the one of the four that is stated rather than left out. A
+		// stopped session is not waiting on anyone's answer, and that is
+		// something this function knows rather than something it failed to
+		// find out -- so it says so, with Says(""), instead of leaving the
+		// field nil. Nil is reserved for a source that never spoke, and
+		// Waiting reads it as "do not know"; a stopped session would then be
+		// drawn as an open question on the panel forever, which is the exact
+		// opposite of what leaving it out was meant to achieve.
+		Needs: daemon.Says(""),
 	}
 	if !r.CreatedAt.IsZero() {
 		s.CreatedAt = r.CreatedAt.UnixMilli()

@@ -18,9 +18,9 @@ func twoFleetCycle(at time.Time, stage string, waiting bool) Snapshot {
 	}
 	bCards := []board.Card{{Path: "/b/board/cards/two.md", Session: "b0000002", Stage: stage, Title: "ship it"}}
 	sessions := []daemon.Session{
-		{Short: "a0000001", Name: "A's orchestrator", Needs: needs},
-		{Short: "b0000002", Name: "B's task", Needs: needs},
-		{Short: "n0000001", Name: "nobody's", Needs: needs},
+		{Short: "a0000001", Name: "A's orchestrator", Needs: daemon.Says(needs)},
+		{Short: "b0000002", Name: "B's task", Needs: daemon.Says(needs)},
+		{Short: "n0000001", Name: "nobody's", Needs: daemon.Says(needs)},
 	}
 	return Snapshot{
 		At:       at,

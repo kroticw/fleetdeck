@@ -112,9 +112,9 @@ func TestSnapshotKeepsSessionsAndBoardWhenUsageFails(t *testing.T) {
 // transcript context.
 func TestSnapshotAssembledFromEveryInconvenientForm(t *testing.T) {
 	sessions := []daemon.Session{
-		{Short: "waits123", Name: "waiting one", Needs: "answer: pick one (A · B)"},
-		{Short: "stall123", Name: "stalled one", State: "blocked", Needs: ""},
-		{Short: "dying123", Name: "dying one", Needs: "answer: are you sure", Dying: true},
+		{Short: "waits123", Name: "waiting one", Needs: daemon.Says("answer: pick one (A · B)")},
+		{Short: "stall123", Name: "stalled one", State: "blocked", Needs: daemon.Says("")},
+		{Short: "dying123", Name: "dying one", Needs: daemon.Says("answer: are you sure"), Dying: true},
 		{Short: "quiet123", Name: "quiet one"},
 	}
 	cards := []board.Card{
@@ -139,13 +139,13 @@ func TestSnapshotAssembledFromEveryInconvenientForm(t *testing.T) {
 	if byShort["quiet123"].CardPath != "" {
 		t.Fatalf("a session no card names must have no CardPath: %+v", byShort["quiet123"])
 	}
-	if !byShort["waits123"].Waiting() {
+	if byShort["waits123"].Waiting() != daemon.Yes {
 		t.Fatal("a session with a real question in Needs must be Waiting")
 	}
-	if !byShort["stall123"].Stalled() || byShort["stall123"].Waiting() {
+	if !byShort["stall123"].Stalled() || byShort["stall123"].Waiting() == daemon.Yes {
 		t.Fatal("state=blocked with empty needs must be Stalled, never Waiting")
 	}
-	if byShort["dying123"].Waiting() || byShort["dying123"].Stalled() {
+	if byShort["dying123"].Waiting() == daemon.Yes || byShort["dying123"].Stalled() {
 		t.Fatal("a dying session must be neither Waiting nor Stalled")
 	}
 	if byShort["quiet123"].Context != nil {

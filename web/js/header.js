@@ -6,7 +6,7 @@ import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
 import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
-import { isWaiting, isNeedsStalled, isFlagOnlyStalled } from "./needs.js";
+import { isWaiting, isWaitingUnknown, isNeedsStalled, isFlagOnlyStalled } from "./needs.js";
 import { UPDATE_BINDING, WAY_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
 
 // The icon beside the fleet's name in the header: small enough to sit in a
@@ -448,12 +448,30 @@ export function nextMenuState(open, action, fleet, current) {
 // and the sessions no fleet claims. Another fleet's waiting sessions are
 // counted on its switcher entry instead, so they are neither lost nor taken
 // for this fleet's. stalled is the tracker's answer for every session.
+//
+// unknown is the third list, and it is not a third counter: it is what makes the
+// waiting counter honest. "0 waiting for you" is itself a statement that nobody is
+// waiting, and it is the wrong one to make about sessions whose source never said.
+// The count stays a count of definite answers -- inflating it would call people for
+// nothing -- and the sessions nobody can describe are declared beside it as what
+// they are, the way the context bar declares an estimate rather than passing it off
+// as a reading.
 export function headerCounts(snap, stalled) {
   const counted = new Set(headerSessions(snap));
   return {
     waiting: [...counted].filter(isWaiting),
     stalled: stalled.filter((s) => counted.has(s)),
+    unknown: [...counted].filter(isWaitingUnknown),
   };
+}
+
+// The mark beside the waiting count when some sessions did not report. "+?" rather
+// than a number: the number would read as a second count of people waiting, and
+// nobody knows that any of them is. What is known is that the figure to its left is
+// a floor and not a total, and that is exactly what it says.
+export function unknownMarkHTML(unknownCount) {
+  if (!unknownCount) return "";
+  return ` <abbr class="counter-unknown" title="${escapeHTML(t("waiting_unknown_count"))}">+?</abbr>`;
 }
 
 export function renderHeader(root) {
@@ -579,7 +597,7 @@ export function renderHeader(root) {
       <div class="counters">
         ${alarmHTML(connected, snap)}
         ${usageProblemHTML(usageSeverity, snap.usageErrorKind)}
-        <span class="counter counter-waiting ${waitingCount > 0 ? "counter-on" : ""}">${waitingCount} ${t("waiting_count")}</span>
+        <span class="counter counter-waiting ${waitingCount > 0 ? "counter-on" : ""}">${waitingCount} ${t("waiting_count")}${unknownMarkHTML(counts.unknown.length)}</span>
         <span class="counter counter-stalled ${stalledCount > 0 ? "counter-on" : ""}">${stalledCount} ${t("stalled_count")} ${stalledList(stalledSessions)}</span>
       </div>`;
   };

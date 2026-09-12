@@ -29,10 +29,16 @@ const en = {
   waiting: "Waiting",
   stalled: "Stalled",
   context_unknown: "no transcript yet",
+  // Shown when the session's source never said whether a person is waiting. The
+  // hint is the whole point of the pair: "unknown" alone would be read as a polite
+  // way of saying no, and the difference between the two is what this marker is for.
+  waiting_unknown: "not reported",
+  waiting_unknown_hint: "this session's source does not report whether a person is waiting — which is not the same as nobody waiting",
   open_card: "card",
   open_card_hint: "Open this session's card",
   silent_unmeasured: "not measured",
   waiting_count: "waiting for you",
+  waiting_unknown_count: "some sessions do not report whether anyone is waiting — the number beside this mark counts only the ones that do",
   stalled_count: "stalled",
   limit_5h: "5h",
   limit_7d: "7d",

@@ -30,17 +30,19 @@ import { isMultiFleet, groupSessions, switchFleet } from "./fleet.js";
 import { pageStorage } from "./buildcheck.js";
 import { isLive, isResumable } from "./lifecycle.js";
 import { sessionMarks } from "./initials.js";
-import { isWaiting } from "./needs.js";
+import { isWaiting, isWaitingUnknown } from "./needs.js";
 
-// The text explaining *why* a Waiting/Stalled session isn't moving. For a
-// flags-only Stalled session (needs empty) detail is the only field that
-// still says anything; everywhere else needs is the words that matter.
-// stalled is the row's own tracker-backed decision (rowHtml's stalledNow),
-// not a fresh isStalled(s) call (needs.js): a flag-only stall not yet counted
-// by the tracker must not show detail either, or the row would carry a "why it
-// stopped" reason for a stop the badge itself does not yet claim happened.
-function reasonText(s, stalled) {
-  if (stalled && !s.needs) return s.detail || "";
+// The text explaining *why* a session isn't moving. Where needs has words, they
+// are the words that matter. Where it has none -- a flags-only Stalled session,
+// or a session whose source never spoke at all -- detail is the only field left
+// that can say anything, and it is shown instead.
+//
+// fallBackToDetail is the caller's decision, not a fresh check here (see
+// rowHtml): a flag-only stall not yet counted by the tracker must not show
+// detail either, or the row would carry a "why it stopped" reason for a stop the
+// badge itself does not yet claim happened.
+function reasonText(s, fallBackToDetail) {
+  if (fallBackToDetail && !s.needs) return s.detail || "";
   return s.needs || "";
 }
 
@@ -129,15 +131,28 @@ function applyContextWidths(root) {
 export function rowHtml(s, stalledNow) {
   const waiting = isWaiting(s);
   const stalled = Boolean(stalledNow);
+  // A source that never said whether anyone is waiting. This gets a marker of its
+  // own and none of the waiting row's emphasis: nobody established that a person
+  // is needed here, so it must not shout -- but drawing nothing at all would say
+  // the panel looked and found nobody, which is the claim this whole change exists
+  // to stop making. The same distinction .ctx-unknown already makes for the context
+  // estimate: not known is shown, never rendered as zero.
+  const unknown = isWaitingUnknown(s);
   const classes = ["srow"];
   if (waiting) classes.push("srow-waiting");
   if (stalled) classes.push("srow-stalled");
 
+  // At most one badge, in order of how much it asks of a person: a definite
+  // question first, then a stop that needs no answer, then "not known". A session
+  // can be both unknown and flag-only stalled; stalled is the more specific thing
+  // that can honestly be said about it, so it wins.
   const badge = waiting
     ? `<span class="sbadge sbadge-waiting">${escapeHtml(t("waiting"))}</span>`
     : stalled
       ? `<span class="sbadge sbadge-stalled">${escapeHtml(t("stalled"))}</span>`
-      : "";
+      : unknown
+        ? `<span class="sbadge sbadge-unknown" title="${escapeHtml(t("waiting_unknown_hint"))}">${escapeHtml(t("waiting_unknown"))}</span>`
+        : "";
 
   // The reason is clipped to a few lines by the stylesheet, with the whole of
   // it in title. The daemon writes an incoming message's text into detail
@@ -147,7 +162,7 @@ export function rowHtml(s, stalledNow) {
   // keeps the text itself intact -- spec 3.1 wants detail carried verbatim
   // because a person has to read it, so it has to stay reachable here rather
   // than only in the daemon.
-  const raw = waiting || stalled ? reasonText(s, stalled) : "";
+  const raw = waiting || stalled || unknown ? reasonText(s, stalled || unknown) : "";
   // The envelope comes off, and nothing else does. What a session says about
   // why it stopped is carried verbatim (spec 3.1) because a person decides from
   // its exact words whether they are being called — so this is NOT rendered as
