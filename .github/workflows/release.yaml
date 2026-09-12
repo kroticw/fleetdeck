@@ -153,8 +153,47 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
+      # The disk image: the app, a shortcut to Applications and a laid-out window,
+      # built out of the zip that has just passed its own gate — so the app a
+      # person drags out of the image is byte for byte the app that was checked,
+      # and there is no second build to differ from the first. It is what somebody
+      # downloads; the zip stays because it is what an installed app fetches to
+      # update itself, by a name it builds rather than by looking at what a
+      # release carries.
+      - name: Build the release disk image
+        run: make dist-dmg VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+
+      # Apple's half again, for the image this time. The app inside already
+      # carries its own ticket, and that is not this: Gatekeeper asks about the
+      # thing a person opens, and the first thing a person opens is the image.
+      # Without a ticket of its own the image would put the "cannot be verified"
+      # dialog one step earlier in the journey than the app's own notarization
+      # was bought to prevent.
+      - name: Notarize the disk image
+        run: make notarize-dmg VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+      # The same kind of gate as the app's, for what only an image has: exactly
+      # one image, named for this tag; a volume holding the app, the Applications
+      # symlink and the window's two files and nothing else; a window layout
+      # matching the one committed to this repository byte for byte; a Developer
+      # ID signature on the image itself with Apple's ticket stapled into it; and
+      # Gatekeeper answering "accepted" when asked whether a person may open it.
+      # The app inside is then taken apart by the same code that took the zip's
+      # app apart, in the place a person would drag it from.
+      - name: Verify the disk image before anything is published
+        run: make verify-dist-dmg VERSION="$RELEASE_VERSION" EXPECT_SEAL=notarized
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+
       - name: Publish
-        run: gh release create "$RELEASE_VERSION" dist/*.tar.gz dist/*.zip --generate-notes
+        run: gh release create "$RELEASE_VERSION" dist/*.tar.gz dist/*.zip dist/*.dmg --generate-notes
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
