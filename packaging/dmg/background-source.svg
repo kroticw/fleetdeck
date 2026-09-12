@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="720" viewBox="0 0 660 360">
+  <!-- fleetdeck disk image background — the window a person sees on opening the .dmg.
+       Palette from cmd/fleetdeck-window/icon-source.svg and web/app.css:
+       accent #1f7a72 / #34a99a, accent-strong #15645d.
+
+       Light ground on purpose. Finder draws the icon labels in the viewer's own
+       system appearance, not in one this file gets to choose: black in light
+       mode, white in dark. A dark ground would swallow the black ones. The band
+       the labels land on is lifted to a mid tone so white text has something to
+       sit on as well — the one compromise that reads in both appearances.
+
+       Geometry is not free-hand, and the height is the measured part. The icons
+       are 128 px, centred at (180, 160) and (480, 160), so they occupy y 96..224
+       and their labels land just under y 230; the band spans that. The arrow
+       runs between the two icons and touches neither.
+
+       360 rather than 400: Finder draws this image in the window's content area,
+       and how tall that is depends on which bars the *viewer* has turned on. A
+       stock Finder takes only the title bar, and packaging/dmg/DS_Store sizes the
+       window for exactly that (360 + 28). A Finder with the tab bar, status bar
+       and path bar showing — measured on this machine — eats about 52 px more,
+       and at 400 tall the wordmark below fell off the bottom. At 360 everything
+       that carries meaning sits above y 330 and survives both.
+
+       Rebuilt by hand with `make dmg-background`, which needs rsvg-convert; the
+       TIFF beside this file is committed for the same reason
+       cmd/fleetdeck-window/icon.icns is. -->
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8f9fa"/>
+      <stop offset="1" stop-color="#e4e9e8"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a8b5b3" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#a6b4b1" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#a6b4b1" stop-opacity="0.5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="660" height="360" fill="url(#ground)"/>
+
+  <!-- The band the icon labels sit on. -->
+  <rect x="0" y="216" width="660" height="68" fill="url(#band)"/>
+
+  <!-- The arrow: drag what is on the left onto what is on the right. No words in
+       it, because this one image ships to every language the panel speaks. -->
+  <g stroke="#1f7a72" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M262 160 L382 160" stroke-width="5" stroke-dasharray="2 14"/>
+    <path d="M374 147 L392 160 L374 173" stroke-width="5"/>
+  </g>
+
+  <text x="330" y="322" text-anchor="middle"
+        font-family="-apple-system, SF Pro Text, Helvetica Neue, Helvetica, sans-serif"
+        font-size="15" fill="#15645d" letter-spacing="0.5">fleetdeck</text>
+</svg>
