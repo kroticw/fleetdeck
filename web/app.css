@@ -766,13 +766,17 @@ main {
   word-break: break-word;
 }
 
-/* .o-error-action (a picker choice, a label or a key that did not go
+/* .o-error-brief (the pin stands for a working order that is not on disk),
+ * .o-error-action (a picker choice, a label or a key that did not go
  * through) and .o-error-stream (the terminal's connection, ended or being
- * tried again) are independent states shown at once when both apply — what
- * the operator did must never be mistaken for, or hidden behind, a
+ * tried again) are independent states shown at once when several apply —
+ * what the operator did must never be mistaken for, or hidden behind, a
  * connection that is coming back by itself. The stream one is visually
  * quieter: the terminal retries it on its own, and there is nothing for the
- * operator to act on the way there is for a choice that was not saved. */
+ * operator to act on the way there is for a choice that was not saved.
+ * .o-error-brief has no rule of its own on purpose: it is the plain .o-error
+ * red, the loudest of the three, and it is the one that does not go away
+ * until someone acts on it. */
 .o-error-stream {
   background: color-mix(in srgb, var(--attn) 14%, var(--surface));
   border-color: color-mix(in srgb, var(--attn) 35%, var(--border));

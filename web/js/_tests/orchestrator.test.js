@@ -13,7 +13,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel } from "../orchestrator.js";
+import { resolveOrchestrator, contextPercent, pickableSessions, pickerLabel, briefWarning } from "../orchestrator.js";
 
 test("no snapshot yet resolves to nothing pinned and no sessions", () => {
   const r = resolveOrchestrator(null);
@@ -394,6 +394,60 @@ test("a connection being retried and a choice that was not saved are on screen t
   assert.ok(text(c, ".o-error-stream").includes(t("terminal_reconnecting")), "the retry lost its row");
   assert.ok(text(c, ".o-error-action").includes(t("orchestrator_pin_failed")), "the failed choice lost its row");
   assert.equal(c.root.querySelectorAll(".o-error").length, 2);
+});
+
+// The pin means this session has been given the fleet's working order. The
+// dropdown in this column's own head moves the pin and writes nothing, and
+// the file can be deleted after a real appointment wrote it — so the panel
+// can come to claim an orchestrator that has nothing to work from. It used to
+// claim it in silence, which is the whole of what these pin.
+
+test("a pin whose working order is not on disk says so, and names the file", () => {
+  const said = briefWarning({
+    orchestratorSession: "abc",
+    orchestratorBriefMissing: true,
+    orchestratorBriefPath: "/board/docs/orchestrator.md",
+  });
+  assert.ok(said.includes(t("orchestrator_brief_missing")), "the row does not say what is wrong");
+  assert.ok(said.includes("/board/docs/orchestrator.md"), "the row does not say which file, so there is nowhere to look");
+});
+
+test("a brief that is on disk says nothing, and neither does a snapshot that has not arrived", () => {
+  assert.equal(briefWarning({ orchestratorSession: "abc", orchestratorBriefPath: "/board/docs/orchestrator.md" }), "");
+  assert.equal(briefWarning({}), "");
+  assert.equal(briefWarning(null), "");
+});
+
+// Nothing pinned is not this failure, and the panel must not say it is: the
+// row would then stand on every fresh panel, and a warning that is always
+// there is one nobody reads when it finally means something. The collector
+// never sets the flag without a pin (cmd/fleetdeck's briefState); this pins
+// that the column does not invent it either.
+test("nothing pinned raises no working-order row", () => {
+  assert.equal(briefWarning({ orchestratorSession: "", orchestratorBriefPath: "/board/docs/orchestrator.md" }), "");
+});
+
+test("the missing working order is on screen in its own row, above the connection", async () => {
+  const c = await column({ ...structuredClone(PIN), orchestratorBriefMissing: true, orchestratorBriefPath: "/board/docs/orchestrator.md" });
+
+  const row = c.root.querySelector(".o-error-brief");
+  assert.ok(row, "a pinned orchestrator with no working order on disk is shown as nothing at all");
+  assert.ok(row.textContent.includes("/board/docs/orchestrator.md"), "the row is on screen without the file it is about");
+
+  ready(c.ptys()[0]);
+  c.ptys()[0].serverClose(1006);
+  await settle();
+  const rows = [...c.root.querySelectorAll(".o-error")];
+  assert.equal(rows.length, 2, "the two states did not each keep a row");
+  assert.ok(rows[0].classList.contains("o-error-brief"), "the connection retrying pushed the standing failure below itself");
+});
+
+test("the row goes away on the cycle after the working order is written, without a reload", async () => {
+  const c = await column({ ...structuredClone(PIN), orchestratorBriefMissing: true, orchestratorBriefPath: "/board/docs/orchestrator.md" });
+  assert.ok(c.root.querySelector(".o-error-brief"), "the row was never there to begin with");
+
+  await c.push({ ...structuredClone(PIN), orchestratorBriefPath: "/board/docs/orchestrator.md" });
+  assert.equal(c.root.querySelector(".o-error-brief"), null, "the file is there and the row still says it is not");
 });
 
 // Requirement 5 of the first-run wizard's card: the wizard can be run again,
