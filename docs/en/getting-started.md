@@ -128,9 +128,15 @@ rm ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
 
 ## Updating the app
 
-An app built with `make window-app` from a git checkout has an Update button in its header. It is there only in the app: a browser tab has nothing to run an update with.
+The app has an Update button in its header. It is there only in the app: a browser tab has nothing to run an update with.
 
-Pressing it brings the checkout forward and hands over to the new build:
+What the button does depends on how the app got onto your Mac. An app built from a git checkout brings that checkout forward; an app installed from a release downloads the next release. A build that can do neither still has the button, and says which of those it is instead of leaving you to work it out from a button that is not there.
+
+The app also asks GitHub once a day, when it starts, whether there is a newer version, and says so in the header when there is. It asks nothing else and at no other time, and when it cannot reach GitHub it says nothing — press the button to ask out loud and see why.
+
+### An app built from a checkout
+
+Pressing the button brings the checkout forward and hands over to the new build:
 
 1. The checkout is fetched and fast-forwarded to its remote's `master`. A checkout on another branch, with uncommitted edits to tracked files, or with commits of its own is left exactly as it is, and the button says why.
 2. The new app is built into `.fleetdeck-update/` beside the installed `fleetdeck.app` — never over it.
@@ -140,7 +146,21 @@ A step that takes longer than two seconds shows how long it has taken. A second 
 
 If the new version's panel does not start, or answers with another build, nothing is replaced: the installed app stays, its panel is started again, and the button says what went wrong. The version an update replaces stays in `.fleetdeck-update/` until the next update.
 
-An app installed from a release has no Update button: it was built by the release workflow, not from a checkout on your Mac, and there is no tree for it to bring forward. A new version is installed the way the first one was — download it and drag it into Applications, replacing the old one. A signed and notarized release opens with a double click like the first one did.
+### An app installed from a release
+
+Pressing the button downloads the newest release and installs it over this one:
+
+1. GitHub's releases page is asked which release is newest. If it is the one you are running, or an older one, nothing is downloaded and the button says so.
+2. The archive is downloaded beside the installed `fleetdeck.app` — never over it.
+3. **It is checked before anything moves.** The app that came down must be whole, signed with an Apple Developer ID, signed by the same Apple team as the app you are running, and notarized by Apple. An app that fails any of those is deleted and not installed, and the button says which check it failed.
+4. From there it is the same handover as above: the new version's window opens, takes the panel over, proves its panel answers, and only then puts itself in place of the old app.
+
+The check in step 3 is the point of doing this inside the app at all. Without it, a program that downloads an archive and puts it over the running app is a way to hand you anything at all.
+
+There are two things the button cannot do, and it says so rather than trying:
+
+- **An app you built yourself** with `make window-app`, without a checkout written into it, is signed by nobody. There is no release that corresponds to it, so there is nothing to update it to — build it again from your checkout.
+- **A binary run outside an app bundle** — `go run`, or the executable on its own — has no app to replace.
 
 ## Opening the panel
 

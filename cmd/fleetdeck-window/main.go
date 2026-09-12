@@ -72,6 +72,7 @@ import (
 	webview "github.com/webview/webview_go"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
+	"github.com/kroticw/fleetdeck/internal/version"
 )
 
 // defaultURL matches cmd/fleetdeck-status's own default (see its FLEETDECK_ENDPOINT
@@ -180,25 +181,54 @@ func main() {
 	if err := w.Bind(chooseFolderBindingName, chooseFolder); err != nil {
 		log.Printf("fleetdeck-window: the setup page will offer no folder chooser: %v", err)
 	}
-	if why := updateUnavailable(treeDir, exe); why != "" {
-		log.Printf("fleetdeck-window: no update button: %s", why)
-	} else {
-		canonical := canonicalBundle(exe, *toldCanonical)
-		var updating atomic.Bool
-		if err := w.Bind(updateBindingName, func() {
-			// The page takes no second press either, and the update itself holds
-			// a lock for a second window or a terminal; this is the third guard,
-			// for this window's own binding.
-			if !updating.CompareAndSwap(false, true) {
+	// The button is bound whatever this build is, and that is the change this
+	// file exists for. A window that created no button left a person who had
+	// installed the app from a release with no way to find out that updating
+	// existed at all -- a refusal so quiet that nobody knew there was one.
+	// Now there is always a button; a build that cannot update says so when it
+	// is pressed, and again when the page first loads.
+	canonical := canonicalBundle(exe, *toldCanonical)
+	how := updateWay(config{
+		tree:    treeDir,
+		exe:     exe,
+		version: version.String(),
+		teamID:  ownTeamID(exe),
+	})
+	if how.Refusal != "" {
+		log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
+	}
+	if err := w.Bind(wayBindingName, func() report {
+		if how.Refusal != "" {
+			return refusalProgress(how.Refusal)
+		}
+		return report{Step: "can"}
+	}); err != nil {
+		log.Printf("fleetdeck-window: the page will not learn whether this build can update: %v", err)
+	}
+	var updating atomic.Bool
+	if err := w.Bind(updateBindingName, func() {
+		// The page takes no second press either, and the update itself holds
+		// a lock for a second window or a terminal; this is the third guard,
+		// for this window's own binding.
+		if !updating.CompareAndSwap(false, true) {
+			return
+		}
+		go func() {
+			defer updating.Store(false)
+			if how.Refusal != "" {
+				tell(w, refusalProgress(how.Refusal))
 				return
 			}
-			go func() {
-				defer updating.Store(false)
-				runUpdate(w, *url, canonical, kept)
-			}()
-		}); err != nil {
-			log.Printf("fleetdeck-window: the update button will not work: %v", err)
-		}
+			runUpdate(w, *url, canonical, how.Source, kept)
+		}()
+	}); err != nil {
+		log.Printf("fleetdeck-window: the update button will not work: %v", err)
+	}
+	// One question at startup, at most once a day, and silent unless there is
+	// an answer worth a person's attention. A window started by a handover
+	// asks nothing: it has just been installed, and it knows it is the newest.
+	if how.Source != nil && *handover == "" {
+		go askAtStart(w, how.Source)
 	}
 
 	// The window's own ground until the keeper's first word, which comes within
@@ -238,33 +268,34 @@ func main() {
 	kept.stop()
 }
 
-// runUpdate is one press of the update button: supervisor.Update, with each
-// step handed to the page, and the window quitting once the new one has taken
-// over.
-func runUpdate(w webview.WebView, url, canonical string, kept *keeperRun) {
+// tell hands one report to the page, from whatever goroutine is holding it.
+func tell(w webview.WebView, r report) {
+	w.Dispatch(func() { w.Eval(reportScript(r)) })
+}
+
+// runUpdate is one press of the update button: supervisor.Update over
+// whichever source this build has, with each step handed to the page, and the
+// window quitting once the new one has taken over.
+func runUpdate(w webview.WebView, url, canonical string, source supervisor.Source, kept *keeperRun) {
 	say := func(p supervisor.Progress) {
-		w.Dispatch(func() { w.Eval(progressScript(p)) })
+		w.Dispatch(func() { w.Eval(progressScript(p, "")) })
 	}
-	tools, err := supervisor.FindTools(supervisor.Tools{Git: gitPath, Go: goPath, Make: makePath}, supervisor.FileExists)
-	if err != nil {
-		say(resultProgress(err))
-		return
+	// The lock lives beside whatever this build updates from: a source tree
+	// for a build that has one, and otherwise the installed app itself, so
+	// that two windows of the same installed app cannot update it at once.
+	lockRoot := treeDir
+	if lockRoot == "" {
+		lockRoot = canonical
 	}
-	lockPath, err := supervisor.LockPath(treeDir)
+	lockPath, err := supervisor.LockPath(lockRoot)
 	if err != nil {
-		say(resultProgress(err))
+		tell(w, resultProgress(err))
 		return
 	}
 	var last string
 	u := &supervisor.Update{
-		Tree: &supervisor.Tree{
-			Dir: treeDir, Remote: updateRemote, Branch: updateBranch,
-			Git: tools.Git, Env: supervisor.BuildEnv(tools, os.Environ()),
-		},
-		Tools:           tools,
-		Env:             os.Environ(),
+		Source:          source,
 		Canonical:       canonical,
-		Running:         ownRevision(),
 		LockPath:        lockPath,
 		HandoverTimeout: handoverTimeout,
 		Launch:          launchNewWindow(url),
@@ -278,7 +309,7 @@ func runUpdate(w webview.WebView, url, canonical string, kept *keeperRun) {
 	}
 	if err := u.Run(context.Background()); err != nil {
 		log.Printf("fleetdeck-window: update: %v", err)
-		say(resultProgress(err))
+		tell(w, resultProgress(err))
 		return
 	}
 	if last == "done" {

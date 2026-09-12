@@ -45,7 +45,11 @@
 # window-app writes into the window for its Update button. A release is built on
 # a CI runner; a window that knew the runner's checkout would offer to update
 # from a tree that exists on no machine the app is installed on. Without them the
-# window shows no Update button, and a new version is a new download.
+# window updates from the releases page instead -- it downloads the next release
+# and checks that it is signed by the same team and notarized before installing
+# it (docs/engineering/update-from-release.md). Which is why the signature this
+# script puts on is load-bearing twice over: it is what lets a person open the
+# app, and it is what the next version is checked against.
 #
 # The zip is written with ditto, which is what Finder's Archive Utility is built
 # on, and without resource forks, extended attributes or ACLs, so it holds the

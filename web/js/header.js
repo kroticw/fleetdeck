@@ -6,7 +6,7 @@ import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
 import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
-import { UPDATE_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
+import { UPDATE_BINDING, WAY_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
 
 // The icon beside the fleet's name in the header: small enough to sit in a
 // row of controls, large enough to be the application's mark rather than a
@@ -554,20 +554,32 @@ export function renderHeader(root) {
     else globalThis.location.assign(next.go.path);
   };
 
+  // The button belongs to the window, not to a browser tab: only the window
+  // binds these. What the window no longer decides is whether there is a
+  // button at all -- every window binds one now, and a build that cannot
+  // update answers the way binding with the reason (web/js/update.js).
   const hostUpdate = typeof window[UPDATE_BINDING] === "function" ? () => window[UPDATE_BINDING]() : null;
   let update = initialState();
   const paintUpdate = () => {
     const el = root.querySelector(".update-control");
     if (el) el.outerHTML = updateHTML(update, Date.now());
   };
+  const tookReport = (report) => {
+    update = onProgress(update, report ?? {}, Date.now());
+    paintUpdate();
+  };
   if (hostUpdate) {
-    window[PROGRESS_FUNCTION] = (report) => {
-      update = onProgress(update, report ?? {}, Date.now());
-      paintUpdate();
-    };
+    window[PROGRESS_FUNCTION] = tookReport;
     setInterval(() => {
       if (update.phase === "running") paintUpdate();
     }, UPDATE_REPAINT_MS);
+    // Asked once, as the page loads. A window that cannot update answers with
+    // the reason, and the person reads it beside the button instead of
+    // finding no button and drawing their own conclusion -- which for a whole
+    // release nobody did, because there was nothing there to draw one from.
+    if (typeof window[WAY_BINDING] === "function") {
+      Promise.resolve(window[WAY_BINDING]()).then(tookReport, () => {});
+    }
   }
 
   root.addEventListener("click", (event) => {
