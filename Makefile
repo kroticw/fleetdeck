@@ -25,8 +25,9 @@ BIN_NAMES := $(sort $(notdir $(patsubst %/,%,$(wildcard cmd/*/))))
 # that cannot finish. This is a deliberate, single exception, not the "second list" the
 # paragraph above warns about: that warning is about a *CLI* command someone adds and
 # forgets to wire in, and this is a GUI window that was never meant to ride the same
-# cross-arch release path without its own C cross-toolchain setup -- that belongs with
-# codesigning the release build, when that is taken up on purpose.
+# cross-arch release path without its own C cross-toolchain setup. `dist-app` below is
+# that setup: it ships the window inside the release app, built for both architectures
+# with clang told the target.
 DIST_BIN_NAMES := $(filter-out fleetdeck-window,$(BIN_NAMES))
 
 # HOST_GOOS drives the same exclusion for `build`, but conditionally rather than always:
@@ -59,7 +60,7 @@ DISTDIR  ?= dist
 # project (spec section 1), so this is the whole list, not a default subset.
 DIST_ARCHES ?= arm64 amd64
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist window-app install icon
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app window-app install icon
 
 # Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
 # see BUILD_BIN_NAMES above.
@@ -171,6 +172,30 @@ dist:
 verify-dist:
 	@scripts/verify-dist.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(DIST_BIN_NAMES)" "$(LDFLAGS)"
 
+# dist-app builds the release app: fleetdeck-$(VERSION)-macos.zip in $(DISTDIR), holding
+# the fleetdeck.app `window-app` builds, made into one a person can download, drag to
+# Applications and open -- every command in it, both architectures in every binary, the
+# tag as its version, and an ad-hoc seal over the whole bundle. What each of those is
+# for, and what is left out on purpose, is in scripts/build-dist-app.sh.
+#
+# It takes every command there is (BIN_NAMES), not DIST_BIN_NAMES: the window is the
+# app, and the exclusion that keeps it out of `dist` is about a plain GOARCH switch
+# turning cgo off, which this target does not do -- it gives clang the target
+# architecture instead.
+#
+# It runs after `dist` into the same directory and removes only zips of its own
+# making, so `make dist dist-app` leaves the whole release there. macOS only: the
+# window needs cgo against WebKit, and the bundle needs lipo, codesign and ditto.
+dist-app:
+	@scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)"
+	@$(MAKE) --no-print-directory verify-dist-app
+
+# verify-dist-app interrogates the zip dist-app wrote, the way it reaches a person:
+# unpacked, then looked at from the outside. The release workflow runs it as a step of
+# its own, for the same reason it runs verify-dist.
+verify-dist-app:
+	@scripts/verify-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)"
+
 run: build
 	@if [ ! -x $(BINDIR)/fleetdeck ]; then \
 		echo "run: $(BINDIR)/fleetdeck was not built" >&2; \
@@ -182,10 +207,11 @@ run: build
 # the panel it starts, side by side in Contents/MacOS -- the window looks for the panel
 # beside itself, and starts it when nothing answers at the panel's URL (see
 # cmd/fleetdeck-window's package doc). It is deliberately not part of `dist` -- see
-# DIST_BIN_NAMES above -- and codesigning it is a separate, not-yet-taken-up task; a
-# bundle built and run locally (this target does both) never picks up the
-# com.apple.quarantine attribute Gatekeeper acts on, so none is needed for that case.
-# If this bundle is ever downloaded instead of built locally, it will.
+# DIST_BIN_NAMES above. A bundle built and run locally (this target does both) never
+# picks up the com.apple.quarantine attribute Gatekeeper acts on, so it is not sealed:
+# its signature is the linker's, over the window binary alone. A downloaded copy of
+# it would be "damaged" to Gatekeeper; the bundle a release publishes is built by
+# `dist-app` instead, which seals it.
 #
 # The window is told, at build time, the tree it was built from and the tools
 # that built it: its update button brings that tree forward and runs this very

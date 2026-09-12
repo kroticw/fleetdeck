@@ -50,6 +50,16 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
+      # The app a person installs: fleetdeck.app, universal, sealed ad-hoc, zipped. It
+      # goes into the same dist/ after the archives, and removes only zips of its own.
+      # This is the reason the job must run on macOS rather than merely prefer it: the
+      # window is built with cgo against WebKit, and the bundle with lipo, codesign and
+      # ditto.
+      - name: Build the release app
+        run: make dist-app VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+
       # make dist verifies what it just built, so this step normally passes on work
       # already done. It is a step of its own anyway: the gate between building an
       # archive and publishing it must be visible in the workflow, not an implementation
@@ -64,8 +74,18 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
+      # The same gate for the app: exactly one zip, holding exactly the app; the tag in
+      # its Info.plist and in every slice of every binary; both architectures; the seal
+      # verifying; and the panel inside answering with the tag. It also proves the window
+      # carries no source tree -- the runner's checkout must not become an Update button
+      # on somebody else's Mac.
+      - name: Verify the app before anything is published
+        run: make verify-dist-app VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+
       - name: Publish
-        run: gh release create "$RELEASE_VERSION" dist/*.tar.gz --generate-notes
+        run: gh release create "$RELEASE_VERSION" dist/*.tar.gz dist/*.zip --generate-notes
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

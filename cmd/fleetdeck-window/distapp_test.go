@@ -1,0 +1,270 @@
+//go:build darwin
+
+package main
+
+import (
+	"bytes"
+	"debug/buildinfo"
+	"debug/macho"
+	"encoding/json"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+)
+
+// releaseAppVersion is the tag the release app under test is built for. Not "dev":
+// "dev" is what a binary says when the version never reached it, so a test built
+// on it would pass against a release that carries no version at all.
+const releaseAppVersion = "v0.1.0"
+
+// wantReleaseAppMembers is everything the release zip may hold: the bundle, the
+// three commands, the icon, the plist, and the seal over them. No AppleDouble "._"
+// companions, no __MACOSX, no staging directory.
+var wantReleaseAppMembers = []string{
+	"fleetdeck.app/",
+	"fleetdeck.app/Contents/",
+	"fleetdeck.app/Contents/Info.plist",
+	"fleetdeck.app/Contents/MacOS/",
+	"fleetdeck.app/Contents/MacOS/fleetdeck",
+	"fleetdeck.app/Contents/MacOS/fleetdeck-status",
+	"fleetdeck.app/Contents/MacOS/fleetdeck-window",
+	"fleetdeck.app/Contents/Resources/",
+	"fleetdeck.app/Contents/Resources/icon.icns",
+	"fleetdeck.app/Contents/_CodeSignature/",
+	"fleetdeck.app/Contents/_CodeSignature/CodeResources",
+}
+
+// The ldflags a release slice must carry, exactly: the version and nothing else.
+// In particular no main.treeDir -- a release is built on a CI runner, and a
+// window that knew the runner's checkout would show an Update button pointing at
+// a tree that exists on no machine the app is installed on.
+const wantReleaseLdflags = `-ldflags="-X github.com/kroticw/fleetdeck/internal/version.value=` + releaseAppVersion + `"`
+
+// TestDistAppBuildsAnAppAPersonCanInstall runs the real `make dist-app` and
+// interrogates the zip it leaves, the way a person gets it: unpacked, then
+// looked at from the outside. It trusts nothing the target says about itself --
+// the target's own verification is one edit away from checking nothing, and what
+// it blesses is published.
+func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the whole universal app bundle")
+	}
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	distDir := filepath.Join(t.TempDir(), "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A zip from another version would be uploaded under this tag by the publish
+	// step's glob. The tarball beside it is `make dist`'s, which the release runs
+	// first into the same directory: dist-app must not take it with it.
+	stale := filepath.Join(distDir, "fleetdeck-v0.0.1-macos.zip")
+	tarball := filepath.Join(distDir, "fleetdeck-"+releaseAppVersion+"-darwin-arm64.tar.gz")
+	for _, f := range []string{stale, tarball} {
+		if err := os.WriteFile(f, []byte("not this build's zip"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := exec.Command("make", "dist-app", "VERSION="+releaseAppVersion, "DISTDIR="+distDir)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make dist-app: %v\n%s", err, out)
+	}
+	zip := filepath.Join(distDir, "fleetdeck-"+releaseAppVersion+"-macos.zip")
+	// The release workflow's gate is verify-dist-app, and a gate that stops part
+	// way with status 0 passes everything after the point it stopped. That is not
+	// hypothetical: a case inside $(...), which the bash 3.2 that is /bin/sh on
+	// macOS cannot parse, once ended it early, silently, with every check after
+	// the architectures unrun. Its last line is the proof it got to the end.
+	if !strings.Contains(string(out), "verify-dist-app: "+zip+" ok") {
+		t.Fatalf("make dist-app succeeded without verify-dist-app reaching its end:\n%s", out)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("%s survived make dist-app and would be published under %s", stale, releaseAppVersion)
+	}
+	if _, err := os.Stat(tarball); err != nil {
+		t.Fatalf("make dist-app removed make dist's archive %s: %v", tarball, err)
+	}
+	zips, err := filepath.Glob(filepath.Join(distDir, "*.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(zips) != 1 || zips[0] != zip {
+		t.Fatalf("make dist-app must leave exactly %s, found %v", zip, zips)
+	}
+
+	listing, err := exec.Command("unzip", "-Z1", zip).Output()
+	if err != nil {
+		t.Fatalf("unzip -Z1 %s: %v", zip, err)
+	}
+	members := strings.Fields(string(listing))
+	sort.Strings(members)
+	if !reflect.DeepEqual(members, wantReleaseAppMembers) {
+		t.Fatalf("%s must hold exactly the app:\nwant %v\ngot  %v", zip, wantReleaseAppMembers, members)
+	}
+
+	// ditto is what Finder's Archive Utility is built on; unzip would do too.
+	unpacked := t.TempDir()
+	if out, err := exec.Command("ditto", "-x", "-k", zip, unpacked).CombinedOutput(); err != nil {
+		t.Fatalf("ditto -x -k %s: %v\n%s", zip, err, out)
+	}
+	app := filepath.Join(unpacked, "fleetdeck.app")
+	window := filepath.Join(app, "Contents", "MacOS", "fleetdeck-window")
+
+	t.Run("the plist carries the tag and is window-app's in every other key", func(t *testing.T) {
+		got := plistKeys(t, filepath.Join(app, "Contents", "Info.plist"))
+		want := plistKeys(t, "Info.plist") // what `make window-app` copies as it is
+		for _, key := range []string{"CFBundleShortVersionString", "CFBundleVersion"} {
+			if got[key] != strings.TrimPrefix(releaseAppVersion, "v") {
+				t.Errorf("%s = %v, want %q: Finder's Get Info would show a version this release is not", key, got[key], strings.TrimPrefix(releaseAppVersion, "v"))
+			}
+			delete(got, key)
+			delete(want, key)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("the release plist drifted from window-app's:\nrelease    %v\nwindow-app %v", got, want)
+		}
+	})
+
+	t.Run("the icon is the one window-app ships", func(t *testing.T) {
+		got, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "icon.icns"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile("icon.icns")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Error("the release icon is not cmd/fleetdeck-window/icon.icns")
+		}
+	})
+
+	t.Run("every command runs on both architectures with the release version", func(t *testing.T) {
+		for _, bin := range []string{window, panelBinary(window), filepath.Join(filepath.Dir(window), "fleetdeck-status")} {
+			slices := fatSlices(t, bin)
+			var cpus []string
+			for cpu := range slices {
+				cpus = append(cpus, cpu)
+			}
+			sort.Strings(cpus)
+			if strings.Join(cpus, " ") != "amd64 arm64" {
+				t.Errorf("%s holds %v, want both amd64 and arm64: half the Macs could not open it", filepath.Base(bin), cpus)
+			}
+			for cpu, s := range slices {
+				if s.goarch != cpu {
+					t.Errorf("%s: the %s slice was built for GOARCH=%s", filepath.Base(bin), cpu, s.goarch)
+				}
+				if s.ldflags != wantReleaseLdflags {
+					t.Errorf("%s (%s) was built with %s, want %s", filepath.Base(bin), cpu, s.ldflags, wantReleaseLdflags)
+				}
+				// The window is WebKit or it is nothing; the panel must not be a
+				// second copy of it. Checked per slice: a cross-built slice is
+				// exactly where cgo quietly targets the wrong thing.
+				if isWindow := bin == window; s.webkit != isWindow {
+					t.Errorf("%s (%s) links WebKit = %v, want %v", filepath.Base(bin), cpu, s.webkit, isWindow)
+				}
+			}
+		}
+	})
+
+	t.Run("the seal covers the whole bundle", func(t *testing.T) {
+		// Without it the bundle's signature is the linker's, over the window
+		// binary alone, and a quarantined copy fails Gatekeeper's signature
+		// check instead of reaching the question a person can answer.
+		if out, err := exec.Command("codesign", "--verify", "--deep", "--strict", app).CombinedOutput(); err != nil {
+			t.Fatalf("codesign --verify --deep --strict: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("the panel beside the window reports the tag", func(t *testing.T) {
+		out, err := exec.Command(panelBinary(window), "version").CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) != releaseAppVersion {
+			t.Fatalf("%s version = %q (%v), want %q", panelBinary(window), out, err, releaseAppVersion)
+		}
+	})
+
+	t.Run("setup finds the status reporter where it looks", func(t *testing.T) {
+		// cmd/fleetdeck's first-run setup wires Claude Code's statusline to the
+		// fleetdeck-status beside the running panel, and writes nothing when it
+		// is not there. A release without it installs a fleet with no statusline.
+		info, err := os.Stat(filepath.Join(filepath.Dir(panelBinary(window)), "fleetdeck-status"))
+		if err != nil || info.Mode()&0o111 == 0 {
+			t.Fatalf("no executable fleetdeck-status beside the panel: %v", err)
+		}
+	})
+}
+
+// plistKeys reads a property list as a map, through plutil's JSON form.
+func plistKeys(t *testing.T, path string) map[string]any {
+	t.Helper()
+	out, err := exec.Command("plutil", "-convert", "json", "-o", "-", path).Output()
+	if err != nil {
+		t.Fatalf("plutil %s: %v", path, err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("plutil %s: %v", path, err)
+	}
+	return m
+}
+
+type slice struct {
+	goarch  string
+	ldflags string
+	webkit  bool
+}
+
+// fatSlices reads every architecture slice of a universal binary on its own.
+// `go version -m` is not enough here: on a universal binary it reads the first
+// slice only and says nothing about the rest (measured on 2026-09-11 with go
+// 1.27.1: an x86_64+arm64 binary reported GOARCH=amd64 alone).
+func fatSlices(t *testing.T, path string) map[string]slice {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fat, err := macho.NewFatFile(f)
+	if err != nil {
+		t.Fatalf("%s is not a universal binary: %v", filepath.Base(path), err)
+	}
+	slices := map[string]slice{}
+	for _, arch := range fat.Arches {
+		cpu := map[macho.Cpu]string{macho.CpuArm64: "arm64", macho.CpuAmd64: "amd64"}[arch.Cpu]
+		if cpu == "" {
+			cpu = arch.Cpu.String()
+		}
+		var s slice
+		info, err := buildinfo.Read(io.NewSectionReader(f, int64(arch.Offset), int64(arch.Size)))
+		if err != nil {
+			t.Fatalf("%s (%s): no Go build record: %v", filepath.Base(path), cpu, err)
+		}
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "GOARCH":
+				s.goarch = setting.Value
+			case "-ldflags":
+				s.ldflags = `-ldflags="` + setting.Value + `"`
+			}
+		}
+		for _, l := range arch.Loads {
+			if d, ok := l.(*macho.Dylib); ok && strings.Contains(d.Name, "WebKit.framework") {
+				s.webkit = true
+			}
+		}
+		slices[cpu] = s
+	}
+	return slices
+}

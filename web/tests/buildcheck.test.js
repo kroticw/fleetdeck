@@ -173,6 +173,34 @@ test("a build from a modified tree is marked beside its commit", () => {
   assert.equal(buildState("a", "a", ""), "current", "a modified tree alone is not a reason to reload");
 });
 
+// A person who downloaded the app reads the header to learn which version they
+// have, and a commit hash tells them nothing. A release shows its tag; the
+// commit stays in the title for whoever needs it.
+test("a release build shows its version in the header, not the commit", () => {
+  const html = brandHTML({ web: "a", version: "v0.2.0", revision: "24d0c7a657ebdf751972b6963b7039d5f4c10eb5" });
+  assert.match(html, />v0\.2\.0</, "the tag is on screen");
+  assert.doesNotMatch(html, />[^<]*24d0c7a[^<]*</, "the commit is not on screen");
+  assert.match(html, /title="[^"]*v0\.2\.0/, "the version is in the title too");
+  assert.match(html, /title="[^"]*24d0c7a657ebdf751972b6963b7039d5f4c10eb5/, "the full commit stays in the title");
+});
+
+// A build from a checkout reports "dev". The header must not dress that up as
+// a version: it says dev, and the commit beside it is what tells two such
+// builds apart.
+test("a dev build says dev beside its commit and shows nothing that reads as a version", () => {
+  const html = brandHTML({ web: "a", version: "dev", revision: "24d0c7a657eb", modified: true });
+  assert.match(html, />dev 24d0c7a\*</);
+  assert.doesNotMatch(html, />[^<]*v\d/, "nothing on screen looks like a release tag");
+});
+
+// A panel from before the version was in the fingerprint answers without one:
+// the header shows the commit exactly as it did then.
+test("a panel that reports no version keeps the commit on screen", () => {
+  const html = brandHTML({ web: "a", revision: "24d0c7a657eb" });
+  assert.match(html, />24d0c7a</);
+  assert.doesNotMatch(html, /dev/);
+});
+
 test("the brand survives a panel with no fingerprint at all", () => {
   assert.match(brandHTML(undefined), /fleetdeck/);
   assert.match(brandHTML({ web: "a" }), /fleetdeck/);
