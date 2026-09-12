@@ -386,7 +386,7 @@ func (c *Collector) enrich(views []state.SessionView, labels map[string]string) 
 		views[i].Label = labels[id]
 		// A label survives a session stopping — it is the operator's own
 		// name for the work, and the row still shows it. The readings below
-		// do not: silence is the age of the last write to a transcript
+		// do not: silence is the age of the last line in a transcript
 		// nothing is writing any more, which would report a session that
 		// stopped this morning as having been silent for hours, and the
 		// context bar would draw a reading frozen at the moment it stopped

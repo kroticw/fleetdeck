@@ -96,6 +96,22 @@ test("the in-call badge leaves on the next snapshot once the call has returned",
   assert.ok(!next.includes("sbadge-unknown"), "with the call back, the daemon's no stands again");
 });
 
+test("a session silent inside a call is named even while its flags make it stalled", () => {
+  // Seen on a live frozen session on 2026-09-12: state stayed "blocked" the whole time,
+  // so after ten minutes of silence the stall tracker counts it too. A bare flag says
+  // less than the call does -- "stalled" with the text of the last message sent to it
+  // as the reason, against "silent inside Read" -- so the call is what the row names.
+  const html = rowHtml(inCall("Read", minutes(14), { state: "blocked" }), true);
+  assert.ok(html.includes("sbadge-incall"), "the call is the more specific thing that can be said");
+  assert.ok(!html.includes("sbadge-stalled"), "one badge, the most specific one");
+});
+
+test("a stall in words still outranks everything but a question", () => {
+  const html = rowHtml(inCall("Read", minutes(14), { needs: "usage limit reached" }), true);
+  assert.ok(html.includes("sbadge-stalled"), "words decide: this session is stalled on a limit");
+  assert.ok(!html.includes("sbadge-incall"));
+});
+
 test("a session in an ordinary short call has no badge at all", () => {
   const html = rowHtml(inCall("Bash", minutes(3)));
   assert.ok(!html.includes("sbadge-unknown"));

@@ -36,11 +36,12 @@ const FLEET_ICON_SIZE = 20;
 // writing to its transcript every few seconds, and the badge stayed lit
 // through all of it, because the clock had run out during an earlier, real
 // stall and the sticky flag never let it restart. So the threshold is now
-// measured against silentFor -- the age of the last write to the session's
-// transcript, the one value in the snapshot that is a measurement rather than
-// a flag. "Has been silent continuously for T" is simply silentFor >= T, with
-// no clock of our own to accumulate and nothing to reset: a single write to
-// the transcript is the reset.
+// measured against silentFor -- how long ago the session last said anything
+// in its transcript, the one value in the snapshot that is a measurement rather
+// than a flag. "Has been silent continuously for T" is simply silentFor >= T,
+// with no clock of our own to accumulate and nothing to reset: a single line
+// the session writes itself is the reset. A line someone else writes there --
+// a message sent to it -- is not, since 2026-09-13 (internal/transcript.Voice).
 //
 // The number, 10 minutes, is measured rather than reasoned. Every transcript
 // on this machine over the 30 days to 2026-09-12 (103 files, 98 665 gaps

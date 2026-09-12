@@ -298,8 +298,8 @@ type FleetBoard struct {
 // and this package does neither — Task 11's Collect does both and hands the
 // finished views back. So a zero SilentFor out of Link means "not measured", never
 // "not silent", and the two cannot be told apart from the field alone. Silence is
-// measured from the transcript, as the age of the last write to the session's
-// file, and a session may well have no transcript at all: one that has just
+// measured from the transcript, as how long ago the session itself last said
+// anything there, and a session may well have no transcript at all: one that has just
 // started and whose file does not exist yet, one transcript.Locate cannot find,
 // one from another backend. Anything reading SilentFor must therefore treat zero
 // as "no measurement" — the silence rule in Diff does, which is why a session in

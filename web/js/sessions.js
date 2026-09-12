@@ -56,7 +56,8 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-// silentFor is nanoseconds since the session's transcript was last written.
+// silentFor is nanoseconds since the session last said anything -- its last own line
+// in the transcript, not the last line anyone wrote there (internal/transcript.Voice).
 // Zero is not "silent for zero time" — it means no transcript exists yet, so
 // nothing has been measured. That must render as unknown, never as "0m" or
 // as if the session were freshly active.
@@ -157,17 +158,25 @@ export function rowHtml(s, stalledNow) {
   if (waiting) classes.push("srow-waiting");
   if (stalled) classes.push("srow-stalled");
 
-  // At most one badge, in order of how much it asks of a person: a definite
-  // question first, then a stop that needs no answer, then "not known". A session
-  // can be both unknown and flag-only stalled; stalled is the more specific thing
-  // that can honestly be said about it, so it wins.
+  // At most one badge, the most specific thing that can honestly be said: a definite
+  // question first; then a session silent inside a named tool call; then a stop that
+  // needs no answer; then "not reported". A session a source never reports on can also
+  // be flag-only stalled, and stalled says more than "not reported", so it wins there.
+  // A session silent inside a call is the other way round: a frozen session was seen
+  // holding state "blocked" throughout, so the stall tracker counts it too, and a bare
+  // flag -- with the last message sent to it standing in as the reason -- says less
+  // than the call it has not come back from. A stall in words never gets here: words
+  // make waiting "no", not unknown.
+  const silentInCall = unknown && isSilencedInCall(s);
   const badge = waiting
     ? `<span class="sbadge sbadge-waiting">${escapeHtml(t("waiting"))}</span>`
-    : stalled
-      ? `<span class="sbadge sbadge-stalled">${escapeHtml(t("stalled"))}</span>`
-      : unknown
-        ? unknownBadge(s)
-        : "";
+    : silentInCall
+      ? unknownBadge(s)
+      : stalled
+        ? `<span class="sbadge sbadge-stalled">${escapeHtml(t("stalled"))}</span>`
+        : unknown
+          ? unknownBadge(s)
+          : "";
 
   // The reason is clipped to a few lines by the stylesheet, with the whole of
   // it in title. The daemon writes an incoming message's text into detail
