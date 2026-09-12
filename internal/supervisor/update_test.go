@@ -43,6 +43,15 @@ type updateRig struct {
 	expect    string
 	takeover  error
 	oldStarts atomic.Int64 // panels the old window's keeper started
+	newFrom   []string     // the bundle each panel of the new window was started from
+}
+
+// startedFrom is where the new window's keeper started each of its panels, in
+// order.
+func (r *updateRig) startedFrom() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.newFrom...)
 }
 
 func newUpdateRig(t *testing.T) *updateRig {
@@ -127,12 +136,22 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 		rev = []byte(r.expect)
 	}
 	events := make(chan Event, 16)
-	k := &Keeper{
+	var k *Keeper
+	k = &Keeper{
 		URL: r.url, Bin: PanelIn(staged),
 		Env:     helperEnvFor(r.newKind, r.addr),
 		LogPath: filepath.Join(r.t.TempDir(), "new.log"), StartTimeout: 5 * time.Second,
 		MinUptime: time.Minute, Poll: 100 * time.Millisecond,
-		OnEvent: func(e Event) { events <- e },
+		OnEvent: func(e Event) {
+			// Where a panel came from, noted as it starts: the keeper starts
+			// by path, and the path is what an update moves.
+			if e.State == Starting {
+				r.mu.Lock()
+				r.newFrom = append(r.newFrom, k.bin())
+				r.mu.Unlock()
+			}
+			events <- e
+		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -263,6 +282,35 @@ func TestAnUpdateBuildsToTheSideAndTheNewWindowPutsItInPlace(t *testing.T) {
 	want := []string{"check", "build", "handover", "handover:alive", "handover:panel", "handover:swapped", "handover:done", "done"}
 	if got := r.steps(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("steps %v, want %v", got, want)
+	}
+}
+
+// One update starts two panels, and that is the whole of what a person sees
+// as two restarts a moment apart (T-033, 2026-09-12). This pins which bundle
+// each of the two came from, because that is the part the log does not say
+// and the part that makes both starts necessary: the first cannot be the
+// canonical bundle, which still holds the old version at that moment, and the
+// second cannot be the staged one, which holds the version swapped out by
+// then -- a keeper left pointing there would start the old build the next
+// time its panel died. docs/engineering/window-and-panel.md says why at
+// length.
+func TestTheNewWindowStartsItsPanelTwiceStagedThenCanonical(t *testing.T) {
+	r := newUpdateRig(t)
+	staged := filepath.Join(StagingDir(r.canonical), "fleetdeck.app")
+
+	if err := r.update("old").Run(context.Background()); err != nil {
+		t.Fatalf("update: %v (steps %v)", err, r.steps())
+	}
+
+	from := r.startedFrom()
+	want := []string{PanelIn(staged), PanelIn(r.canonical)}
+	if strings.Join(from, ",") != strings.Join(want, ",") {
+		t.Fatalf("the new window started panels from %v, want %v", from, want)
+	}
+	// And the second start is the one that leaves the keeper able to start
+	// the new build again, rather than the one that was swapped out.
+	if got := revisionIn(t, staged); got != "old" {
+		t.Fatalf("the staged path holds %q after the swap, want the bundle swapped out", got)
 	}
 }
 
