@@ -259,7 +259,7 @@ const en = {
   // rather than found in the report after it — the wizard says the same thing
   // in setup_outside, and making a fleet writes in the same two places.
   start_new_outside:
-    "Outside that folder it adds the fleet to ~/.config/fleetdeck/config.yaml and the folder to permissions.additionalDirectories in ~/.claude/settings.json, so Claude Code sessions can write their cards. That file is rewritten as formatted JSON: a hand-ordered one does not come back in its own order.",
+    "Outside that folder the fleet goes into ~/.config/fleetdeck/config.yaml and the folder into permissions.additionalDirectories in ~/.claude/settings.json, so Claude Code sessions can write their cards. Both are added to what is there: your settings stay, only the indent and key order can change.",
   start_new_create: "Create the fleet",
   start_new_cancel: "Cancel",
   start_name_required: "Name the fleet",
@@ -509,7 +509,7 @@ const ru = {
   start_new_name: "Имя",
   start_new_path: "Папка",
   start_new_outside:
-    "Вне этой папки флот будет дописан в ~/.config/fleetdeck/config.yaml, а сама папка — в permissions.additionalDirectories файла ~/.claude/settings.json, чтобы сессии Claude Code могли вести свои карточки. Этот файл будет перезаписан отформатированным JSON: если вы упорядочили ключи вручную, прежний порядок не вернётся.",
+    "Вне этой папки флот дописывается в ~/.config/fleetdeck/config.yaml, а папка — в permissions.additionalDirectories файла ~/.claude/settings.json, чтобы сессии Claude Code вели свои карточки. Обе записи добавляются к прежним: настройки остаются, смениться может отступ и порядок ключей.",
   start_new_create: "Создать флот",
   start_new_cancel: "Отмена",
   start_name_required: "Укажите имя флота",
