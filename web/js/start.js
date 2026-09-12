@@ -25,7 +25,7 @@ import { t } from "./i18n.js";
 import { initTheme } from "./theme.js";
 import { belongsTo, fleetEntries, rememberedFleet, switchFleet } from "./fleet.js";
 import { isLive } from "./lifecycle.js";
-import { isWaiting } from "./header.js";
+import { isWaiting } from "./needs.js";
 import { fleetIconHTML } from "./icon.js";
 import { showSteps } from "./steplist.js";
 import { pageStorage, takeReloadFleet } from "./buildcheck.js";

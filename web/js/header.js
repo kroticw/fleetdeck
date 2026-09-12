@@ -6,69 +6,13 @@ import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
 import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
+import { isWaiting, isNeedsStalled, isFlagOnlyStalled } from "./needs.js";
 import { UPDATE_BINDING, WAY_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
 
 // The icon beside the fleet's name in the header: small enough to sit in a
 // row of controls, large enough to be the application's mark rather than a
 // dot. The start page shows the same drawing much larger.
 const FLEET_ICON_SIZE = 20;
-
-// Mirrors daemon.Session.Waiting()/.Stalled() in internal/daemon/types.go.
-// Keep both lists and both functions in sync with that file if it ever
-// changes -- it is the source of truth, this is a JS restatement of it.
-const STALLED_NEEDS_PREFIXES = [
-  "usage limit reached",
-  "login required",
-  "API error",
-  "API overloaded",
-  "API unavailable",
-  "invalid API request",
-  "rate limited",
-];
-
-function isStalledNeeds(needs) {
-  return STALLED_NEEDS_PREFIXES.some((prefix) => needs.startsWith(prefix));
-}
-
-// waiting: a person must answer before this session can move. needs is the
-// only signal -- never state/tempo, which are set by a mechanism the session
-// does not control (spec 3.1).
-export function isWaiting(s) {
-  if (s.dying) return false;
-  if (!s.needs) return false;
-  return !isStalledNeeds(s.needs);
-}
-
-// stalled: stopped for a reason no answer fixes, or stopped with no words at
-// all. Order matters: needs decides first; the state/tempo flags are only
-// consulted when needs is empty (spec 3.1). This mirrors
-// daemon.Session.Stalled() exactly -- timeless, per-snapshot -- and stays
-// that way for the sake of that mirror; the counter below does not use it
-// directly, see isFlagOnlyStalled and createStalledTracker.
-export function isStalled(s) {
-  if (s.dying) return false;
-  if (s.needs) return isStalledNeeds(s.needs);
-  return s.state === "blocked" || s.tempo === "blocked";
-}
-
-// isStalled's two branches, split apart so the counter can treat them
-// differently: a needs-based stall is a word from the daemon and is real the
-// instant it appears; a flag-only stall (state/tempo === "blocked" with no
-// needs text) is exactly what a session looks like for the length of one
-// message delivery too, and has been observed to read as stalled twice in
-// one hour on live sessions that were not actually stalled at all --
-// including the orchestrator's own. See createStalledTracker.
-function isNeedsStalled(s) {
-  if (s.dying) return false;
-  if (!s.needs) return false;
-  return isStalledNeeds(s.needs);
-}
-
-function isFlagOnlyStalled(s) {
-  if (s.dying) return false;
-  if (s.needs) return false;
-  return s.state === "blocked" || s.tempo === "blocked";
-}
 
 // How long a flag-only stall must go without a sign of life before the
 // counter shows it.
