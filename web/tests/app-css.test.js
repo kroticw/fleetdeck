@@ -375,3 +375,61 @@ test("nothing outranks the icon variants' own display rules", () => {
     );
   }
 });
+
+// The row that fills the workspace path (web/js/setup.js's workspace step):
+// the field, the button that opens the window's folder chooser, and the button
+// that writes. Neither button had a single rule in this file, so a browser drew
+// both of them itself — smaller and fainter than the field they stand beside,
+// and carrying none of the panel's own button language.
+//
+// That is the lesson the folded column's unfold button above already paid for
+// on a screenshot: a control that does not look like one does not exist for the
+// person who needs it. It lands harder here, because the chooser is the only
+// comfortable way to fill this field — the alternative is typing a path out by
+// hand — and it is the first thing a person sees of this application.
+//
+// Whether the row reads right is a question only a browser and a pair of eyes
+// can answer, which is what the acceptance screenshots are for. The floor kept
+// here: both buttons are drawn, at the field's own size rather than shrunk
+// below it, and exactly one of them wears the accent — the one that writes.
+test("the workspace row's buttons are drawn, at the field's size, with the accent on the one that writes", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // Every declaration that reaches a class, from each rule naming it: the
+  // shared rule that sizes both buttons and the separate one that colours it.
+  const declarations = (className) => {
+    let found = "";
+    for (const [, selector, bodyText] of stripped.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+      if (selector.split(",").map((s) => s.trim()).includes(className)) found += bodyText;
+    }
+    return found;
+  };
+
+  const choose = declarations(".setup-choose");
+  const create = declarations(".setup-create");
+  assert.notEqual(choose, "", ".setup-choose has no rule in web/app.css, so the browser draws it and nobody can find it");
+  assert.notEqual(create, "", ".setup-create has no rule in web/app.css, so the browser draws it");
+
+  // Drawn as a button: an edge, a surface of its own and a pointer that agrees
+  // it is one. Without the border it is a word on the page background.
+  assert.match(choose, /border:\s*1px solid var\(--border-strong\)/, "the choose button has no edge, so it reads as a label beside the field");
+  assert.match(choose, /background:\s*var\(--/, "the choose button has no surface of its own");
+  assert.match(choose, /cursor:\s*pointer/, "the choose button does not say it can be pressed");
+
+  // At the field's size, both of them. The field is font: inherit with a 4px
+  // vertical padding; a button that names a smaller --fs-* step comes out
+  // shorter than what it stands beside, which is the complaint this fixes.
+  for (const [name, rules] of [["choose", choose], ["create", create]]) {
+    assert.match(rules, /font:\s*inherit/, `the ${name} button does not take the row's own type size`);
+    assert.doesNotMatch(rules, /font-size:/, `the ${name} button shrinks its type below the field it stands beside`);
+    assert.match(rules, /padding:\s*4px 12px/, `the ${name} button is not at the field's height`);
+    assert.match(rules, /flex:\s*none/, `the ${name} button can be squeezed by the field beside it`);
+  }
+
+  // One accent in the row, on the button that writes. Two accents beside each
+  // other say the two actions weigh the same, and they do not: choosing a
+  // folder is reversible, creating the workspace is not.
+  assert.match(create, /background:\s*var\(--accent\)/, "the button that writes does not carry the accent");
+  assert.match(create, /border:\s*1px solid var\(--accent-strong\)/, "the button that writes has no accent edge");
+  assert.doesNotMatch(choose, /background:\s*var\(--accent/, "the choose button wears the accent that belongs to the button that writes");
+});

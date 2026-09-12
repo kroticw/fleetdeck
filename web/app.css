@@ -2615,6 +2615,60 @@ body.is-resizing {
   color: var(--text);
 }
 
+/* The two buttons of that row: the one that opens the window's folder chooser
+ * (cmd/fleetdeck-window/choose_darwin.go) and the one that writes.
+ *
+ * Neither had a rule here, so the browser drew both itself — shorter than the
+ * field they stand beside, in a grey of its own choosing, speaking none of the
+ * language the panel's other buttons speak. The screenshot settled it, exactly
+ * as it settled the folded column's unfold button above: a control that does
+ * not look like one does not exist for the person who needs it.
+ *
+ * It costs more here than anywhere else in the panel. The chooser is the only
+ * comfortable way to fill this field — a person who does not find it types a
+ * path out by hand — and this row is the first thing the application shows
+ * anybody at all.
+ *
+ * So both are drawn at the field's own height: font: inherit and its vertical
+ * padding, not a smaller --fs-* step, which is what made them read as captions.
+ * The accent goes to one of them only, the one that writes: a folder can be
+ * chosen again, a workspace is created once. */
+.setup-choose,
+.setup-create {
+  flex: none;
+  font: inherit;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.setup-choose {
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+}
+
+.setup-choose:hover {
+  background: var(--surface-hover);
+}
+
+.setup-create {
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent-strong);
+}
+
+.setup-create:hover {
+  background: var(--accent-strong);
+}
+
+/* Held down for as long as the POST is in flight (web/js/setup.js), so it has
+   to look held down rather than merely stop answering. */
+.setup-create:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .setup-error {
   color: var(--danger);
 }
