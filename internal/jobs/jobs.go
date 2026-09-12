@@ -133,13 +133,13 @@ type Record struct {
 // state is the subset of state.json this package reads. Every field is
 // optional and none is required to produce a usable record.
 type state struct {
-	SessionID       string `json:"sessionId"`
-	ResumeSessionID string `json:"resumeSessionId"`
-	Name            string `json:"name"`
-	CWD             string `json:"cwd"`
-	State           string `json:"state"`
-	Detail          string `json:"detail"`
-	Intent          string `json:"intent"`
+	SessionID       string   `json:"sessionId"`
+	ResumeSessionID string   `json:"resumeSessionId"`
+	Name            string   `json:"name"`
+	CWD             string   `json:"cwd"`
+	State           string   `json:"state"`
+	Detail          string   `json:"detail"`
+	Intent          string   `json:"intent"`
 	Backend         string   `json:"backend"`
 	CLIVersion      string   `json:"cliVersion"`
 	CreatedAt       string   `json:"createdAt"`
