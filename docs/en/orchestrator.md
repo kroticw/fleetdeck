@@ -59,9 +59,17 @@ as an excuse. Defects live there.
 
 Merge only on green CI, squashed.
 
-**Never pass the delete-branch flag while the fleet is running.** It removes the
+**Never pass the delete-branch flag on the merge command.** It removes the
 worktree the session is standing in, along with the branch, without asking and
-without printing a word about it. Delete branches later, when the session is gone.
+without printing a word about it.
+
+There is deliberately no "while the fleet is running" condition. A deferred merge
+fires not when it is queued but when CI turns green, and by then a session may be
+standing on the branch that did not exist when the merge was queued. An empty
+fleet at the moment of the command says nothing about the moment of the deletion.
+
+Delete the branch as a separate step, once the work on it is finished: ask
+`git worktree list` first, then delete.
 
 Without that flag, a dependent branch's base is not moved for you. Rebase it by
 hand, then change the base field. If files a branch never touched appear in its
@@ -88,6 +96,11 @@ board's documentation, not to the scratch directory.
 
 Do not compress the analysis itself. A compressed analysis is worse than none: it
 looks complete.
+
+That file is requested by the task, not invented by the session: a rule against
+creating unrequested documentation does not apply to it. A session that did not
+write its analysis carries it away silently — that failure is visible to nobody,
+so ask for the analysis explicitly and check that its path is named.
 
 ## One card, one session
 
