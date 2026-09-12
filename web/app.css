@@ -2161,6 +2161,20 @@ main {
   text-decoration: underline;
 }
 
+/* The card's number on the session list's button wears the board's chip
+ * (.knum, further down), and a live row is itself drawn on --surface-hover,
+ * the chip's own ground. Left as it is, the chip vanishes into the row and the
+ * number is back to plain monospace, which is the one thing the chip is there
+ * to prevent. Measured on a stand: chip and row computed to the same colour in
+ * both themes. A stopped row sits on --surface and needs nothing. */
+.srow .knum {
+  background: var(--surface);
+}
+
+.srow .knum-none {
+  background: none;
+}
+
 /* <abbr> comes underlined in some browsers and dotted in others; stated here so
  * the estimate mark does not read as a link. The existing .est rule above keeps
  * the help cursor. */

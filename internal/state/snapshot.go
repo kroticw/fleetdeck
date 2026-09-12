@@ -64,6 +64,11 @@ type SessionView struct {
 	CardPath  string            `json:"cardPath,omitempty"`
 	SilentFor time.Duration     `json:"silentFor"`
 
+	// CardID is the number of the card at CardPath ("T-NNN"), empty when that
+	// card has none or there is no card. It rides beside the path so the
+	// session list can name the card a session is busy with.
+	CardID string `json:"cardId,omitempty"`
+
 	// Lifecycle is which of the three states above this session is in. It is
 	// derived, never read off the wire: the control protocol has no `live`
 	// and no `resumable` field, and says so (docs/protocol/
@@ -280,7 +285,7 @@ type FleetBoard struct {
 // link on every tick, and a neighbour package changing its sort cannot silently
 // move a card from one session to another.
 //
-// Link fills Session and CardPath and nothing else. Context, SilentFor, Model and
+// Link fills Session, CardPath and CardID and nothing else. Context, SilentFor, Model and
 // CostUSD are the caller's to fill: the first two require I/O (reading the session's
 // transcript from disk) and the last two arrive from the statusline reporter,
 // and this package does neither — Task 11's Collect does both and hands the
@@ -293,23 +298,23 @@ type FleetBoard struct {
 // as "no measurement" — the silence rule in Diff does, which is why a session in
 // its first second of life does not get told it has been silent for half an hour.
 func Link(sessions []daemon.Session, cards []board.Card) []SessionView {
-	cardByShort := map[string]string{}
+	cardByShort := map[string]board.Card{}
 	for _, c := range cards {
 		if c.Session == "" {
 			continue
 		}
-		if won, taken := cardByShort[c.Session]; taken && won <= c.Path {
+		if won, taken := cardByShort[c.Session]; taken && won.Path <= c.Path {
 			continue
 		}
-		cardByShort[c.Session] = c.Path
+		cardByShort[c.Session] = c
 	}
 	views := make([]SessionView, 0, len(sessions))
 	for _, s := range sessions {
-		path := ""
-		if s.Short != "" {
-			path = cardByShort[s.Short]
+		v := SessionView{Session: s}
+		if c, ok := cardByShort[s.Short]; ok && s.Short != "" {
+			v.CardPath, v.CardID = c.Path, c.ID
 		}
-		views = append(views, SessionView{Session: s, CardPath: path})
+		views = append(views, v)
 	}
 	return views
 }

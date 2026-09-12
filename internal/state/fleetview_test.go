@@ -137,6 +137,27 @@ func TestForFleetLinksSessionsOnlyToThatFleetsCards(t *testing.T) {
 	}
 }
 
+// TestForFleetCarriesTheNumberOfThatFleetsCard pins that a tab's session names
+// the number of the card on that tab's board, and loses a number whose card is
+// on another board along with its path.
+func TestForFleetCarriesTheNumberOfThatFleetsCard(t *testing.T) {
+	whole := wholeTwoFleets()
+	whole.Boards[0].Cards[0].ID = "T-001" // A's one.md, session a0000002
+	whole.Boards[1].Cards[0].ID = "T-002" // B's two.md, session b0000002
+	whole.Sessions[1].CardID = "T-001"    // the whole view linked it on every board
+	view, err := ForFleet(whole, "B")
+	if err != nil {
+		t.Fatalf("ForFleet(B): %v", err)
+	}
+	s := byShort(view.Sessions)
+	if got := s["b0000002"].CardID; got != "T-002" {
+		t.Errorf("b0000002 names %q in B's view, want T-002", got)
+	}
+	if got := s["a0000002"].CardID; got != "" {
+		t.Errorf("a0000002 names %q in B's view, whose board does not hold its card", got)
+	}
+}
+
 func TestForFleetReportsOrphansOfThatFleetOnly(t *testing.T) {
 	view, err := ForFleet(wholeTwoFleets(), "A")
 	if err != nil {

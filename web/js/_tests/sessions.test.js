@@ -304,6 +304,41 @@ test("a session with no card offers no control", () => {
   assert.ok(!html.includes("scard"), "nothing to open, so nothing to press");
 });
 
+// --- the card's number on the button (T-042) ---
+//
+// The list is where a person asks "what is this one busy with", and the card's
+// number is the answer they can say out loud. It wears the board's chip (.knum)
+// on purpose: the number is told apart from the session's short id by shape,
+// not colour, and one shape means one kind of thing wherever it appears.
+
+test("the card button names the card's number, readable without a pointer", () => {
+  const html = rowHtml({ short: "aa11", name: "aa11", cardPath: "/board/cards/T-018-x.md", cardId: "T-018" });
+  const button = /<button[^>]*class="scard"[^>]*>([\s\S]*?)<\/button>/.exec(html)?.[1] ?? "";
+  assert.match(button, /class="knum"[^>]*>T-018</, "the number sits inside the button, in the board's chip");
+  assert.ok(button.replace(/<[^>]*>/g, " ").includes("T-018"), "and it is text, not only a tooltip");
+});
+
+test("the number and the session's short id never share a shape", () => {
+  const html = rowHtml({ short: "bb22", name: "bb22", cardPath: "/b/c.md", cardId: "T-018" });
+  assert.ok(!/class="knum"[^>]*>bb22</.test(html), "the session's id must not wear the card's chip");
+  assert.ok(!/class="sname"[^>]*>T-018</.test(html), "and the number must not be drawn as a name");
+});
+
+test("a card with no number says so in words, not with a gap or an empty chip", () => {
+  const html = rowHtml({ short: "aa11", name: "n", cardPath: "/b/c.md" });
+  assert.match(html, /class="knum knum-none"[^>]*>(no number|без номера)</);
+});
+
+test("a session with no card shows no number at all", () => {
+  const html = rowHtml({ short: "aa11", name: "n" });
+  assert.ok(!html.includes("knum"), "no card, so no number to name");
+});
+
+test("a card number cannot break out of the markup it lands in", () => {
+  const html = rowHtml({ short: "aa11", name: "n", cardPath: "/b/c.md", cardId: '<img src=x onerror=alert(1)>' });
+  assert.ok(!html.includes("<img"), "a number is data, not markup");
+});
+
 test("a card path cannot break out of the attribute it lands in", () => {
   const html = rowHtml({ short: "aa11", name: "n", cardPath: '/board/x" onclick="alert(1)' });
   assert.ok(!html.includes('onclick="alert(1)"'), "a path is data, not markup");

@@ -46,7 +46,7 @@ The validator also tolerates four fields that Obsidian's own property panel can 
 
 `id` is the one identifier a person can read off the panel, say out loud, and hand back to a script to reach the same file — which is what a board's `scripts/card_path.py` resolves. It is permanent: unlike `session`, which is the short id of whichever session is working the card and changes with every run, a card's number is assigned once, when the card is created, and is what the card is referred to by afterwards.
 
-The panel shows it in both places a card appears — on the card in its column and in the open card, beside `stage` and `progress` — as a monospaced chip, which is what keeps it from being mistaken for the session's short id sitting next to it.
+The panel shows it wherever a card appears — on the card in its column, in the open card beside `stage` and `progress`, and on the button that opens a session's card in the session list — as a monospaced chip, which is what keeps it from being mistaken for the session's short id sitting next to it.
 
 A number is handed out in exactly two places, and both claim it the same way — an empty marker file `.ids/T-NNN` created with `O_EXCL`: the board's `scripts/new_card.py` and the panel's new-card button. One claim rather than two independent counters: cards are started in parallel by the operator, by the orchestrator and by the sessions themselves, and "read the maximum, add one" gives one number to two cards when two of them start at once. The marker is never removed — not when a card is renamed, not when it moves to the archive — so a number can neither be released nor reused.
 
