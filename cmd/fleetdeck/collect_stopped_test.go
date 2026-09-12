@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kroticw/fleetdeck/internal/config"
+	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/state"
 )
 
@@ -140,8 +141,16 @@ func TestStoppedSessionCarriesNoLiveReadings(t *testing.T) {
 	if s.Tempo != "" {
 		t.Errorf("tempo = %q, want empty on a session that is not running", s.Tempo)
 	}
-	if s.Needs != "" {
-		t.Errorf("needs = %q, want empty: nobody is being asked anything", s.Needs)
+	// Stated, not omitted: a stopped session is known not to be waiting, so Needs
+	// carries an empty string rather than nothing at all. Nil here would make
+	// Waiting() answer "unknown" and draw the session as an open question forever.
+	if s.Needs == nil {
+		t.Error("needs is absent; a stopped session must say it has no question, not stay silent")
+	} else if *s.Needs != "" {
+		t.Errorf("needs = %q, want empty: nobody is being asked anything", *s.Needs)
+	}
+	if got := s.Waiting(); got != daemon.No {
+		t.Errorf("Waiting() = %v on a stopped session, want no", got)
 	}
 	if s.Dying {
 		t.Error("a stopped session is not dying; it has already stopped")
@@ -155,7 +164,7 @@ func TestStoppedSessionCarriesNoLiveReadings(t *testing.T) {
 	if s.LastState != "blocked" {
 		t.Errorf("lastState = %q, want the value the session recorded", s.LastState)
 	}
-	if s.Waiting() || s.Stalled() {
+	if s.Waiting() == daemon.Yes || s.Stalled() {
 		t.Error("a stopped session must land in neither the waiting nor the stalled counter")
 	}
 }

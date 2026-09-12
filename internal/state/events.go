@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/fleet"
 )
 
@@ -73,7 +74,22 @@ func standingRules(s SessionView, silenceAfter time.Duration) map[string]bool {
 	if !s.Live() {
 		return rules
 	}
-	if s.Waiting() {
+	// Only a Yes raises the banner. Waiting is three-valued (see daemon.Verdict), and
+	// an Unknown -- a source that never said whether anyone is waiting -- must not be
+	// turned into a banner here, for the same reason it must not be turned into "not
+	// waiting" on screen: neither is something the source actually said. A banner is a
+	// claim about a specific session made to a specific person, and firing one on every
+	// session a source cannot describe would empty the counter of meaning within an hour
+	// of such a source appearing -- which is the failure section 5 warns about, one step
+	// removed.
+	//
+	// This does leave an unknown session without a banner of its own, and that is the
+	// under-reporting side of the trade. It is not left uncovered: the silence rule below
+	// is what catches it, and it is the one rule of the three that survives a change of
+	// source, because it measures how long the session has been quiet rather than reading
+	// the meaning of a field. A session nobody can describe, waiting on a person, goes
+	// quiet -- and gets called in on time.
+	if s.Waiting() == daemon.Yes {
 		rules[kindWaiting] = true
 	}
 	if s.State == "failed" {

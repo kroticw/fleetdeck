@@ -66,6 +66,11 @@ func snapshotFixture() state.Snapshot {
 					Agent:      "claude",
 					CLIVersion: "2.1.263",
 					Source:     "shell",
+					// Says("") rather than nil: this fixture stands for a session from the
+					// daemon, which always sends the key. nil would make the golden file
+					// omit "needs" entirely and quietly teach the frontend tests that a
+					// perfectly ordinary session is one nothing is known about.
+					Needs: daemon.Says(""),
 				},
 				Context:   &transcript.Usage{Tokens: 120000, Window: 1000000},
 				CardPath:  "/board/fleet-ui.md",

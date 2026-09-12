@@ -76,6 +76,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -214,7 +215,10 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 		t.Fatal("server goroutine did not complete: the client likely never connected")
 	}
 
-	type expect struct{ waiting, stalled bool }
+	type expect struct {
+		waiting Verdict
+		stalled bool
+	}
 	// Every expectation below is derived directly from the current rule (see Waiting's
 	// and Stalled's doc comments): needs non-empty decides alone, matching
 	// stalledNeedsPrefixes or not; needs empty falls to state/tempo, which can only
@@ -224,11 +228,11 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 		// waiting, regardless of tempo=blocked and state=blocked both being set. This
 		// is the record that proves words outrank flags: were needs read second, both
 		// flags being blocked would suggest stalled, but the question text decides.
-		"a1c92f04": {waiting: true, stalled: false},
+		"a1c92f04": {waiting: Yes, stalled: false},
 		// needs="": empty, and neither flag is blocked — neither.
-		"b2d83e15": {waiting: false, stalled: false},
+		"b2d83e15": {waiting: No, stalled: false},
 		// needs="": empty, and neither flag is blocked — neither.
-		"c3e94f26": {waiting: false, stalled: false},
+		"c3e94f26": {waiting: No, stalled: false},
 		// needs="", state=blocked: needs is empty, so state/tempo decide — stalled,
 		// never waiting, even though Detail's text ("awaiting user decision on a
 		// dependency version") reads like a person-facing decision. State alone cannot
@@ -236,43 +240,43 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 		// control, indistinguishable from a session merely coordinating its own
 		// subagents. This is exactly why the protocol obliges Detail to be shown
 		// verbatim for a session stalled this way.
-		"e4fa5037": {waiting: false, stalled: true},
+		"e4fa5037": {waiting: No, stalled: true},
 		// needs="", dying=true: a job being retired. Dying overrides before either
 		// needs or the flags are even read — plainly neither.
-		"f5ab6148": {waiting: false, stalled: false},
+		"f5ab6148": {waiting: No, stalled: false},
 		// needs="answer: ...": non-empty, does not match stalledNeedsPrefixes —
 		// waiting, with neither flag blocked.
-		"d4bc7159": {waiting: true, stalled: false},
+		"d4bc7159": {waiting: Yes, stalled: false},
 		// needs="usage limit reached...": non-empty, matches stalledNeedsPrefixes —
 		// stalled, not waiting, with neither flag blocked.
-		"07ea8b3c": {waiting: false, stalled: true},
+		"07ea8b3c": {waiting: No, stalled: true},
 		// needs="rate limited...", tempo=blocked: non-empty, matches
 		// stalledNeedsPrefixes — stalled. The flags play no part in this outcome at
 		// all under the current rule; they are consulted only when needs is empty.
-		"918cf4a2": {waiting: false, stalled: true},
+		"918cf4a2": {waiting: No, stalled: true},
 		// needs="choose: ...", state=blocked, tempo=blocked, dying=true: every trigger
 		// Waiting or Stalled could otherwise fire on is present at once, but Dying
 		// overrides all of them — neither. Absent Dying, needs alone (non-empty, not
 		// in stalledNeedsPrefixes) would already make this Waiting, per a1c92f04 above.
-		"2b91d6f7": {waiting: false, stalled: false},
+		"2b91d6f7": {waiting: No, stalled: false},
 		// needs="rate limited...", tempo=blocked: the same shape as 918cf4a2, recorded
 		// directly against the fixture — non-empty needs matching stalledNeedsPrefixes
 		// makes this stalled regardless of tempo=blocked.
-		"6a3d8f52": {waiting: false, stalled: true},
+		"6a3d8f52": {waiting: No, stalled: true},
 		// needs="disk full...": non-empty, an unfamiliar prefix not in
 		// stalledNeedsPrefixes — the closed list is deliberately narrow, so this must
 		// be waiting, not stalled, with neither flag blocked.
-		"c7f2a916": {waiting: true, stalled: false},
+		"c7f2a916": {waiting: Yes, stalled: false},
 		// needs="request too large...": non-empty, in the daemon's own vocabulary but
 		// deliberately outside the design spec's closed list (fixing it takes a person
 		// running /compact inside the session) — waiting, with neither flag blocked.
-		"3e9b5c04": {waiting: true, stalled: false},
+		"3e9b5c04": {waiting: Yes, stalled: false},
 		// needs="", tempo=blocked: needs is empty, so state/tempo decide — stalled,
 		// never waiting, the same reasoning as e4fa5037 but via Tempo rather than
 		// State, and with a Detail whose own text explicitly denies being a
 		// person-wait ("no reply needed from a person") — shown verbatim regardless,
 		// since the protocol's obligation does not depend on what Detail happens to say.
-		"8b4e2f71": {waiting: false, stalled: true},
+		"8b4e2f71": {waiting: No, stalled: true},
 	}
 
 	if len(sessions) != len(want) {
@@ -290,7 +294,7 @@ func TestWaitingAndStalledAgainstFixture(t *testing.T) {
 		if got := s.Stalled(); got != exp.stalled {
 			t.Errorf("Stalled() = %v for short %q, want %v", got, s.Short, exp.stalled)
 		}
-		if s.Waiting() && s.Stalled() {
+		if s.Waiting() == Yes && s.Stalled() {
 			t.Errorf("short %q is both Waiting and Stalled; the two must be mutually exclusive", s.Short)
 		}
 	}
@@ -434,21 +438,35 @@ func TestFixtureFirstRecordAllFieldsLiteral(t *testing.T) {
 		Agent:      "claude",
 		CLIVersion: "2.1.259",
 		Source:     "fleet",
-		Needs:      "choose: (1) deploy via two staged releases or one combined release; (2) confirm the default configuration value; (3) use the short title or the more descriptive one",
+		Needs:      Says("choose: (1) deploy via two staged releases or one combined release; (2) confirm the default configuration value; (3) use the short title or the more descriptive one"),
 		Dying:      false,
 	}
 
-	if got != want {
-		t.Errorf("record a1c92f04 =\n%+v\nwant\n%+v", got, want)
+	// reflect.DeepEqual rather than ==: Needs is a pointer now, and == would compare
+	// where the two strings live rather than what they say, failing on every run for a
+	// record that decoded perfectly.
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("record a1c92f04 =\n%s\nwant\n%s", showSession(got), showSession(want))
 	}
+}
+
+// showSession prints a Session with Needs readable. "%+v" prints a *string as an
+// address, which turns a one-word difference into two lines of hex nobody can compare.
+func showSession(s Session) string {
+	needs := "<absent>"
+	if s.Needs != nil {
+		needs = strconv.Quote(*s.Needs)
+	}
+	s.Needs = nil
+	return fmt.Sprintf("%+v needs=%s", s, needs)
 }
 
 // TestRateLimitedIsStalledNotWaiting covers the split between the two counters: a
 // non-empty Needs that is not one of the question forms (as seen on a rate-limited or
 // login-required session) is Stalled, since no answer fixes it, but never Waiting.
 func TestRateLimitedIsStalledNotWaiting(t *testing.T) {
-	s := Session{State: "working", Tempo: "active", Needs: "rate limited, retrying in 30s"}
-	if s.Waiting() {
+	s := Session{State: "working", Tempo: "active", Needs: Says("rate limited, retrying in 30s")}
+	if s.Waiting() == Yes {
 		t.Error("a rate-limited session with a non-question Needs must not be Waiting()")
 	}
 	if !s.Stalled() {
@@ -466,8 +484,8 @@ func TestRateLimitedIsStalledNotWaiting(t *testing.T) {
 // lands in Stalled this way (see docs/protocol/daemon-control-socket.md section 5),
 // not read by either method here.
 func TestBareBlockedStateWithEmptyNeedsIsStalledNotWaiting(t *testing.T) {
-	s := Session{State: "blocked", Tempo: "active", Needs: "", Detail: "awaiting a decision"}
-	if s.Waiting() {
+	s := Session{State: "blocked", Tempo: "active", Needs: Says(""), Detail: "awaiting a decision"}
+	if s.Waiting() == Yes {
 		t.Error("state=blocked with empty needs must never be Waiting(), regardless of tempo or detail")
 	}
 	if !s.Stalled() {
@@ -480,8 +498,8 @@ func TestBareBlockedStateWithEmptyNeedsIsStalledNotWaiting(t *testing.T) {
 // for the identical reason — the flag alone cannot say whether a person or the
 // session's own subagents are the reason for the stop.
 func TestBareBlockedTempoWithEmptyNeedsIsStalledNotWaiting(t *testing.T) {
-	s := Session{State: "working", Tempo: "blocked", Needs: ""}
-	if s.Waiting() {
+	s := Session{State: "working", Tempo: "blocked", Needs: Says("")}
+	if s.Waiting() == Yes {
 		t.Error("tempo=blocked with empty needs must never be Waiting()")
 	}
 	if !s.Stalled() {
@@ -494,8 +512,8 @@ func TestBareBlockedTempoWithEmptyNeedsIsStalledNotWaiting(t *testing.T) {
 // both flags blocked, a naive "check the flags" reading would call this stalled, but
 // the question text in Needs makes it Waiting.
 func TestQuestionNeedsOutranksBothBlockedFlags(t *testing.T) {
-	s := Session{State: "blocked", Tempo: "blocked", Needs: "answer: Which colour should the probe use? (Red · Green · Blue)"}
-	if !s.Waiting() {
+	s := Session{State: "blocked", Tempo: "blocked", Needs: Says("answer: Which colour should the probe use? (Red · Green · Blue)")}
+	if s.Waiting() != Yes {
 		t.Error("a question needs must be Waiting() even with both state and tempo blocked")
 	}
 	if s.Stalled() {
@@ -506,8 +524,8 @@ func TestQuestionNeedsOutranksBothBlockedFlags(t *testing.T) {
 // TestWaitingQuestionNeedsAloneIsWaitingNotStalled covers the third, independent
 // waiting form: neither flag is blocked, but the needs text itself is a question.
 func TestWaitingQuestionNeedsAloneIsWaitingNotStalled(t *testing.T) {
-	s := Session{State: "working", Tempo: "active", Needs: "choose: (1) A; (2) B"}
-	if !s.Waiting() {
+	s := Session{State: "working", Tempo: "active", Needs: Says("choose: (1) A; (2) B")}
+	if s.Waiting() != Yes {
 		t.Error("a \"choose:\" needs with neither flag blocked must be Waiting()")
 	}
 	if s.Stalled() {
@@ -517,8 +535,8 @@ func TestWaitingQuestionNeedsAloneIsWaitingNotStalled(t *testing.T) {
 
 // TestWaitingNegative covers a session that is neither waiting nor stalled by any form.
 func TestWaitingNegative(t *testing.T) {
-	s := Session{State: "working", Tempo: "active", Needs: ""}
-	if s.Waiting() {
+	s := Session{State: "working", Tempo: "active", Needs: Says("")}
+	if s.Waiting() == Yes {
 		t.Error("state=working, tempo=active, needs=\"\" must not be waiting")
 	}
 	if s.Stalled() {
@@ -536,10 +554,10 @@ func TestDyingSessionIsNeverWaitingOrStalled(t *testing.T) {
 	s := Session{
 		State: "blocked",
 		Tempo: "blocked",
-		Needs: "choose: (1) A; (2) B",
+		Needs: Says("choose: (1) A; (2) B"),
 		Dying: true,
 	}
-	if s.Waiting() {
+	if s.Waiting() == Yes {
 		t.Error("a dying session must never be Waiting(), regardless of state/tempo/needs")
 	}
 	if s.Stalled() {

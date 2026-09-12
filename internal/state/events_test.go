@@ -16,15 +16,25 @@ import (
 var observedAt = time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
 
 func waitingView(short string) SessionView {
-	return SessionView{Session: daemon.Session{Short: short, Name: "session " + short, Needs: "answer: pick one (A · B)"}}
+	return SessionView{Session: daemon.Session{Short: short, Name: "session " + short, Needs: daemon.Says("answer: pick one (A · B)")}}
 }
 
+// idleView is a session from the daemon going about its business: the source speaks,
+// and what it says is that there is no question. Says("") rather than a nil Needs,
+// which would be a source that never said anything -- a different fixture, below.
 func idleView(short string) SessionView {
+	return SessionView{Session: daemon.Session{Short: short, Name: "session " + short, Needs: daemon.Says("")}}
+}
+
+// unknownView is a session from a source that does not speak `needs` at all. Waiting()
+// answers Unknown for it, and the point of the tests below is what the banner rules do
+// with that: nothing, deliberately.
+func unknownView(short string) SessionView {
 	return SessionView{Session: daemon.Session{Short: short, Name: "session " + short}}
 }
 
 func stalledView(short string) SessionView {
-	return SessionView{Session: daemon.Session{Short: short, Name: "session " + short, State: "blocked", Detail: "waiting on my own subagents"}}
+	return SessionView{Session: daemon.Session{Short: short, Name: "session " + short, State: "blocked", Detail: "waiting on my own subagents", Needs: daemon.Says("")}}
 }
 
 func TestSessionBecomingWaitingFiresOnce(t *testing.T) {
@@ -554,5 +564,48 @@ func TestSilenceBannerTextUsesTheHumanDuration(t *testing.T) {
 	fire, _ := Diff(prev, next, 30*time.Minute)
 	if len(fire) != 1 || fire[0].Text != "has been silent for over 30m" {
 		t.Fatalf("the banner must read the way a person writes a duration: %+v", fire)
+	}
+}
+
+// A source that cannot say whether anyone is waiting must not be turned into a banner.
+// A banner is a claim about one session made to one person; firing it for every session
+// a source cannot describe would empty the counter of meaning within an hour of such a
+// source appearing, which is the failure docs/protocol/daemon-control-socket.md
+// section 5 warns about one step removed.
+func TestUnknownWaitingRaisesNoBanner(t *testing.T) {
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{idleView("a")}}
+	next := Snapshot{Sessions: []SessionView{unknownView("a")}}
+	fire, cleared := Diff(prev, next, time.Hour)
+	for _, e := range fire {
+		if e.Key == "session:a:waiting" {
+			t.Fatalf("an unknown waiting verdict fired a waiting banner: %+v", fire)
+		}
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("nothing was standing, so nothing can clear: %v", cleared)
+	}
+}
+
+// The other half of that trade, stated as a test so it is a decision on the record
+// rather than an omission: an unknown session is not left uncovered, it is covered by
+// the silence rule instead. That rule measures how long the session has been quiet and
+// reads no field whose meaning depends on the source, which is why it is the one of the
+// three that survives a source this client cannot otherwise describe.
+func TestUnknownWaitingStillReachedBySilence(t *testing.T) {
+	quiet := unknownView("a")
+	quiet.SilentFor = 2 * time.Hour
+
+	prev := Snapshot{At: observedAt, Sessions: []SessionView{unknownView("a")}}
+	next := Snapshot{Sessions: []SessionView{quiet}}
+	fire, _ := Diff(prev, next, time.Hour)
+
+	var found bool
+	for _, e := range fire {
+		if e.Key == "session:a:silent" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a session nobody can describe, silent past the threshold, must still call someone: %+v", fire)
 	}
 }

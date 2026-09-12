@@ -124,7 +124,7 @@ func TestStoppedSessionRaisesNoBanner(t *testing.T) {
 		Session: daemon.Session{
 			Short: "stop1234",
 			State: "failed",
-			Needs: "answer: are you there?",
+			Needs: daemon.Says("answer: are you there?"),
 		},
 		Lifecycle: LifecycleStopped,
 		SilentFor: 4 * time.Hour,
