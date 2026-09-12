@@ -89,12 +89,15 @@ build:
 		go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$$b ./cmd/$$b || exit 1; \
 	done
 
+# test runs every Go test and, through go test, the board's Python tests as well
+# (plugin/templates/board_scripts_test.go), so it needs python3 and fails in words
+# without it: a skipped Python run would read exactly like a passing one.
 test:
 	go test ./... -race -count=1
 
-# The frontend's own tests. Kept out of `make test` deliberately: that target is
-# Go-only and node is not a build requirement of this project, so a contributor
-# without node still gets a complete Go check. CI runs both.
+# The frontend's own tests. Kept out of `make test` deliberately: node is not a
+# build requirement of this project, so a contributor without node still gets a
+# complete check of everything else. CI runs both.
 #
 # No npm and no dependencies: web/package.json exists only to tell node that the
 # files under web/ are ES modules, and web/tests/ sits outside web/embed.go's

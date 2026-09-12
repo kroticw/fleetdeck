@@ -1,7 +1,7 @@
 // Package scripts holds the plugin's shell scripts. It carries no Go code of
 // its own — only the tests that run those scripts, so that they are checked by
-// `make test` and by CI. The board's own Python tests are not run anywhere
-// automatically, and a check nobody runs is a green report rather than a guard.
+// `make test` and by CI. The board's own Python tests are run the same way,
+// from plugin/templates, next to the files they test.
 package scripts
 
 import (
