@@ -3,6 +3,7 @@ package jobs
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -354,5 +355,57 @@ func TestUnparseableTimestampsLeaveTheRecordUsable(t *testing.T) {
 	}
 	if !r.CreatedAt.IsZero() || !r.UpdatedAt.IsZero() {
 		t.Errorf("want zero times, got %v / %v", r.CreatedAt, r.UpdatedAt)
+	}
+}
+
+// The two fields below are read for one caller only — the resume descriptor
+// internal/daemon.Client.Resume sends — and for nothing the panel displays.
+// They are tested apart from the display fields above for that reason: a
+// change that drops one of them resumes the session without its own flags,
+// which is invisible in every screen this package otherwise feeds and shows
+// up only as a session that came back on the wrong model.
+func TestLoadReadsTheFieldsAResumeDescriptorNeeds(t *testing.T) {
+	cwd := t.TempDir()
+	dir := writeStore(t, map[string][]byte{
+		"bbbb2222": []byte(`{
+			"sessionId": "bbbb2222-0000-4000-8000-000000000002",
+			"resumeSessionId": "cccc3333-0000-4000-8000-000000000003",
+			"cwd": "` + cwd + `",
+			"linkScanPath": "/somewhere/projects/-p/bbbb2222.jsonl",
+			"respawnFlags": ["--name", "a session", "--model", "opus"]
+		}`),
+	})
+
+	records, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	r := find(t, records, "bbbb2222")
+
+	if got, want := r.LinkScanPath, "/somewhere/projects/-p/bbbb2222.jsonl"; got != want {
+		t.Errorf("LinkScanPath = %q, want %q", got, want)
+	}
+	want := []string{"--name", "a session", "--model", "opus"}
+	if !slices.Equal(r.RespawnFlags, want) {
+		t.Errorf("RespawnFlags = %v, want %v", r.RespawnFlags, want)
+	}
+}
+
+// ResumeID is the rule "resumeSessionId, else sessionId" made callable. It is
+// exported because the resume path outside this package has to apply exactly
+// the same rule Resumable applied inside it — two copies of that rule could
+// disagree, and a session reported resumable would then be dispatched under
+// an id the daemon does not know.
+func TestResumeIDPrefersTheExplicitResumeID(t *testing.T) {
+	both := Record{SessionID: "s", ResumeSessionID: "r"}
+	if got := both.ResumeID(); got != "r" {
+		t.Errorf("ResumeID with both set = %q, want %q", got, "r")
+	}
+	only := Record{SessionID: "s"}
+	if got := only.ResumeID(); got != "s" {
+		t.Errorf("ResumeID with no resume id = %q, want %q", got, "s")
+	}
+	if got := (Record{}).ResumeID(); got != "" {
+		t.Errorf("ResumeID with neither = %q, want empty", got)
 	}
 }
