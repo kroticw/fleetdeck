@@ -129,8 +129,16 @@ func (k *Keeper) init() {
 
 // Restart asks the keeper to stop its panel and start it again from bin. It
 // takes effect while the keeper's own panel answers, and is not counted as
-// the panel dying: an update restarts the panel from the canonical path once
-// the new bundle is there, so the panel reports where it really runs from.
+// the panel dying.
+//
+// Its one caller is an update, restarting the panel from the canonical path
+// once the new bundle is there. Setting Bin without stopping the panel would
+// not do: the panel that runs was started from the staging directory, which
+// holds the bundle that was swapped out by then, and three things follow from
+// where a panel was started rather than from which build it is -- the path
+// the keeper starts the next one from, the path the panel reports in
+// /api/snapshot, and the path `fleetdeck init` writes into Claude Code's
+// statusLine.command. docs/engineering/window-and-panel.md says it at length.
 func (k *Keeper) Restart(bin string) {
 	k.init()
 	select {

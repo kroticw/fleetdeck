@@ -152,6 +152,17 @@ func (u *Update) Run(ctx context.Context) error {
 // swap, the canonical bundle is the old one and any failure leaves it so; the
 // staged panel is stopped before a failure is reported, so the old window can
 // start its panel again.
+//
+// So one update starts two panels, and shows in the panel's log as two
+// identical "shutting down"/"listening" pairs a moment apart -- which reads
+// as two crashes, and was read that way by the operator on 2026-09-12. Both
+// starts are needed, and the order is not free: the first cannot be from the
+// canonical path, because the old version is still there and stays there
+// until this build has shown it works, and the second is what puts the panel
+// on the path the app is installed at -- the only run of the canonical bundle
+// from its final path before done is reported, and the path the panel then
+// reports to everything that asks. docs/engineering/window-and-panel.md,
+// "The panel is started twice", has the whole of it.
 type Takeover struct {
 	URL       string
 	Handover  Handover
