@@ -325,3 +325,36 @@ test("the operator's own messages are marked, in colours that follow the theme",
     );
   }
 });
+
+// The application's icon ships as two drawings, one per theme, and the
+// stylesheet decides which is shown (web/js/icon.js says why it is not the
+// page's decision). The trap is the one the palette at the top of the file
+// warns about: a variant whose only rule lives inside the media query is right
+// only while the system and the explicit choice agree. Someone on a light
+// system who chooses dark would then read a dark page with the light drawing
+// on it, and nothing anywhere would fail.
+test("neither icon variant is decided inside the media query alone", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const outsideMedia = stripped.replace(/@media \(prefers-color-scheme: dark\) \{[\s\S]*?\n\}/g, "");
+
+  assert.match(
+    outsideMedia,
+    /\.app-icon-dark\s*\{[^}]*display\s*:\s*none/,
+    "the dark drawing must be hidden by a rule outside the media query, or it shows on a light page",
+  );
+  assert.match(
+    outsideMedia,
+    /:root\[data-theme="dark"\]\s+\.app-icon-dark\s*\{[^}]*display\s*:\s*block/,
+    "an explicit dark choice must show the dark drawing even on a light system",
+  );
+  assert.match(
+    outsideMedia,
+    /:root\[data-theme="dark"\]\s+\.app-icon-light\s*\{[^}]*display\s*:\s*none/,
+    "an explicit dark choice must hide the light drawing even on a light system",
+  );
+  assert.match(
+    stripped,
+    /@media \(prefers-color-scheme: dark\)[\s\S]*:root:not\(\[data-theme="light"\]\) \.app-icon-dark/,
+    "a dark system with no explicit choice must show the dark drawing",
+  );
+});

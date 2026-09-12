@@ -113,7 +113,7 @@ func (d Deps) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 // side, and switching one of them changes nothing for the other. The only
 // error is a fleet no configuration has, which the caller answers with 404.
 func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
-	return state.ForFleet(d.Snapshot(), r.URL.Query().Get("fleet"))
+	return state.ForFleet(d.Snapshot(), r.URL.Query().Get(fleetParam))
 }
 
 func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {

@@ -12,10 +12,12 @@ import (
 	"github.com/kroticw/fleetdeck/web"
 )
 
-func TestIndexIsServedAtRoot(t *testing.T) {
+// The panel is served at the root with a fleet named. The bare root is the
+// start page instead (internal/server/startpage_test.go).
+func TestIndexIsServedAtRootForANamedFleet(t *testing.T) {
 	d, _ := testDeps()
 	rec := httptest.NewRecorder()
-	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?fleet=", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 at root, got %d", rec.Code)
 	}
@@ -27,7 +29,7 @@ func TestIndexIsServedAtRoot(t *testing.T) {
 func TestIndexHasContentSecurityPolicy(t *testing.T) {
 	d, _ := testDeps()
 	rec := httptest.NewRecorder()
-	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?fleet=", nil))
 	want := "default-src 'self'; connect-src 'self' ws: wss:; script-src 'self'; style-src 'self' 'unsafe-inline'"
 	if got := rec.Header().Get("Content-Security-Policy"); got != want {
 		t.Fatalf("want Content-Security-Policy %q, got %q", want, got)
@@ -44,7 +46,7 @@ func TestIndexHasContentSecurityPolicy(t *testing.T) {
 func TestOnlyStyleSrcIsRelaxed(t *testing.T) {
 	d, _ := testDeps()
 	rec := httptest.NewRecorder()
-	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?fleet=", nil))
 	policy := rec.Header().Get("Content-Security-Policy")
 
 	for _, directive := range strings.Split(policy, ";") {
@@ -136,7 +138,11 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 	want := map[string]bool{
 		"index.html":           true,
 		"setup.html":           true,
+		"start.html":           true,
 		"app.css":              true,
+		"js/start.js":          true,
+		"js/icon.js":           true,
+		"js/steplist.js":       true,
 		"js/store.js":          true,
 		"js/main.js":           true,
 		"js/api.js":            true,

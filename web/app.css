@@ -2619,3 +2619,199 @@ body.is-resizing {
   color: var(--text);
 }
 
+
+/* The start page (start.html, web/js/start.js): the screen the application
+   opens on. One column of the same width as the wizard's, because it is the
+   same kind of page — a few lines of text and a list to act on — and two
+   different column widths for the two screens a person meets first would read
+   as two different applications.
+
+   The panel's "main" button, the accent-filled one, was the wizard's alone.
+   It is here too now: this page exists to be acted on, and its one action is
+   making a fleet. Nowhere else has gained one. */
+.start-body {
+  display: block;
+  overflow-y: auto;
+}
+
+.start {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--gap-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  color: var(--text);
+}
+
+.start-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap);
+  padding: calc(var(--gap-lg) * 2) 0 var(--gap);
+  text-align: center;
+}
+
+.start-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin: 0;
+}
+
+.start-intro {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* Said, rather than shown as a machine with no fleets: an empty list and a
+   panel that is not answering look identical, and only one of them means the
+   operator has to do something. */
+.start-offline {
+  margin: 0;
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--attn);
+  line-height: 1.5;
+}
+
+.start-fleets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.start-fleet {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-lg);
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  padding: var(--gap) var(--gap-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.start-fleet:hover {
+  background: var(--surface-hover);
+}
+
+.start-fleet-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.start-fleet-name {
+  font-weight: 600;
+}
+
+/* The fleet the panel was last opened in. A mark on a row, never a decision:
+   the page opens nothing by itself (web/js/fleet.js rememberedFleet). */
+.start-fleet-last {
+  font-size: var(--fs-xs);
+  color: var(--accent-strong);
+}
+
+.start-fleet-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-lg);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The same colour the header's waiting counter uses, and for the same reason:
+   a question in a fleet is the one thing on this page a person has to act on. */
+.start-fleet-waiting {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--danger);
+}
+
+.start-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding-top: var(--gap);
+}
+
+.start-new {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent-strong);
+}
+
+.start-new:hover {
+  background: var(--accent-strong);
+}
+
+.start-new-form {
+  gap: var(--gap);
+}
+
+.start-footer {
+  margin: 0;
+  padding-top: var(--gap-lg);
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* The application's icon (web/js/icon.js). Both variants are in the markup and
+   one of them is shown here, rather than the page picking one: "auto" is the
+   default theme and follows the system, which can change under a page that is
+   already open. Same three-block shape as the palette at the top of this file,
+   and for the same reason — no variant may have its only rule inside the media
+   query, or an explicit dark choice on a light system would show the light
+   drawing on a dark page. */
+.app-icon {
+  display: inline-flex;
+}
+
+.app-icon svg {
+  display: block;
+}
+
+.app-icon-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .app-icon-dark {
+    display: block;
+  }
+
+  :root:not([data-theme="light"]) .app-icon-light {
+    display: none;
+  }
+}
+
+:root[data-theme="dark"] .app-icon-dark {
+  display: block;
+}
+
+:root[data-theme="dark"] .app-icon-light {
+  display: none;
+}

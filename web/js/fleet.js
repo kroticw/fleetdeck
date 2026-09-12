@@ -98,6 +98,32 @@ export function fleetEntries(snap, isWaiting) {
   }));
 }
 
+// Which fleet the panel was last opened in, for the start page to mark.
+//
+// localStorage, not the sessionStorage the open session is kept in: the point
+// is the next launch of the application, and a tab's session storage does not
+// survive one. It is a hint on a list, never a decision — the start page marks
+// the row and opens nothing by itself, so a stale or unreadable value costs a
+// mark and nothing else. Private windows and browsers with storage off throw on
+// either call; both are caught, as in web/js/theme.js.
+const LAST_FLEET_KEY = "fleetdeck-fleet";
+
+export function rememberedFleet() {
+  try {
+    return localStorage.getItem(LAST_FLEET_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function rememberFleet(name) {
+  try {
+    localStorage.setItem(LAST_FLEET_KEY, name);
+  } catch {
+    // The mark just will not be there next launch.
+  }
+}
+
 // switchFleet shows another fleet in this tab. The session a reload would
 // otherwise reopen is forgotten first: it belongs to the fleet being left.
 export function switchFleet(fleet, { storage, location = globalThis.location } = {}) {

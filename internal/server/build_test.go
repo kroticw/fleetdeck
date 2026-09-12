@@ -38,7 +38,7 @@ func get(t *testing.T, d Deps, path string) *httptest.ResponseRecorder {
 }
 
 func TestIndexCarriesTheBuildFingerprintInsideItsHead(t *testing.T) {
-	rec := get(t, depsWithBuild(), "/")
+	rec := get(t, depsWithBuild(), "/?fleet=")
 	body := rec.Body.String()
 
 	meta := `<meta name="fleetdeck-build" content="` + testWebHash + `">`
@@ -69,14 +69,14 @@ func TestTheRealIndexStillHasThePlaceTheFingerprintGoes(t *testing.T) {
 // seen not to keep the promise written on it. The index is a couple of
 // kilobytes over loopback; asking for it afresh costs nothing.
 func TestIndexIsNeverTakenFromCacheWithoutAsking(t *testing.T) {
-	rec := get(t, depsWithBuild(), "/")
+	rec := get(t, depsWithBuild(), "/?fleet=")
 	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
 		t.Fatalf("Cache-Control = %q, want no-cache", got)
 	}
 }
 
 func TestIndexKeepsItsSecurityPolicyWhenRewritten(t *testing.T) {
-	rec := get(t, depsWithBuild(), "/")
+	rec := get(t, depsWithBuild(), "/?fleet=")
 	if rec.Header().Get("Content-Security-Policy") != contentSecurityPolicy {
 		t.Fatal("the rewritten index lost its Content-Security-Policy")
 	}
@@ -107,7 +107,9 @@ func TestIndexWithoutAFingerprintIsServedAsEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := get(t, d, "/")
+	// "/?fleet=" rather than "/": the panel moved behind a named fleet when
+	// the start page took the bare root (internal/server/static.go).
+	rec := get(t, d, "/?fleet=")
 	if rec.Body.String() != string(want) {
 		t.Fatal("index.html changed with no fingerprint to put in it")
 	}

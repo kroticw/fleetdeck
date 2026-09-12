@@ -185,6 +185,34 @@ const KEYS = [
   "terminal_font_smaller",
   "terminal_font_bigger",
   "terminal_font_reset",
+
+  // The start page (web/js/start.js) — the screen the application opens on.
+  // start_new_text above all: it is the sentence that says the panel shows the
+  // new fleet only after it is restarted, and it is read before the button, not
+  // discovered after it.
+  "start_intro",
+  "start_last",
+  "start_footer",
+  "start_new",
+  "start_new_title",
+  "start_new_text",
+  "start_new_name",
+  "start_new_path",
+  "start_new_create",
+  "start_new_cancel",
+  "start_name_required",
+  "start_new_unavailable",
+  "start_made",
+  "start_failed",
+  "start_offline",
+
+  // The fleet menu in the panel's header (web/js/header.js). It replaced the
+  // row of fleet buttons, so these carry what the row used to say by being a
+  // row: fleet_menu_all is the way back to the start page, and fleet_menu_new
+  // the way to a fleet that does not exist yet.
+  "fleet_menu",
+  "fleet_menu_all",
+  "fleet_menu_new",
 ];
 
 // Presence in a dictionary cannot be observed through t(): a Russian lookup

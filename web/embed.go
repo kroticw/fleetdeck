@@ -34,5 +34,11 @@ import "embed"
 // setup.html is the page a panel with no configuration serves in place of
 // index.html (internal/server/setup.go).
 //
-//go:embed index.html setup.html app.css js vendor
+// start.html is the start page, served at "/" when the address names no fleet
+// (internal/server/static.go). A top-level file has to be named here: the js
+// and vendor patterns walk their directories, but a new file beside index.html
+// is matched by nothing and would simply not be in the binary — with no
+// compile error to say so, since the other patterns still match.
+//
+//go:embed index.html setup.html start.html app.css js vendor
 var FS embed.FS
