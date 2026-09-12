@@ -121,10 +121,39 @@ A code the page does not know still shows the detail rather than an empty line: 
 
 The whole thing took 8.5 seconds.
 
+### On a stand that was really installed from a release
+
+**Measured, 2026-09-12** (`TestAStandInstalledFromAReleaseUpdatesItself`, in `cmd/fleetdeck-window`). The run above leaves out the window; this one does not.
+
+A stand was built the way a release is — `make dist-app VERSION=v0.3.9 SIGN_IDENTITY=…`, both architectures, Developer ID, hardened runtime, secure timestamp, through the release gate under `EXPECT_SEAL=developer-id` — and unpacked to a canonical path of its own. No notarization ticket: what is checked is what comes down, not what is running. It was given a `HOME` and a port of its own, the port in a configuration file rather than on a command line, because the panel the new window starts is started by that window with its own arguments.
+
+What ran, in order, with nothing stubbed below the press:
+
+```text
+check
+download v0.4.0          ← the real releases page, 39.6 MB
+verify   v0.4.0          ← whole, Developer ID, team PTLLPQ8LY4, notarized
+handover
+handover:alive           ← a second process, from the downloaded bundle
+handover:panel 4afe4536…
+handover:swapped
+handover:done
+done     v0.4.0
+```
+
+Afterwards: the app at the canonical path answered `v0.4.0` when its panel was run; the panel listening on the stand's port reported `v0.4.0` and an executable inside the canonical bundle; the replaced `v0.3.9` was beside it in `.fleetdeck-update/`; and no quarantine attribute anywhere. 5.6 seconds.
+
+**Measured: `updateWay` chose the release path on the stand** without being told to — the decision the whole change turns on, made from the stand's own signature and version.
+
+**Measured: nothing reached the operator's fleet.** Their panel was answering on 7777 throughout, from `/Applications/fleetdeck.app`, and afterwards still reported `v0.3.0` with its three sessions. No `.fleetdeck-update` appeared in `/Applications`.
+
+**Measured, and it was the test's error rather than the app's:** the panel reports its path through `EvalSymlinks`, so on macOS a bundle under `/var/folders/…` is reported under `/private/var/folders/…`. The first run failed on that comparison. It is not translocation — the path holds no `AppTranslocation` component, which is now checked for by name.
+
 ## 9. Not verified
 
-- **The last mile, on a person's screen.** What the acceptance above leaves out is the window: no web view, no handover between two windows, no panel on a port. Those are the same code the tree path has used since 2026-09-11 and the end-to-end tests cover them — but an installed release replacing itself with the next one, from the button, on a screen, has not been done. It needs two published releases carrying this code.
-- **That the updated app runs untranslocated** (section 3). The attribute is measured to be absent, which is the thing that arms translocation; that the app then runs from `/Applications` was not watched.
+- **The press itself.** Everything above the button is measured; the button calls `supervisor.Update` through `runUpdate`, and the acceptance calls `supervisor.Update`. A click into a WKWebView cannot be made from a test.
+- **An app in `/Applications` replacing itself**, rather than a stand at a path of its own. The difference is the directory's permissions, which are checked and refused in words, and App Translocation, which needs a quarantine attribute this never sets.
+- **Two published releases.** The stand was built locally rather than downloaded, so "the app a person installed" has still not been the thing doing the updating.
 - **A machine with no Xcode and no Command Line Tools.** `codesign` and `spctl` are part of macOS and are called by absolute path, so this is expected to hold; it is read from where the binaries live, not measured on such a machine.
 - **A person not in the admin group**, who cannot write beside the installed app. The refusal exists and is tested with a stand-in path; it has not been met by a real account.
 - **What Apple revoking a certificate looks like from inside the app.** `spctl` is expected to refuse, and the refusal would arrive as `seal:not-notarized`.
