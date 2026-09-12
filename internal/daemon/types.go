@@ -166,7 +166,7 @@ func (v Verdict) String() string {
 //   - Needs present and empty — No. This is a statement, not a silence: the daemon
 //     looked and has no question outstanding. With no words there is still nothing to
 //     tell "waiting on a person" apart from "waiting on my own subagents", so a bare
-//     blocked flag never promotes it (see Stalled, rule 2) — but the source did answer,
+//     blocked flag never promotes it (see Stalled, rule 2) -- but the source did answer,
 //     and the answer was no.
 //
 //   - Needs present and non-empty — it decides alone. A value matching

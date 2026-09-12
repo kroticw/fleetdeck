@@ -36,8 +36,16 @@ import {
   fleetMenuHTML,
   nextMenuState,
   headerCounts,
+  unknownMarkHTML,
 } from "../header.js";
-import { isWaiting, isStalled } from "../needs.js";
+import {
+  isWaiting,
+  isStalled,
+  waiting,
+  WAITING_YES,
+  WAITING_NO,
+  WAITING_UNKNOWN,
+} from "../needs.js";
 import { t } from "../i18n.js";
 
 // The reasons a person actually sees, in order. Each reason is its own
@@ -78,6 +86,59 @@ test("no needs, no blocked state or tempo is neither waiting nor stalled", () =>
   const s = { needs: "", state: "", tempo: "" };
   assert.equal(isWaiting(s), false);
   assert.equal(isStalled(s), false);
+});
+
+// --- the three answers, mirroring daemon.Verdict and internal/daemon's
+// --- silent_source_test.go. A bool cannot carry the third one, and answering "no"
+// --- in its place is the panel stating that nobody is waiting on the strength of
+// --- never having asked.
+
+test("a source that never reported needs is unknown, not no", () => {
+  assert.equal(waiting({ state: "working" }), WAITING_UNKNOWN);
+  assert.equal(waiting({ needs: undefined, state: "working" }), WAITING_UNKNOWN);
+  assert.equal(waiting({ needs: null, state: "working" }), WAITING_UNKNOWN);
+});
+
+test("a daemon reporting no question is no, not unknown", () => {
+  // The distinction the whole change turns on: "" is an answer, absence is not.
+  assert.equal(waiting({ needs: "", state: "working" }), WAITING_NO);
+});
+
+test("a question is yes, and a stall is no", () => {
+  assert.equal(waiting({ needs: "answer: pick one (A · B)" }), WAITING_YES);
+  assert.equal(waiting({ needs: "usage limit reached" }), WAITING_NO);
+});
+
+test("a dying session is no, even when nothing else is known", () => {
+  assert.equal(waiting({ dying: true }), WAITING_NO);
+  assert.equal(waiting({ dying: true, needs: "answer: still there?" }), WAITING_NO);
+});
+
+test("isWaiting counts only a definite yes", () => {
+  // Every counter, filter and sort goes through isWaiting, and none of them may
+  // count an unknown session among those a person has to answer: nobody
+  // established that one is needed.
+  assert.equal(isWaiting({ state: "working" }), false);
+  assert.equal(isWaiting({ needs: "" }), false);
+  assert.equal(isWaiting({ needs: "answer: pick one" }), true);
+});
+
+test("the three answers are all truthy, so a forgotten comparison breaks loudly", () => {
+  // Deliberate: were "no" falsy, a call site that wrote `if (waiting(s))` would
+  // work by accident and fail only on the unknown case, which is the one nobody
+  // has a fixture for.
+  for (const v of [WAITING_YES, WAITING_NO, WAITING_UNKNOWN]) {
+    assert.ok(v, `${v} must be truthy`);
+  }
+  assert.equal(new Set([WAITING_YES, WAITING_NO, WAITING_UNKNOWN]).size, 3);
+});
+
+test("an unknown verdict still falls to the flags for stalled", () => {
+  // Stalled is unchanged by this: nil needs and empty needs behave the same there,
+  // exactly as they do in Go. The silence rule is what covers a stall nobody can read.
+  assert.equal(isStalled({ state: "blocked" }), true);
+  assert.equal(isStalled({ tempo: "blocked" }), true);
+  assert.equal(isStalled({ state: "working" }), false);
 });
 
 test("a dying session is never in either counter, even with a question pending", () => {
@@ -661,3 +722,44 @@ test("the counters count this fleet and the unclaimed, never another fleet's", (
   assert.deepEqual(counts.stalled.map((s) => s.short), ["n1"]);
 });
 
+
+// --- the waiting counter under a source that does not report ---
+//
+// "0 waiting for you" is a statement that nobody is waiting, and it is the wrong
+// one to make about sessions nobody asked. The count itself stays a count of
+// definite answers -- inflating it would call people for nothing -- and what is
+// added beside it says the figure is a floor.
+
+test("sessions that do not report are counted apart from those that do", () => {
+  const snap = {
+    sessions: [
+      { short: "a", needs: "answer: pick one" },
+      { short: "b", needs: "" },
+      { short: "c", state: "working" },
+      { short: "d" },
+    ],
+  };
+  const counts = headerCounts(snap, []);
+  assert.deepEqual(
+    counts.waiting.map((s) => s.short),
+    ["a"],
+    "only a definite yes is counted as waiting",
+  );
+  assert.deepEqual(
+    counts.unknown.map((s) => s.short),
+    ["c", "d"],
+    "a session with no needs key at all is unknown, not answered",
+  );
+});
+
+test("the counter says nothing extra when every session reported", () => {
+  assert.equal(unknownMarkHTML(0), "");
+  assert.equal(unknownMarkHTML(undefined), "");
+});
+
+test("the counter admits it is a floor when some session did not report", () => {
+  const html = unknownMarkHTML(3);
+  assert.ok(html.includes("counter-unknown"));
+  assert.ok(html.includes("+?"), "the mark is a qualifier, not a second count of people waiting");
+  assert.ok(!html.includes(">3<"), "the number of unreported sessions is not a number of people waiting");
+});

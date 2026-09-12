@@ -38,8 +38,48 @@ test("a quote or a tag in the reason cannot break out of the title attribute", (
 });
 
 test("a session that is neither waiting nor stalled has no reason row at all", () => {
-  const html = rowHtml({ short: "dd44", name: "n", state: "working", detail: "some detail" });
+  // needs: "" rather than omitted: this is a daemon saying it has no question, which
+  // is what an ordinary working session looks like. Omitting the key would make this
+  // a session nothing is known about, and one of those does show its detail -- see
+  // the unknown-verdict tests below.
+  const html = rowHtml({ short: "dd44", name: "n", needs: "", state: "working", detail: "some detail" });
   assert.equal(html.includes("sreason"), false, "an absent reason is absent, not an empty box");
+});
+
+// --- a source that never said whether anyone is waiting ---
+//
+// Mirrors internal/daemon's silent_source_test.go. The panel must draw "not known"
+// as its own thing: not as the strong waiting row, which would call a person nobody
+// established was needed, and above all not as nothing, which is the panel claiming
+// it looked and found nobody.
+
+test("a session whose source never reported needs is marked, not left blank", () => {
+  const html = rowHtml({ short: "uu11", name: "n", state: "working", detail: "working away" });
+  assert.ok(html.includes("sbadge-unknown"), "an unknown verdict must be visible on the row");
+  assert.ok(!html.includes("sbadge-waiting"), "it must not be dressed up as a definite question");
+  assert.ok(!html.includes("srow-waiting"), "and must not take the waiting row's emphasis");
+});
+
+test("an unknown verdict is not the same row as a daemon saying there is no question", () => {
+  const unknown = rowHtml({ short: "uu22", name: "n", state: "working" });
+  const answered = rowHtml({ short: "uu33", name: "n", needs: "", state: "working" });
+  assert.ok(unknown.includes("sbadge-unknown"));
+  assert.ok(!answered.includes("sbadge-unknown"), '"needs": "" is an answer, and the answer is no');
+  assert.notEqual(unknown, answered, "the two states must be distinguishable on screen");
+});
+
+test("an unknown session shows its detail, the only field left that can explain it", () => {
+  const html = rowHtml({ short: "uu44", name: "n", state: "working", detail: "awaiting a decision" });
+  assert.ok(html.includes("sreason"), "detail is the only thing that can speak for a silent source");
+  assert.ok(html.includes("awaiting a decision"));
+});
+
+test("a stalled session is called stalled even when its verdict is unknown", () => {
+  // Both true at once: no needs at all, and a blocked flag. Stalled is the more
+  // specific thing that can honestly be said, so it is what the row says.
+  const html = rowHtml({ short: "uu55", name: "n", state: "blocked", detail: "d" }, true);
+  assert.ok(html.includes("sbadge-stalled"));
+  assert.ok(!html.includes("sbadge-unknown"), "one badge, the most specific one");
 });
 
 // --- the operator's own name for a session ---

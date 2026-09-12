@@ -973,6 +973,29 @@ main {
   color: var(--text);
 }
 
+/* A session whose source never said whether anyone is waiting. Quiet on purpose:
+ * nothing here is asking for a person, so it must not carry the weight of the
+ * waiting badge -- but it must not be absent either, because an absent badge is
+ * how the panel used to claim it had checked and found nobody. Outlined and
+ * italic, the same register as .ctx-unknown, which makes the same distinction for
+ * the context estimate. */
+.sbadge-unknown {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-strong);
+  font-style: italic;
+}
+
+/* The "+?" beside the waiting count, saying the count is a floor. Same register as
+ * .est, the tilde on an estimated context reading: a small honest qualifier on a
+ * number, not a number of its own. */
+.counter-unknown {
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: help;
+  font-weight: 600;
+}
+
 .smeta {
   display: flex;
   gap: 8px;
