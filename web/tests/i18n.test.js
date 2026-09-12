@@ -134,6 +134,11 @@ const KEYS = [
   "wizard_open",
   "orchestrator_wizard",
   "orchestrator_wizard_hint",
+  // web/js/orchestrator.js's working-order row. Either falling back to its own
+  // key would leave the column naming a file with no word about what is wrong
+  // with it — a missing working order and a foreign one need opposite actions.
+  "orchestrator_brief_missing",
+  "orchestrator_brief_foreign",
   "pick_doc",
   "doc_opening",
   "docs_empty",

@@ -82,6 +82,11 @@ const en = {
   // can also be deleted after a real appointment wrote it. The path is
   // appended after a colon, the way orchestrator_pin_failed's own reason is.
   orchestrator_brief_missing: "this session is pinned as the orchestrator, but its working order is not on disk — run the wizard to write it",
+  // Said when the pin is set and the file where its working order belongs was
+  // not written by fleetdeck: the session reads it as its working order, and
+  // the wizard refuses to replace it — so "run the wizard" alone would send
+  // the operator into that refusal. The path is appended after a colon.
+  orchestrator_brief_foreign: "this session is pinned as the orchestrator, but the file where its working order belongs was not written by fleetdeck, and the session will work by it — move the file aside, then run the wizard",
 
   // Card panel (web/js/card.js). Field names are deliberately absent: stage,
   // progress and session are frontmatter keys, they appear in the card file
@@ -396,6 +401,7 @@ const ru = {
   no_orchestrator_thread: "оркестратор не закреплён — выберите его выше",
   orchestrator_pin_failed: "изменение не сохранено — после перезагрузки страницы оно исчезнет",
   orchestrator_brief_missing: "сессия закреплена оркестратором, но её порядка работы нет на диске — запустите мастер, чтобы он его записал",
+  orchestrator_brief_foreign: "сессия закреплена оркестратором, но файл на месте её порядка работы записан не fleetdeck, и сессия будет работать по нему — уберите файл в сторону, затем запустите мастер",
 
   card_number_hint: "номер самой карточки — вслух называют его",
   card_no_number: "без номера",
