@@ -144,6 +144,38 @@ func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleResume brings a stopped session back.
+//
+// It takes no body at all — the short id in the path is the whole request, and
+// everything else is read from the job store on the far side of Deps.
+// ResumeSession. The route is a POST regardless, because it starts a process;
+// the guard requires application/json on every POST, so the page sends an empty
+// object rather than nothing (internal/server/guard.go says why that
+// requirement is not negotiable).
+//
+// It answers only once the resume has finished one way or the other, which can
+// take the better part of a minute for a session with a long history to replay.
+// That is deliberate: the operator pressed a button, and the alternative —
+// answering "accepted" at once — leaves a failed resume showing as a row that
+// simply never changed, which is the silence this route exists to end.
+func (d Deps) handleResume(w http.ResponseWriter, r *http.Request) {
+	if d.ResumeSession == nil {
+		unavailable(w, "a daemon")
+		return
+	}
+	err := d.ResumeSession(r.PathValue("id"))
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrSessionNotResumable):
+		// Not a bad gateway: nothing upstream failed. This session cannot
+		// come back, and pressing again will not change that.
+		fail(w, http.StatusConflict, err.Error())
+	default:
+		fail(w, http.StatusBadGateway, err.Error())
+	}
+}
+
 func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 	d, ok := d.forFleet(w, r)
 	if !ok {

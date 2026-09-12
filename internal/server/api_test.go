@@ -48,6 +48,10 @@ func testDeps() (Deps, *[]string) {
 			calls = append(calls, fmt.Sprintf("label:%s:%s", sessionID, label))
 			return nil
 		},
+		ResumeSession: func(short string) error {
+			calls = append(calls, "resume:"+short)
+			return nil
+		},
 	}, &calls
 }
 
@@ -580,5 +584,66 @@ func TestSetSessionLabelReportsAStoreFailure(t *testing.T) {
 	rec := do(d, http.MethodPatch, "/api/sessions/11111111-1111-1111-1111-111111111111/label", `{"label":"x"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The resume route is addressed by short id, not by the transcript UUID the
+// digest and label routes use. A stopped session is one the daemon is no
+// longer listing, and the short id is what the job store — the only source
+// that still knows anything about it — names its directory by.
+func TestResumeReachesTheSessionByItsShortID(t *testing.T) {
+	d, calls := testDeps()
+	rec := do(d, http.MethodPost, "/api/sessions/abc123/resume", `{}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 1 || (*calls)[0] != "resume:abc123" {
+		t.Fatalf("unexpected calls: %v", *calls)
+	}
+}
+
+// A panel wired without a daemon says so, rather than answering 404 as if the
+// route did not exist — the same answer every other unwired capability gives.
+func TestResumeWithoutADaemonSaysSo(t *testing.T) {
+	d, _ := testDeps()
+	d.ResumeSession = nil
+	rec := do(d, http.MethodPost, "/api/sessions/abc123/resume", `{}`)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Whatever went wrong reaches the operator in the words it went wrong in. This
+// is the whole point of the button over the hint it replaces: a resume that
+// quietly does nothing is worse than no button at all.
+func TestResumeReportsAFailureInItsOwnWords(t *testing.T) {
+	d, _ := testDeps()
+	d.ResumeSession = func(string) error {
+		return errors.New("resumed worker crashed during startup: exit 1")
+	}
+	rec := do(d, http.MethodPost, "/api/sessions/abc123/resume", `{}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("want 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "crashed during startup: exit 1") {
+		t.Fatalf("the failure must carry its own words, got %s", rec.Body.String())
+	}
+}
+
+// "This session cannot be resumed" is not "the daemon is broken", and they are
+// answered apart: the first is a fact about the session that no retry changes,
+// the second is worth trying again. Both reach the operator as words either
+// way; the codes are for everything else that reads this API.
+func TestResumeAnswersANotResumableSessionAsAConflict(t *testing.T) {
+	d, _ := testDeps()
+	d.ResumeSession = func(string) error {
+		return fmt.Errorf("%w: it has no transcript to resume from", ErrSessionNotResumable)
+	}
+	rec := do(d, http.MethodPost, "/api/sessions/abc123/resume", `{}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "no transcript") {
+		t.Fatalf("the refusal must say what is wrong with the session, got %s", rec.Body.String())
 	}
 }
