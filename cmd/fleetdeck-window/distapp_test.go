@@ -226,6 +226,159 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 			t.Fatalf("no executable fleetdeck-status beside the panel: %v", err)
 		}
 	})
+
+	// The disk image is built out of the zip above, so it belongs to this test
+	// rather than to one of its own: a separate test would have to build the
+	// whole universal app a second time to have a zip to build an image from,
+	// and `make test` runs this on every pull request.
+	diskImageBuiltFromTheZip(t, root, distDir)
+}
+
+// diskImageBuiltFromTheZip runs the real `make dist-dmg` against the dist
+// directory the zip is already in, and interrogates the image it leaves the way
+// a person gets it: mounted, then looked at from the outside. As above, it
+// trusts nothing the target says about itself.
+func diskImageBuiltFromTheZip(t *testing.T, root, distDir string) {
+	t.Helper()
+	zip := filepath.Join(distDir, "fleetdeck-"+releaseAppVersion+"-macos.zip")
+	// An image from another version would be uploaded under this tag by the
+	// publish step's glob, exactly as a stale zip would.
+	stale := filepath.Join(distDir, "fleetdeck-v0.0.1-macos.dmg")
+	if err := os.WriteFile(stale, []byte("not this build's image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("make", "dist-dmg", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make dist-dmg: %v\n%s", err, out)
+	}
+	dmg := filepath.Join(distDir, "fleetdeck-"+releaseAppVersion+"-macos.dmg")
+	// Its last line is the proof the gate got to the end, for the same reason
+	// the zip's is: a gate that stops part way with status 0 passes everything
+	// after the point it stopped.
+	if !strings.Contains(string(out), "verify-dist-dmg: "+dmg+" ok") {
+		t.Fatalf("make dist-dmg succeeded without verify-dist-dmg reaching its end:\n%s", out)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("%s survived make dist-dmg and would be published under %s", stale, releaseAppVersion)
+	}
+	if _, err := os.Stat(zip); err != nil {
+		t.Fatalf("make dist-dmg removed the zip the release also publishes: %v", err)
+	}
+	images, err := filepath.Glob(filepath.Join(distDir, "*.dmg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 1 || images[0] != dmg {
+		t.Fatalf("make dist-dmg must leave exactly %s, found %v", dmg, images)
+	}
+
+	mounted := mountImage(t, dmg)
+
+	t.Run("the volume holds the app, the shortcut and the window and nothing else", func(t *testing.T) {
+		entries, err := os.ReadDir(mounted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		sort.Strings(names)
+		want := []string{".DS_Store", ".background", "Applications", "fleetdeck.app"}
+		if !reflect.DeepEqual(names, want) {
+			t.Fatalf("the volume must hold exactly %v, found %v", want, names)
+		}
+	})
+
+	t.Run("Applications is a shortcut to Applications", func(t *testing.T) {
+		// A folder by that name would be a place to drop the app that goes
+		// nowhere, and a copied /Applications would be a 60 GB image.
+		target, err := os.Readlink(filepath.Join(mounted, "Applications"))
+		if err != nil {
+			t.Fatalf("Applications on the volume is not a symbolic link: %v", err)
+		}
+		if target != "/Applications" {
+			t.Fatalf("Applications on the volume points at %q, want /Applications", target)
+		}
+	})
+
+	t.Run("the window published is the window committed", func(t *testing.T) {
+		// The layout cannot be computed -- Finder writes it -- so what this can
+		// check is that the bytes shipped are the bytes reviewed. See
+		// scripts/build-dmg-layout.sh.
+		for _, f := range []struct{ onImage, inRepo string }{
+			{filepath.Join(mounted, ".DS_Store"), filepath.Join(root, "packaging", "dmg", "DS_Store")},
+			{filepath.Join(mounted, ".background", "background.tiff"), filepath.Join(root, "packaging", "dmg", "background.tiff")},
+		} {
+			shipped, err := os.ReadFile(f.onImage)
+			if err != nil {
+				t.Fatalf("reading %s: %v", f.onImage, err)
+			}
+			committed, err := os.ReadFile(f.inRepo)
+			if err != nil {
+				t.Fatalf("reading %s: %v", f.inRepo, err)
+			}
+			if !bytes.Equal(shipped, committed) {
+				t.Fatalf("%s on the image is not %s", filepath.Base(f.onImage), f.inRepo)
+			}
+		}
+	})
+
+	t.Run("the app on the image reports the tag", func(t *testing.T) {
+		// Asked of the bundle in the place a person would drag it from, and by
+		// running it rather than by reading its metadata: the linker accepts an
+		// -X target that does not exist without complaint.
+		panel := filepath.Join(mounted, "fleetdeck.app", "Contents", "MacOS", "fleetdeck")
+		out, err := exec.Command(panel, "version").CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) != releaseAppVersion {
+			t.Fatalf("%s version = %q (%v), want %q", panel, out, err, releaseAppVersion)
+		}
+	})
+}
+
+// mountImage attaches dmg read-only and out of sight, and detaches it when the
+// test ends however it ends. A mounted image outlives the process that mounted
+// it, and a test that left one behind would leave the next run to find the
+// volume name already taken.
+func mountImage(t *testing.T, dmg string) string {
+	t.Helper()
+	// -mountrandom needs the directory it randomises inside to exist already;
+	// without it hdiutil fails with "no mountable file systems", which reads
+	// like a broken image and is not one.
+	into := t.TempDir()
+	out, err := exec.Command("hdiutil", "attach", "-nobrowse", "-readonly", "-mountrandom", into, "-plist", dmg).Output()
+	if err != nil {
+		t.Fatalf("hdiutil attach %s: %v", dmg, err)
+	}
+	mounted := mountPointIn(t, string(out))
+	t.Cleanup(func() {
+		if out, err := exec.Command("hdiutil", "detach", mounted, "-force").CombinedOutput(); err != nil {
+			t.Errorf("hdiutil detach %s: %v\n%s", mounted, err, out)
+		}
+	})
+	return mounted
+}
+
+// mountPointIn pulls the mount point out of hdiutil's plist without a plist
+// decoder: the value is the one <string> under a <key>mount-point</key>.
+func mountPointIn(t *testing.T, attachPlist string) string {
+	t.Helper()
+	const key = "<key>mount-point</key>"
+	i := strings.Index(attachPlist, key)
+	if i < 0 {
+		t.Fatalf("hdiutil said where nothing was mounted:\n%s", attachPlist)
+	}
+	rest := attachPlist[i+len(key):]
+	open := strings.Index(rest, "<string>")
+	closing := strings.Index(rest, "</string>")
+	if open < 0 || closing < open {
+		t.Fatalf("hdiutil's mount point is not a string:\n%s", attachPlist)
+	}
+	return strings.TrimSpace(rest[open+len("<string>") : closing])
 }
 
 // plistKeys reads a property list as a map, through plutil's JSON form.
