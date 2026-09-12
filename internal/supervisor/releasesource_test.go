@@ -223,6 +223,51 @@ func TestStageRefusesBeforeDownloadingWhenThereIsNoRoom(t *testing.T) {
 	}
 }
 
+// The real thing, against the real releases page: the redirect that names the
+// newest tag, the 40 MB download, and the signature check on what came back.
+// Everything above is measured against a server this test starts; this one is
+// measured against GitHub.
+//
+// Off by default, because a test suite that needs the network fails on a train
+// and in an air-gapped build. FLEETDECK_NETWORK_TEST=1 turns it on, and the
+// acceptance for this feature runs it.
+func TestStageDownloadsTheRealReleaseFromGitHub(t *testing.T) {
+	if os.Getenv("FLEETDECK_NETWORK_TEST") != "1" {
+		t.Skip("set FLEETDECK_NETWORK_TEST=1 to download from the real releases page")
+	}
+	app := developerIDBundle(t) // skips when there is no signed app to compare a team against
+	teamID, err := TeamIDOf(context.Background(), "/usr/bin/codesign", app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := &ReleaseSource{
+		Releases: &Releases{Base: "https://github.com/kroticw/fleetdeck"},
+		Seal:     realSeal(teamID),
+		Ditto:    "/usr/bin/ditto",
+		// A version nothing was ever released as, so whatever is newest is
+		// newer than it.
+		Running: "v0.0.1",
+	}
+
+	tag, err := src.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag == "" {
+		t.Fatal("the releases page offered nothing newer than v0.0.1")
+	}
+	t.Logf("the newest release is %s", tag)
+
+	staged, err := src.Stage(context.Background(), t.TempDir(), tag, nil)
+	if err != nil {
+		t.Fatalf("the real %s did not pass the checks an update makes: %v", tag, err)
+	}
+	if _, err := os.Stat(PanelIn(staged)); err != nil {
+		t.Fatalf("the real release has no panel where the window looks for one: %v", err)
+	}
+	t.Logf("downloaded %s, checked it, and staged it at %s", tag, staged)
+}
+
 // Check is the question the button asks first, and its three answers are: a
 // newer version, this one, and cannot tell.
 func TestCheckReportsANewerRelease(t *testing.T) {
