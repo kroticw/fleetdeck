@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,9 +15,10 @@ import (
 )
 
 // Written in by `make window-app` (-ldflags -X): the source tree this app was
-// built from, and the tools that built it. The update button brings that
-// tree forward and builds it again; an app built any other way has no tree to
-// update from, and shows no button.
+// built from, and the tools that built it. The update button brings that tree
+// forward and builds it again. An app built any other way has no tree here,
+// and updates by downloading a release instead (way.go) -- it does not, as it
+// once did, go without a button.
 var (
 	treeDir  string
 	gitPath  string
@@ -35,6 +35,13 @@ const (
 const (
 	updateBindingName = "fleetdeckUpdate"
 	progressFunction  = "fleetdeckUpdateProgress"
+	// wayBindingName is what the page asks, as it loads, about whether this
+	// build can update itself at all. The page cannot learn that from the
+	// presence of the update binding any more: the binding is always there
+	// now, and a build that cannot update answers this with the reason. The
+	// name is a contract across two languages, and way_test.go holds both
+	// sides to the same spelling.
+	wayBindingName = "fleetdeckUpdateWay"
 )
 
 // How long the new window has, from its start to its panel answering from the
@@ -77,18 +84,6 @@ func canonicalBundle(exe, told string) string {
 	return bundleOf(exe)
 }
 
-// updateUnavailable says why this window cannot update itself, or "" when it
-// can.
-func updateUnavailable(tree, exe string) string {
-	if tree == "" {
-		return "this app was built without its source tree written in (make window-app writes it)"
-	}
-	if bundleOf(exe) == "" {
-		return "this window does not run from an app bundle"
-	}
-	return ""
-}
-
 // ownRevision is the commit this window was built from.
 func ownRevision() string {
 	info, ok := debug.ReadBuildInfo()
@@ -103,19 +98,20 @@ func ownRevision() string {
 	return ""
 }
 
-// progressScript hands p to the page: one guarded call, its argument JSON --
-// which, being a JS literal too, needs nothing escaped for the eval.
-func progressScript(p supervisor.Progress) string {
-	arg, _ := json.Marshal(map[string]string{"step": p.Step, "detail": p.Detail})
+// progressScript hands one step to the page: one guarded call, its argument
+// JSON -- which, being a JS literal too, needs nothing escaped for the eval.
+// The reason travels beside the step so the page can say why in the reader's
+// own language; the detail is this refusal's particulars, whatever language
+// they are in.
+func progressScript(p supervisor.Progress, reason string) string {
+	arg, _ := json.Marshal(report{Step: p.Step, Reason: reason, Detail: p.Detail})
 	return fmt.Sprintf("window.%s && window.%s(%s)", progressFunction, progressFunction, arg)
 }
 
-// resultProgress is how an update's error reaches the page.
-func resultProgress(err error) supervisor.Progress {
-	if errors.Is(err, supervisor.ErrBusy) {
-		return supervisor.Progress{Step: "busy"}
-	}
-	return supervisor.Progress{Step: "failed", Detail: err.Error()}
+// reportScript is progressScript for a report the window made itself.
+func reportScript(r report) string {
+	arg, _ := json.Marshal(r)
+	return fmt.Sprintf("window.%s && window.%s(%s)", progressFunction, progressFunction, arg)
 }
 
 // launchNewWindow starts the window in the staged bundle as the one to take

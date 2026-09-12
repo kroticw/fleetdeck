@@ -11,11 +11,13 @@ import assert from "node:assert/strict";
 
 import {
   UPDATE_BINDING,
+  WAY_BINDING,
   WAIT_SHOWN_AFTER_MS,
   UPDATE_REPAINT_MS,
   initialState,
   onPress,
   onProgress,
+  reasonKey,
   updateHTML,
 } from "../js/update.js";
 import { t } from "../js/i18n.js";
@@ -108,4 +110,97 @@ test("what the window reports is escaped before it reaches the page", () => {
   const running = onPress(initialState(), { unsent: false, now: 0 }).state;
   const failed = onProgress(running, { step: "failed", detail: "<img src=x onerror=alert(1)>" }, 1);
   assert.doesNotMatch(updateHTML(failed, 1), /<img/);
+});
+
+// The defect this whole change is about: the page used to decide whether to
+// show an update button by whether the window had bound one, so an app
+// installed from a release -- which could not update, and said nothing about
+// it -- showed no button at all. Nobody could learn that updating existed.
+//
+// The button is always there now. A build that cannot update says so, in
+// words, beside a button that is visibly not pressable.
+
+test("the way binding is the one cmd/fleetdeck-window gives the page", () => {
+  assert.equal(WAY_BINDING, "fleetdeckUpdateWay");
+});
+
+test("a build that cannot update shows the button and says why", () => {
+  const state = onProgress(initialState(), { step: "cannot", reason: "built-here" }, 0);
+  const html = updateHTML(state, 0);
+
+  assert.match(html, /class="update-button"/, "no button at all: the silent refusal is back");
+  assert.match(html, /disabled/, "the button offers an update this build cannot do");
+  assert.ok(has(html, "update_cannot_built_here"), `no reason on screen: ${html}`);
+});
+
+test("every reason a build cannot update has words of its own", () => {
+  for (const reason of ["not-a-bundle", "built-here", "no-version"]) {
+    const html = updateHTML(onProgress(initialState(), { step: "cannot", reason }, 0), 0);
+    assert.ok(has(html, reasonKey("update_cannot", reason)), `${reason} has no sentence of its own`);
+  }
+});
+
+// A refusal arrives as a code and the particulars separately, because the
+// sentence has to be in the reader's language and the particulars -- a team
+// identifier, a path, how many megabytes -- come from the system in whatever
+// language it uses.
+test("a refusal is shown in the reader's language, with its particulars beside it", () => {
+  const state = onProgress(initialState(), {
+    step: "failed",
+    reason: "seal:wrong-team",
+    detail: "the downloaded app is signed by team ZZZZZZZZZZ, not PTLLPQ8LY4",
+  }, 0);
+  const html = updateHTML(state, 0);
+
+  assert.ok(has(html, "update_reason_seal_wrong_team"), `no translated reason: ${html}`);
+  assert.match(html, /ZZZZZZZZZZ/, "the particulars of the refusal are not shown");
+  assert.match(html, /update-problem/, "a refusal is not marked as a problem");
+});
+
+test("every refusal the window can send has words of its own", () => {
+  const reasons = [
+    "offline",
+    "no-releases",
+    "no-room",
+    "other",
+    "seal:broken",
+    "seal:not-developer-id",
+    "seal:wrong-team",
+    "seal:no-hardened-runtime",
+    "seal:no-timestamp",
+    "seal:not-notarized",
+  ];
+  for (const reason of reasons) {
+    const html = updateHTML(onProgress(initialState(), { step: "failed", reason, detail: "x" }, 0), 0);
+    assert.ok(has(html, reasonKey("update_reason", reason)), `${reason} has no sentence of its own`);
+  }
+});
+
+// A refusal with no code -- an older window, or something nobody foresaw --
+// must still say something rather than show an empty line where a sentence
+// belongs.
+test("a refusal with no code still says something", () => {
+  const html = updateHTML(onProgress(initialState(), { step: "failed", detail: "something went wrong" }, 0), 0);
+
+  assert.match(html, /something went wrong/, `nothing on screen: ${html}`);
+  assert.match(html, /update-problem/);
+});
+
+test("downloading and checking are steps the person can see", () => {
+  for (const [step, key] of [["download", "update_step_download"], ["verify", "update_step_verify"]]) {
+    const html = updateHTML(onProgress(initialState(), { step, detail: "v0.4.0" }, 0), 0);
+    assert.ok(has(html, key, { version: "v0.4.0" }), `${step} is not shown: ${html}`);
+  }
+});
+
+// A build that cannot update must not start one when the button is pressed
+// anyway -- by a keyboard, or by a click the browser delivered before the
+// answer arrived.
+test("pressing a button that cannot update starts nothing", () => {
+  const state = onProgress(initialState(), { step: "cannot", reason: "built-here" }, 0);
+
+  const pressed = onPress(state, { unsent: false, now: 0 });
+
+  assert.equal(pressed.start, false);
+  assert.equal(pressed.state.phase, "cannot");
 });

@@ -5,12 +5,14 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
+	"github.com/kroticw/fleetdeck/web"
 )
 
 // The two names are a contract across two languages: the window binds one and
@@ -57,21 +59,8 @@ func TestTheCanonicalBundleIsTheOneTheWindowWasToldAfterAHandover(t *testing.T) 
 	}
 }
 
-func TestAWindowThatCannotUpdateItselfSaysWhy(t *testing.T) {
-	inBundle := "/a/fleetdeck.app/Contents/MacOS/fleetdeck-window"
-	if why := updateUnavailable("", inBundle); !strings.Contains(why, "source tree") {
-		t.Fatalf("no tree written in: %q, want the reason", why)
-	}
-	if why := updateUnavailable("/src/fleetdeck", "/a/bin/fleetdeck-window"); !strings.Contains(why, "app bundle") {
-		t.Fatalf("not in a bundle: %q, want the reason", why)
-	}
-	if why := updateUnavailable("/src/fleetdeck", inBundle); why != "" {
-		t.Fatalf("a bundled window with its tree cannot update: %q", why)
-	}
-}
-
 func TestProgressReachesThePageAsOneCallWithItsTextQuoted(t *testing.T) {
-	script := progressScript(supervisor.Progress{Step: "failed", Detail: `a "quoted" </script> detail`})
+	script := progressScript(supervisor.Progress{Step: "failed", Detail: `a "quoted" </script> detail`}, "")
 	prefix := "window." + progressFunction + " && window." + progressFunction + "("
 	if !strings.HasPrefix(script, prefix) || !strings.HasSuffix(script, ")") {
 		t.Fatalf("script %q is not one guarded call", script)
@@ -91,6 +80,21 @@ func TestAnUpdatesEndIsToldToThePageInItsOwnWords(t *testing.T) {
 	}
 	if p := resultProgress(errors.New("the source tree has uncommitted edits (a.go)")); p.Step != "failed" || !strings.Contains(p.Detail, "a.go") {
 		t.Fatalf("an error -> %+v, want it failed with the error's words", p)
+	}
+}
+
+// The page and the window have to spell the two binding names the same way,
+// or the page silently loses the ability to ask about updating at all -- the
+// same class of defect this change is about.
+func TestThePageAsksAboutUpdatingByTheNameTheWindowBindsIt(t *testing.T) {
+	src, err := fs.ReadFile(web.FS, "js/update.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{updateBindingName, wayBindingName, progressFunction} {
+		if !strings.Contains(string(src), name) {
+			t.Errorf("web/js/update.js never mentions %q, which the window binds", name)
+		}
 	}
 }
 
