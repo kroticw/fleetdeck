@@ -88,7 +88,12 @@ Where the new app comes from is the one thing that differs between builds, and i
 
 ### The panel is started twice, and both starts are load-bearing
 
-Steps 6 and 9 are two starts of two panel processes by one window, from two different directories, and an update therefore shows up in `~/Library/Logs/fleetdeck.log` as two `shutting down` / `listening` pairs about a second apart. The lines are indistinguishable — both name the new version and the same URL, and neither says which bundle it was started from — so one update reads as two crashes. It was read that way by the operator on 2026-09-12 (T-033), which is why this section exists.
+Steps 6 and 9 are two starts of two panel processes by one window, from two different directories, and an update therefore shows up in `~/Library/Logs/fleetdeck.log` as two `shutting down` / `listening` pairs about a second apart. Both name the new version and the same URL, and until T-041 neither said which bundle it was started from, so one update read as two crashes. It was read that way by the operator on 2026-09-12 (T-033), which is why this section exists. The `listening` line now ends with the path of the binary serving (`servingLine` in `cmd/fleetdeck/main.go`), and the two starts of one update name two different bundles:
+
+```text
+fleetdeck v0.6.0 listening on http://127.0.0.1:7777 from /Applications/.fleetdeck-update/fleetdeck.app/Contents/MacOS/fleetdeck
+fleetdeck v0.6.0 listening on http://127.0.0.1:7777 from /Applications/fleetdeck.app/Contents/MacOS/fleetdeck
+```
 
 Neither start can go. The first one cannot be from the canonical path: the old version is still there, and it stays there until the new build has shown it works, which is the invariant. The second one is needed for three separate reasons, any one of which would be enough:
 

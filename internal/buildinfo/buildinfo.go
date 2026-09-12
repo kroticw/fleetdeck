@@ -96,18 +96,24 @@ func WebHash(fsys fs.FS) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// Read fingerprints the running binary over the web interface it serves.
-func Read(web fs.FS) (Fingerprint, error) {
+// Executable is the path of the running binary, or "" when it cannot be found.
+func Executable() string {
 	exe, err := os.Executable()
 	if err != nil {
-		exe = ""
-	} else if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		// A symlink in PATH points at an install somewhere else, and that
 		// somewhere else is what the operator needs to know.
-		exe = resolved
+		return resolved
 	}
+	return exe
+}
+
+// Read fingerprints the running binary over the web interface it serves.
+func Read(web fs.FS) (Fingerprint, error) {
 	info, _ := debug.ReadBuildInfo()
-	f, err := read(web, exe, info)
+	f, err := read(web, Executable(), info)
 	if err != nil {
 		return f, err
 	}
