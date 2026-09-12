@@ -32,6 +32,7 @@ The fields below and their allowed values are the schema enforced by the board's
 
 | Field | Type | Required | Allowed values |
 | --- | --- | --- | --- |
+| `id` | string | no, as far as this repository's validator script is concerned | the card's permanent number, `T-` and at least three digits (`T-018`) |
 | `zone` | string | yes | one of `urgent`, `unplanned`, `planned`, `niceToHave` |
 | `stage` | string | yes | one of `new`, `active`, `review`, `done`, `blocked` |
 | `progress` | integer | yes | one of `0`, `10`, `20`, `40`, `60`, `80`, `100` |
@@ -40,6 +41,16 @@ The fields below and their allowed values are the schema enforced by the board's
 | `repo` | string | no | any string; not otherwise validated |
 
 The validator also tolerates four fields that Obsidian's own property panel can add on its own — `tags`, `aliases`, `cssclasses`, `cssclass` — without treating them as unknown. Any other field name is rejected.
+
+### The card's number
+
+`id` is the one identifier a person can read off the panel, say out loud, and hand back to a script to reach the same file — which is what a board's `scripts/card_path.py` resolves. It is permanent: unlike `session`, which is the short id of whichever session is working the card and changes with every run, a card's number is assigned once, when the card is created, and is what the card is referred to by afterwards.
+
+The panel shows it in both places a card appears — on the card in its column and in the open card, beside `stage` and `progress` — as a monospaced chip, which is what keeps it from being mistaken for the session's short id sitting next to it.
+
+A card with no `id` is a card created without the board's `new_card.py`, not a broken one: it is read and shown normally, and the panel says in words that the card has no number rather than leaving a blank where one would be. A card whose frontmatter does not parse says nothing about its number at all — nothing is known about it.
+
+Note that this repository's validator template (`plugin/templates/board/scripts/validate_cards.py`) does not yet know the field, so on a board created from the template a card carrying `id` is rejected as an unknown field. The panel reads the field either way; the template is what has to catch up.
 
 ## Cross-field rules
 
@@ -79,6 +90,7 @@ The Go code the panel uses to read cards (`internal/board`) and the Python valid
 | Check | Go reader (`ParseCard`) | Go writer (`SetField`) | Validator script |
 | --- | --- | --- | --- |
 | Unknown frontmatter field | ignored | ignored | rejected |
+| `id` | read and shown; absence shown as "no number" | never written | not known to the template's script yet — rejected as unknown |
 | Required fields present | not checked | not checked | required: `zone`, `stage`, `progress`, `created` |
 | `zone` is one of the four allowed values | not checked | not checked | enforced |
 | `created` matches `YYYY-MM-DD` | not checked | not checked | enforced |
