@@ -207,3 +207,34 @@ func TestForFleetOfASnapshotWithNoBoardsIsThatSnapshot(t *testing.T) {
 		t.Fatalf("ForFleet(zero) = %+v", view)
 	}
 }
+
+// A view carries its own fleet's answer about the orchestrator's working
+// order, never the first fleet's. Each fleet has its own orchestrator and its
+// own documentation directories, so a brief missing in one says nothing about
+// the other -- and showing the wrong fleet's answer would put a fresh lie in
+// the place built to stop one.
+func TestForFleetCarriesThatFleetsBriefState(t *testing.T) {
+	whole := wholeTwoFleets()
+	whole.Boards[0].BriefPath = "/a/docs/orchestrator.md"
+	whole.Boards[0].BriefMissing = false
+	whole.Boards[1].BriefPath = "/b/docs/orchestrator.md"
+	whole.Boards[1].BriefMissing = true
+
+	for _, tc := range []struct {
+		fleet   string
+		path    string
+		missing bool
+	}{
+		{"A", "/a/docs/orchestrator.md", false},
+		{"B", "/b/docs/orchestrator.md", true},
+	} {
+		view, err := ForFleet(whole, tc.fleet)
+		if err != nil {
+			t.Fatalf("ForFleet(%q): %v", tc.fleet, err)
+		}
+		if view.OrchestratorBriefPath != tc.path || view.OrchestratorBriefMissing != tc.missing {
+			t.Errorf("fleet %s: path %q, missing %v; want %q, %v",
+				tc.fleet, view.OrchestratorBriefPath, view.OrchestratorBriefMissing, tc.path, tc.missing)
+		}
+	}
+}

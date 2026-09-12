@@ -77,6 +77,11 @@ const en = {
   not_pinned: "not pinned",
   no_orchestrator_thread: "no session is pinned as the orchestrator — pick one above",
   orchestrator_pin_failed: "the change was not saved — a reload will undo it",
+  // Said when the pin is set and the working order it stands for is not on
+  // disk: the dropdown above moves the pin and writes nothing, and the file
+  // can also be deleted after a real appointment wrote it. The path is
+  // appended after a colon, the way orchestrator_pin_failed's own reason is.
+  orchestrator_brief_missing: "this session is pinned as the orchestrator, but its working order is not on disk — run the wizard to write it",
 
   // Card panel (web/js/card.js). Field names are deliberately absent: stage,
   // progress and session are frontmatter keys, they appear in the card file
@@ -390,6 +395,7 @@ const ru = {
   not_pinned: "не закреплено",
   no_orchestrator_thread: "оркестратор не закреплён — выберите его выше",
   orchestrator_pin_failed: "изменение не сохранено — после перезагрузки страницы оно исчезнет",
+  orchestrator_brief_missing: "сессия закреплена оркестратором, но её порядка работы нет на диске — запустите мастер, чтобы он его записал",
 
   card_number_hint: "номер самой карточки — вслух называют его",
   card_no_number: "без номера",

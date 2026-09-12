@@ -14,7 +14,9 @@ import (
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/fleet"
 	"github.com/kroticw/fleetdeck/internal/jobs"
+	"github.com/kroticw/fleetdeck/internal/orchestrator"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
@@ -401,6 +403,32 @@ func (c *Collector) pruneContextCache(live map[string]struct{}) {
 	}
 }
 
+// briefState says where f's orchestrator brief belongs and whether f is
+// pinned to a session that has none. It is asked on every collect cycle, and
+// deliberately not once at appointment time: a brief written and then removed
+// by hand is indistinguishable on disk from one never written, so only a
+// standing check reports both.
+//
+// Anything that is not a readable regular file at that path counts as none.
+// A directory of that name, or a path the panel may not stat, is not a
+// working order any orchestrator can read, and calling either of them "there"
+// would be the same silence in a new place. Nothing is reported when no
+// session is pinned: an absent brief claims nothing when no session is
+// claimed to have been given one.
+func briefState(f fleet.Fleet) (path string, missing bool) {
+	if f.BoardPath == "" && len(f.DocsPaths) == 0 {
+		// Nowhere to put one, and an appointment is refused outright
+		// (orchestrator.ErrNoBoard), so there is no claim to contradict.
+		return "", false
+	}
+	path = orchestrator.BriefPath(orchestrator.Paths{Board: f.BoardPath, Docs: f.DocsPaths})
+	if f.Orchestrator == "" {
+		return path, false
+	}
+	info, err := os.Stat(path)
+	return path, err != nil || !info.Mode().IsRegular()
+}
+
 // Collect asks each source separately. A failure fills that source's own error field
 // in the snapshot and leaves every other field alone, so a dead daemon still returns
 // a full board and an unreadable board still returns a full session list.
@@ -442,10 +470,13 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 				fb.Cards = scanned
 			}
 		}
+		fb.BriefPath, fb.BriefMissing = briefState(f)
 		snap.Boards = append(snap.Boards, fb)
 		cards = append(cards, fb.Cards...)
 	}
 	snap.BoardError = snap.Boards[0].BoardError
+	snap.OrchestratorBriefPath = snap.Boards[0].BriefPath
+	snap.OrchestratorBriefMissing = snap.Boards[0].BriefMissing
 
 	// The daemon's list is the live sessions and only those. Everything the
 	// panel knows about a stopped session comes from Claude Code's job store

@@ -51,6 +51,32 @@ export function resolveOrchestrator(snap) {
   return { sessions, short, session };
 }
 
+// briefWarning is what the column says when the pin stands for a working
+// order that is not on disk, and "" when there is nothing to say.
+//
+// The pin means one thing: this session has been given the fleet's working
+// order. The dropdown in this column's own head moves the pin and writes
+// nothing — that is deliberate, and it is also the way the panel can come to
+// claim an orchestrator that was never handed anything. The file can equally
+// be deleted after a real appointment wrote it. Both leave the same state:
+// the column names an orchestrator, the configuration agrees, and the
+// document it works from does not exist.
+//
+// It is read off the snapshot rather than checked here, and the snapshot is
+// read every collect cycle rather than once when an appointment is made: a
+// brief written and later removed is indistinguishable on disk from one never
+// written, so only a standing answer covers both.
+//
+// The path is appended because the row has to be actionable. "Something is
+// missing" with nowhere to look is the kind of warning an operator learns to
+// scroll past.
+export function briefWarning(snap) {
+  if (!snap?.orchestratorBriefMissing) return "";
+  const path = snap.orchestratorBriefPath ?? "";
+  const said = t("orchestrator_brief_missing");
+  return path ? `${said}: ${path}` : said;
+}
+
 // contextPercent turns a transcript.Usage-shaped object into a rounded
 // percentage, or null when there is nothing to show. transcript.Usage's JSON
 // fields are exactly `tokens`/`window`/`estimated` — there is no `percent`
@@ -89,12 +115,19 @@ export function pickerLabel(session) {
 // times, so a session joining or leaving the fleet has to reach it. None of it
 // can disturb the terminal: the terminal is reopened only when the session it
 // draws changes, never by a redraw.
+//
+// Whether the pin's working order is on disk is part of this, and has to be:
+// anything the column shows and this does not track is a thing that goes
+// stale on screen and stays stale until something else happens to move. A
+// warning that outlives the state it warns about is the same silence it was
+// added to break, pointing the other way.
 export function viewSignature(snap, connected) {
   const { sessions, short, session } = resolveOrchestrator(snap);
   return JSON.stringify({
     connected,
     short,
     hasSnapshot: snap != null,
+    brief: briefWarning(snap),
     sessions: pickableSessions(sessions, snap?.fleet).map((s) => [s.short, s.name ?? "", s.label ?? ""]),
     session: session
       ? [session.short, session.name ?? "", session.label ?? "", session.sessionId, contextPercent(session.context)]
@@ -216,6 +249,11 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
   const paintRows = () => {
     if (!built) return;
     const screen = root.querySelector(".o-screen");
+    // First of the three, and above the connection: it is the only one of
+    // them that neither heals itself nor came from something the operator
+    // just did, and the fleet is being led from a session working without
+    // its working order for as long as it is on screen.
+    showRow(root, "o-error o-error-brief", briefWarning(resolve().snap), screen);
     showRow(root, "o-error o-error-stream", streamError, screen);
     showRow(root, "o-error o-error-action", actionError, screen);
     showRow(root, "o-notice", standingNotice(), screen);
