@@ -47,9 +47,21 @@ The control is the same archives unstamped: no attribute on anything. So unpacki
 
 **Measured: App Translocation.** Opened from outside Applications, even after approval, the stand-in ran from `/private/var/folders/…/T/AppTranslocation/<uuid>/d/fleetdeck.app/…`. **Read:** first-run setup takes the statusline command's path from `os.Executable()` beside the panel (`ensureStatusline` in `cmd/fleetdeck/init.go`), so a first launch from Downloads would record a path that later disappears. Hence the guide's step "drag it to Applications before the first launch".
 
-**Measured on 2026-09-12: being in Applications is not by itself enough.** The real v0.3.0 release, downloaded by Firefox and carrying its quarantine, ran translocated from `/Applications` — after a shell `mv` into it, and again after a move performed by Finder itself over an Apple Event (`tell application "Finder" to move …`). Removing `com.apple.quarantine` stopped it: with the attribute gone, the same app ran from `/Applications/fleetdeck.app/Contents/MacOS/…`.
+**Measured on 2026-09-12, on the real v0.3.0 release downloaded by Firefox: the drag is the thing, and being in Applications is not.**
 
-So neither a script's `mv` nor Finder's scripted `move` is the thing that clears translocation, and anything that installs the app that way — an installer, a `make` target, a script a person copies off a page — leaves it translocated. **Whether a drag made with a mouse in Finder differs is not established here.** After the operator dragged one, an app carrying a quarantine attribute was running untranslocated from `/Applications`, which suggests it does; but that copy could not be told apart with certainty from the one this session had already moved and unquarantined by hand, and a measurement whose starting state is uncertain is not a measurement. The guide's step 2 rests on that answer, and it is worth settling from a clean copy rather than assuming either way.
+| How the app got into `/Applications` | Where it ran from |
+| --- | --- |
+| `mv` in a shell | `/private/var/folders/…/AppTranslocation/…` |
+| Finder's own `move`, over an Apple Event | `/private/var/folders/…/AppTranslocation/…` |
+| Dragged with a mouse in Finder | `/Applications/…`, and the quarantine attribute still on it |
+
+So the guide's step 2 does what it was written to do, and a person who follows it gets an app that knows where it lives. What does **not** work is installing the app by moving it programmatically — an installer, a `make` target, a script copied off a page — and that is worth knowing before anyone writes one.
+
+Removing `com.apple.quarantine` also stops translocation, which is the other half of the mechanism: it is the attribute that arms it, and the drag that disarms it.
+
+**Read off the attribute, not from Apple's documentation:** a pristine download carries flags `0081`; after a mouse drag into Applications and a launch the bundle carries `01c1` and the binaries inside `00c1`. The `01` appears to be the mark of the user's own move, but that reading is inference from three observations, not something Apple states here.
+
+**One confound, stated rather than hidden:** the scripted-move row was measured on a copy that had already been launched once (flags `00c1`), while the mouse-drag row started from a pristine `0081`. The two rows differ in the starting flags as well as in how the app was moved, so "Finder's scripted move does not clear translocation" is measured for that starting state and not isolated from it. The row that matters for a person — the pristine copy, dragged, untranslocated — has no such confound.
 
 ## 4. Building one app for both architectures
 
@@ -154,7 +166,7 @@ The mutants: no bundle seal; one architecture only; no plist version; `treeDir` 
 
 **Measured: the release app does not take a running panel away from its window.** The operator's panel was answering on 7777, started by their own window, while this was done. `Keeper.replaceable` returns false when the answering panel's owner process is alive (`internal/supervisor/keeper.go`), and that is what happened: the new window used the panel it found, and the operator's window and panel were still running afterwards.
 
-**Not measured, and the loose end of this release:** a first run of the release app all the way through first-run setup, on a machine with no fleet. If the app is translocated at that moment — see section 3 for when it is — the run records a statusline path under `/private/var/folders/…/AppTranslocation/…`, which disappears when the app quits. That is not new with signing and not caused by it; it is the same on every earlier release, and nothing reached it before because Gatekeeper stopped people first.
+**Not measured, and the loose end of this release:** a first run of the release app all the way through first-run setup, on a machine with no fleet. The app opened on a fleet that already existed, so `ensureStatusline` never ran from a downloaded copy. Section 3 says the path it would record is the right one as long as the person dragged the app in Finder, which the guide tells them to do — but that is the path not yet walked end to end.
 
 ## 9. Not verified
 
