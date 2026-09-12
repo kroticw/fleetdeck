@@ -14,10 +14,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// BundleName is what the app bundle is called, inside the release archive and
-// on disk.
-const BundleName = "fleetdeck.app"
-
 // Defaults for a ReleaseSource, each one a bound rather than a guess:
 //
 //   - DefaultMaxArchiveBytes: the v0.3.0 archive is 39.6 MB, both
@@ -65,10 +61,14 @@ type ReleaseSource struct {
 	// MaxArchiveBytes and NeedBytes default to the constants above.
 	MaxArchiveBytes int64
 	NeedBytes       int64
-
-	// Progress, when set, is told how the download is going.
-	Progress func(Progress)
 }
+
+// Both ways of getting a new app are the same shape to Update. The compiler
+// holds them to it.
+var (
+	_ Source = (*ReleaseSource)(nil)
+	_ Source = (*TreeSource)(nil)
+)
 
 // Check is the tag of a release newer than the running one, or "" when there
 // is nothing to update to.
@@ -96,9 +96,14 @@ func (r *ReleaseSource) Check(ctx context.Context) (string, error) {
 // It returns the path of a bundle that has passed every check, and on any
 // refusal it leaves dir as it found it: a rejected download must not stay
 // anywhere a person or a later run could start it from.
-func (r *ReleaseSource) Stage(ctx context.Context, dir, tag string) (string, error) {
+func (r *ReleaseSource) Stage(ctx context.Context, dir, tag string, say func(Progress)) (string, error) {
 	if err := r.roomFor(dir); err != nil {
 		return "", err
+	}
+	step := func(name, detail string) {
+		if say != nil {
+			say(Progress{Step: name, Detail: detail})
+		}
 	}
 	archive := filepath.Join(dir, ArchiveName(tag))
 	unpacked := filepath.Join(dir, "unpacked")
@@ -109,7 +114,7 @@ func (r *ReleaseSource) Stage(ctx context.Context, dir, tag string) (string, err
 		_ = os.RemoveAll(unpacked)
 	}
 
-	r.say("download", tag)
+	step("download", tag)
 	if err := r.download(ctx, r.Releases.ArchiveURL(tag), archive); err != nil {
 		clean()
 		return "", err
@@ -128,7 +133,7 @@ func (r *ReleaseSource) Stage(ctx context.Context, dir, tag string) (string, err
 	// The check runs on the bundle that will be started, in the place it will
 	// be started from. Checking one copy and starting another leaves a gap
 	// between the two, however short.
-	r.say("verify", tag)
+	step("verify", tag)
 	if err := r.Seal.Verify(ctx, staged); err != nil {
 		clean()
 		return "", err
@@ -205,10 +210,4 @@ func (r *ReleaseSource) download(ctx context.Context, url, into string) error {
 		return fmt.Errorf("downloading %s: the archive is too large (over %d MB)", url, limit>>20)
 	}
 	return nil
-}
-
-func (r *ReleaseSource) say(step, detail string) {
-	if r.Progress != nil {
-		r.Progress(Progress{Step: step, Detail: detail})
-	}
 }

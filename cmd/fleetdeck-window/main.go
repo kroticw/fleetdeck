@@ -257,14 +257,16 @@ func runUpdate(w webview.WebView, url, canonical string, kept *keeperRun) {
 	}
 	var last string
 	u := &supervisor.Update{
-		Tree: &supervisor.Tree{
-			Dir: treeDir, Remote: updateRemote, Branch: updateBranch,
-			Git: tools.Git, Env: supervisor.BuildEnv(tools, os.Environ()),
+		Source: &supervisor.TreeSource{
+			Tree: &supervisor.Tree{
+				Dir: treeDir, Remote: updateRemote, Branch: updateBranch,
+				Git: tools.Git, Env: supervisor.BuildEnv(tools, os.Environ()),
+			},
+			Tools:   tools,
+			Env:     os.Environ(),
+			Running: ownRevision(),
 		},
-		Tools:           tools,
-		Env:             os.Environ(),
 		Canonical:       canonical,
-		Running:         ownRevision(),
 		LockPath:        lockPath,
 		HandoverTimeout: handoverTimeout,
 		Launch:          launchNewWindow(url),

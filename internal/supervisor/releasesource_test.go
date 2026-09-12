@@ -85,7 +85,7 @@ func TestStageDownloadsUnpacksAndChecksTheRelease(t *testing.T) {
 	src := releaseSource(t, srv, teamIDOfInstalledApp(t))
 	dir := t.TempDir()
 
-	staged, err := src.Stage(context.Background(), dir, "v9.9.9")
+	staged, err := src.Stage(context.Background(), dir, "v9.9.9", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestStageRefusesAnArchiveThatIsNotSignedLikeARelease(t *testing.T) {
 	srv := serveRelease(t, "v9.9.9", releaseZip(t, adhocBundle(t)))
 	src := releaseSource(t, srv, "PTLLPQ8LY4")
 
-	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9")
+	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9", nil)
 
 	var sealErr *SealError
 	if !errors.As(err, &sealErr) {
@@ -123,7 +123,7 @@ func TestStageLeavesNothingBehindWhenItRefuses(t *testing.T) {
 	src := releaseSource(t, srv, "PTLLPQ8LY4")
 	dir := t.TempDir()
 
-	if _, err := src.Stage(context.Background(), dir, "v9.9.9"); err == nil {
+	if _, err := src.Stage(context.Background(), dir, "v9.9.9", nil); err == nil {
 		t.Fatal("the forged archive was accepted")
 	}
 
@@ -145,7 +145,7 @@ func TestStageSaysSoWhenTheArchiveIsNotThere(t *testing.T) {
 	defer srv.Close()
 	src := releaseSource(t, srv, "PTLLPQ8LY4")
 
-	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9")
+	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9", nil)
 	if err == nil {
 		t.Fatal("a 404 was not reported")
 	}
@@ -169,7 +169,7 @@ func TestStageStopsADownloadThatWillNotEnd(t *testing.T) {
 	src := releaseSource(t, srv, "PTLLPQ8LY4")
 	src.MaxArchiveBytes = 1 << 20
 
-	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9")
+	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9", nil)
 	if err == nil {
 		t.Fatal("an endless download was accepted")
 	}
@@ -191,7 +191,7 @@ func TestStageRefusesAnArchiveThatIsNotTheApp(t *testing.T) {
 	srv := serveRelease(t, "v9.9.9", zipOf(t, odd))
 	src := releaseSource(t, srv, "PTLLPQ8LY4")
 
-	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9")
+	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9", nil)
 	if err == nil {
 		t.Fatal("an archive with no app in it was accepted")
 	}
@@ -212,7 +212,7 @@ func TestStageRefusesBeforeDownloadingWhenThereIsNoRoom(t *testing.T) {
 	src := releaseSource(t, srv, "PTLLPQ8LY4")
 	src.NeedBytes = 1 << 60 // an exabyte
 
-	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9")
+	_, err := src.Stage(context.Background(), t.TempDir(), "v9.9.9", nil)
 
 	var room *NoRoomError
 	if !errors.As(err, &room) {

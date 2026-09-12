@@ -14,11 +14,35 @@ import (
 
 // Progress is one thing an update tells the person who pressed the button.
 type Progress struct {
-	// Step is "check", "build", "handover", "handover:<step>", "current" or
-	// "done".
+	// Step is "check", "current", "done", "handover", "handover:<step>", or
+	// whatever the Source reports while it puts the new app in place: "build"
+	// for a tree, "download" and "verify" for a release.
 	Step   string
 	Detail string
 }
+
+// Source is where an update gets the app it is going to install.
+//
+// There are two, and the difference between them is the whole of this
+// feature: Tree builds the new app from a checkout on this machine, and
+// ReleaseSource downloads one that was built and signed elsewhere. Update
+// drives either without knowing which it has, so that the path everything
+// below it takes -- the lock, the staging directory beside the installed app,
+// the handover to a new window, the swap -- is one path with one set of
+// tests, and not two that drift apart.
+type Source interface {
+	// Check says what this source could update to: a commit, a release tag,
+	// or "" when there is nothing newer than what runs.
+	Check(ctx context.Context) (string, error)
+	// Stage puts that version into dir and returns the bundle it put there,
+	// ready to be started. It reports its own steps through say, which may be
+	// nil.
+	Stage(ctx context.Context, dir, version string, say func(Progress)) (string, error)
+}
+
+// BundleName is what the app bundle is called: on disk, and inside the
+// release archive.
+const BundleName = "fleetdeck.app"
 
 // StagingDir is where an update builds: beside the canonical bundle, never in
 // place, and on the same filesystem, so that Swap can exchange the two.
@@ -32,16 +56,15 @@ func PanelIn(bundle string) string {
 }
 
 // Update is one press of the update button, as the running window does it:
-// bring the tree forward, build the app to the side, start the new window
-// from what was built, and wait for it to take the panel over and put itself
-// in place. The running window never touches the canonical bundle; the new
-// one does, and only once it has shown it works (see Takeover).
+// get the new app to the side of the installed one, start the new window from
+// it, and wait for it to take the panel over and put itself in place. Where
+// the new app comes from is the Source's business -- a checkout brought
+// forward and built, or a release downloaded and checked. The running window
+// never touches the canonical bundle; the new one does, and only once it has
+// shown it works (see Takeover).
 type Update struct {
-	Tree      *Tree
-	Tools     Tools
-	Env       []string
+	Source    Source
 	Canonical string // the installed app bundle
-	Running   string // the revision the running window was built from
 	LockPath  string
 	// HandoverTimeout bounds the new window's whole takeover.
 	HandoverTimeout time.Duration
@@ -72,28 +95,31 @@ func (u *Update) Run(ctx context.Context) error {
 	defer release()
 
 	u.say("check", "")
-	st, err := u.Tree.Forward(ctx)
+	version, err := u.Source.Check(ctx)
 	if err != nil {
 		return err
 	}
-	if st.Head == u.Running {
-		u.say("current", st.Head)
+	if version == "" {
+		u.say("current", "")
 		return nil
 	}
 
 	staging := StagingDir(u.Canonical)
 	// What an earlier update left there -- the bundle it swapped out -- is
-	// this program's own, and is replaced.
+	// this program's own, and an older version of it. Starting that would be
+	// an update backwards.
 	if err := os.RemoveAll(staging); err != nil {
 		return fmt.Errorf("clear %s: %w", staging, err)
 	}
-	u.say("build", st.Head)
-	if err := Make(ctx, u.Tree.Dir, u.Tools, u.Env, "window-app", "BINDIR="+staging); err != nil {
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		return fmt.Errorf("make %s: %w", staging, err)
+	}
+	staged, err := u.Source.Stage(ctx, staging, version, func(p Progress) { u.say(p.Step, p.Detail) })
+	if err != nil {
 		return err
 	}
-	staged := filepath.Join(staging, filepath.Base(u.Canonical))
 	if _, err := os.Stat(PanelIn(staged)); err != nil {
-		return fmt.Errorf("the build left no panel in %s: %w", staged, err)
+		return fmt.Errorf("the new app has no panel in %s: %w", staged, err)
 	}
 
 	u.say("handover", "")
@@ -108,7 +134,7 @@ func (u *Update) Run(ctx context.Context) error {
 	last, detail, err := h.Watch(hctx, func(s Step, d string) { u.say("handover:"+string(s), d) })
 	cancel()
 	if last == StepDone {
-		u.say("done", st.Head)
+		u.say("done", version)
 		return nil
 	}
 	stop()

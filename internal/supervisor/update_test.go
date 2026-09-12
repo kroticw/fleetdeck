@@ -154,11 +154,13 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 func (r *updateRig) update(running string) *Update {
 	makeBin, _ := exec.LookPath("make")
 	return &Update{
-		Tree:            r.f.supervisedTree(),
-		Tools:           Tools{Git: r.f.git, Make: makeBin},
-		Env:             append(r.f.env, "HELPER_BIN="+os.Args[0]),
+		Source: &TreeSource{
+			Tree:    r.f.supervisedTree(),
+			Tools:   Tools{Git: r.f.git, Make: makeBin},
+			Env:     append(r.f.env, "HELPER_BIN="+os.Args[0]),
+			Running: running,
+		},
 		Canonical:       r.canonical,
-		Running:         running,
 		LockPath:        filepath.Join(r.t.TempDir(), "update.lock"),
 		HandoverTimeout: 30 * time.Second,
 		Launch:          r.launch,
