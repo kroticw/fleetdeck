@@ -358,3 +358,20 @@ test("neither icon variant is decided inside the media query alone", () => {
     "a dark system with no explicit choice must show the dark drawing",
   );
 });
+
+// The bug this caught, on a live screen and not in any of the tests above:
+// ".app-icon svg { display: block }" outranks ".app-icon-dark { display: none }"
+// — one class and a type beats one class — so both drawings were painted side
+// by side in the light theme. Nothing may set display on the drawings except
+// the variant rules themselves, which all weigh the same.
+test("nothing outranks the icon variants' own display rules", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const [, selector, bodyText] of stripped.matchAll(/([^{}]*\.app-icon[^{}]*)\{([^}]*)\}/g)) {
+    if (!/display\s*:/.test(bodyText)) continue;
+    const name = selector.trim();
+    assert.ok(
+      name === ".app-icon" || /\.app-icon-(dark|light)$/.test(name),
+      `${name} sets display on the icon and outranks the variant rules that decide which one is shown`,
+    );
+  }
+});

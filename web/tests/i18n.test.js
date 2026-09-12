@@ -198,6 +198,7 @@ const KEYS = [
   "start_new_text",
   "start_new_name",
   "start_new_path",
+  "start_new_outside",
   "start_new_create",
   "start_new_cancel",
   "start_name_required",

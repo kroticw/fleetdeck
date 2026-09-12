@@ -21,10 +21,17 @@
 import { t, langCode } from "./i18n.js";
 import { envelopeText } from "./envelope.js";
 import { belongsTo, fleetFromSearch, withFleet } from "./fleet.js";
+import { fleetIconHTML } from "./icon.js";
 
 // What the panel names the workspace folder inside a directory the person
 // picked with the window's chooser.
 const WORKSPACE_NAME = "fleetdeck";
+
+// The icon on the folder step. A person with no configuration never reaches
+// the start page — there is no panel yet, only this surface — so this is the
+// screen the application opens on for them, and it carries the application's
+// mark for the same reason the start page does.
+const ICON_SIZE = 48;
 
 // How long the page waits for the panel to take over after setup: tries times
 // the pause. The panel swaps itself in right after the setup answers; this is
@@ -133,7 +140,11 @@ export function renderSetup(root, { fetch: get = globalThis.fetch, reload, wait,
 // taken over from the setup surface, with the steps setup reported: the next
 // step carries them, or they would be on screen for as long as one poll.
 function renderWorkspaceStep(root, { get, pause, choose, proposed, onReady }) {
+  const icon = el("div", "setup-icon");
+  icon.innerHTML = fleetIconHTML(ICON_SIZE);
   const heading = el("h1", "setup-title", t("setup_title"));
+  const head = el("div", "setup-head");
+  head.append(icon, heading);
   const intro = el("p", "setup-intro", t("setup_intro"));
   const made = el("ul", "setup-made");
   made.append(el("li", "", t("setup_board")), el("li", "", t("setup_docs")));
@@ -164,7 +175,7 @@ function renderWorkspaceStep(root, { get, pause, choose, proposed, onReady }) {
   const steps = el("ul", "setup-steps");
   const status = el("p", "setup-status");
 
-  root.replaceChildren(heading, intro, made, outside, row, error, steps, status);
+  root.replaceChildren(head, intro, made, outside, row, error, steps, status);
 
   let reported = [];
   const handOver = async () => {

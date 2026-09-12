@@ -578,12 +578,23 @@ export function renderHeader(root) {
   // the document, because the point is what happens outside the header: a menu
   // that could only be closed by the control that opened it is a menu covering
   // the panel until someone finds that control again.
-  document.addEventListener("click", (event) => {
-    if (!menuOpen) return;
-    if (event.target.closest?.(".fleet-menu")) return;
-    menuOpen = false;
-    lastPaint();
-  });
+  // The click listener is on the capture phase, and that is load-bearing. On
+  // the bubble phase the header's own handler has already run and replaced the
+  // markup whole, so the clicked node is detached by the time this asks where
+  // it was: closest() then answers null for a click inside the menu, and the
+  // menu shuts itself in the same gesture that opened it. Seen on a live page,
+  // where opening it worked once and then did not — the unit tests cannot look
+  // here, because they never run a real event through a real document.
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!menuOpen) return;
+      if (event.target.closest?.(".fleet-menu")) return;
+      menuOpen = false;
+      lastPaint();
+    },
+    true,
+  );
   document.addEventListener("keydown", (event) => {
     if (!menuOpen || event.key !== "Escape") return;
     menuOpen = false;

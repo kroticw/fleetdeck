@@ -92,10 +92,13 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
   path.setAttribute("aria-label", t("start_new_path"));
   path.setAttribute("spellcheck", "false");
 
-  const nameRow = el("div", "setup-row");
-  nameRow.append(name);
-  const pathRow = el("div", "setup-row");
-  pathRow.append(path);
+  // Labelled, not only aria-labelled: two bare boxes one under the other do
+  // not say which is the name and which is the folder, and the first live run
+  // of this form could not be filled in without guessing.
+  const nameRow = el("label", "setup-row start-field");
+  nameRow.append(el("span", "start-field-name", t("start_new_name")), name);
+  const pathRow = el("label", "setup-row start-field");
+  pathRow.append(el("span", "start-field-name", t("start_new_path")), path);
   if (typeof choose === "function") {
     const chooseButton = button("start-choose", t("setup_choose"));
     chooseButton.addEventListener("click", async () => {
@@ -126,6 +129,12 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
   form.append(
     el("h2", "", t("start_new_title")),
     el("p", "", t("start_new_text")),
+    // What is written outside the folder being chosen, before the button
+    // rather than in the report after it. Making a fleet rewrites
+    // ~/.claude/settings.json as formatted JSON, which a hand-ordered file
+    // does not survive — found by making a fleet on a stand and reading what
+    // the steps had done.
+    el("p", "setup-outside", t("start_new_outside")),
     nameRow,
     pathRow,
     unavailable,

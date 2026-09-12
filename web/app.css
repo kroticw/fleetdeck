@@ -2448,7 +2448,22 @@ body.is-resizing {
 
 .setup-title {
   font-size: var(--fs-md);
+  margin: 0;
+}
+
+/* The icon beside the title on the folder step. A person with no
+   configuration never reaches the start page, so this is the screen the
+   application opens on for them. */
+.setup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-lg);
   margin: var(--gap-lg) 0 0;
+}
+
+.setup-icon {
+  flex: none;
+  display: inline-flex;
 }
 
 .setup-intro,
@@ -2864,6 +2879,20 @@ body.is-resizing {
   gap: var(--gap);
 }
 
+/* The two boxes are a name and a folder, and which is which has to be on
+   screen: aria-label alone left a form that could not be filled in without
+   guessing, found the first time it was used on a real page. */
+.start-field {
+  align-items: center;
+}
+
+.start-field-name {
+  flex: none;
+  width: 5rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
 .start-footer {
   margin: 0;
   padding-top: var(--gap-lg);
@@ -2884,10 +2913,12 @@ body.is-resizing {
   display: inline-flex;
 }
 
-.app-icon svg {
-  display: block;
-}
-
+/* No rule here may set display on the svg through a selector of its own —
+   ".app-icon svg" outranks ".app-icon-dark" (one class and a type beats one
+   class), and the first build of this shipped both drawings side by side in
+   the light theme. Every unit test passed; a live screen caught it. The
+   variants are the only rules that touch display, and they all weigh the
+   same. */
 .app-icon-dark {
   display: none;
 }

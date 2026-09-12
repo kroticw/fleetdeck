@@ -226,6 +226,11 @@ const en = {
     "fleetdeck makes the folder with a board and documentation in it, the same two the first run makes, and adds the fleet to the configuration. It is served after the panel is restarted — nothing that is running now is touched.",
   start_new_name: "Name",
   start_new_path: "Folder",
+  // What is written outside the folder being chosen, said before the button
+  // rather than found in the report after it — the wizard says the same thing
+  // in setup_outside, and making a fleet writes in the same two places.
+  start_new_outside:
+    "Outside that folder it adds the fleet to ~/.config/fleetdeck/config.yaml and the folder to permissions.additionalDirectories in ~/.claude/settings.json, so Claude Code sessions can write their cards. That file is rewritten as formatted JSON: a hand-ordered one does not come back in its own order.",
   start_new_create: "Create the fleet",
   start_new_cancel: "Cancel",
   start_name_required: "Name the fleet",
@@ -439,6 +444,8 @@ const ru = {
     "fleetdeck создаст папку, а в ней доску и документацию — те же две, что появляются при первом запуске, — и допишет флот в настройку. Панель начнёт его показывать после перезапуска; на то, что работает сейчас, это не влияет.",
   start_new_name: "Имя",
   start_new_path: "Папка",
+  start_new_outside:
+    "Вне этой папки флот будет дописан в ~/.config/fleetdeck/config.yaml, а сама папка — в permissions.additionalDirectories файла ~/.claude/settings.json, чтобы сессии Claude Code могли вести свои карточки. Этот файл будет перезаписан отформатированным JSON: если вы упорядочили ключи вручную, прежний порядок не вернётся.",
   start_new_create: "Создать флот",
   start_new_cancel: "Отмена",
   start_name_required: "Укажите имя флота",
