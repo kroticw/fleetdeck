@@ -72,11 +72,13 @@ A panel that moved to another port would be invisible to all three. The statusli
 
 ## Handing the panel to a new version
 
-The Update button (`internal/supervisor/update.go`, `cmd/fleetdeck-window/update.go`) builds the new app beside the installed one, and lets the new version put itself in place. The invariant, in the operator's words and in the code: at the canonical path there is always a working version, at any moment.
+The Update button (`internal/supervisor/update.go`, `cmd/fleetdeck-window/update.go`) puts the new app beside the installed one, and lets the new version put itself in place. The invariant, in the operator's words and in the code: at the canonical path there is always a working version, at any moment.
 
-1. The old window takes the update lock. It is an flock outside the tree, so a crashed update never locks the next one out.
-2. It fast-forwards the source tree. It refuses, in words, a tree on another branch, with edits, or with commits of its own.
-3. It builds the app into `.fleetdeck-update/` beside the installed bundle.
+Where the new app comes from is the one thing that differs between builds, and it is behind `supervisor.Source`: a build from a checkout brings that checkout forward and builds it (`TreeSource`), and one installed from a release downloads the next release and checks who signed it (`ReleaseSource`, and [update-from-release.md](update-from-release.md)). Steps 2 and 3 below are that source's half; everything else is the same code for both, which is the reason for the seam.
+
+1. The old window takes the update lock. It is an flock beside whatever the build updates from — the source tree for a build that has one, the installed app otherwise — so a crashed update never locks the next one out.
+2. It asks the source what there is to update to, and stops here when that is what already runs. A tree is fetched and reported on without being moved; a releases page is asked which release is newest. A tree on another branch, with edits, or with commits of its own is refused in words.
+3. It has the source put the new app into `.fleetdeck-update/` beside the installed bundle: built there from the tree, or downloaded there and checked — signed with a Developer ID, by the same Apple team as the running app, and notarized — before anything else happens. A download that fails any check is deleted and the update stops.
 4. It pauses its own keeper. A keeper left running would race the new window for the port; a test holds this.
 5. It starts the new window from the build with `--handover <file> --canonical <installed bundle>`.
 6. The new window reports `alive`, stops the old panel, and starts its own from the staged bundle. Its keeper starts only after the old panel is stopped, so the replacement rules above never come into play here.
