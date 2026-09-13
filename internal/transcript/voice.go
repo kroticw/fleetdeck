@@ -12,7 +12,8 @@ import (
 )
 
 // Voice is what a transcript says about the session's own voice: when it last said
-// anything, and the tool call it is standing inside, if it is inside one.
+// anything, since when it has left something unanswered, and the tool call it is
+// standing inside when that call is on disk.
 //
 // "Said" is narrower than "written". A transcript is appended to by more than the
 // session: a message sent to it lands as a queue-operation line the moment it is sent,
@@ -30,13 +31,33 @@ import (
 // the seven days to 2026-09-12 found no other line kind the session writes on its own
 // behalf.
 type Voice struct {
-	// LastSpoke is when the session last said anything. A session that has said
-	// nothing at all yet counts from the first timestamped line of its transcript:
-	// it has said nothing since then. Zero only when there is no timestamped line to
-	// measure from, which the caller reads as "not measured".
+	// LastSpoke is when the session, or a subagent of it, last said anything. A
+	// session that has said nothing at all yet counts from the first timestamped line
+	// of its transcript: it has said nothing since then. Zero only when there is no
+	// timestamped line to measure from, which the caller reads as "not measured".
 	LastSpoke time.Time
-	// InCall is the tool call the session is standing inside, or nil. It is the fact
-	// the transcript records, not a judgement: a call that is slow and a call that
+
+	// Unanswered is the moment since which the session has owed a move and said
+	// nothing, or zero when it owes nothing -- when its own words are the newest thing
+	// in the transcript.
+	//
+	// It owes a move when the newest of its lines is a call that came back, or a call
+	// still open, or when someone addressed it -- a typed prompt, a queued message --
+	// after its last words. The first two count from the session's last word; the
+	// third from the first address after it, not from the end of its turn, which may
+	// be hours ago. A subagent speaking restarts the count, since the session is then
+	// working through it.
+	//
+	// This, and not InCall, is what outlives a frozen call. Claude Code does not put
+	// every open call on disk: measured on CLI 2.1.269, a Read -- alone, or beside a
+	// Bash -- reached the transcript only together with its result, so for the whole
+	// time the call hung the file ended at the previous result. What the file does show
+	// in that state is a session that owes its next move and has not made it.
+	Unanswered time.Time
+
+	// InCall is the tool call the session is standing inside, or nil. It is a fact the
+	// transcript records only for calls Claude Code writes before they return -- a
+	// Bash, an MCP call -- and never a judgement: a call that is slow and a call that
 	// will never return look the same from here.
 	InCall *Call
 }
@@ -45,25 +66,28 @@ type Voice struct {
 type Call struct {
 	Tool  string    `json:"tool"`
 	Since time.Time `json:"since"`
-
-	id string
 }
 
-// maxSubagentDepth bounds how far ReadVoice follows a subagent into the subagent it
-// started in turn. Claude Code records nesting (spawnDepth in the meta file) but a
-// chain of meta files naming each other is still a cycle a reader must not follow
-// forever.
-const maxSubagentDepth = 4
-
-// ReadVoice reads the session's voice from the tail of its transcript. Only the most
-// recent turn is read in the common case; the walk goes further back only while
-// nothing the session said has been found yet.
+// ReadVoice reads the session's voice from the tail of its transcript, and from the
+// transcripts of its subagents beside it. Only the most recent turn is read in the
+// common case; the walk goes further back only while nothing the session said has
+// been found yet.
 func ReadVoice(path string) (Voice, error) {
-	subagents := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
-	return readVoice(path, subagents, 0)
+	v, err := readOwnVoice(path)
+	if err != nil {
+		return Voice{}, err
+	}
+	own := v.LastSpoke
+	if sub := subagentsLastSpoke(filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents"), own); sub.After(own) {
+		v.LastSpoke = sub
+		if !v.Unanswered.IsZero() && sub.After(v.Unanswered) {
+			v.Unanswered = sub
+		}
+	}
+	return v, nil
 }
 
-func readVoice(path, subagentsDir string, depth int) (Voice, error) {
+func readOwnVoice(path string) (Voice, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Voice{}, fmt.Errorf("%w: %s", ErrNoTranscript, path)
@@ -77,8 +101,10 @@ func readVoice(path, subagentsDir string, depth int) (Voice, error) {
 		v         Voice
 		earliest  time.Time
 		answered  = map[string]bool{}
+		addresses []time.Time // addresses seen before (newer than) the last own line
 		sawCall   bool
 		spokeSeen bool
+		lastIsRes bool // the newest own line is a tool_result
 	)
 	visit := func(line []byte) bool {
 		var r voiceLine
@@ -93,6 +119,13 @@ func readVoice(path, subagentsDir string, depth int) (Voice, error) {
 
 		blocks := r.blocks()
 		switch {
+		case r.addresses(blocks):
+			if !spokeSeen {
+				addresses = append(addresses, stamp)
+			}
+			// A typed prompt before the session's newest words starts the turn
+			// those words belong to: nothing further back is needed.
+			return spokeSeen && r.Type == "user"
 		case r.Type == "user" && blocks.hasToolResult():
 			if sawCall {
 				// A result from before the calls already seen: the previous
@@ -103,12 +136,8 @@ func readVoice(path, subagentsDir string, depth int) (Voice, error) {
 				answered[id] = true
 			}
 			if !spokeSeen {
-				v.LastSpoke, spokeSeen = stamp, true
+				v.LastSpoke, spokeSeen, lastIsRes = stamp, true, true
 			}
-		case r.Type == "user":
-			// A prompt, from a person or a peer: someone speaking to the session.
-			// It ends the turn being read, and says nothing about the session.
-			return spokeSeen
 		case r.Type == "assistant":
 			if !spokeSeen {
 				v.LastSpoke, spokeSeen = stamp, true
@@ -124,7 +153,7 @@ func readVoice(path, subagentsDir string, depth int) (Voice, error) {
 				if !answered[u.ID] {
 					// Walking newest-first, so the last one kept is the
 					// earliest open call of the batch.
-					v.InCall = &Call{Tool: u.Name, Since: stamp, id: u.ID}
+					v.InCall = &Call{Tool: u.Name, Since: stamp}
 				}
 			}
 		}
@@ -133,54 +162,91 @@ func readVoice(path, subagentsDir string, depth int) (Voice, error) {
 	if err := reverseLines(f, visit); err != nil {
 		return Voice{}, err
 	}
-	if !spokeSeen {
-		v.LastSpoke = earliest
-	}
 
-	if v.InCall != nil && depth < maxSubagentDepth {
-		if sub, ok := subagentOf(subagentsDir, v.InCall.id); ok {
-			if sv, err := readVoice(sub, subagentsDir, depth+1); err == nil && sv.LastSpoke.After(v.LastSpoke) {
-				v.LastSpoke = sv.LastSpoke
-			}
-		}
+	switch {
+	case !spokeSeen:
+		v.LastSpoke = earliest
+		v.Unanswered = earliestAtOrAfter(addresses, earliest)
+	case lastIsRes || v.InCall != nil:
+		v.Unanswered = v.LastSpoke
+	default:
+		v.Unanswered = earliestAfter(addresses, v.LastSpoke)
 	}
 	return v, nil
 }
 
-// subagentOf finds the transcript of the subagent a tool call started, through the
-// meta file Claude Code writes beside it ("agent-<id>.meta.json", whose toolUseId
-// names the call). A call with no such file started no subagent this reader can see.
-func subagentOf(dir, toolUseID string) (string, bool) {
-	if toolUseID == "" {
-		return "", false
-	}
-	metas, err := filepath.Glob(filepath.Join(dir, "*.meta.json"))
+// subagentsLastSpoke is the newest moment any subagent of the session spoke after
+// since, or the zero time. Only transcripts written to after since are read at all,
+// so an idle session with a long history of finished subagents costs a directory
+// listing and nothing more.
+func subagentsLastSpoke(dir string, since time.Time) time.Time {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil {
-		return "", false
+		return time.Time{}
 	}
-	for _, m := range metas {
-		raw, err := os.ReadFile(m)
+	var newest time.Time
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil || !fi.ModTime().After(since) {
+			continue
+		}
+		sv, err := readOwnVoice(p)
 		if err != nil {
 			continue
 		}
-		var meta struct {
-			ToolUseID string `json:"toolUseId"`
+		if sv.LastSpoke.After(newest) {
+			newest = sv.LastSpoke
 		}
-		if json.Unmarshal(raw, &meta) != nil || meta.ToolUseID != toolUseID {
-			continue
-		}
-		return strings.TrimSuffix(m, ".meta.json") + ".jsonl", true
 	}
-	return "", false
+	return newest
+}
+
+func earliestAfter(ts []time.Time, after time.Time) time.Time {
+	var out time.Time
+	for _, t := range ts {
+		if t.After(after) && (out.IsZero() || t.Before(out)) {
+			out = t
+		}
+	}
+	return out
+}
+
+func earliestAtOrAfter(ts []time.Time, from time.Time) time.Time {
+	var out time.Time
+	for _, t := range ts {
+		if !t.Before(from) && (out.IsZero() || t.Before(out)) {
+			out = t
+		}
+	}
+	return out
 }
 
 // voiceLine is the part of a transcript line ReadVoice reads.
 type voiceLine struct {
-	Type      string `json:"type"`
-	Timestamp string `json:"timestamp"`
-	Message   struct {
+	Type       string `json:"type"`
+	Timestamp  string `json:"timestamp"`
+	Operation  string `json:"operation"`
+	Attachment struct {
+		Type string `json:"type"`
+	} `json:"attachment"`
+	Message struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
+}
+
+// addresses reports whether the line is someone addressing the session: a typed
+// prompt, a message put in its queue, or the record of a queued message being handed
+// to it.
+func (r voiceLine) addresses(blocks blockList) bool {
+	switch r.Type {
+	case "user":
+		return !blocks.hasToolResult()
+	case "queue-operation":
+		return r.Operation == "enqueue"
+	case "attachment":
+		return r.Attachment.Type == "queued_command"
+	}
+	return false
 }
 
 type contentBlock struct {
