@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,14 +110,15 @@ type artifact struct {
 }
 
 type release struct {
-	ID        int64   `json:"id"`
-	TagName   string  `json:"tag_name"`
-	Name      string  `json:"name"`
-	Body      string  `json:"body"`
-	Draft     bool    `json:"draft"`
-	HTMLURL   string  `json:"html_url"`
-	UploadURL string  `json:"upload_url"`
-	Assets    []asset `json:"assets"`
+	ID         int64   `json:"id"`
+	TagName    string  `json:"tag_name"`
+	Name       string  `json:"name"`
+	Body       string  `json:"body"`
+	Draft      bool    `json:"draft"`
+	Prerelease bool    `json:"prerelease"`
+	HTMLURL    string  `json:"html_url"`
+	UploadURL  string  `json:"upload_url"`
+	Assets     []asset `json:"assets"`
 }
 
 type asset struct {
@@ -225,8 +227,19 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, warne
 	case len(published) == 1:
 		rel = published[0]
 		p.logf("release %d for %s is already published; checking it is complete", rel.ID, tag)
-	case len(drafts) > 0:
+	case len(drafts) > 1:
+		// Nothing says which of several drafts is this release, and picking one
+		// publishes whatever that one carries, which cannot be taken back.
+		ids := make([]string, len(drafts))
+		for i, d := range drafts {
+			ids[i] = strconv.FormatInt(d.ID, 10)
+		}
+		return fmt.Errorf("%d draft releases carry the tag %s (%s) and nothing says which of them is this release; delete the ones that are not and run again", len(drafts), tag, strings.Join(ids, ", "))
+	case len(drafts) == 1:
 		rel = drafts[0]
+		if err := p.requireOurs(ctx, rel, arts); err != nil {
+			return err
+		}
 		p.logf("finishing draft release %d for %s", rel.ID, tag)
 	default:
 		p.logf("creating a draft release for %s", tag)
@@ -238,8 +251,9 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, warne
 			return err
 		}
 	}
-	// Other drafts on the tag are left alone: a draft can hold notes somebody wrote,
-	// and deleting is not this program's call. They are named where a person sees them.
+	// Drafts beside a published release are not this release and are not published;
+	// they are left alone, since deleting is not this program's call, and named where a
+	// person sees them.
 	for _, d := range drafts {
 		if d.ID != rel.ID && !warned[d.ID] {
 			warned[d.ID] = true
@@ -332,13 +346,66 @@ func check(got release, tag string, arts []artifact, expect map[string]expectati
 	return nil
 }
 
+type notes struct {
+	Name string `json:"name"`
+	Body string `json:"body"`
+}
+
+// generateNotes asks GitHub for the title and notes it would write for tag. It
+// changes nothing.
+func (p *Publisher) generateNotes(ctx context.Context, tag string) (notes, error) {
+	var n notes
+	err := p.call(ctx, http.MethodPost, p.repoURL("/releases/generate-notes"), map[string]any{"tag_name": tag}, &n)
+	return n, err
+}
+
+// requireOurs refuses a draft that carries anything this publish would not have put
+// there itself: publishing it would publish that too. A draft passes when it is not a
+// prerelease, its title and notes are empty or exactly the ones GitHub generates for
+// the tag, and every file on it is one this build makes. That is the shape a draft
+// has when this program, or gh before it, made it and was cut off; anything else was
+// shaped by a person, and a person decides what happens to it.
+func (p *Publisher) requireOurs(ctx context.Context, rel release, arts []artifact) error {
+	var foreign []string
+	if rel.Prerelease {
+		foreign = append(foreign, "it is marked as a prerelease")
+	}
+	for _, a := range rel.Assets {
+		if !makes(arts, a.Name) {
+			foreign = append(foreign, "it holds "+a.Name+", which this build does not make")
+		}
+	}
+	if rel.Name != "" || rel.Body != "" {
+		generated, err := p.generateNotes(ctx, rel.TagName)
+		if err != nil {
+			return err
+		}
+		if rel.Name != "" && rel.Name != generated.Name {
+			foreign = append(foreign, fmt.Sprintf("its title %q is not the generated %q", rel.Name, generated.Name))
+		}
+		if rel.Body != "" && rel.Body != generated.Body {
+			foreign = append(foreign, "its notes are not the ones GitHub generates for the tag")
+		}
+	}
+	if len(foreign) > 0 {
+		return fmt.Errorf("draft release %d for %s was not made by a publish and would be published as it is: %s; fix or delete it and run again", rel.ID, rel.TagName, strings.Join(foreign, "; "))
+	}
+	return nil
+}
+
+func makes(arts []artifact, name string) bool {
+	for _, a := range arts {
+		if a.name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Publisher) writeNotes(ctx context.Context, rel *release) error {
 	p.logf("generating notes for release %d", rel.ID)
-	var notes struct {
-		Name string `json:"name"`
-		Body string `json:"body"`
-	}
-	if err := p.call(ctx, http.MethodPost, p.repoURL("/releases/generate-notes"), map[string]any{"tag_name": rel.TagName}, &notes); err != nil {
+	notes, err := p.generateNotes(ctx, rel.TagName)
+	if err != nil {
 		return err
 	}
 	change := map[string]any{"body": notes.Body}

@@ -1,7 +1,6 @@
 package releasepublish
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -122,28 +121,105 @@ func TestPublishUploadsEachArtifactWithTheContentTypeReleasesAlreadyUse(t *testi
 	}
 }
 
-// v0.8.0: the attempts to publish by hand answered with errors and still left two
-// empty drafts on the tag. The retry must finish the release with one of them rather
-// than stop, and must not add a third.
+// A create that answered with an error and made an empty draft anyway: the retry
+// finishes that draft rather than adding a second one beside it.
 func TestPublishFinishesALeftoverEmptyDraftInsteadOfCreatingAnother(t *testing.T) {
 	fg := newFakeGitHub(t)
 	files, paths := build(t)
-	first := fg.addRelease(tag, true, "", nil)
-	fg.addRelease(tag, true, "", nil)
-	var log bytes.Buffer
+	draft := fg.addRelease(tag, true, "", nil)
 
-	if err := fg.publisher(&log, 0).Publish(context.Background(), tag, paths); err != nil {
+	if err := fg.publisher(t.Output(), 0).Publish(context.Background(), tag, paths); err != nil {
 		t.Fatal(err)
 	}
-	rel := requirePublished(t, fg, files)
-	if rel.ID != first.ID {
-		t.Errorf("published release %d, want the oldest draft %d", rel.ID, first.ID)
+	if rel := requirePublished(t, fg, files); rel.ID != draft.ID {
+		t.Errorf("published release %d, want the existing draft %d", rel.ID, draft.ID)
 	}
-	if n := len(fg.releasesForTag()); n != 2 {
-		t.Errorf("%d releases carry the tag, want the two that were there", n)
+	if n := len(fg.releasesForTag()); n != 1 {
+		t.Errorf("%d releases carry the tag, want the one that was there", n)
 	}
-	if !strings.Contains(log.String(), "::warning::") {
-		t.Errorf("the other draft on the tag went unmentioned; log:\n%s", log.String())
+}
+
+// v0.8.0 was left with two drafts on the tag. Nothing says which one is the release,
+// and publishing the wrong one cannot be taken back: the run stops, names them, and
+// changes nothing.
+func TestPublishStopsOnSeveralDraftsOnTheTag(t *testing.T) {
+	fg := newFakeGitHub(t)
+	_, paths := build(t)
+	first := fg.addRelease(tag, true, "", nil)
+	second := fg.addRelease(tag, true, "", nil)
+	var slept int
+	p := fg.publisher(t.Output(), 5)
+	p.Sleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+	err := p.Publish(context.Background(), tag, paths)
+	if err == nil {
+		t.Fatal("publish chose one of two drafts on its own")
+	}
+	for _, id := range []int64{first.ID, second.ID} {
+		if !strings.Contains(err.Error(), fmt.Sprint(id)) {
+			t.Errorf("the error does not name draft %d: %v", id, err)
+		}
+	}
+	if m := fg.mutations(); len(m) != 0 {
+		t.Errorf("GitHub was changed: %v", m)
+	}
+	if slept != 0 {
+		t.Errorf("waited %d times for something only a person can resolve", slept)
+	}
+}
+
+// A draft somebody shaped would be published with whatever they put in it. Each of
+// these stops the run before anything changes.
+func TestPublishStopsOnADraftCarryingSomethingAPublishWouldNotPutThere(t *testing.T) {
+	cases := map[string]func(*fakeRelease){
+		"prerelease":         func(r *fakeRelease) { r.Prerelease = true },
+		"hand-written notes": func(r *fakeRelease) { r.Name, r.Body = tag, "Hand-written notes." },
+		"another title":      func(r *fakeRelease) { r.Name, r.Body = "Big release", generatedNotes(tag) },
+		"a file of its own": func(r *fakeRelease) {
+			r.Assets = append(r.Assets, &fakeAsset{ID: 1, Name: "checksums.txt", State: "uploaded", Data: []byte("x")})
+		},
+	}
+	for name, shape := range cases {
+		t.Run(name, func(t *testing.T) {
+			fg := newFakeGitHub(t)
+			_, paths := build(t)
+			shape(fg.addRelease(tag, true, "", nil))
+
+			err := fg.publisher(t.Output(), 5).Publish(context.Background(), tag, paths)
+			if err == nil {
+				t.Fatal("publish finished a draft carrying something it did not make")
+			}
+			if m := fg.mutations(); len(m) != 0 {
+				t.Errorf("GitHub was changed: %v", m)
+			}
+		})
+	}
+}
+
+// The price of an outage that outlasts every retry has to stay one rerun of the
+// publish, not a new build: the draft keeps every file that reached it, and a rerun
+// with the same files only publishes.
+func TestPublishOutageLeavesADraftARerunOnlyHasToPublish(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	fg.inject(fault{op: "update", times: -1, status: http.StatusBadGateway})
+
+	if err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths); err == nil {
+		t.Fatal("publish reported success while publishing was failing")
+	}
+	rels := fg.releasesForTag()
+	if len(rels) != 1 || !rels[0].Draft || len(rels[0].Assets) != len(files) {
+		t.Fatalf("the failed run did not leave one draft with every file on it")
+	}
+
+	fg.recover()
+	if err := fg.publisher(t.Output(), 0).Publish(context.Background(), tag, paths); err != nil {
+		t.Fatal(err)
+	}
+	requirePublished(t, fg, files)
+	want := fmt.Sprintf("PATCH /repos/%s/releases/%d", fakeRepo, rels[0].ID)
+	if m := fg.mutations(); len(m) != 1 || m[0] != want {
+		t.Errorf("the rerun sent %v, want only %s", m, want)
 	}
 }
 
@@ -394,12 +470,17 @@ func TestPublishDoesNotRetryAValidationErrorWithNothingUncertainBeforeIt(t *test
 func TestPublishDoesNotRetryBadCredentials(t *testing.T) {
 	fg := newFakeGitHub(t)
 	_, paths := build(t)
+	var slept int
 	p := fg.publisher(t.Output(), 5)
 	p.Token = "wrong"
+	p.Sleep = func(context.Context, time.Duration) error { slept++; return nil }
 
 	var apiErr *APIError
 	if err := p.Publish(context.Background(), tag, paths); !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized {
 		t.Fatalf("got %v, want the 401", err)
+	}
+	if slept != 0 {
+		t.Errorf("bad credentials were retried %d times", slept)
 	}
 }
 

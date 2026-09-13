@@ -41,12 +41,13 @@ type fakeGitHub struct {
 }
 
 type fakeRelease struct {
-	ID     int64
-	Tag    string
-	Name   string
-	Body   string
-	Draft  bool
-	Assets []*fakeAsset
+	ID         int64
+	Tag        string
+	Name       string
+	Body       string
+	Draft      bool
+	Prerelease bool
+	Assets     []*fakeAsset
 }
 
 type fakeAsset struct {
@@ -136,16 +137,26 @@ func (fg *fakeGitHub) releasesForTag() []*fakeRelease {
 }
 
 // mutations are the requests that change something, in the order they arrived.
+// Generating notes is a POST that changes nothing, and is not one.
 func (fg *fakeGitHub) mutations() []string {
 	fg.mu.Lock()
 	defer fg.mu.Unlock()
 	var out []string
 	for _, r := range fg.requests {
-		if !strings.HasPrefix(r, "GET ") {
+		if !strings.HasPrefix(r, "GET ") && !strings.HasSuffix(r, "/generate-notes") {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// recover ends every injected failure and forgets the requests seen so far: GitHub
+// is back, and what a rerun does from here is counted on its own.
+func (fg *fakeGitHub) recover() {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	fg.faults = nil
+	fg.requests = nil
 }
 
 func (fg *fakeGitHub) id() int64 {
@@ -435,6 +446,7 @@ func (fg *fakeGitHub) render(rel *fakeRelease) map[string]any {
 		"name":       rel.Name,
 		"body":       rel.Body,
 		"draft":      rel.Draft,
+		"prerelease": rel.Prerelease,
 		"upload_url": fmt.Sprintf("%s/uploads/repos/%s/releases/%d/assets{?name,label}", fg.srv.URL, fakeRepo, rel.ID),
 		"assets":     assets,
 	}
