@@ -312,9 +312,28 @@ func TestE2ECreateThatFailedButHappened(t *testing.T) {
 	}
 }
 
-// The state v0.8.0 was left in: two empty drafts on the tag, made by attempts that
-// reported failure.
-func TestE2EFinishesLeftoverEmptyDrafts(t *testing.T) {
+// An empty draft on the tag, the kind a create that reported failure leaves: the
+// publish finishes it rather than adding another.
+func TestE2EFinishesALeftoverEmptyDraft(t *testing.T) {
+	e := newE2E(t, "draft")
+	ctx := context.Background()
+	var draft release
+	e.must(e.admin.call(ctx, http.MethodPost, e.admin.repoURL("/releases"), map[string]any{"tag_name": e.tag, "draft": true}, &draft))
+
+	if err := e.publisher().Publish(ctx, e.tag, e.paths); err != nil {
+		t.Fatal(err)
+	}
+	if rel := e.requirePublished(); rel.ID != draft.ID {
+		t.Errorf("published %d, want the draft that was there, %d", rel.ID, draft.ID)
+	}
+	if n := len(e.releases()); n != 1 {
+		t.Errorf("%d releases carry the tag, want one", n)
+	}
+}
+
+// The state v0.8.0 was left in: two drafts on the tag. Nothing says which is the
+// release, so the run stops and changes nothing.
+func TestE2EStopsOnTwoDrafts(t *testing.T) {
 	e := newE2E(t, "drafts")
 	ctx := context.Background()
 	var first, second release
@@ -322,15 +341,35 @@ func TestE2EFinishesLeftoverEmptyDrafts(t *testing.T) {
 	e.must(e.admin.call(ctx, http.MethodPost, e.admin.repoURL("/releases"), map[string]any{"tag_name": e.tag, "draft": true}, &second))
 	t.Logf("GitHub accepted two drafts on one tag: %d and %d", first.ID, second.ID)
 
-	if err := e.publisher().Publish(ctx, e.tag, e.paths); err != nil {
+	err := e.publisher(e2eWaits...).Publish(ctx, e.tag, e.paths)
+	if err == nil {
+		t.Fatal("the publish chose one of two drafts on its own")
+	}
+	t.Logf("stopped with: %v", err)
+	if m := e.ft.takeMutations(); len(m) != 0 {
+		t.Errorf("GitHub was changed: %v", m)
+	}
+}
+
+// A draft made by an earlier attempt of this publisher carries GitHub's generated
+// notes. Finishing it depends on GitHub generating the same notes again when asked,
+// which is what this checks.
+func TestE2EFinishesADraftAnEarlierAttemptMade(t *testing.T) {
+	e := newE2E(t, "earlier")
+	e.ft.add(e2eRule{name: "uploads down", match: isUpload, times: -1})
+	if err := e.publisher().Publish(context.Background(), e.tag, e.paths); err == nil {
+		t.Fatal("a run with uploads failing reported success")
+	}
+	rels := e.releases()
+	if len(rels) != 1 || !rels[0].Draft || rels[0].Body == "" {
+		t.Fatalf("want one draft carrying generated notes: %+v", rels)
+	}
+
+	e.ft = &faultyTransport{t: t, base: http.DefaultTransport}
+	if err := e.publisher().Publish(context.Background(), e.tag, e.paths); err != nil {
 		t.Fatal(err)
 	}
-	if rel := e.requirePublished(); rel.ID != first.ID {
-		t.Errorf("published %d, want the older draft %d", rel.ID, first.ID)
-	}
-	if n := len(e.releases()); n != 2 {
-		t.Errorf("%d releases carry the tag, want the two drafts that were there", n)
-	}
+	e.requirePublished()
 }
 
 // A run that died part way through the uploads: one file on a draft, nothing else.
@@ -396,21 +435,20 @@ func TestE2EUploadAndPublishThatFailedButHappened(t *testing.T) {
 	e.requirePublished()
 }
 
-// An outage longer than the retries: the run fails, says so, and the release is not
-// published. Then GitHub recovers, the rerun finishes, and a rerun after that changes
-// nothing at all.
-func TestE2EOutageFailsTheRunAndTheRerunFinishes(t *testing.T) {
+// An outage of publishing longer than the retries: the run fails, says so, and
+// leaves a draft holding every file. The rerun of the publish, with the same files,
+// only publishes; a rerun after that changes nothing at all.
+func TestE2EOutageLeavesADraftTheRerunOnlyPublishes(t *testing.T) {
 	e := newE2E(t, "outage")
-	e.ft.add(e2eRule{name: "writes down", times: -1, match: func(r *http.Request) bool { return r.Method != http.MethodGet }})
+	e.ft.add(e2eRule{name: "publishing down", match: isUpdate, times: -1})
 
 	err := e.publisher(time.Second, time.Second).Publish(context.Background(), e.tag, e.paths)
 	if err == nil || !strings.Contains(err.Error(), "not published") {
 		t.Fatalf("an outage outlasting the retries ended with %v, want a failure saying the release is not published", err)
 	}
-	for _, r := range e.releases() {
-		if !r.Draft {
-			t.Fatalf("release %d is published although the run failed", r.ID)
-		}
+	rels := e.releases()
+	if len(rels) != 1 || !rels[0].Draft || len(rels[0].Assets) != len(e.paths) {
+		t.Fatalf("the failed run did not leave one draft with every file: %+v", rels)
 	}
 
 	e.ft = &faultyTransport{t: t, base: http.DefaultTransport}
@@ -418,8 +456,10 @@ func TestE2EOutageFailsTheRunAndTheRerunFinishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.requirePublished()
+	if m := e.ft.takeMutations(); len(m) != 1 || !strings.HasPrefix(m[0], "PATCH ") {
+		t.Errorf("the rerun sent %v, want the publish alone", m)
+	}
 
-	e.ft.takeMutations()
 	if err := e.publisher().Publish(context.Background(), e.tag, e.paths); err != nil {
 		t.Fatal(err)
 	}
