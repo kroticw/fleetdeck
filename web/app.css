@@ -1206,8 +1206,10 @@ main {
    done by the time a card is open here. The panel offers no unlink action
    either, so there is nothing for alarm to prompt. Genuine problems —
    a write that failed, a card that does not parse — stay --danger below;
-   only the dead-session fact is carved out as calm information. */
-.card-session-dead {
+   only the dead-session fact is carved out as calm information. A stopped
+   session is calmer still — paused work, not lost work — and looks the same. */
+.card-session-dead,
+.card-session-stopped {
   color: var(--text-muted);
   font-size: var(--fs-sm);
 }
