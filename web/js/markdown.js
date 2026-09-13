@@ -40,7 +40,12 @@ function unescapeHTML(text) {
   return out;
 }
 
-const FENCE = /^(```|~~~)/;
+// A fence opens on three or more ` or ~ and closes only on a line of the same
+// character, at least as many of them and nothing else, the way
+// internal/board/card.go reads it: a ``` shown inside a ```` fence, or inside
+// a ~~~ one, is part of the code.
+const FENCE = /^(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^(`{3,}|~{3,})\s*$/;
 const BULLET = /^[-*]\s+/;
 
 // A numbered item, and the whole difficulty is telling one from a line that
@@ -132,8 +137,9 @@ function inline(text, known) {
       // A link to a note that is neither is shown as a link that does not
       // work: no data attribute, so no click delegation ever sees it, and a
       // class the stylesheet can mark as broken. A span, not a control: there
-      // is nothing here to activate.
-      return `<span class="wikilink wikilink-missing">${label === "" ? whole : label}</span>`;
+      // is nothing here to activate. The title, when the caller gives one, is
+      // the only thing that answers a click that does nothing.
+      return `<span class="wikilink wikilink-missing"${known.missingTitle}>${label === "" ? whole : label}</span>`;
     })
     .replace(BOLD, "<strong>$1</strong>")
     .replace(/<(\d+)>/g, (_, index) => `<code>${spans[Number(index)]}</code>`);
@@ -188,11 +194,18 @@ function renderTable(header, alignments, rows, known) {
   return `<div class="md-table"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
-export function renderMarkdown(text, knownCards, knownDocs) {
-  const known = { cards: knownCards ?? NO_NAMES, docs: knownDocs ?? NO_NAMES };
+// `missingTitle`, when given, is written as the title of every link that opens
+// nothing, so hovering it says why.
+export function renderMarkdown(text, knownCards, knownDocs, { missingTitle = "" } = {}) {
+  const known = {
+    cards: knownCards ?? NO_NAMES,
+    docs: knownDocs ?? NO_NAMES,
+    missingTitle: missingTitle ? ` title="${escapeHTML(missingTitle)}"` : "",
+  };
   const lines = escapeHTML(text).split("\n");
   const out = [];
-  let inCode = false;
+  // The marker of the open fence, or null outside one.
+  let fence = null;
   // Which list is open, if any: "ul", "ol", or null. Two kinds mean one has to
   // close the other — a bulleted line inside a numbered list is a new list, not
   // another item.
@@ -262,18 +275,21 @@ export function renderMarkdown(text, knownCards, knownDocs) {
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = clean(lines[i]);
-    if (FENCE.test(line)) {
-      if (inCode) {
-        closeCode();
-      } else {
-        closeBlocks();
-        out.push("<pre><code>");
-        atCodeStart = true;
-      }
-      inCode = !inCode;
+    const close = fence === null ? null : FENCE_CLOSE.exec(line);
+    if (close && close[1][0] === fence[0] && close[1].length >= fence.length) {
+      closeCode();
+      fence = null;
       continue;
     }
-    if (inCode) {
+    const open = fence === null ? FENCE.exec(line) : null;
+    if (open) {
+      closeBlocks();
+      out.push("<pre><code>");
+      atCodeStart = true;
+      fence = open[1];
+      continue;
+    }
+    if (fence !== null) {
       // Appended to the open <pre><code> rather than pushed as its own entry:
       // the join below puts a newline between entries, and HTML only ignores a
       // newline immediately after <pre>, never after <code>. Pushed, every
@@ -380,6 +396,6 @@ export function renderMarkdown(text, knownCards, knownDocs) {
   closeBlocks();
   // An unterminated fence closes here rather than leaking an open <pre> into
   // whatever the caller appends after this string.
-  if (inCode) closeCode();
+  if (fence !== null) closeCode();
   return out.join("\n");
 }

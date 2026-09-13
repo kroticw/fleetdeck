@@ -736,6 +736,40 @@ test("a card with no documents draws no documents block, not an empty one", asyn
   assert.ok(!root.textContent.includes(t("card_docs")), "a heading over nothing reads as a panel that lost something");
 });
 
+test("a link that opens nothing is listed as one, with the reason, and opens nothing", async () => {
+  const opened = [];
+  // The fixture card links "nowhere": neither a card nor a document.
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    onOpenDoc: (path) => opened.push(path),
+  });
+  await settle();
+
+  assert.equal(root.querySelectorAll(".card-doc").length, 2, "a broken link is not counted as a document");
+  const broken = root.querySelectorAll(".card-doc-missing");
+  assert.equal(broken.length, 1);
+  assert.ok(broken[0].textContent.includes("nowhere"), broken[0].textContent);
+  assert.ok(broken[0].textContent.includes(t("card_doc_missing")), broken[0].textContent);
+  fireEvent(broken[0], "click");
+  assert.deepEqual(opened, []);
+});
+
+test("a card whose only document link is broken still shows the block, to say so", async () => {
+  const { root } = open(snapshot(), FLEET_UI, { listDocs: async () => DOCS });
+  await settle();
+
+  assert.ok(root.querySelector(".card-docs"), "a broken link hidden is a broken link nobody fixes");
+  assert.equal(root.querySelectorAll(".card-doc").length, 0);
+  assert.equal(root.querySelectorAll(".card-doc-missing").length, 1);
+});
+
+test("a broken link in the body carries the reason it opens nothing", async () => {
+  const { root } = open(snapshot(), FLEET_UI, { listDocs: async () => DOCS });
+  await settle();
+
+  assert.ok(root.querySelector(".card-body").innerHTML.includes(`title="${t("card_doc_missing")}"`));
+});
+
 test("the documents appear when the list arrives, without waiting for a snapshot", async () => {
   let release;
   const gate = new Promise((resolve) => {

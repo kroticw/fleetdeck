@@ -121,6 +121,9 @@ const en = {
   // A card's documents (web/js/card.js) and, the other way, the cards a
   // document belongs to (web/js/doccards.js).
   card_docs: "documents",
+  // A [[link]] that opens nothing, in the card's documents and as its title
+  // in the body.
+  card_doc_missing: "opens nothing: no card or document has this name, or two documents share it",
   doc_cards: "cards",
   reader_close: "close the document",
 
@@ -431,6 +434,7 @@ const ru = {
   card_write_refused: "правка отклонена, ничего не записано",
   backlinks: "ссылаются сюда",
   card_docs: "документы",
+  card_doc_missing: "не открывается: нет ни карточки, ни документа с таким именем, или документов с ним несколько",
   doc_cards: "карточки",
   reader_close: "закрыть документ",
 

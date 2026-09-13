@@ -44,6 +44,28 @@ test("a fenced code block is escaped, not executed and not re-parsed", () => {
   assert.ok(!html.includes("<strong>"), html);
 });
 
+// A fence closes only on a fence of its own character, at least as long, with
+// nothing after it. internal/board reads fences the same way, so a link inside
+// any of these is neither extracted nor rendered.
+test("a fence is closed only by a fence of its own kind", () => {
+  for (const body of [
+    "````markdown\n```\n[[fleet-ui]]\n```\n````",
+    "~~~\n```\n[[fleet-ui]]\n~~~",
+    "```\n```go\n[[fleet-ui]]\n```",
+  ]) {
+    const html = renderMarkdown(body, cardNames);
+    assert.equal(html.split("<pre><code>").length - 1, 1, html);
+    assert.equal(html.split("</code></pre>").length - 1, 1, html);
+    assert.ok(html.includes("[[fleet-ui]]"), html);
+    assert.ok(!html.includes("data-link"), html);
+  }
+});
+
+test("a link that opens nothing says why when a reason is given", () => {
+  const html = renderMarkdown("[[nowhere]]", new Set(), new Set(), { missingTitle: 'opens "nothing"' });
+  assert.ok(html.includes('<span class="wikilink wikilink-missing" title="opens &quot;nothing&quot;">nowhere</span>'), html);
+});
+
 test("an unterminated fence is closed rather than left open", () => {
   const html = renderMarkdown("```\nstill open", new Set());
   assert.equal(html.split("<pre><code>").length - 1, 1);

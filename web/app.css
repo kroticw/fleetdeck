@@ -1318,6 +1318,19 @@ main {
   overflow-wrap: anywhere;
 }
 
+/* A link in the card that opens nothing: listed with the reason, as text and
+ * not a control, and styled like a missing link in the body.
+ */
+.card-doc-missing {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text-faint);
+}
+
+.card-doc-missing-why {
+  color: var(--text-muted);
+}
+
 /* Document reader (web/js/reader.js)
  *
  * An overlay over the centre column, sharing #card-panel's rules above, and for
