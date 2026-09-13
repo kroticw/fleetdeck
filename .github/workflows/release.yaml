@@ -5,10 +5,12 @@ on:
     tags:
       - "v*"
 
-# Read-only by default. Only the job that publishes gets contents: write, and it gets
-# it for the whole job because gh release create needs it — this workflow is the one
-# place in the repository holding a token that can write to it, which is also why every
-# action below is pinned to a commit rather than a tag.
+# Read-only by default, and it stays that way for the job that builds, signs and
+# notarizes: that job holds the Developer ID certificate and the notarization key, and
+# cannot write to this repository. Only the publish job gets contents: write, and it
+# holds nothing of Apple's. Every action below is pinned to a commit rather than a tag
+# because this workflow is the one place in the repository holding a token that can
+# write to it.
 permissions:
   contents: read
 
@@ -19,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     # macOS only, and macOS arm64 in particular: the archives hold darwin binaries for
     # both architectures, and the verification below runs the one this host can
     # execute. Building them elsewhere would still produce archives, but nothing would
@@ -29,8 +31,6 @@ jobs:
     # It answered in about a minute when this was set up; Apple documents no bound,
     # and a release that times out half way through is worse than one that waits.
     timeout-minutes: 60
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -192,13 +192,29 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
-      - name: Publish
-        run: gh release create "$RELEASE_VERSION" dist/*.tar.gz dist/*.zip dist/*.dmg --generate-notes
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The files that passed every gate above, kept for the publish job. They are
+      # handed over rather than rebuilt there because publishing is the step that can
+      # fail for reasons that are GitHub's and not the build's, and a rerun of the
+      # publish job alone then publishes these same bytes -- no second build, no second
+      # signature, no second trip through Apple's queue.
+      #
+      # overwrite: a rerun of the whole workflow builds again and must be able to
+      # replace what the first attempt kept. compression-level 0: every file here is
+      # already compressed. Thirty days is how long GitHub lets a run be rerun.
+      - name: Keep the verified release files for publishing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.dmg
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 30
 
-      # However this job ended -- published, failed, cancelled -- the private key and
+      # However this job ended -- built, failed, cancelled -- the private key and
       # the keychain holding the certificate go. A runner is thrown away after a job,
       # but that is GitHub's promise to keep, not ours.
       - name: Remove the signing material
@@ -206,3 +222,48 @@ jobs:
         run: |
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
           rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/certificate.p12"
+
+  # The only job whose effects outlive the run, and so the one a rerun has to be able
+  # to repeat. It is a job of its own for two reasons. Rerunning it costs a minute on
+  # Linux rather than a build, two notarizations and a signature, and it publishes the
+  # very bytes the build job verified. And the token that can write to this repository
+  # lives here, on a runner that never sees a secret of Apple's.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # The publisher gives itself twenty minutes in all, retries and uploads of about a
+    # hundred megabytes included, and ends with an error of its own when they run out;
+    # this is the margin above that, so the job is not cancelled in the middle of it.
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Fetch the verified release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: dist
+
+      # `gh release create` could not be repeated: on 2026-09-13 GitHub answered its
+      # create with a 500 and made a draft anyway, a draft is not found by its tag,
+      # and every rerun after that was refused until somebody deleted the draft by
+      # hand. What runs here instead reads the releases GitHub holds, drafts
+      # included, and finishes the release from whatever stage it is at: creates it,
+      # fills a draft an earlier attempt made, publishes. A draft it did not make
+      # stops it, because publishing that draft would publish whatever somebody put
+      # in it. After a failure GitHub may have acted on it looks again rather than
+      # repeating the request, gives a blip a few minutes to clear, and succeeds only
+      # once the release reads back published with every file, byte for byte. Once
+      # the publish request has gone out nothing more is written; a release left a
+      # draft turns this run red, it never passes quietly, and what reached the draft
+      # stays there for a rerun of this job.
+      - name: Publish
+        run: make publish-release VERSION="$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
