@@ -14,6 +14,26 @@
 // release back; a failure GitHub may have acted on is followed by a fresh pass rather
 // than by sending the same request again. Repeating a create is how releases get
 // duplicated. Repeating a pass is not.
+//
+// Running this against a sandbox repository on 2026-09-13 showed two more things.
+//
+// The release list trails a create by 0.7 to 2.2 seconds, so a release this run has
+// just made may not be in it yet.
+//
+// And a release can end up under a tag named untagged-... instead of its own. One
+// cause is established: an update of a draft that does not publish it and does not
+// name tag_name comes back with the draft's tag replaced, every time it was tried,
+// while the same update naming tag_name keeps the tag and an update that publishes
+// keeps it without naming it. Two releases were published that way in the sandbox,
+// by an earlier version of this program that wrote notes without the tag and whose
+// retries did not yet stop at a wrong tag. The v0.8.0 draft on kroticw/fleetdeck
+// that showed untagged-... was probably the same rule: before that was seen, an
+// update carrying only a name and no tag_name went to it and was answered with a 5xx,
+// and whether that update was carried out was not checked; the other draft, which no
+// update touched, kept v0.8.0. So updates name the tag, and the tag is still checked rather than
+// trusted: on the release found, after writing notes, on the release itself just
+// before a publish, and after it; and once a publish request has gone out, nothing
+// but that one release is written to again.
 package releasepublish
 
 import (
@@ -47,6 +67,15 @@ var DefaultWaits = []time.Duration{
 	60 * time.Second, 60 * time.Second,
 }
 
+// DefaultSettle are the pauses between readings of the release list after a create
+// that may have gone through without an answer, before creating again. The list was
+// measured trailing a create by 0.7 to 2.2 seconds on 2026-09-13; this waits for up to
+// half a minute, an order of magnitude more, because creating again too early is how
+// a second draft is born.
+var DefaultSettle = []time.Duration{
+	1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second,
+}
+
 const (
 	apiTimeout    = 2 * time.Minute
 	uploadTimeout = 20 * time.Minute
@@ -71,8 +100,11 @@ type Publisher struct {
 	// Waits are the pauses before each retry. Their number is the number of
 	// retries; none means a single pass.
 	Waits []time.Duration
-	// Sleep waits between passes; nil means a real wait that a cancelled context
-	// cuts short.
+	// Settle are the pauses between readings of the release list after a create
+	// whose answer was lost; see DefaultSettle.
+	Settle []time.Duration
+	// Sleep waits between passes and readings; nil means a real wait that a
+	// cancelled context cuts short.
 	Sleep func(context.Context, time.Duration) error
 }
 
@@ -157,21 +189,20 @@ func (p *Publisher) Publish(ctx context.Context, tag string, paths []string) err
 		return fmt.Errorf("release %s was not published: %w", tag, err)
 	}
 
-	warned := map[int64]bool{}
-	uncertain := false
+	st := &runState{warned: map[int64]bool{}}
 	for attempt := 1; ; attempt++ {
-		err := p.pass(ctx, tag, arts, warned)
+		err := p.pass(ctx, tag, arts, st)
 		if err == nil {
 			return nil
 		}
-		if !retryable(ctx, err, uncertain) {
-			return fmt.Errorf("release %s was not published: %w", tag, err)
+		if !retryable(ctx, err, st.uncertain) {
+			return fmt.Errorf("release %s was not published as it should be: %w", tag, err)
 		}
 		if attempt > len(p.Waits) {
-			return fmt.Errorf("release %s was not published after %d attempts: %w", tag, attempt, err)
+			return fmt.Errorf("release %s was not published as it should be after %d attempts: %w", tag, attempt, err)
 		}
 		// From here on an earlier request may have landed without an answer.
-		uncertain = true
+		st.uncertain = true
 		wait := p.Waits[attempt-1]
 		p.warnf("attempt %d of %d to publish %s failed, trying again in %s: %v", attempt, len(p.Waits)+1, tag, wait, err)
 		if err := p.sleep(ctx, wait); err != nil {
@@ -203,67 +234,75 @@ func retryable(ctx context.Context, err error, uncertain bool) bool {
 	return errors.As(err, &transport) || errors.As(err, &unfinished)
 }
 
-func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, warned map[int64]bool) error {
-	all, err := p.listReleases(ctx)
-	if err != nil {
+// stopError ends a publish at once: retryable never retries it. Something is wrong
+// that another attempt cannot put right, and after a publish another attempt can only
+// make it worse: publishing cannot be taken back, and on 2026-09-13 retrying after a
+// release came back wrong published two more.
+type stopError struct{ msg string }
+
+func (e *stopError) Error() string { return e.msg }
+
+func stopf(format string, args ...any) error {
+	return &stopError{msg: fmt.Sprintf(format, args...)}
+}
+
+// runState is what one run of Publish remembers between its passes.
+type runState struct {
+	warned map[int64]bool
+	// uncertain: an earlier pass failed in a way GitHub may have acted on.
+	uncertain bool
+	// created is the release a create of this run was answered with. The release
+	// list trails a create by a second or two, and this is how the release is found
+	// in that time without making another.
+	created int64
+	// createUncertain: a create was sent and its answer never came back.
+	createUncertain bool
+	// pinned is the release a publish request has gone out for, or that was found
+	// already published. From then on no other release is created, finished or
+	// published by this run.
+	pinned int64
+	// publishSent: a publish request has gone out. Nothing is written to a
+	// published release after that.
+	publishSent bool
+	// sawPublished: a pass has already found the pinned release published. The next
+	// one only reads it.
+	sawPublished bool
+}
+
+func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, st *runState) error {
+	var rel release
+	if st.pinned != 0 {
+		if err := p.call(ctx, http.MethodGet, p.releaseURL(st.pinned), nil, &rel); err != nil {
+			return err
+		}
+	} else {
+		var err error
+		if rel, err = p.find(ctx, tag, arts, st); err != nil {
+			return err
+		}
+	}
+	if err := requireTag(rel, tag); err != nil {
 		return err
 	}
-	var published, drafts []release
-	for _, r := range all {
-		switch {
-		case r.TagName != tag:
-		case r.Draft:
-			drafts = append(drafts, r)
-		default:
-			published = append(published, r)
-		}
-	}
-	sort.Slice(drafts, func(i, j int) bool { return drafts[i].ID < drafts[j].ID })
 
-	var rel release
-	switch {
-	case len(published) > 1:
-		return fmt.Errorf("%d published releases carry the tag %s; which of them is the release is for a person to decide", len(published), tag)
-	case len(published) == 1:
-		rel = published[0]
-		p.logf("release %d for %s is already published; checking it is complete", rel.ID, tag)
-	case len(drafts) > 1:
-		// Nothing says which of several drafts is this release, and picking one
-		// publishes whatever that one carries, which cannot be taken back.
-		ids := make([]string, len(drafts))
-		for i, d := range drafts {
-			ids[i] = strconv.FormatInt(d.ID, 10)
-		}
-		return fmt.Errorf("%d draft releases carry the tag %s (%s) and nothing says which of them is this release; delete the ones that are not and run again", len(drafts), tag, strings.Join(ids, ", "))
-	case len(drafts) == 1:
-		rel = drafts[0]
-		if err := p.requireOurs(ctx, rel, arts); err != nil {
-			return err
-		}
-		p.logf("finishing draft release %d for %s", rel.ID, tag)
-	default:
-		p.logf("creating a draft release for %s", tag)
-		if err := p.call(ctx, http.MethodPost, p.repoURL("/releases"), map[string]any{
-			"tag_name":               tag,
-			"draft":                  true,
-			"generate_release_notes": true,
-		}, &rel); err != nil {
-			return err
-		}
-	}
-	// Drafts beside a published release are not this release and are not published;
-	// they are left alone, since deleting is not this program's call, and named where a
-	// person sees them.
-	for _, d := range drafts {
-		if d.ID != rel.ID && !warned[d.ID] {
-			warned[d.ID] = true
-			p.warnf("draft release %d also carries the tag %s and was left as it is; it can be deleted once release %d is published", d.ID, tag, rel.ID)
-		}
+	// A release found published, by a run that has not published anything itself, may
+	// get the files it is missing, once. Otherwise a published release is only read:
+	// writing to something already public again, or after this run's own publish, is
+	// a retry after publication.
+	writes := true
+	if !rel.Draft {
+		writes = !st.sawPublished && !st.publishSent
+		st.sawPublished = true
+		st.pinned = rel.ID
+		p.logf("release %d for %s is published; checking it is complete", rel.ID, tag)
 	}
 
 	// A draft made by hand, or by gh before its upload failed, has no notes.
-	if rel.Body == "" {
+	if rel.Draft && rel.Body == "" {
 		if err := p.writeNotes(ctx, &rel); err != nil {
+			return err
+		}
+		if err := requireTag(rel, tag); err != nil {
 			return err
 		}
 	}
@@ -280,6 +319,8 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, warne
 			p.logf("%s is already published on %s and stays as it is", a.name, tag)
 			expect[a.name] = expectation{size: have.Size, digest: deref(have.Digest)}
 			continue
+		case !writes:
+			// Reported by the check below.
 		default:
 			if have != nil {
 				p.logf("removing %s (state %q) left by an earlier attempt", a.name, have.State)
@@ -296,33 +337,163 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, warne
 	}
 
 	if rel.Draft {
-		p.logf("publishing release %d for %s", rel.ID, tag)
-		if err := p.call(ctx, http.MethodPatch, p.repoURL(fmt.Sprintf("/releases/%d", rel.ID)), map[string]any{"draft": false}, nil); err != nil {
+		// The last look before the one step that cannot be taken back, at the release
+		// itself rather than at what earlier answers said about it.
+		var fresh release
+		if err := p.call(ctx, http.MethodGet, p.releaseURL(rel.ID), nil, &fresh); err != nil {
 			return err
+		}
+		if err := requireTag(fresh, tag); err != nil {
+			return err
+		}
+		if fresh.Draft {
+			if problems := contentProblems(fresh, arts, expect); len(problems) > 0 {
+				return &unfinishedError{problems: problems}
+			}
+			st.pinned = rel.ID
+			st.publishSent = true
+			p.logf("publishing release %d for %s", rel.ID, tag)
+			if err := p.call(ctx, http.MethodPatch, p.releaseURL(rel.ID), map[string]any{"draft": false}, nil); err != nil {
+				return err
+			}
 		}
 	}
 
 	// What the requests answered is not evidence of anything; the release as GitHub
 	// now holds it is.
 	var got release
-	if err := p.call(ctx, http.MethodGet, p.repoURL(fmt.Sprintf("/releases/%d", rel.ID)), nil, &got); err != nil {
+	if err := p.call(ctx, http.MethodGet, p.releaseURL(rel.ID), nil, &got); err != nil {
 		return err
 	}
-	if err := check(got, tag, arts, expect); err != nil {
+	if err := requireTag(got, tag); err != nil {
 		return err
+	}
+	if got.Draft {
+		// Not published, so not yet past the point of no return: the next pass looks
+		// at this same release again and may publish it, and nothing else.
+		return &unfinishedError{problems: []string{fmt.Sprintf("release %d is still a draft", got.ID)}}
+	}
+	if problems := contentProblems(got, arts, expect); len(problems) > 0 {
+		return stopf("release %d for %s is published but not right, and nothing more is sent to it: %s", got.ID, tag, strings.Join(problems, "; "))
 	}
 	p.logf("published %s: %s", tag, got.HTMLURL)
 	return nil
 }
 
-func check(got release, tag string, arts []artifact, expect map[string]expectation) error {
+// find is the release for tag as the release list shows it, or a new draft when there
+// is none.
+func (p *Publisher) find(ctx context.Context, tag string, arts []artifact, st *runState) (release, error) {
+	published, drafts, err := p.onTag(ctx, tag)
+	if err != nil {
+		return release{}, err
+	}
+	if len(published)+len(drafts) == 0 && st.created != 0 {
+		var rel release
+		if err := p.call(ctx, http.MethodGet, p.releaseURL(st.created), nil, &rel); err != nil {
+			return release{}, err
+		}
+		p.logf("release %d, created by this run, is not in the release list yet; reading it by its id", rel.ID)
+		return rel, nil
+	}
+	if len(published)+len(drafts) == 0 && st.createUncertain {
+		for _, wait := range p.Settle {
+			p.logf("a create may have gone through without an answer; reading the release list again in %s", wait)
+			if err := p.sleep(ctx, wait); err != nil {
+				return release{}, err
+			}
+			if published, drafts, err = p.onTag(ctx, tag); err != nil {
+				return release{}, err
+			}
+			if len(published)+len(drafts) > 0 {
+				break
+			}
+		}
+	}
+
+	var rel release
+	switch {
+	case len(published) > 1:
+		return release{}, stopf("%d published releases carry the tag %s; which of them is the release is for a person to decide", len(published), tag)
+	case len(published) == 1:
+		rel = published[0]
+	case len(drafts) > 1:
+		// Nothing says which of several drafts is this release, and picking one
+		// publishes whatever that one carries, which cannot be taken back.
+		ids := make([]string, len(drafts))
+		for i, d := range drafts {
+			ids[i] = strconv.FormatInt(d.ID, 10)
+		}
+		return release{}, stopf("%d draft releases carry the tag %s (%s) and nothing says which of them is this release; delete the ones that are not and run again", len(drafts), tag, strings.Join(ids, ", "))
+	case len(drafts) == 1:
+		rel = drafts[0]
+		if err := p.requireOurs(ctx, rel, arts); err != nil {
+			return release{}, err
+		}
+		p.logf("finishing draft release %d for %s", rel.ID, tag)
+	default:
+		p.logf("creating a draft release for %s", tag)
+		st.createUncertain = true
+		if err := p.call(ctx, http.MethodPost, p.repoURL("/releases"), map[string]any{
+			"tag_name":               tag,
+			"draft":                  true,
+			"generate_release_notes": true,
+		}, &rel); err != nil {
+			return release{}, err
+		}
+		st.createUncertain = false
+		st.created = rel.ID
+	}
+	// Drafts beside a published release are not this release and are not published;
+	// they are left alone, since deleting is not this program's call, and named where a
+	// person sees them.
+	for _, d := range drafts {
+		if d.ID != rel.ID && !st.warned[d.ID] {
+			st.warned[d.ID] = true
+			p.warnf("draft release %d also carries the tag %s and was left as it is; it can be deleted once release %d is published", d.ID, tag, rel.ID)
+		}
+	}
+	return rel, nil
+}
+
+// onTag reads the release list and returns the releases carrying tag, drafts oldest
+// first.
+func (p *Publisher) onTag(ctx context.Context, tag string) (published, drafts []release, err error) {
+	all, err := p.listReleases(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, r := range all {
+		switch {
+		case r.TagName != tag:
+		case r.Draft:
+			drafts = append(drafts, r)
+		default:
+			published = append(published, r)
+		}
+	}
+	sort.Slice(drafts, func(i, j int) bool { return drafts[i].ID < drafts[j].ID })
+	return published, drafts, nil
+}
+
+// requireTag stops at a release carrying any tag but ours. GitHub has been seen to
+// give a release a tag named untagged-... in place of the one asked for, and a
+// release with the wrong tag is somebody else's problem to publish, or already a
+// mistake in public.
+func requireTag(rel release, tag string) error {
+	switch {
+	case rel.TagName == tag:
+		return nil
+	case rel.Draft:
+		return stopf("draft release %d carries the tag %q, not %s, and was not published; a person has to look at it", rel.ID, rel.TagName, tag)
+	default:
+		return stopf("release %d was published with the tag %q instead of %s; nothing more was sent, and a person has to look at it", rel.ID, rel.TagName, tag)
+	}
+}
+
+// contentProblems is what a release lacks: notes, and each artifact uploaded with the
+// size and digest expected of it.
+func contentProblems(got release, arts []artifact, expect map[string]expectation) []string {
 	var problems []string
-	if got.TagName != tag {
-		problems = append(problems, fmt.Sprintf("it carries the tag %q", got.TagName))
-	}
-	if got.Draft {
-		problems = append(problems, "it is still a draft")
-	}
 	if got.Body == "" {
 		problems = append(problems, "it has no notes")
 	}
@@ -340,10 +511,11 @@ func check(got release, tag string, arts []artifact, expect map[string]expectati
 			problems = append(problems, fmt.Sprintf("%s has digest %s, want %s", a.name, *have.Digest, want.digest))
 		}
 	}
-	if len(problems) > 0 {
-		return &unfinishedError{problems: problems}
-	}
-	return nil
+	return problems
+}
+
+func (p *Publisher) releaseURL(id int64) string {
+	return p.repoURL(fmt.Sprintf("/releases/%d", id))
 }
 
 type notes struct {
@@ -408,7 +580,11 @@ func (p *Publisher) writeNotes(ctx context.Context, rel *release) error {
 	if err != nil {
 		return err
 	}
-	change := map[string]any{"body": notes.Body}
+	// The tag is sent along although it does not change. An update of a draft that
+	// leaves out tag_name was seen on 2026-09-13 to come back with the draft's tag
+	// replaced by untagged-...; the draft has already been found under this tag, so
+	// naming it cannot move somebody else's draft onto it.
+	change := map[string]any{"body": notes.Body, "tag_name": rel.TagName}
 	if rel.Name == "" {
 		change["name"] = notes.Name
 	}

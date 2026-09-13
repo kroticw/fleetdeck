@@ -44,6 +44,7 @@ func main() {
 		Client: &http.Client{},
 		Log:    os.Stdout,
 		Waits:  releasepublish.DefaultWaits,
+		Settle: releasepublish.DefaultSettle,
 	}
 	if err := p.Publish(ctx, *tag, flag.Args()); err != nil {
 		fmt.Printf("::error::%s\n", strings.ReplaceAll(err.Error(), "\n", " "))

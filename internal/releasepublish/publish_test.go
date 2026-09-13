@@ -513,6 +513,308 @@ func TestPublishRefusesTwoArtifactsWithOneName(t *testing.T) {
 	}
 }
 
+// The list trails a create. A create that answered with an error and went through is
+// not in the list on the next reading; creating again then would make a second draft.
+// The publisher reads the list again, with growing pauses, before it does.
+func TestPublishLooksAgainBeforeCreatingWhenACreateMayHaveGoneThrough(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	fg.listLag = 3
+	fg.inject(fault{op: "create", times: 1, status: http.StatusInternalServerError, after: true})
+
+	if err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths); err != nil {
+		t.Fatal(err)
+	}
+	requirePublished(t, fg, files)
+	if n := len(fg.releasesForTag()); n != 1 {
+		t.Errorf("%d releases carry the tag, want one", n)
+	}
+}
+
+// A release this run created and got an answer for is read by its id while the list
+// does not show it yet, instead of being made again.
+func TestPublishReadsTheReleaseItCreatedByIDWhileTheListTrails(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	fg.listLag = 3
+	fg.inject(fault{op: "upload", times: 1, status: http.StatusBadGateway})
+	p := fg.publisher(t.Output(), 3)
+	p.Settle = nil
+
+	if err := p.Publish(context.Background(), tag, paths); err != nil {
+		t.Fatal(err)
+	}
+	requirePublished(t, fg, files)
+	if n := len(fg.releasesForTag()); n != 1 {
+		t.Errorf("%d releases carry the tag, want one", n)
+	}
+}
+
+// Before publishing, the draft is read by its id. If GitHub reports another tag on
+// it, it is not published.
+func TestPublishDoesNotPublishADraftThatReadsBackWithAnotherTag(t *testing.T) {
+	fg := newFakeGitHub(t)
+	_, paths := build(t)
+	fg.mangle = "read"
+	var slept int
+	p := fg.publisher(t.Output(), 5)
+	p.Sleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+	if err := p.Publish(context.Background(), tag, paths); err == nil {
+		t.Fatal("publish succeeded with a draft reading back as untagged")
+	}
+	if n := len(fg.publishRequests); n != 0 {
+		t.Errorf("%d publish requests were sent", n)
+	}
+	if slept != 0 {
+		t.Errorf("retried %d times", slept)
+	}
+}
+
+// 2026-09-13 in the sandbox: a release came back published under untagged-..., and
+// the retries went on to publish two more. Once a publish has gone out and the release
+// is wrong, the run stops and sends nothing else.
+func TestPublishStopsWhenAPublishedReleaseComesBackWithAnotherTag(t *testing.T) {
+	fg := newFakeGitHub(t)
+	_, paths := build(t)
+	fg.mangle = "publish"
+	fg.addRelease(tag, true, "", nil)
+
+	err := fg.publisher(t.Output(), 5).Publish(context.Background(), tag, paths)
+	if err == nil {
+		t.Fatal("publish succeeded with the release published under another tag")
+	}
+	if n := len(fg.publishRequests); n != 1 {
+		t.Errorf("%d publish requests were sent, want the one", n)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprint(fg.publishRequests[0].ID)) {
+		t.Errorf("the error does not name the release: %v", err)
+	}
+	creates := 0
+	for _, m := range fg.mutations() {
+		if m == "POST /repos/"+fakeRepo+"/releases" {
+			creates++
+		}
+	}
+	if creates != 0 {
+		t.Errorf("%d releases were created after the publish", creates)
+	}
+}
+
+// A publish that failed before it did anything is sent again, and only ever to the
+// same release.
+func TestPublishRepeatsAFailedPublishOnlyForTheSameRelease(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	fg.inject(fault{op: "update", times: 2, status: http.StatusBadGateway})
+
+	if err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths); err != nil {
+		t.Fatal(err)
+	}
+	rel := requirePublished(t, fg, files)
+	for _, r := range fg.publishRequests {
+		if r.ID != rel.ID {
+			t.Errorf("a publish request went to release %d, want only %d", r.ID, rel.ID)
+		}
+	}
+}
+
+// The property the sandbox findings come down to, checked across every way GitHub
+// was seen to answer wrongly, alone and together: a publish request only ever goes to
+// a draft carrying our tag, one run publishes at most one release, and a run that
+// succeeds leaves exactly one complete published release with our tag.
+func TestPublishNeverPublishesAReleaseWhoseTagIsNotOurs(t *testing.T) {
+	manglings := []string{"", "create", "notes", "unnamed-update", "read", "publish", "drop"}
+	faults := map[string][]fault{
+		"no failure":                    nil,
+		"create 500 after creating":     {{op: "create", times: 1, status: http.StatusInternalServerError, after: true}},
+		"upload 502 after storing":      {{op: "upload", times: 1, status: http.StatusBadGateway, after: true}},
+		"upload answered, not stored":   {{op: "upload", times: 1, lie: true}},
+		"update 500 after applying":     {{op: "update", times: 1, status: http.StatusInternalServerError, after: true}},
+		"publish 500 after publishing":  {{op: "publish", times: 1, status: http.StatusInternalServerError, after: true}},
+		"publish 502 before publishing": {{op: "publish", times: 2, status: http.StatusBadGateway}},
+		"read dropped":                  {{op: "get", times: 1, drop: true}},
+	}
+	starts := map[string]func(*fakeGitHub){
+		"nothing":        func(*fakeGitHub) {},
+		"an empty draft": func(fg *fakeGitHub) { fg.addRelease(tag, true, "", nil) },
+		"two drafts, one not listed yet": func(fg *fakeGitHub) {
+			fg.addRelease(tag, true, "", nil)
+			fg.hide(fg.addRelease(tag, true, "", nil), 2)
+		},
+	}
+	for _, mangle := range manglings {
+		for faultName, injected := range faults {
+			for startName, start := range starts {
+				for _, lag := range []int{0, 2} {
+					name := fmt.Sprintf("mangle=%q/%s/%s/lag=%d", mangle, faultName, startName, lag)
+					t.Run(name, func(t *testing.T) {
+						fg := newFakeGitHub(t)
+						files, paths := build(t)
+						fg.mangle, fg.listLag = mangle, lag
+						start(fg)
+						for _, f := range injected {
+							fg.inject(f)
+						}
+
+						err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths)
+
+						for _, r := range fg.publishRequests {
+							if r.Tag != tag || !r.Draft {
+								t.Errorf("a publish request went to release %d while it carried %q (draft %v)", r.ID, r.Tag, r.Draft)
+							}
+							held := map[string]string{}
+							for _, a := range r.Assets {
+								if a.State == "uploaded" {
+									held[a.Name] = string(a.Data)
+								}
+							}
+							for name, content := range files {
+								if held[name] != content {
+									t.Errorf("a publish request went to release %d while it did not hold this build's %s", r.ID, name)
+								}
+							}
+						}
+						for _, w := range fg.writes {
+							if w.Tag != tag {
+								t.Errorf("a %s went to release %d while it carried %q", w.Op, w.ID, w.Tag)
+							}
+							if !w.Draft {
+								t.Errorf("a %s went to release %d after it was published", w.Op, w.ID)
+							}
+							if w.AfterPublish && w.ID != fg.publishRequests[0].ID {
+								t.Errorf("a %s went to release %d after a publish request for %d", w.Op, w.ID, fg.publishRequests[0].ID)
+							}
+						}
+						if n := len(fg.published); n > 1 {
+							t.Errorf("%d releases were published in one run: %v", n, fg.published)
+						}
+						if err == nil {
+							requirePublished(t, fg, files)
+							for _, r := range fg.publishedReleases() {
+								if r.Tag != tag {
+									t.Errorf("the run succeeded and release %d is published as %q", r.ID, r.Tag)
+								}
+							}
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// The sandbox, 2026-09-13: writing notes to an empty draft without naming its tag
+// came back with the draft's tag replaced by untagged-.... Naming the tag in that
+// update keeps the draft publishable.
+func TestPublishNamesTheTagWhenWritingNotesToADraft(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	fg.mangle = "unnamed-update"
+	draft := fg.addRelease(tag, true, "", nil)
+
+	if err := fg.publisher(t.Output(), 0).Publish(context.Background(), tag, paths); err != nil {
+		t.Fatal(err)
+	}
+	if rel := requirePublished(t, fg, files); rel.ID != draft.ID {
+		t.Errorf("published release %d, want the draft %d", rel.ID, draft.ID)
+	}
+}
+
+// A release found published and missing a file gets it once. When that upload fails,
+// the next attempt only reads the release: writing to something public again is a
+// retry after publication.
+func TestPublishWritesToAPublishedReleaseOnlyOnce(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	have := map[string]string{}
+	for name, content := range files {
+		if !strings.HasSuffix(name, ".dmg") {
+			have[name] = content
+		}
+	}
+	fg.addRelease(tag, false, generatedNotes(tag), have)
+	fg.inject(fault{op: "upload", times: -1, status: http.StatusBadGateway})
+
+	if err := fg.publisher(t.Output(), 5).Publish(context.Background(), tag, paths); err == nil {
+		t.Fatal("publish succeeded with the image never uploaded")
+	}
+	if n := fg.uploads(); n != 1 {
+		t.Errorf("%d uploads went to the published release, want one", n)
+	}
+}
+
+// A published release that drops out of the list under its tag, the way a release
+// given another tag does, is still the release: the next attempt reads it by its id
+// rather than making a new one.
+func TestPublishStaysWithAPublishedReleaseThatLeavesTheList(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	have := map[string]string{}
+	for name, content := range files {
+		if !strings.HasSuffix(name, ".dmg") {
+			have[name] = content
+		}
+	}
+	fg.vanish(fg.addRelease(tag, false, generatedNotes(tag), have), 1)
+	fg.inject(fault{op: "upload", times: 1, status: http.StatusBadGateway})
+
+	_ = fg.publisher(t.Output(), 5).Publish(context.Background(), tag, paths)
+	for _, m := range fg.mutations() {
+		if m == "POST /repos/"+fakeRepo+"/releases" {
+			t.Errorf("a release was created after a published one had been found")
+		}
+	}
+}
+
+// A release that loses a file as it is published is published and wrong. The run
+// stops there and uploads nothing into it: that is a retry after publication, even
+// when the publish request's own answer was an error.
+func TestPublishStopsWhenTheReleaseComesOutOfPublishingIncomplete(t *testing.T) {
+	for name, injected := range map[string][]fault{
+		"publish answered":             nil,
+		"publish 500 after publishing": {{op: "publish", times: 1, status: http.StatusInternalServerError, after: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fg := newFakeGitHub(t)
+			_, paths := build(t)
+			fg.mangle = "drop"
+			for _, f := range injected {
+				fg.inject(f)
+			}
+			var slept int
+			p := fg.publisher(t.Output(), 5)
+			p.Sleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+			if err := p.Publish(context.Background(), tag, paths); err == nil {
+				t.Fatal("publish succeeded with a file lost in publishing")
+			}
+			if n := fg.uploads(); n != len(paths) {
+				t.Errorf("%d uploads, want the %d before publishing and none after", n, len(paths))
+			}
+			if want := len(injected); slept != want {
+				t.Errorf("waited %d times, want %d", slept, want)
+			}
+		})
+	}
+}
+
+// An upload GitHub answered and did not keep is found missing before the publish, not
+// after it: the draft gets the file again and only then is published.
+func TestPublishDoesNotPublishADraftMissingAFile(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	fg.inject(fault{op: "upload", times: 1, lie: true})
+
+	if err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths); err != nil {
+		t.Fatal(err)
+	}
+	requirePublished(t, fg, files)
+	if n := len(fg.publishRequests); n != 1 || len(fg.publishRequests[0].Assets) != len(files) {
+		t.Errorf("publish requests: %d, the first to a release holding %d files; want one, to a release holding %d", n, len(fg.publishRequests[0].Assets), len(files))
+	}
+}
+
 // A published release already on the tag and a draft beside it: the published one is
 // the release, and the draft is only reported.
 func TestPublishPrefersThePublishedReleaseOverADraftOnTheSameTag(t *testing.T) {

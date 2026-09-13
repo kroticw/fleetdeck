@@ -38,6 +38,41 @@ type fakeGitHub struct {
 	// ignorePublish makes an update asking to publish answer as if it had, and
 	// publish nothing: the lie a read-back exists to catch.
 	ignorePublish bool
+	// listLag is how many readings of the release list a new release stays out of:
+	// the list trailed a create by one to two seconds on 2026-09-13.
+	listLag int
+	// mangle is where GitHub gives a release a tag named untagged-... in place of
+	// its own: "create", "notes" (an update that does not publish), "publish", or
+	// "read" (a release read by its id reports it, while its state keeps the tag).
+	// "drop" loses a file of the release as it is published. "unnamed-update" is
+	// what the sandbox showed on 2026-09-13: an update of a draft that does not
+	// publish it and does not name its tag leaves it with untagged-....
+	mangle string
+
+	// publishRequests are the requests to publish that reached the server, with the
+	// release as it was when each arrived.
+	publishRequests []publishRequest
+	// writes are all requests that change a release (uploads, updates, asset
+	// deletions), with the release as it was when each arrived.
+	writes []writeRequest
+	// published are the releases that went from draft to published.
+	published []int64
+}
+
+type publishRequest struct {
+	ID     int64
+	Tag    string
+	Draft  bool
+	Assets []fakeAsset
+}
+
+type writeRequest struct {
+	Op    string
+	ID    int64
+	Tag   string
+	Draft bool
+	// AfterPublish: a publish request had already arrived when this one did.
+	AfterPublish bool
 }
 
 type fakeRelease struct {
@@ -48,7 +83,16 @@ type fakeRelease struct {
 	Draft      bool
 	Prerelease bool
 	Assets     []*fakeAsset
+	// unlisted is how many more readings of the list leave this release out.
+	unlisted int
+	// vanishAfter, when set, is how many readings of the list show this release
+	// before it stops appearing in the list for good, the way a release given
+	// another tag drops out of the list for its own.
+	vanishAfter int
+	listed      int
 }
+
+func untagged(id int64) string { return fmt.Sprintf("untagged-%016x", id) }
 
 type fakeAsset struct {
 	ID          int64
@@ -72,6 +116,8 @@ type fault struct {
 	starter bool
 	// drop closes the connection instead of answering.
 	drop bool
+	// lie answers as if the request had succeeded, and does nothing.
+	lie bool
 }
 
 const fakeRepo = "octo/app"
@@ -92,8 +138,49 @@ func (fg *fakeGitHub) publisher(log io.Writer, waits int) *Publisher {
 		Client: fg.srv.Client(),
 		Log:    log,
 		Waits:  make([]time.Duration, waits),
+		Settle: make([]time.Duration, 5),
 		Sleep:  func(context.Context, time.Duration) error { return nil },
 	}
+}
+
+// hide keeps rel out of the next n readings of the release list.
+func (fg *fakeGitHub) hide(rel *fakeRelease, n int) {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	rel.unlisted = n
+}
+
+// vanish lets rel appear in n more readings of the release list and in none after.
+func (fg *fakeGitHub) vanish(rel *fakeRelease, n int) {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	rel.vanishAfter, rel.listed = n, 0
+}
+
+// uploads counts the upload requests that reached the server.
+func (fg *fakeGitHub) uploads() int {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	n := 0
+	for _, w := range fg.writes {
+		if w.Op == "upload" {
+			n++
+		}
+	}
+	return n
+}
+
+// publishedReleases are the releases that are published now, whatever their tag.
+func (fg *fakeGitHub) publishedReleases() []fakeRelease {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	var out []fakeRelease
+	for _, rel := range fg.releases {
+		if !rel.Draft {
+			out = append(out, *rel)
+		}
+	}
+	return out
 }
 
 func (fg *fakeGitHub) inject(f fault) {
@@ -234,7 +321,50 @@ func (fg *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f := fg.takeFault(op)
+	publishing := false
+	if op == "update" {
+		var in struct {
+			Draft *bool `json:"draft"`
+		}
+		publishing = json.Unmarshal(body, &in) == nil && in.Draft != nil && !*in.Draft
+	}
+	fg.mu.Lock()
+	target := fg.find(id)
+	if op == "delete-asset" {
+		target = fg.owner(id)
+	}
+	if target != nil && (op == "update" || op == "upload" || op == "delete-asset") {
+		fg.writes = append(fg.writes, writeRequest{Op: op, ID: target.ID, Tag: target.Tag, Draft: target.Draft, AfterPublish: len(fg.publishRequests) > 0})
+		if publishing {
+			req := publishRequest{ID: target.ID, Tag: target.Tag, Draft: target.Draft}
+			for _, a := range target.Assets {
+				req.Assets = append(req.Assets, *a)
+			}
+			fg.publishRequests = append(fg.publishRequests, req)
+		}
+	}
+	fg.mu.Unlock()
+
+	// A fault on "publish" matches only updates that publish; one on "update"
+	// matches any update.
+	var f *fault
+	if publishing {
+		f = fg.takeFault("publish")
+	}
+	if f == nil {
+		f = fg.takeFault(op)
+	}
+	if f != nil && f.lie {
+		if op == "upload" {
+			fg.mu.Lock()
+			aid := fg.id()
+			fg.mu.Unlock()
+			fg.writeJSON(w, http.StatusCreated, map[string]any{"id": aid, "name": r.URL.Query().Get("name"), "state": "uploaded", "size": len(body)})
+			return
+		}
+		fg.writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
 	if f != nil && !f.after {
 		fg.fail(w, r, id, f)
 		return
@@ -270,6 +400,18 @@ func (fg *fakeGitHub) fail(w http.ResponseWriter, r *http.Request, id int64, f *
 	http.Error(w, `{"message":"Server Error"}`, f.status)
 }
 
+// owner is the release holding the asset with id.
+func (fg *fakeGitHub) owner(assetID int64) *fakeRelease {
+	for _, rel := range fg.releases {
+		for _, a := range rel.Assets {
+			if a.ID == assetID {
+				return rel
+			}
+		}
+	}
+	return nil
+}
+
 func (fg *fakeGitHub) find(id int64) *fakeRelease {
 	for _, rel := range fg.releases {
 		if rel.ID == id {
@@ -303,9 +445,12 @@ func (fg *fakeGitHub) handle(w http.ResponseWriter, r *http.Request, op string, 
 				return
 			}
 		}
-		rel := &fakeRelease{ID: fg.id(), Tag: in.TagName, Draft: in.Draft}
+		rel := &fakeRelease{ID: fg.id(), Tag: in.TagName, Draft: in.Draft, unlisted: fg.listLag}
 		if in.GenerateReleaseNotes {
 			rel.Name, rel.Body = in.TagName, generatedNotes(in.TagName)
+		}
+		if fg.mangle == "create" {
+			rel.Tag = untagged(rel.ID)
 		}
 		fg.releases = append(fg.releases, rel)
 		fg.writeJSON(w, http.StatusCreated, fg.render(rel))
@@ -316,7 +461,11 @@ func (fg *fakeGitHub) handle(w http.ResponseWriter, r *http.Request, op string, 
 			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 			return
 		}
-		fg.writeJSON(w, http.StatusOK, fg.render(rel))
+		out := fg.render(rel)
+		if fg.mangle == "read" && rel.Draft {
+			out["tag_name"] = untagged(rel.ID)
+		}
+		fg.writeJSON(w, http.StatusOK, out)
 
 	case "update":
 		rel := fg.find(id)
@@ -325,9 +474,10 @@ func (fg *fakeGitHub) handle(w http.ResponseWriter, r *http.Request, op string, 
 			return
 		}
 		var in struct {
-			Name  *string `json:"name"`
-			Body  *string `json:"body"`
-			Draft *bool   `json:"draft"`
+			Name    *string `json:"name"`
+			Body    *string `json:"body"`
+			Draft   *bool   `json:"draft"`
+			TagName *string `json:"tag_name"`
 		}
 		if err := json.Unmarshal(body, &in); err != nil {
 			http.Error(w, `{"message":"Problems parsing JSON"}`, http.StatusBadRequest)
@@ -338,6 +488,9 @@ func (fg *fakeGitHub) handle(w http.ResponseWriter, r *http.Request, op string, 
 		}
 		if in.Body != nil {
 			rel.Body = *in.Body
+		}
+		if in.Draft == nil && (fg.mangle == "notes" || fg.mangle == "unnamed-update" && in.TagName == nil) {
+			rel.Tag = untagged(rel.ID)
 		}
 		out := fg.render(rel)
 		if in.Draft != nil {
@@ -352,6 +505,15 @@ func (fg *fakeGitHub) handle(w http.ResponseWriter, r *http.Request, op string, 
 			if fg.ignorePublish && !*in.Draft {
 				out["draft"] = false
 			} else {
+				if rel.Draft && !*in.Draft {
+					fg.published = append(fg.published, rel.ID)
+					if fg.mangle == "publish" {
+						rel.Tag = untagged(rel.ID)
+					}
+					if fg.mangle == "drop" && len(rel.Assets) > 0 {
+						rel.Assets = rel.Assets[:len(rel.Assets)-1]
+					}
+				}
 				rel.Draft = *in.Draft
 				out = fg.render(rel)
 			}
@@ -418,8 +580,22 @@ func (fg *fakeGitHub) list(w http.ResponseWriter, r *http.Request) {
 	if page <= 0 {
 		page = 1
 	}
-	all := make([]*fakeRelease, len(fg.releases))
-	copy(all, fg.releases)
+	var all []*fakeRelease
+	for _, rel := range fg.releases {
+		if page == 1 && rel.unlisted > 0 {
+			rel.unlisted--
+			continue
+		}
+		if rel.vanishAfter > 0 {
+			if rel.listed >= rel.vanishAfter {
+				continue
+			}
+			if page == 1 {
+				rel.listed++
+			}
+		}
+		all = append(all, rel)
+	}
 	sort.Slice(all, func(i, j int) bool { return all[i].ID > all[j].ID })
 
 	start := (page - 1) * perPage
