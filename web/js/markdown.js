@@ -80,6 +80,8 @@ const TABLE_SEPARATOR = /^\s*\|[\s:|-]*-[\s:|-]*\|\s*$/;
 // wherever it is read.
 export const WIKILINK = /\[\[([^[\]\r\n]+?)\]\]/g;
 const CODE_SPAN = /`([^`]+)`/g;
+// Nothing to link against. Shared and frozen: read on every render, never written.
+const NO_NAMES = Object.freeze(new Set());
 const BOLD = /\*\*([^*]+)\*\*/g;
 
 // linkParts splits a wiki link's inner text the way internal/board's
@@ -93,7 +95,7 @@ export function linkParts(inner) {
   return { target, label: label === "" ? target : label };
 }
 
-function inline(text, knownCards) {
+function inline(text, known) {
   // Code spans are lifted out before anything else runs. Order alone would not
   // do it: a wiki link inside backticks would still be matched inside the
   // <code> a code-span pass had just produced, and a backtick inside a link's
@@ -111,18 +113,27 @@ function inline(text, knownCards) {
   return lifted
     .replace(WIKILINK, (whole, inner) => {
       const { target, label } = linkParts(inner);
-      if (target === "" || !knownCards.has(unescapeHTML(target))) {
-        // A link to a card that does not exist is shown as a link that does not
-        // work: no data-link attribute, so the panel's click delegation never
-        // sees it, and a class the stylesheet can mark as broken. A span, not a
-        // control: there is nothing here to activate.
-        return `<span class="wikilink wikilink-missing">${label === "" ? whole : label}</span>`;
+      const name = unescapeHTML(target);
+      if (target !== "" && known.cards.has(name)) {
+        // A button rather than an href-less <a>. An <a> with no href is not
+        // focusable, is not in the tab order and is not announced as a link, so
+        // it would look like a link and work only for a mouse. Following a link
+        // here opens a panel rather than navigating, which is what a button is.
+        return `<button type="button" class="wikilink" data-link="${target}">${label}</button>`;
       }
-      // A button rather than an href-less <a>. An <a> with no href is not
-      // focusable, is not in the tab order and is not announced as a link, so
-      // it would look like a link and work only for a mouse. Following a link
-      // here opens a panel rather than navigating, which is what a button is.
-      return `<button type="button" class="wikilink" data-link="${target}">${label}</button>`;
+      if (target !== "" && known.docs.has(name)) {
+        // A document the text links to. Checked after the cards, so a name a
+        // card and a document share stays the card's, as it was before
+        // documents could be linked. data-doc rather than data-link: the two
+        // open different things, and a panel that handles only one of them
+        // must not take the other for its own.
+        return `<button type="button" class="wikilink wikilink-doc" data-doc="${target}">${label}</button>`;
+      }
+      // A link to a note that is neither is shown as a link that does not
+      // work: no data attribute, so no click delegation ever sees it, and a
+      // class the stylesheet can mark as broken. A span, not a control: there
+      // is nothing here to activate.
+      return `<span class="wikilink wikilink-missing">${label === "" ? whole : label}</span>`;
     })
     .replace(BOLD, "<strong>$1</strong>")
     .replace(/<(\d+)>/g, (_, index) => `<code>${spans[Number(index)]}</code>`);
@@ -134,6 +145,11 @@ function inline(text, knownCards) {
 // and without ".md" — and decides only whether a wiki link is clickable. Callers
 // with nothing to link against pass an empty Set; the signature is shared with
 // the documentation section, which does exactly that.
+//
+// knownDocs decides the same for a link to a document (web/js/docnames.js): any
+// object with has(name), because a document's name is resolved against the
+// documentation list rather than looked up in a fixed set. A name both hold is
+// the card's.
 // cellsOf splits one table row into its cells. The fencing bars are dropped and
 // everything between the inner ones is a cell, empty cells included: a blank
 // cell is a value a table legitimately holds.
@@ -172,8 +188,8 @@ function renderTable(header, alignments, rows, known) {
   return `<div class="md-table"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
-export function renderMarkdown(text, knownCards) {
-  const known = knownCards ?? new Set();
+export function renderMarkdown(text, knownCards, knownDocs) {
+  const known = { cards: knownCards ?? NO_NAMES, docs: knownDocs ?? NO_NAMES };
   const lines = escapeHTML(text).split("\n");
   const out = [];
   let inCode = false;

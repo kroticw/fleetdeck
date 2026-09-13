@@ -1089,7 +1089,8 @@ main {
  * style attributes as well as inline <style>, and a blocked one fails silently.
  */
 
-#card-panel {
+#card-panel,
+#reader-panel {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -1100,19 +1101,22 @@ main {
   box-shadow: 0 0 16px var(--shadow);
 }
 
-.card-head {
+.card-head,
+.reader-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--gap);
 }
 
-.card-title {
+.card-title,
+.reader-title {
   margin: 0;
   font-size: var(--fs-md);
 }
 
-.card-close {
+.card-close,
+.reader-close {
   flex: none;
   font: inherit;
   color: var(--text-muted);
@@ -1121,7 +1125,8 @@ main {
   cursor: pointer;
 }
 
-.card-close:hover {
+.card-close:hover,
+.reader-close:hover {
   color: var(--text);
 }
 
@@ -1230,7 +1235,8 @@ main {
   margin-top: var(--gap);
 }
 
-.card-body pre {
+.card-body pre,
+.reader-body pre {
   overflow: auto;
   padding: var(--gap);
   border-radius: var(--radius-sm);
@@ -1244,6 +1250,7 @@ main {
  */
 .wikilink,
 .card-backlink,
+.card-doc,
 .card-session-link {
   padding: 0;
   border: none;
@@ -1254,7 +1261,8 @@ main {
 }
 
 .wikilink,
-.card-backlink {
+.card-backlink,
+.card-doc {
   cursor: pointer;
   text-decoration: underline;
 }
@@ -1288,6 +1296,86 @@ main {
 
 .card-backlink {
   display: block;
+}
+
+/* A card's documents: the reports and design docs its [[links]] name
+ * (web/js/docnames.js), listed right under the number so they are seen without
+ * scrolling the body. A card with none draws no block at all.
+ */
+.card-docs {
+  margin-bottom: var(--gap);
+  font-size: var(--fs-sm);
+}
+
+.card-docs-title {
+  margin: 0 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.card-doc {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+/* Document reader (web/js/reader.js)
+ *
+ * An overlay over the centre column, sharing #card-panel's rules above, and for
+ * the same reason: a report opened from a card is read over the board it came
+ * from, with the way back to the card at the top.
+ *
+ * The body is held to a reading width. A report is prose first, and a line
+ * across the whole centre column of a wide window is not read; its tables
+ * scroll inside their own box (.md-table) instead of widening the text.
+ */
+.reader-body {
+  max-width: 80ch;
+  margin-top: var(--gap);
+  overflow-wrap: anywhere;
+}
+
+.reader-empty {
+  color: var(--text-muted);
+}
+
+.reader-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* The cards an open document belongs to (web/js/doccards.js), in the reader and
+ * in the documentation section alike. Each is the card's number chip, the same
+ * .knum it wears on the board, and its title as the link.
+ */
+.doc-cards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm) var(--gap);
+  margin-top: var(--gap);
+  font-size: var(--fs-sm);
+}
+
+.doc-cards-title {
+  color: var(--text-muted);
+}
+
+.doc-card {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-card-title {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 /* Kanban board.
@@ -1753,9 +1841,24 @@ main {
   background: var(--surface-hover);
 }
 
+/* The open document and, over it, the cards linking to it. A column of its own
+ * so the body keeps the scroll and the row above it never scrolls away. */
+.docs-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.docs-cards .doc-cards {
+  margin: 0 0 var(--gap);
+}
+
 .docs-body {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   overflow: auto;
 }
 

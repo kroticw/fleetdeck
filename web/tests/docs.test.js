@@ -265,3 +265,48 @@ test("configured directories holding no markdown say so", async () => {
   assert.equal(root.querySelectorAll("[data-path]").length, 0);
   assert.match(root.textContent, new RegExp(t("docs_empty")));
 });
+
+// The way back: an open document names the cards that link to it.
+
+function storeOf(snap) {
+  return (fn) => {
+    fn(snap, true);
+    return () => {};
+  };
+}
+
+test("an open document names the cards that link it, and a card opens with one click", async () => {
+  stubFetch([
+    ["/api/docs/content", ok({ path: "/docs/index.md", body: "# Handbook\n" })],
+    ["/api/docs", ok(DOCS)],
+  ]);
+  const opened = [];
+  const snap = { cards: [{ path: "/board/cards/T-007-guide.md", id: "T-007", title: "Guide", links: ["index"] }] };
+
+  renderDocs(root, { subscribe: storeOf(snap), onOpenCard: (path) => opened.push(path) });
+  await settle();
+  fireEvent(root.querySelector("[data-path]"), "click");
+  await settle();
+
+  const cards = root.querySelectorAll(".doc-card");
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].textContent, /T-007/);
+  fireEvent(cards[0], "click");
+  assert.deepEqual(opened, ["/board/cards/T-007-guide.md"]);
+});
+
+test("a document no card links shows no cards row", async () => {
+  stubFetch([
+    ["/api/docs/content", ok({ path: "/docs/index.md", body: "# Handbook\n" })],
+    ["/api/docs", ok(DOCS)],
+  ]);
+  const snap = { cards: [{ path: "/board/cards/T-007-guide.md", id: "T-007", title: "Guide", links: ["elsewhere"] }] };
+
+  renderDocs(root, { subscribe: storeOf(snap), onOpenCard: () => {} });
+  await settle();
+  fireEvent(root.querySelector("[data-path]"), "click");
+  await settle();
+
+  assert.equal(root.querySelectorAll(".doc-card").length, 0);
+  assert.ok(!root.textContent.includes(t("doc_cards")));
+});

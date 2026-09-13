@@ -4,6 +4,7 @@ import { renderHeader } from "./header.js";
 import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
+import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
 import { renderDocs } from "./docs.js";
@@ -34,7 +35,22 @@ subscribe((snap) => {
 });
 
 const sessionPanel = document.getElementById("session-panel");
-const cardPanel = createCardPanel(document.getElementById("card-panel"));
+// The card panel and the document reader are two overlays over the same column,
+// and each opens the other: a card lists its documents, and a document names the
+// cards linking to it. Only one of them may be up, so each closes before the
+// other opens.
+const cardPanel = createCardPanel(document.getElementById("card-panel"), {
+  onOpenDoc: (path) => {
+    cardPanel.close();
+    reader.open(path);
+  },
+});
+const reader = createReader(document.getElementById("reader-panel"), {
+  onOpenCard: (path) => {
+    reader.close();
+    cardPanel.open(path);
+  },
+});
 
 // Exactly one session panel at a time, and its stop function held here.
 //
@@ -64,6 +80,7 @@ const terminalLinks = {
   resolve: (name) => cardPathForLink(get()?.cards, name),
   open: (path) => {
     closeSession();
+    reader.close();
     cardPanel.open(path);
   },
 };
@@ -74,6 +91,7 @@ function openSession(short) {
   // and the card panel is opened from the board underneath. Only one of them may
   // be up, or they cover each other in whichever order they happened to open.
   cardPanel.close();
+  reader.close();
   stopSession = renderSession(sessionPanel, short, closeSession, { links: terminalLinks });
   rememberOpenSession(storage, short);
 }
@@ -106,7 +124,7 @@ createSections(document.getElementById("tabs"), [
     id: "docs",
     label: t("tab_docs"),
     root: document.getElementById("docs"),
-    onFirstShow: () => renderDocs(document.getElementById("docs")),
+    onFirstShow: () => renderDocs(document.getElementById("docs"), { onOpenCard: cardPanel.open }),
   },
 ]);
 

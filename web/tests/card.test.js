@@ -74,6 +74,9 @@ function open(snap, path = FLEET_UI, options = {}) {
   const closed = [];
   const dispose = renderCard(root, path, () => closed.push(true), {
     subscribe: store.subscribe,
+    // No documentation unless a test brings its own: the panel lists a card's
+    // documents from the server, and a test about a field write has no server.
+    listDocs: async () => [],
     ...options,
   });
   return { root, store, closed, dispose };
@@ -692,3 +695,109 @@ test("the scroll indicator measures the body after it is in the page", () => {
   assert.ok(root);
 });
 
+
+// The card's documents: links from its body to documents under the configured
+// documentation roots (web/js/docnames.js), listed under its number.
+
+const DOCS = [
+  { path: "/board/docs/reports/2026-09-12-report.md", title: "reports/2026-09-12-report.md", root: "/board/docs" },
+  { path: "/board/docs/reports/2026-09-13-design.md", title: "reports/2026-09-13-design.md", root: "/board/docs" },
+];
+
+function withDocuments(snap) {
+  const card = snap.cards.find((c) => c.path === FLEET_UI);
+  card.links = [...card.links, "2026-09-12-report", "reports/2026-09-13-design"];
+  card.body += "\nReport: [[2026-09-12-report]], design: [[reports/2026-09-13-design]].\n";
+  return snap;
+}
+
+test("a card's documents are listed and each opens with one click", async () => {
+  const opened = [];
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    onOpenDoc: (path) => opened.push(path),
+  });
+  await settle();
+
+  const entries = root.querySelectorAll(".card-doc");
+  assert.deepEqual(
+    entries.map((entry) => entry.textContent),
+    ["reports/2026-09-12-report", "reports/2026-09-13-design"],
+  );
+  fireEvent(entries[1], "click");
+  assert.deepEqual(opened, ["/board/docs/reports/2026-09-13-design.md"]);
+});
+
+test("a card with no documents draws no documents block, not an empty one", async () => {
+  const { root } = open(snapshot(), CARD_KEEPING, { listDocs: async () => DOCS });
+  await settle();
+
+  assert.equal(root.querySelector(".card-docs"), null);
+  assert.ok(!root.textContent.includes(t("card_docs")), "a heading over nothing reads as a panel that lost something");
+});
+
+test("the documents appear when the list arrives, without waiting for a snapshot", async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, { listDocs: () => gate });
+  assert.equal(root.querySelector(".card-docs"), null);
+
+  release(DOCS);
+  await settle();
+
+  assert.equal(root.querySelectorAll(".card-doc").length, 2);
+});
+
+test("documentation that cannot be listed leaves the card whole", async () => {
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => {
+      throw new Error("no documentation roots are configured");
+    },
+  });
+  await settle();
+
+  assert.equal(root.querySelector(".card-docs"), null);
+  assert.ok(root.querySelector("select[data-field=stage]"), "the card itself must still be drawn");
+});
+
+test("a document link in the body is a control naming the document", async () => {
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, { listDocs: async () => DOCS });
+  await settle();
+
+  assert.match(root.querySelector(".card-body").innerHTML, /data-doc="2026-09-12-report"/);
+});
+
+test("a document link clicked in the body opens that document", async () => {
+  const opened = [];
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    onOpenDoc: (path) => opened.push(path),
+  });
+  await settle();
+
+  // Appended by hand: the fake DOM does not parse the body's innerHTML.
+  const link = dom.element("button");
+  link.dataset.doc = "2026-09-12-report";
+  root.querySelector(".card-body").appendChild(link);
+  fireEvent(link, "click");
+
+  assert.deepEqual(opened, ["/board/docs/reports/2026-09-12-report.md"]);
+});
+
+test("the documents are listed once per opened card, not once per snapshot", async () => {
+  let calls = 0;
+  const { store } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => {
+      calls += 1;
+      return DOCS;
+    },
+  });
+  await settle();
+  store.push(withDocuments(snapshot()));
+  store.push(withDocuments(snapshot()));
+  await settle();
+
+  assert.equal(calls, 1);
+});

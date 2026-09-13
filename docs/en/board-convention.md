@@ -77,6 +77,16 @@ A card's title and its `[[links]]` to other notes are read out of the body, not 
 
 With the fenced regions blanked out, the title is the first line matching a level-1 markdown heading (`# ...`) anywhere in the body — normally the card template's own heading line. Every `[[...]]` reference is collected as a link; a link with a heading anchor (`[[note#heading]]`) or an alias (`[[note|alias]]`) is recorded by its bare target, `note`, with the anchor or alias stripped. The card's stored body text is always the untouched original file content — the blanking described here is only a working copy used to find the title and the links, and is never written back or shown as the card's body.
 
+## Documents a card links to
+
+A card's reports, research results and design documents are markdown files under a documentation directory: `docs` inside the board, or `docs` next to it, the way a fleetdeck workspace lays them out. A card links to one the way it links to another card, by name: `[[2026-09-13-card-artifacts]]`. A longer tail of the path, such as `[[reports/2026-09-13-card-artifacts]]`, is needed only when two documents share a file name.
+
+These links are the only record of which documents belong to a card; there is no frontmatter field for them. The panel lists a card's documents under its number and opens each one in a reader over the board. The reader, like the documentation section, names every card that links to the document it shows, so the way back is worked out from the cards and cannot disagree with them.
+
+A document written as a path — `docs/reports/x.md`, in backticks or not — cannot be opened from the card, so the validator rejects it and names the link to write instead. `scripts/link_docs.py` rewrites the paths in cards written before this rule; without `--write` it only prints what it would change.
+
+A path to a file in a task's repository, a branch, a PR and a screenshot are not documents of the board and stay text. A name two documents share opens neither of them: the panel shows it as a link that does not work rather than pick one.
+
 ## What makes a card unreadable
 
 A card fails to parse in exactly two situations: the file does not start with a frontmatter block at all (no `---` fence at the very top), or the frontmatter is present but is not valid YAML. Either way, the card is not dropped from the board: it is kept, marked with a parse error, and shown as unreadable rather than silently disappearing. A file that cannot even be read from disk — permission denied, or deleted between listing the directory and reading the file — is handled the same way, as a card carrying an error rather than as a reason to abort scanning the rest of the board.

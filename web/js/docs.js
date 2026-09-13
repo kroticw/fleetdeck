@@ -7,6 +7,8 @@
 // renders from the snapshot the socket pushes, but documentation is not fleet
 // state: it does not change once a second, it can be megabytes, and putting it
 // in the snapshot would send every document to every browser on every tick.
+// The two reads are exported, because the card panel and the document reader
+// read the same routes and must repeat the same refusals.
 //
 // It builds its list with createElement and textContent rather than assembling
 // an HTML string. A document's title is a file name off the operator's disk, and
@@ -22,6 +24,9 @@
 
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
+import { subscribe as storeSubscribe } from "./store.js";
+import { cardsLinkingTo } from "./docnames.js";
+import { docCardsRow } from "./doccards.js";
 import { t } from "./i18n.js";
 import { inFleet } from "./api.js";
 
@@ -51,6 +56,23 @@ async function refusal(response) {
   return new Error(detail || `HTTP ${response.status}`);
 }
 
+// listDocs is every document the configured roots hold, or an Error carrying
+// the server's own sentence.
+export async function listDocs() {
+  const response = await fetch(inFleet("/api/docs"));
+  if (!response.ok) throw await refusal(response);
+  const body = await response.json();
+  return Array.isArray(body) ? body : [];
+}
+
+// fetchDoc is one document's markdown, by the path the list handed out.
+export async function fetchDoc(path) {
+  const response = await fetch(inFleet(`/api/docs/content?path=${encodeURIComponent(path)}`));
+  if (!response.ok) throw await refusal(response);
+  const { body } = await response.json();
+  return body;
+}
+
 /**
  * renderDocs draws the documentation section into `root`.
  *
@@ -58,19 +80,34 @@ async function refusal(response) {
  * time the operator opens it (see sections.js) rather than at startup, so a
  * panel with no documentation directories does not ask for them before anyone
  * has looked.
+ *
+ * options.onOpenCard is called with a card's path when one of the cards linking
+ * to the open document is followed. options.subscribe replaces the store, for a
+ * test; nothing in the application passes it.
  */
-export function renderDocs(root) {
+export function renderDocs(root, options = {}) {
+  const subscribe = options.subscribe ?? storeSubscribe;
+  const onOpenCard = options.onOpenCard ?? null;
+
   // The list and the body are two elements with two lifetimes, and that is the
   // point. The list is rebuilt only when the set of documents changes, so
   // opening one does not tear down and re-create the entry the operator's cursor
   // is on; the body is replaced on every open.
   const nav = el("nav", "docs-list");
+  // The cards linking to the open document sit over its body in a slot of their
+  // own, so redrawing them never touches the body. An empty slot takes no room.
+  const cardsSlot = el("div", "docs-cards");
   const article = el("article", "docs-body");
+  const main = el("div", "docs-main");
+  main.append(cardsSlot, article);
   const box = el("div", "docs");
-  box.append(nav, article);
+  box.append(nav, main);
   root.replaceChildren(box);
 
   let selected = null;
+  let docs = [];
+  let cards = [];
+  let paintedCards = null;
   // Which open is the newest. An answer carrying an older token belongs to a
   // document the operator has already navigated away from, and painting it would
   // put one document's text under another one's highlighted entry.
@@ -80,6 +117,16 @@ export function renderDocs(root) {
     for (const entry of nav.querySelectorAll("[data-path]")) {
       entry.className = entry.dataset.path === selected ? "docs-entry on" : "docs-entry";
     }
+  };
+
+  const paintCards = () => {
+    const doc = docs.find((d) => d.path === selected) ?? null;
+    const linking = cardsLinkingTo(doc, cards, docs);
+    const signature = JSON.stringify([selected, linking.map((card) => [card.path, card.id, card.title])]);
+    if (signature === paintedCards) return;
+    paintedCards = signature;
+    const row = docCardsRow(linking, onOpenCard);
+    cardsSlot.replaceChildren(...(row ? [row] : []));
   };
 
   // Either the rendered document or a line of plain text. The two are separate
@@ -97,19 +144,21 @@ export function renderDocs(root) {
     article.replaceChildren(el("p", "docs-empty", content?.text ?? t("pick_doc")));
   };
 
-  const paintList = (docs, listError) => {
+  const paintList = (list, listError) => {
+    docs = list;
+    paintCards();
     if (listError) {
       // Replaces the list, and only the list: one document refusing to open says
       // nothing about the others, so that failure goes to the body instead.
       nav.replaceChildren(el("p", "docs-error", listError));
       return;
     }
-    if (docs.length === 0) {
+    if (list.length === 0) {
       nav.replaceChildren(el("p", "docs-empty", t("docs_empty")));
       return;
     }
     nav.replaceChildren(
-      ...docs.map((doc) => {
+      ...list.map((doc) => {
         // A button rather than an href-less <a>: an anchor with no href is not
         // focusable, is not in the tab order and is not announced as a link, so
         // it would look like a link and work only for a mouse.
@@ -126,11 +175,10 @@ export function renderDocs(root) {
     const mine = (token += 1);
     selected = path;
     markSelected();
+    paintCards();
     paintBody({ text: t("doc_opening") });
     try {
-      const response = await fetch(inFleet(`/api/docs/content?path=${encodeURIComponent(path)}`));
-      if (!response.ok) throw await refusal(response);
-      const { body } = await response.json();
+      const body = await fetchDoc(path);
       if (token !== mine) return;
       paintBody({ html: renderMarkdown(body, NO_CARDS) });
     } catch (err) {
@@ -150,12 +198,15 @@ export function renderDocs(root) {
 
   paintBody(null);
 
+  // The section lives as long as the page, so this subscription is never undone.
+  subscribe((snap) => {
+    cards = snap?.cards ?? [];
+    paintCards();
+  });
+
   (async () => {
     try {
-      const response = await fetch(inFleet("/api/docs"));
-      if (!response.ok) throw await refusal(response);
-      const body = await response.json();
-      paintList(Array.isArray(body) ? body : [], "");
+      paintList(await listDocs(), "");
     } catch (err) {
       // Verbatim, with a line saying what failed: the server's sentence already
       // names the directory it could not read or the rule that refused the path,

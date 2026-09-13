@@ -23,6 +23,8 @@ import { setCardField } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
+import { listDocs as serverDocs } from "./docs.js";
+import { docForLink, docTitle, documentsOf, noteName } from "./docnames.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
 // Progress is a list of strings because that is what the write route takes and
@@ -30,12 +32,8 @@ import { t } from "./i18n.js";
 const STAGES = ["new", "active", "review", "blocked", "done"];
 const PROGRESS = ["0", "10", "20", "40", "60", "80", "100"];
 
-function baseName(path) {
-  return String(path ?? "")
-    .split("/")
-    .pop()
-    .replace(/\.md$/, "");
-}
+// A card's note name: what a [[link]] to it spells (web/js/docnames.js).
+const baseName = noteName;
 
 // cardPathForLink is which card a wiki link names: the one whose file name,
 // without its directory and ".md", is the link's note name — or null when no
@@ -61,6 +59,13 @@ function el(tag, className, text) {
  * hands the id back; with nothing passed the id renders as plain text, which is
  * what it does until the session panel exists.
  *
+ * options.onOpenDoc, when given, is called with a document's path when one of
+ * the card's documents is followed — from the list under its number or from a
+ * link in its body.
+ *
+ * options.listDocs replaces the documentation list route, for the reason
+ * options.subscribe below exists.
+ *
  * options.subscribe replaces the module's store subscription. It exists so the
  * panel can be driven from a sequence of snapshots in a test without a server,
  * a socket or a browser; nothing in the application passes it.
@@ -68,6 +73,8 @@ function el(tag, className, text) {
 export function renderCard(root, path, onClose, options = {}) {
   const subscribe = options.subscribe ?? storeSubscribe;
   const onOpenSession = options.onOpenSession ?? null;
+  const onOpenDoc = options.onOpenDoc ?? null;
+  const listDocs = options.listDocs ?? serverDocs;
 
   // Which card the panel is showing. A wiki link or a backlink moves it, which
   // is why this is not simply the `path` argument everywhere below.
@@ -100,6 +107,10 @@ export function renderCard(root, path, onClose, options = {}) {
   // Signature of what is currently on screen, so an unchanged snapshot redraws
   // nothing.
   let painted = null;
+  // The documentation list, fetched once per opened panel and null until it
+  // arrives. A card's documents are the links in it that name a document there.
+  let docs = null;
+  let disposed = false;
 
   const shownValue = (card, field) =>
     pending.has(field) ? pending.get(field) : String(card?.[field] ?? "");
@@ -174,7 +185,7 @@ export function renderCard(root, path, onClose, options = {}) {
     return box;
   };
 
-  const build = (snap, card, known, orphan, backlinks) => {
+  const build = (snap, card, known, orphan, backlinks, documents) => {
     if (!snap) {
       return [head(baseName(current)), el("p", "card-empty", t("card_waiting"))];
     }
@@ -239,6 +250,25 @@ export function renderCard(root, path, onClose, options = {}) {
     }
     if (meta.children.length > 0) nodes.push(meta);
 
+    // The card's documents, right under its number, where they are seen without
+    // scrolling the body: a report can run to a thousand lines, and the card is
+    // where the operator stands when they go looking for it. Its [[links]] are
+    // the only source (docnames.js), so the list cannot disagree with the text.
+    //
+    // No documents, no block. Most cards on a board have none, and a heading
+    // over nothing reads as a panel that lost them.
+    if (documents.length > 0) {
+      const box = el("div", "card-docs");
+      box.append(el("h4", "card-docs-title", t("card_docs")));
+      for (const doc of documents) {
+        const entry = el("button", "card-doc", docTitle(doc));
+        entry.setAttribute("type", "button");
+        entry.addEventListener("click", () => onOpenDoc?.(doc.path));
+        box.append(entry);
+      }
+      nodes.push(box);
+    }
+
     // One line per field that has something to say, in the order the controls
     // are in, and each names its field: with two writable fields there can be
     // two answers on screen at once, and an unlabelled message would not say
@@ -252,7 +282,7 @@ export function renderCard(root, path, onClose, options = {}) {
     }
 
     const body = el("div", "card-body");
-    body.innerHTML = renderMarkdown(card.body, new Set(known));
+    body.innerHTML = renderMarkdown(card.body, new Set(known), { has: (name) => docForLink(docs, name) !== null });
     nodes.push(body);
 
     if (backlinks.length > 0) {
@@ -284,6 +314,7 @@ export function renderCard(root, path, onClose, options = {}) {
     const backlinks = cards.filter(
       (c) => c.path !== current && (c.links ?? []).includes(baseName(current)),
     );
+    const documents = card ? documentsOf(card, cards, docs) : [];
 
     const signature = JSON.stringify({
       hasSnapshot: latest !== null,
@@ -292,6 +323,7 @@ export function renderCard(root, path, onClose, options = {}) {
       known,
       orphan,
       backlinks: backlinks.map((c) => [c.path, c.title]),
+      documents: docs === null ? null : documents.map((d) => d.path),
       pending: [...pending],
       outcomes: [...outcomes],
     });
@@ -299,7 +331,7 @@ export function renderCard(root, path, onClose, options = {}) {
     painted = signature;
 
     root.hidden = false;
-    root.replaceChildren(...build(latest, card, known, orphan, backlinks));
+    root.replaceChildren(...build(latest, card, known, orphan, backlinks, documents));
     // After the panel is in the page, never while it is being built: a node
     // outside the document has no layout, so both widths read zero and every
     // box "fits". Measured there, the mark never appeared at all — and looked
@@ -317,6 +349,14 @@ export function renderCard(root, path, onClose, options = {}) {
   const repaint = (focusField) => draw(latest, focusField);
 
   const onLinkClick = (event) => {
+    const docLink = event.target?.closest?.("[data-doc]");
+    if (docLink && root.contains(docLink)) {
+      const doc = docForLink(docs, docLink.dataset.doc);
+      if (!doc) return;
+      event.preventDefault?.();
+      onOpenDoc?.(doc.path);
+      return;
+    }
     const link = event.target?.closest?.("[data-link]");
     if (!link || !root.contains(link)) return;
     const target = cardPathForLink(latest?.cards, link.dataset.link);
@@ -385,7 +425,25 @@ export function renderCard(root, path, onClose, options = {}) {
   // (snapshot, connected), and draw's second parameter is a field name.
   const unsubscribe = subscribe((snap) => draw(snap));
 
+  (async () => {
+    let list = [];
+    try {
+      const answer = await listDocs();
+      list = Array.isArray(answer) ? answer : [];
+    } catch {
+      // No documentation roots, or none readable: the card is drawn exactly as
+      // it was before documents could be linked, its document links shown as
+      // links that do not work. The documentation section is where the
+      // server's reason is said.
+      list = [];
+    }
+    if (disposed) return;
+    docs = list;
+    draw(latest);
+  })();
+
   return () => {
+    disposed = true;
     unsubscribe();
     root.removeEventListener("click", onLinkClick);
     document.removeEventListener("keydown", onKey, true);
