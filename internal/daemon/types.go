@@ -208,7 +208,8 @@ func (s Session) Waiting() Verdict {
 //     section 5 requires a session stalled by this rule to be presented with Detail
 //     shown verbatim, since Detail is the only field that can still distinguish
 //     "awaiting a decision from a person" from "awaiting my own work" once Needs has
-//     nothing to say.
+//     nothing to say. That holds for the session's own words only: a Detail holding
+//     a message sent to the session is somebody else's text and is never its reason.
 //
 // This stays a bool while Waiting does not, and that is deliberate rather than an
 // oversight. Stalled has the same defect in principle -- a source that cannot say
