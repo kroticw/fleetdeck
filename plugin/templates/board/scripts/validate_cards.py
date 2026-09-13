@@ -38,6 +38,13 @@ FILENAME_ID_RE = re.compile(r"^(T-(?:\d{3}|[1-9]\d{3,}))-")
 # Ссылка [[заметка]], [[заметка#раздел]], [[заметка|подпись]].
 WIKILINK_RE = re.compile(r"\[\[([^\[\]]+?)\]\]")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# Документ, записанный путём: docs/reports/x.md, ~/obsidian/board/docs/reports/x.md.
+# Группа — путь внутри каталога docs, по нему документ и ищется.
+DOC_PATH_RE = re.compile(
+    r"(?<![\w./~\[-])(?:~/|/)?(?:[\w.-]+/)*?docs/((?:[\w.-]+/)*[\w.-]+\.md)(?![\w/-])"
+)
+CODE_SPAN_RE = re.compile(r"`([^`]*)`")
+DOCS_DIR = "docs"
 # Реестр захваченных номеров, который ведёт scripts/new_card.py.
 IDS_DIR = ".ids"
 
@@ -161,16 +168,134 @@ def vault_root(target: Path) -> Path:
     return start
 
 
+def docs_dirs(root: Path) -> list[Path]:
+    """Каталоги документов волта: docs внутри доски и docs рядом с ней.
+
+    Живая доска держит разборы в <доска>/docs, а рабочий каталог fleetdeck
+    раскладывает <корень>/board и <корень>/docs рядом. Ссылка из карточки на
+    разбор должна находиться в обоих случаях, иначе на свежем рабочем каталоге
+    каждая такая ссылка «никуда не ведёт».
+    """
+    found: list[Path] = []
+    for candidate in (root / DOCS_DIR, root.parent / DOCS_DIR):
+        if candidate.is_dir() and all(candidate.resolve() != d.resolve() for d in found):
+            found.append(candidate)
+    return found
+
+
+def is_inside(path: Path, root: Path) -> bool:
+    """Лежит ли path внутри root, с учётом символических ссылок."""
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def vault_notes(root: Path) -> list[tuple[Path, tuple[str, ...]]]:
+    """Заметки волта: файл и части его имени без .md.
+
+    Части считаются от корня волта, а у каталога docs рядом с доской — от
+    каталога, в котором лежат оба: так имя разбора одинаково в обеих раскладках.
+    """
+    scans = [(root, root)] + [(d.parent, d) for d in docs_dirs(root) if not is_inside(d, root)]
+    notes: list[tuple[Path, tuple[str, ...]]] = []
+    for base, scanned in scans:
+        for path in scanned.rglob("*.md"):
+            parts = path.relative_to(base).with_suffix("").parts
+            if any(part.startswith(".") for part in parts):
+                continue
+            notes.append((path.resolve(), parts))
+    return notes
+
+
+def tails(parts: tuple[str, ...]) -> list[str]:
+    """Хвосты пути от самого короткого: «x», «reports/x», «docs/reports/x»."""
+    return ["/".join(parts[start:]) for start in range(len(parts) - 1, -1, -1)]
+
+
 def vault_names(root: Path) -> set[str]:
     """Имена заметок волта так, как их видит Obsidian: путь и его хвосты."""
-    names: set[str] = set()
-    for path in root.rglob("*.md"):
-        if any(part.startswith(".") for part in path.relative_to(root).parts):
+    return {name for _, parts in vault_notes(root) for name in tails(parts)}
+
+
+def doc_links(root: Path) -> dict[Path, str]:
+    """Имя для ссылки на каждый документ: самый короткий хвост, единственный в волте."""
+    notes = vault_notes(root)
+    counts: dict[str, int] = {}
+    for _, parts in notes:
+        for name in tails(parts):
+            counts[name] = counts.get(name, 0) + 1
+    dirs = [d.resolve() for d in docs_dirs(root)]
+    links: dict[Path, str] = {}
+    for path, parts in notes:
+        if not any(is_inside(path, d) for d in dirs):
             continue
-        parts = path.relative_to(root).with_suffix("").parts
-        for start in range(len(parts)):
-            names.add("/".join(parts[start:]))
-    return names
+        names = tails(parts)
+        links[path] = next((name for name in names if counts[name] == 1), names[-1])
+    return links
+
+
+def find_doc_paths(
+    text: str, root: Path, links: dict[Path, str] | None = None
+) -> list[tuple[int, int, str, str]]:
+    """Документы, записанные путём: (начало, конец, как записано, имя для ссылки).
+
+    Путём считается ровно два написания: голый путь и код в бэктиках, который
+    целиком состоит из пути. Путь внутри команды, в блоке кода, к файлу, которого
+    под docs нет (документация репозитория задачи), и к снимку — не документ доски.
+    """
+    if links is None:
+        links = doc_links(root)
+    dirs = docs_dirs(root)
+
+    def link_for(inner: str) -> str | None:
+        for directory in dirs:
+            candidate = directory / inner
+            if candidate.is_file():
+                return links.get(candidate.resolve())
+        return None
+
+    found: list[tuple[int, int, str, str]] = []
+    offset = 0
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        start_of_line = offset
+        offset += len(line)
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        hits: list[tuple[int, int, str, str]] = []
+        masked = line
+        for span in CODE_SPAN_RE.finditer(line):
+            whole = DOC_PATH_RE.fullmatch(span.group(1).strip())
+            link = link_for(whole.group(1)) if whole else None
+            if link:
+                hits.append((span.start(), span.end(), span.group(0), link))
+            masked = masked[: span.start()] + " " * len(span.group(0)) + masked[span.end() :]
+        for existing in WIKILINK_RE.finditer(masked):
+            masked = masked[: existing.start()] + " " * len(existing.group(0)) + masked[existing.end() :]
+        for bare in DOC_PATH_RE.finditer(masked):
+            link = link_for(bare.group(1))
+            if link:
+                hits.append((bare.start(), bare.end(), bare.group(0), link))
+        found.extend(
+            (start_of_line + s, start_of_line + e, written, link)
+            for s, e, written, link in sorted(hits)
+        )
+    return found
+
+
+def validate_doc_paths(
+    name: str, text: str, root: Path, links: dict[Path, str] | None = None
+) -> list[str]:
+    """Документ доски, записанный путём, — ошибка: панель открывает только ссылку."""
+    return [
+        f"{name}: документ записан путём {written} — оформи ссылкой [[{link}]]"
+        for _, _, written, link in find_doc_paths(text, root, links)
+    ]
 
 
 def read_registry(root: Path) -> set[str] | None:
@@ -247,6 +372,9 @@ def main(argv: list[str]) -> int:
 
     root = vault_root(target)
     errors.extend(validate_collection(cards, vault_names(root), read_registry(root)))
+    links = doc_links(root)
+    for name, text in cards:
+        errors.extend(validate_doc_paths(name, text, root, links))
 
     for error in errors:
         print(error)

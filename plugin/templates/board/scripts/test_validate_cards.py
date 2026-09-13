@@ -6,7 +6,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from validate_cards import main, parse_frontmatter, validate_card, validate_collection
+from validate_cards import (
+    main,
+    parse_frontmatter,
+    validate_card,
+    validate_collection,
+    validate_doc_paths,
+    vault_names,
+)
 
 VALID = """---
 id: T-001
@@ -290,6 +297,93 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("binary.md", output)
         self.assertIn("broken.md", output)
+
+
+def board_with_report(tmp: str) -> Path:
+    """Доска с одним разбором в docs/reports, корень волта помечен .git."""
+    root = Path(tmp) / "board"
+    for name in ("cards", ".git", "docs/reports"):
+        (root / name).mkdir(parents=True)
+    (root / "docs" / "reports" / "2026-09-12-report.md").write_text("# Разбор\n", encoding="utf-8")
+    return root
+
+
+class DocPathTest(unittest.TestCase):
+    """Документ, записанный путём, а не ссылкой, панель открыть не может."""
+
+    def test_bare_path_to_a_document_is_error_naming_the_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            errors = validate_doc_paths("a.md", "разбор docs/reports/2026-09-12-report.md\n", root)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("[[2026-09-12-report]]", errors[0])
+
+    def test_code_span_holding_only_the_path_is_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            errors = validate_doc_paths("a.md", "разбор `docs/reports/2026-09-12-report.md`\n", root)
+            self.assertEqual(len(errors), 1)
+
+    def test_path_through_the_home_directory_is_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            text = "`~/obsidian/board/docs/reports/2026-09-12-report.md`\n"
+            self.assertEqual(len(validate_doc_paths("a.md", text, root)), 1)
+
+    def test_path_to_a_document_that_does_not_exist_is_not_error(self):
+        # Карточки называют и документацию репозитория задачи: её на доске нет.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            text = "поправлен `docs/engineering/live-terminal.md`\n"
+            self.assertEqual(validate_doc_paths("a.md", text, root), [])
+
+    def test_path_inside_a_fenced_block_is_not_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            text = "```bash\ncat docs/reports/2026-09-12-report.md\n```\n"
+            self.assertEqual(validate_doc_paths("a.md", text, root), [])
+
+    def test_code_span_holding_a_command_is_not_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            text = "`wc -l docs/reports/2026-09-12-report.md`\n"
+            self.assertEqual(validate_doc_paths("a.md", text, root), [])
+
+    def test_snapshot_is_not_a_document(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            (root / "docs" / "reports" / "shot.png").write_bytes(b"")
+            self.assertEqual(validate_doc_paths("a.md", "docs/reports/shot.png\n", root), [])
+
+    def test_link_to_a_document_is_not_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.assertEqual(validate_doc_paths("a.md", "[[2026-09-12-report]]\n", root), [])
+
+    def test_documents_next_to_the_board_are_notes_of_the_vault(self):
+        # Раскладка рабочего каталога fleetdeck: <root>/board и <root>/docs рядом,
+        # и ссылка из карточки на разбор не должна считаться битой.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "board"
+            (root / "cards").mkdir(parents=True)
+            (root / ".git").mkdir()
+            (Path(tmp) / "docs" / "reports").mkdir(parents=True)
+            (Path(tmp) / "docs" / "reports" / "design.md").write_text("# Дизайн\n", encoding="utf-8")
+            names = vault_names(root)
+            self.assertIn("design", names)
+            self.assertIn("reports/design", names)
+
+    def test_main_fails_on_a_card_with_a_document_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            (root / "cards" / "T-001-card.md").write_text(
+                card(id="T-001") + "\nразбор docs/reports/2026-09-12-report.md\n", encoding="utf-8"
+            )
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main(["validate_cards.py", str(root / "cards")])
+            self.assertEqual(code, 1)
+            self.assertIn("[[2026-09-12-report]]", out.getvalue())
 
 
 if __name__ == "__main__":
