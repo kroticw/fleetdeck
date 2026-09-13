@@ -32,7 +32,6 @@ import (
 	"github.com/kroticw/fleetdeck/internal/notify"
 	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
-	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
 	"github.com/kroticw/fleetdeck/internal/version"
 	"github.com/kroticw/fleetdeck/web"
@@ -335,22 +334,6 @@ func main() {
 	}
 }
 
-// imagesDir is where an image attached to a session is kept: the panel's own
-// directory under the user's home, never a directory the operator's work lives
-// in.
-//
-// An empty string when the home directory cannot be determined, which the server
-// reads as "not wired for this" and answers 503 — the one thing it must not do
-// is fall back to a relative path, which would put the files wherever the panel
-// happened to be started from.
-func imagesDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".claude", "fleetdeck", "images")
-}
-
 // projectsDir is where Claude Code keeps session transcripts.
 func projectsDir() string {
 	home, err := os.UserHomeDir()
@@ -495,7 +478,7 @@ func serve(parent context.Context, o runOpts) error {
 		func(err error) { log.Printf("notify: %v", err) },
 	)
 
-	d := deps(ctx, p, dc, collector, cfg, o.configPath)
+	d := deps(p, dc, collector, cfg, o.configPath)
 	// Every fleet's board, docs, pin and wizard, the first fleet's also in
 	// d's own fields, so a request naming no fleet is served as before. Made
 	// before anything below is started, so there is nothing to stop if it fails.
@@ -792,7 +775,7 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
-func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
+func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
 	var create func(title, zone string) (string, error)
@@ -804,7 +787,6 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 	return server.Deps{
 		Snapshot:    p.snapshot,
 		CreateFleet: fleetMaker(configPath),
-		SendText:    func(session, text string) error { return dc.SendText(ctx, session, text) },
 		// Resuming reads the job store and the transcripts on every press
 		// rather than off the snapshot: the button in front of the operator
 		// was drawn from a reading that may be hours old, and a working
@@ -853,26 +835,11 @@ func deps(ctx context.Context, p *panel, dc *daemon.Client, collector *Collector
 		// would be parsed, validated and read by nobody.
 		DocsRoots: cfg.DocsPaths,
 
-		// Deliberately outside any repository the operator works in, and not
-		// derived from a session's own working directory: a file written into a
-		// working tree survives the conversation that produced it and eventually
-		// reaches somebody's commit. The cost of keeping it out is one permission
-		// prompt the first time a session reads from here, which the operator
-		// answers from the panel — see internal/server/image.go.
-		ImageDir: imagesDir(),
-
 		// This is the other end of cmd/fleetdeck-status: the reporter posts to
 		// /api/status, the server hands it here, and Collect prefers it over the
 		// transcript estimate.
 		PutStatus: collector.PutStatus,
 
-		Digest: func(sessionID string, limit int) ([]transcript.Step, error) {
-			path, err := transcript.Locate(projectsDir(), sessionID)
-			if err != nil {
-				return nil, err
-			}
-			return transcript.Digest(path, limit)
-		},
 		SetOrchestratorSession: func(id string) error {
 			return setOrchestratorSession(configPath, collector, id)
 		},

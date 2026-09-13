@@ -17,10 +17,12 @@ func jsonRequest(method, target, body string) *http.Request {
 // before there was anything here to stop it: a page on another site posting into
 // a live session with a CORS-simple content type, which a browser sends without
 // asking the server first. It answered 204 and typed "whoami" into the session.
-// The attacker cannot read the response and does not need to.
+// The attacker cannot read the response and does not need to. That route is gone;
+// the probe is kept against resume, the write that remains which a single request
+// can use to start something in the fleet.
 func TestTheCrossOriginProbeThatReachedASessionIsRefused(t *testing.T) {
 	d, calls := testDeps()
-	r := httptest.NewRequest(http.MethodPost, "/api/sessions/abc123/text", strings.NewReader(`{"text":"whoami"}`))
+	r := httptest.NewRequest(http.MethodPost, "/api/sessions/abc123/resume", strings.NewReader(`{}`))
 	r.Header.Set("Content-Type", "text/plain;charset=UTF-8")
 	r.Header.Set("Origin", "https://evil.example")
 
@@ -41,7 +43,7 @@ func TestAForeignOriginIsRefusedOnEveryRoute(t *testing.T) {
 		request func() *http.Request
 	}{
 		{"snapshot", func() *http.Request { return httptest.NewRequest(http.MethodGet, "/api/snapshot", nil) }},
-		{"text", func() *http.Request { return jsonRequest(http.MethodPost, "/api/sessions/a/text", `{"text":"hi"}`) }},
+		{"resume", func() *http.Request { return jsonRequest(http.MethodPost, "/api/sessions/a/resume", `{}`) }},
 		{"cards", func() *http.Request {
 			return jsonRequest(http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"done"}`)
 		}},
@@ -81,7 +83,7 @@ func TestOriginsThatAreNotThePanelsOwnAreRefused(t *testing.T) {
 	} {
 		t.Run(origin, func(t *testing.T) {
 			d, calls := testDeps()
-			r := jsonRequest(http.MethodPost, "/api/sessions/abc/text", `{"text":"hi"}`)
+			r := jsonRequest(http.MethodPost, "/api/sessions/abc/resume", `{}`)
 			r.Header.Set("Origin", origin)
 			if rec := send(d, r); rec.Code != http.StatusForbidden {
 				t.Fatalf("origin %q must be refused with 403, got %d: %s", origin, rec.Code, rec.Body.String())
@@ -101,7 +103,7 @@ func TestThePanelsOwnOriginIsAccepted(t *testing.T) {
 	} {
 		t.Run(origin, func(t *testing.T) {
 			d, calls := testDeps()
-			r := jsonRequest(http.MethodPost, "/api/sessions/abc/text", `{"text":"hi"}`)
+			r := jsonRequest(http.MethodPost, "/api/sessions/abc/resume", `{}`)
 			r.Header.Set("Origin", origin)
 			if rec := send(d, r); rec.Code != http.StatusNoContent {
 				t.Fatalf("the panel's own origin must be served, got %d: %s", rec.Code, rec.Body.String())
@@ -144,7 +146,7 @@ func TestANonJSONBodyIsRefusedWithUnsupportedMediaType(t *testing.T) {
 	} {
 		t.Run(contentType, func(t *testing.T) {
 			d, calls := testDeps()
-			r := httptest.NewRequest(http.MethodPost, "/api/sessions/abc123/text", strings.NewReader(`{"text":"whoami"}`))
+			r := httptest.NewRequest(http.MethodPost, "/api/sessions/abc123/resume", strings.NewReader(`{}`))
 			if contentType != "" {
 				r.Header.Set("Content-Type", contentType)
 			}
@@ -161,7 +163,7 @@ func TestANonJSONBodyIsRefusedWithUnsupportedMediaType(t *testing.T) {
 
 func TestAJSONContentTypeWithParametersIsAccepted(t *testing.T) {
 	d, calls := testDeps()
-	r := httptest.NewRequest(http.MethodPost, "/api/sessions/abc/text", strings.NewReader(`{"text":"hi"}`))
+	r := httptest.NewRequest(http.MethodPost, "/api/sessions/abc/resume", strings.NewReader(`{}`))
 	r.Header.Set("Content-Type", "application/json; charset=utf-8")
 	if rec := send(d, r); rec.Code != http.StatusNoContent {
 		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
@@ -186,7 +188,7 @@ func TestAReadWithoutABodyNeedsNoContentType(t *testing.T) {
 // no legitimate cross-origin caller, so there is no CORS header to add.
 func TestAPreflightIsNotGrantedCORSHeaders(t *testing.T) {
 	d, _ := testDeps()
-	r := httptest.NewRequest(http.MethodOptions, "/api/sessions/abc123/text", nil)
+	r := httptest.NewRequest(http.MethodOptions, "/api/sessions/abc123/resume", nil)
 	r.Header.Set("Origin", "https://evil.example")
 	r.Header.Set("Access-Control-Request-Method", "POST")
 	r.Header.Set("Access-Control-Request-Headers", "content-type")
@@ -211,7 +213,7 @@ func TestAPreflightIsNotGrantedCORSHeaders(t *testing.T) {
 // panel's own page is same-origin and its requests are never preflighted.
 func TestNoCORSHeadersAreSentToTheLocalOriginEither(t *testing.T) {
 	d, _ := testDeps()
-	r := jsonRequest(http.MethodPost, "/api/sessions/abc/text", `{"text":"hi"}`)
+	r := jsonRequest(http.MethodPost, "/api/sessions/abc/resume", `{}`)
 	r.Header.Set("Origin", "http://127.0.0.1:7777")
 	rec := send(d, r)
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {

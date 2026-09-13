@@ -25,7 +25,6 @@ import (
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 	"github.com/kroticw/fleetdeck/internal/state"
-	"github.com/kroticw/fleetdeck/internal/transcript"
 )
 
 // ErrFieldWrittenNotCommitted is what SetCardField wraps when the field reached
@@ -70,11 +69,6 @@ type Deps struct {
 	// be cheap: the caller is expected to hand over a cached snapshot refreshed
 	// on its own cadence, not to poll the daemon from inside it.
 	Snapshot func() state.Snapshot
-
-	// SendText types text into a session and submits it. There is no submit
-	// parameter because the daemon's reply operation has no such option — see
-	// daemon.Client.SendText.
-	SendText func(session, text string) error
 
 	// ResumeSession brings a stopped session back in place, under its own short
 	// id and with its history, and returns only once it is up or certainly not
@@ -158,12 +152,6 @@ type Deps struct {
 	// a report it could not attribute to a session.
 	PutStatus func(sessionID, model string, contextPercent, costUSD float64)
 
-	// Digest returns up to limit of the most recent readable steps of a
-	// session's transcript, oldest first. sessionID is the transcript UUID
-	// (daemon.Session.SessionID), the identifier transcript.Locate matches on
-	// — never the daemon's short id.
-	Digest func(sessionID string, limit int) ([]transcript.Step, error)
-
 	// SetOrchestratorSession pins (or, given an empty string, unpins) the session
 	// shown in the orchestrator column, and persists the choice to the
 	// configuration file. A nil value means a panel wired without a
@@ -174,7 +162,7 @@ type Deps struct {
 	// operator's own name for one session, persisted to the configuration
 	// file's session_labels map — see internal/config.SetSessionLabel,
 	// which this is expected to wrap. sessionID is the transcript UUID
-	// (daemon.Session.SessionID), matching handleDigest's own convention —
+	// (daemon.Session.SessionID) —
 	// never the daemon's short id, which is reassigned on every restart and
 	// cannot durably name anything.
 	//
@@ -200,17 +188,6 @@ type Deps struct {
 	// has, answered 404. Nil is a panel with one fleet, served from the fields
 	// above as it always was. See fleetdeps.go.
 	Fleet func(name string) (FleetDeps, error)
-
-	// ImageDir is where an image attached to a session is written, under a
-	// subdirectory named after that session. It is the panel's own directory,
-	// deliberately outside any repository the operator works in: a file left in
-	// a working tree eventually reaches somebody's commit, and that is not undone
-	// by noticing it later.
-	//
-	// Like BoardDir, an empty value is not a capability the panel merely lacks —
-	// it is the absence of anywhere safe to write, so the route answers 503
-	// rather than choosing a directory on its own.
-	ImageDir string
 
 	// Build describes the running panel. It is stamped on every snapshot, and
 	// its web hash is written into index.html in the same response that
@@ -278,7 +255,6 @@ func New(d Deps) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
-	mux.HandleFunc("POST /api/sessions/{id}/text", d.handleSendText)
 	mux.HandleFunc("POST /api/sessions/{id}/resume", d.handleResume)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
@@ -286,13 +262,11 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/docs", d.handleDocsList)
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)
 	mux.HandleFunc("POST /api/status", d.handleStatus)
-	mux.HandleFunc("GET /api/sessions/{id}/digest", d.handleDigest)
 	mux.HandleFunc("GET /api/sessions/{id}/cards", d.handleSessionCards)
 	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
 	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
 	mux.HandleFunc("GET /api/orchestrator", d.handleOrchestratorPreview)
 	mux.HandleFunc("POST /api/orchestrator", d.handleAppoint)
-	mux.HandleFunc("POST /api/sessions/{id}/image", d.handleUploadImage)
 	mux.HandleFunc("GET /ws", d.handleWS)
 	mux.HandleFunc("GET /api/sessions/{id}/pty", d.handlePTY)
 	mux.HandleFunc("GET /api/terminal-token", d.handleTerminalToken)
