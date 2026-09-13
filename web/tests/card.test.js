@@ -459,6 +459,68 @@ test("a session id becomes a control only when someone can act on it", () => {
   assert.equal(plain.root.querySelector(".card-session").tagName, "SPAN");
 });
 
+// --- the jump from a card to its session ---
+//
+// Offered only where there is somewhere to go: a card whose work is under way
+// and whose session is live. Everywhere else a control would be a dead button,
+// which is worse than none.
+
+function withStage(snap, path, stage) {
+  snap.cards.find((c) => c.path === path).stage = stage;
+  return snap;
+}
+
+for (const stage of ["active", "review", "blocked"]) {
+  test(`a ${stage} card with a live session jumps to it in one click`, () => {
+    const opened = [];
+    const { root } = open(withStage(snapshot(), FLEET_UI, stage), FLEET_UI, {
+      onOpenSession: (id) => opened.push(id),
+    });
+    const jump = root.querySelector(".card-meta").querySelector("button");
+    assert.ok(jump, "no control to jump with");
+    fireEvent(jump, "click");
+    assert.deepEqual(opened, ["a1b2c3"]);
+  });
+}
+
+for (const stage of ["new", "done"]) {
+  test(`a ${stage} card offers no jump, not even a dead one`, () => {
+    const opened = [];
+    const { root } = open(withStage(snapshot(), FLEET_UI, stage), FLEET_UI, {
+      onOpenSession: (id) => opened.push(id),
+    });
+    assert.equal(root.querySelector(".card-meta").querySelectorAll("button").length, 0);
+    assert.equal(root.querySelector(".card-session").tagName, "SPAN");
+  });
+}
+
+test("a card whose session is dead says so and offers no jump", () => {
+  const { root } = open(snapshot(), CARD_KEEPING, { onOpenSession: () => {} });
+  assert.equal(root.querySelector(".card-session-dead").textContent, t("session_dead"));
+  assert.equal(root.querySelector(".card-meta").querySelectorAll("button").length, 0);
+});
+
+// A stopped session is not dead — the board says so apart — but there is no
+// terminal to open either, so the card says which it is instead of offering one.
+test("a card whose session is stopped says so and offers no jump", () => {
+  const snap = snapshot();
+  snap.stoppedCards = [FLEET_UI];
+  const { root } = open(snap, FLEET_UI, { onOpenSession: () => {} });
+  assert.equal(root.querySelector(".card-session-stopped")?.textContent, t("session_stopped"));
+  assert.equal(root.querySelector(".card-session-dead"), null);
+  assert.equal(root.querySelector(".card-meta").querySelectorAll("button").length, 0);
+});
+
+test("a session that stops while the card is open takes the jump away", () => {
+  const snap = snapshot();
+  const { root, store } = open(snap, FLEET_UI, { onOpenSession: () => {} });
+  assert.equal(root.querySelector(".card-meta").querySelectorAll("button").length, 1);
+  const stopped = snapshot();
+  stopped.stoppedCards = [FLEET_UI];
+  store.push(stopped);
+  assert.equal(root.querySelector(".card-meta").querySelectorAll("button").length, 0);
+});
+
 test("a backlink is a control the keyboard can reach", () => {
   const { root } = open(snapshot());
   assert.equal(root.querySelector(".card-backlink").tagName, "BUTTON");

@@ -38,8 +38,10 @@ const sessionPanel = document.getElementById("session-panel");
 // The card panel and the document reader are two overlays over the same column,
 // and each opens the other: a card lists its documents, and a document names the
 // cards linking to it. Only one of them may be up, so each closes before the
-// other opens.
+// other opens. The same holds for the session panel a card jumps to:
+// openSession closes the card panel before it opens the session.
 const cardPanel = createCardPanel(document.getElementById("card-panel"), {
+  onOpenSession: (short) => openSession(short),
   onOpenDoc: (path) => {
     cardPanel.close();
     reader.open(path);

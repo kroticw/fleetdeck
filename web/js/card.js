@@ -32,6 +32,11 @@ import { brokenLinksOf, docForLink, docTitle, documentsOf, noteName } from "./do
 const STAGES = ["new", "active", "review", "blocked", "done"];
 const PROGRESS = ["0", "10", "20", "40", "60", "80", "100"];
 
+// The stages at which a card's session is worth jumping to. A new card has not
+// been taken up yet and a done one no longer needs its session, so a jump there
+// would be a control that leads nowhere useful — worse than no control.
+const JUMP_STAGES = new Set(["active", "review", "blocked"]);
+
 // A card's note name: what a [[link]] to it spells (web/js/docnames.js).
 const baseName = noteName;
 
@@ -56,8 +61,11 @@ function el(tag, className, text) {
  * until the returned function is called.
  *
  * options.onOpenSession, when given, makes the card's session id a control that
- * hands the id back; with nothing passed the id renders as plain text, which is
- * what it does until the session panel exists.
+ * hands the id back — the jump from a card to its session. It is offered only
+ * where there is somewhere to go: a card whose work is under way (JUMP_STAGES)
+ * and whose session is live. A card whose session is dead or stopped says which
+ * instead; a new or finished card shows the id as plain text. With nothing
+ * passed the id is always plain text.
  *
  * options.onOpenDoc, when given, is called with a document's path when one of
  * the card's documents is followed — from the list under its number or from a
@@ -185,7 +193,7 @@ export function renderCard(root, path, onClose, options = {}) {
     return box;
   };
 
-  const build = (snap, card, known, orphan, backlinks, documents, broken) => {
+  const build = (snap, card, known, orphan, stopped, backlinks, documents, broken) => {
     if (!snap) {
       return [head(baseName(current)), el("p", "card-empty", t("card_waiting"))];
     }
@@ -231,7 +239,13 @@ export function renderCard(root, path, onClose, options = {}) {
       meta.append(number);
     }
     if (card.session) {
-      if (onOpenSession) {
+      // Whether the session is live comes from the snapshot's own two lists —
+      // the ones the board marks its cards by — not from a second look at the
+      // session list: two answers to "is it live" would sooner or later differ.
+      // The stage is the file's, not a pending edit's: the jump is about the
+      // work the card records, and the next snapshot brings any edit in.
+      const live = !orphan && !stopped;
+      if (onOpenSession && live && JUMP_STAGES.has(card.stage)) {
         // A button, not an <a> with no href: an anchor without one is not
         // focusable, is not in the tab order and is not announced as a link, so
         // it would look like a link and work only for a mouse.
@@ -247,6 +261,11 @@ export function renderCard(root, path, onClose, options = {}) {
       // Shown, and nothing more: the panel writes stage and progress and no
       // other field, so it has no honest "unlink" to offer.
       meta.append(el("span", "card-session-dead", t("session_dead")));
+    }
+    if (stopped) {
+      // No terminal to open either, so no jump — the words say why there is
+      // none, instead of a control that would open nothing.
+      meta.append(el("span", "card-session-stopped", t("session_stopped")));
     }
     if (meta.children.length > 0) nodes.push(meta);
 
@@ -327,6 +346,10 @@ export function renderCard(root, path, onClose, options = {}) {
     }
     const known = cards.map((c) => baseName(c.path));
     const orphan = (latest?.orphanCards ?? []).includes(current);
+    // Kept apart from orphan for the reason the server keeps the two lists
+    // apart (internal/state/snapshot.go): a stopped session is paused work, not
+    // lost work, and the card says which of the two it is.
+    const stopped = !orphan && (latest?.stoppedCards ?? []).includes(current);
     const backlinks = cards.filter(
       (c) => c.path !== current && (c.links ?? []).includes(baseName(current)),
     );
@@ -339,6 +362,7 @@ export function renderCard(root, path, onClose, options = {}) {
       card,
       known,
       orphan,
+      stopped,
       backlinks: backlinks.map((c) => [c.path, c.title]),
       documents: docs === null ? null : documents.map((d) => d.path),
       broken,
@@ -349,7 +373,7 @@ export function renderCard(root, path, onClose, options = {}) {
     painted = signature;
 
     root.hidden = false;
-    root.replaceChildren(...build(latest, card, known, orphan, backlinks, documents, broken));
+    root.replaceChildren(...build(latest, card, known, orphan, stopped, backlinks, documents, broken));
     // After the panel is in the page, never while it is being built: a node
     // outside the document has no layout, so both widths read zero and every
     // box "fits". Measured there, the mark never appeared at all — and looked
