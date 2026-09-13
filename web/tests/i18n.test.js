@@ -162,6 +162,11 @@ const KEYS = [
   "session_cards_loading",
   "session_cards_failed",
   "session_card_archived",
+  // The key that opens the session's whole conversation. Its label is a word,
+  // not a glyph, and falling through to its key name would leave the one way to
+  // read what scrolled off the screen named "key_transcript".
+  "key_transcript",
+  "key_transcript_hint",
 
   // web/js/sessions.js's own column header and the theme override's button
   // (web/js/header.js renders it, web/js/theme.js decides its state) — both

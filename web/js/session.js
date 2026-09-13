@@ -43,6 +43,12 @@ export const KEYS = [
   { id: "up", label: "↑", bytes: "[A" },
   { id: "down", label: "↓", bytes: "[B" },
   { id: "enter", label: "Enter", bytes: "\r" },
+  // Ctrl+O: Claude Code's own view of the whole conversation. It is the way to
+  // read what has scrolled off this screen and what came before the panel was
+  // opened, which the terminal is never sent — the daemon hands a new viewer
+  // the current screen, not the history. The same key takes it back. A word
+  // rather than a glyph, because no glyph says "the whole conversation".
+  { id: "transcript", labelKey: "key_transcript", hintKey: "key_transcript_hint", bytes: "" },
 ];
 
 // historyKey is what tells the panel the session's cards may have changed: the
@@ -351,9 +357,10 @@ export function renderSession(
     const keys = el("div", "s-keys");
     keys.appendChild(el("span", "s-keys-label", t("keys_to_session")));
     for (const key of KEYS) {
-      const button = el("button", "s-key", key.label);
+      const button = el("button", "s-key", key.labelKey ? t(key.labelKey) : key.label);
       button.type = "button";
       button.dataset.key = key.id;
+      if (key.hintKey) button.title = t(key.hintKey);
       button.addEventListener("click", () => pressKey(key));
       keys.appendChild(button);
     }

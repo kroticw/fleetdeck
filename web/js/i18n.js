@@ -220,6 +220,9 @@ const en = {
   session_cards_loading: "reading the board…",
   session_cards_failed: "the cards could not be read",
   session_card_archived: "archived",
+  // The key under the terminal that opens the session's whole conversation.
+  key_transcript: "transcript",
+  key_transcript_hint: "Ctrl+O: the session's whole conversation, including what has scrolled off the screen — press again to come back",
 
   // The live terminal (web/js/liveterminal.js), in the session panel and in the
   // orchestrator column. Each ending is named apart, because each asks something
@@ -501,6 +504,8 @@ const ru = {
   session_cards_loading: "читаю доску…",
   session_cards_failed: "карточки прочитать не удалось",
   session_card_archived: "в архиве",
+  key_transcript: "транскрипт",
+  key_transcript_hint: "Ctrl+O: весь разговор сессии, включая то, что ушло за экран, — нажмите ещё раз, чтобы вернуться",
 
   terminal_not_connected: "терминал ещё не подключён",
   terminal_read_only: "этот терминал только показывает сессию: ключа управления нет, поэтому набор выключен",

@@ -780,7 +780,9 @@ test("every key button sends its escape sequence into the socket, and nothing th
   const panel = await mount();
   ready(sockets[0]);
 
-  const expected = { escape: "", up: "[A", down: "[B", enter: "\r" };
+  // transcript is Ctrl+O: Claude Code's own view of the whole conversation, and
+  // the same key again takes it back to the prompt.
+  const expected = { escape: "", up: "[A", down: "[B", enter: "\r", transcript: "" };
   // Every button, and no fewer: a row lost from KEYS would otherwise shrink this
   // loop rather than fail it.
   assert.deepEqual(KEYS.map((k) => k.id).sort(), Object.keys(expected).sort(), "the key buttons are not the four this checks");
@@ -985,6 +987,22 @@ test("the keys carry a label saying where the press lands", async () => {
   assert.equal(label.textContent, t("keys_to_session"), "the label is not the panel's own string");
   assert.notEqual(label.textContent, "keys_to_session", "the label fell through to its own key name");
   assert.notEqual(label.textContent.trim(), "");
+});
+
+test("the transcript key is named in words and says what it opens", async () => {
+  // Every other key's glyph says which key it is. This one is a control
+  // character with no glyph, and what it does — the whole conversation, not only
+  // the screen — is the reason it is there.
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const panel = await mount();
+
+  const button = panel.root.querySelector("[data-key=transcript]");
+  assert.notEqual(button, null, "there is no transcript key");
+  assert.equal(button.textContent, t("key_transcript"));
+  assert.notEqual(button.textContent, "key_transcript", "the label fell through to its own key name");
+  assert.equal(button.title, t("key_transcript_hint"));
+  assert.ok(panel.root.querySelector(".s-keys").contains(button), "the transcript key is not with the other keys");
 });
 
 test("the close button is not one of the keys, and the keys are not in the header", async () => {
