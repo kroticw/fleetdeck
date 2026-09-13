@@ -110,6 +110,11 @@ const en = {
   card_not_committed: "the change is in the card file and did not reach the git history",
   card_write_refused: "the change was refused and nothing was written",
   backlinks: "linked from",
+  // A card's documents (web/js/card.js) and, the other way, the cards a
+  // document belongs to (web/js/doccards.js).
+  card_docs: "documents",
+  doc_cards: "cards",
+  reader_close: "close the document",
 
   // Centre-column sections (web/js/sections.js) and the documentation section
   // (web/js/docs.js). The two failure keys stay separate because they are
@@ -414,6 +419,9 @@ const ru = {
   card_not_committed: "правка лежит в файле карточки и не попала в историю git",
   card_write_refused: "правка отклонена, ничего не записано",
   backlinks: "ссылаются сюда",
+  card_docs: "документы",
+  doc_cards: "карточки",
+  reader_close: "закрыть документ",
 
   tab_board: "Доска",
   tab_docs: "Доки",
