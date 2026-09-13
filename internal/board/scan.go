@@ -43,25 +43,37 @@ func CardsDir(boardDir string) string {
 // is not met.
 func Scan(dir string) ([]Card, error) {
 	cardsDir := CardsDir(dir)
-	entries, err := os.ReadDir(cardsDir)
+	cards, err := readCardsIn(cardsDir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("%w: %s", ErrNoCardsDir, cardsDir)
 		}
 		return nil, fmt.Errorf("read board cards dir: %w", err)
 	}
+	sort.Slice(cards, func(i, j int) bool { return cards[i].Path < cards[j].Path })
+	return cards, nil
+}
+
+// readCardsIn parses every .md file directly inside dir. The error is the
+// directory read's own, unwrapped, so each caller decides what a missing
+// directory means: a board that is not one for Scan, a board with no archive
+// yet for SessionCards.
+func readCardsIn(dir string) ([]Card, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
 	var cards []Card
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		p := filepath.Join(cardsDir, e.Name())
+		p := filepath.Join(dir, e.Name())
 		c, err := ParseCard(p)
 		if err != nil {
 			c = Card{Path: p, ParseError: err.Error()}
 		}
 		cards = append(cards, c)
 	}
-	sort.Slice(cards, func(i, j int) bool { return cards[i].Path < cards[j].Path })
 	return cards, nil
 }

@@ -287,6 +287,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)
 	mux.HandleFunc("POST /api/status", d.handleStatus)
 	mux.HandleFunc("GET /api/sessions/{id}/digest", d.handleDigest)
+	mux.HandleFunc("GET /api/sessions/{id}/cards", d.handleSessionCards)
 	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
 	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
 	mux.HandleFunc("GET /api/orchestrator", d.handleOrchestratorPreview)
