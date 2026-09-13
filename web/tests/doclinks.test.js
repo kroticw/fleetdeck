@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { docForLink, documentsOf, cardsLinkingTo } from "../js/docnames.js";
+import { brokenLinksOf, docForLink, documentsOf, cardsLinkingTo } from "../js/docnames.js";
 import { renderMarkdown } from "../js/markdown.js";
 
 const REPORT = {
@@ -72,6 +72,19 @@ test("a link naming a card stays the card's even when a document has the same na
 test("a card without links, or without a documentation list, has no documents", () => {
   assert.deepEqual(documentsOf(CARD_C, CARDS, DOCS), []);
   assert.deepEqual(documentsOf(CARD_A, CARDS, null), []);
+});
+
+test("a link that opens nothing is named, once, and a card link is never one", () => {
+  // "2026-09-13-other" fits two documents, so it opens neither: to the reader
+  // that is the same link that goes nowhere.
+  const card = { ...CARD_A, links: ["T-002-b", "nowhere", "2026-09-13-other", "2026-09-12-report", "nowhere"] };
+  assert.deepEqual(brokenLinksOf(card, CARDS, DOCS), ["nowhere", "2026-09-13-other"]);
+});
+
+test("without a documentation list no link is called broken", () => {
+  // Not knowing the documents is not knowing a link is broken.
+  assert.deepEqual(brokenLinksOf(CARD_A, CARDS, null), []);
+  assert.deepEqual(brokenLinksOf(CARD_C, CARDS, DOCS), []);
 });
 
 test("a document lists every card that links it, however the link is written", () => {

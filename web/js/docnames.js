@@ -71,6 +71,21 @@ export function documentsOf(card, cards, docs) {
   return found;
 }
 
+// brokenLinksOf is the links a card has that open nothing: no card has the
+// name, and no single document does. Each once, in the order it links them.
+// Without a documentation list nothing is called broken — not knowing the
+// documents is not knowing a link is broken.
+export function brokenLinksOf(card, cards, docs) {
+  if (!Array.isArray(docs)) return [];
+  const cardNames = new Set((cards ?? []).map((c) => noteName(c.path)));
+  const found = [];
+  for (const name of card?.links ?? []) {
+    if (!name || cardNames.has(name) || found.includes(name) || docForLink(docs, name)) continue;
+    found.push(name);
+  }
+  return found;
+}
+
 // cardsLinkingTo is the way back: every card that has this document among its
 // documents. Worked out from the cards rather than written anywhere, so it
 // cannot disagree with them.

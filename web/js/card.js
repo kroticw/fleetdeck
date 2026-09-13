@@ -24,7 +24,7 @@ import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
 import { listDocs as serverDocs } from "./docs.js";
-import { docForLink, docTitle, documentsOf, noteName } from "./docnames.js";
+import { brokenLinksOf, docForLink, docTitle, documentsOf, noteName } from "./docnames.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
 // Progress is a list of strings because that is what the write route takes and
@@ -185,7 +185,7 @@ export function renderCard(root, path, onClose, options = {}) {
     return box;
   };
 
-  const build = (snap, card, known, orphan, backlinks, documents) => {
+  const build = (snap, card, known, orphan, backlinks, documents, broken) => {
     if (!snap) {
       return [head(baseName(current)), el("p", "card-empty", t("card_waiting"))];
     }
@@ -257,13 +257,22 @@ export function renderCard(root, path, onClose, options = {}) {
     //
     // No documents, no block. Most cards on a board have none, and a heading
     // over nothing reads as a panel that lost them.
-    if (documents.length > 0) {
+    //
+    // A link that opens nothing is listed as well, as text with the reason and
+    // not as a control: hidden, it is a broken link nobody fixes, and drawn like
+    // the others, a click on it would lead nowhere without a word.
+    if (documents.length > 0 || broken.length > 0) {
       const box = el("div", "card-docs");
       box.append(el("h4", "card-docs-title", t("card_docs")));
       for (const doc of documents) {
         const entry = el("button", "card-doc", docTitle(doc));
         entry.setAttribute("type", "button");
         entry.addEventListener("click", () => onOpenDoc?.(doc.path));
+        box.append(entry);
+      }
+      for (const name of broken) {
+        const entry = el("span", "card-doc-missing", name);
+        entry.append(el("span", "card-doc-missing-why", ` — ${t("card_doc_missing")}`));
         box.append(entry);
       }
       nodes.push(box);
@@ -282,7 +291,14 @@ export function renderCard(root, path, onClose, options = {}) {
     }
 
     const body = el("div", "card-body");
-    body.innerHTML = renderMarkdown(card.body, new Set(known), { has: (name) => docForLink(docs, name) !== null });
+    body.innerHTML = renderMarkdown(
+      card.body,
+      new Set(known),
+      { has: (name) => docForLink(docs, name) !== null },
+      // Said only once the documents are known: until then a link to one
+      // opens nothing for a reason that is not the one this names.
+      docs === null ? {} : { missingTitle: t("card_doc_missing") },
+    );
     nodes.push(body);
 
     if (backlinks.length > 0) {
@@ -315,6 +331,7 @@ export function renderCard(root, path, onClose, options = {}) {
       (c) => c.path !== current && (c.links ?? []).includes(baseName(current)),
     );
     const documents = card ? documentsOf(card, cards, docs) : [];
+    const broken = card ? brokenLinksOf(card, cards, docs) : [];
 
     const signature = JSON.stringify({
       hasSnapshot: latest !== null,
@@ -324,6 +341,7 @@ export function renderCard(root, path, onClose, options = {}) {
       orphan,
       backlinks: backlinks.map((c) => [c.path, c.title]),
       documents: docs === null ? null : documents.map((d) => d.path),
+      broken,
       pending: [...pending],
       outcomes: [...outcomes],
     });
@@ -331,7 +349,7 @@ export function renderCard(root, path, onClose, options = {}) {
     painted = signature;
 
     root.hidden = false;
-    root.replaceChildren(...build(latest, card, known, orphan, backlinks, documents));
+    root.replaceChildren(...build(latest, card, known, orphan, backlinks, documents, broken));
     // After the panel is in the page, never while it is being built: a node
     // outside the document has no layout, so both widths read zero and every
     // box "fits". Measured there, the mark never appeared at all — and looked
@@ -426,16 +444,17 @@ export function renderCard(root, path, onClose, options = {}) {
   const unsubscribe = subscribe((snap) => draw(snap));
 
   (async () => {
-    let list = [];
+    let list = null;
     try {
       const answer = await listDocs();
-      list = Array.isArray(answer) ? answer : [];
+      list = Array.isArray(answer) ? answer : null;
     } catch {
       // No documentation roots, or none readable: the card is drawn exactly as
       // it was before documents could be linked, its document links shown as
       // links that do not work. The documentation section is where the
-      // server's reason is said.
-      list = [];
+      // server's reason is said. The list stays unknown rather than empty: an
+      // empty list would call every document link the card has broken.
+      list = null;
     }
     if (disposed) return;
     docs = list;
