@@ -220,24 +220,28 @@ test("a genuinely empty fleet still says there are no sessions", async () => {
   dom.restore();
 });
 
-// --- the envelope comes off here too, but nothing is typeset ---
+// --- a message sent to the session is shown as incoming, not as its reason ---
+//
+// The property across every kind of envelope lives in incoming-detail.test.js;
+// these two pin how the line reads.
 
-test("a reason wrapped in an envelope loses the tag and keeps its words", () => {
+test("an incoming message loses the tag, keeps its words and is not typeset", () => {
   const wrapped = '<agent-message id="m-9" from="06a1f607" at="2026-09-10T15:00:00+05:00">approve the **three** MRs</agent-message>';
   const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped }, true);
 
   // The visible text only: the title keeps the envelope on purpose.
-  const shown = html.match(/class="sreason" title="[^"]*">([^<]*)</)?.[1] ?? "";
-  assert.ok(!shown.includes("&lt;agent-message"), "the tag was never the reason");
-  assert.ok(shown.includes("06a1f607"), "who asked is part of the reason");
+  const shown = html.match(/class="sincoming" title="[^"]*">([^<]*)</)?.[1] ?? "";
+  assert.ok(!shown.includes("&lt;agent-message"), "the tag is not what a person needs");
+  assert.ok(shown.includes("06a1f607"), "who wrote it is named");
   assert.ok(shown.includes("approve the **three** MRs"), "and the words are carried exactly");
-  assert.ok(!shown.includes("<strong>"), "a reason is not typeset: spec 3.1 wants detail verbatim");
+  assert.ok(!shown.includes("<strong>"), "a message on the row is not typeset");
+  assert.ok(!html.includes("sreason"), "and it is not the reason the session stopped");
 });
 
-test("the title still holds the reason exactly as the daemon wrote it", () => {
+test("the incoming line's title holds the text exactly as the daemon wrote it", () => {
   const wrapped = '<agent-message id="m-9" from="06a1f607" at="t">body</agent-message>';
   const html = rowHtml({ short: "aa11", name: "n", needs: "", state: "blocked", detail: wrapped }, true);
-  const title = html.match(/class="sreason" title="([^"]*)"/)?.[1];
+  const title = html.match(/class="sincoming" title="([^"]*)"/)?.[1];
   assert.ok(title.includes("&lt;agent-message"), "stripping the tag must not put it out of reach");
 });
 

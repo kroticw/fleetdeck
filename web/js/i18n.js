@@ -41,6 +41,10 @@ const en = {
   waiting_unanswered: "not answering",
   waiting_in_call: "silent inside",
   waiting_unanswered_hint: "this session owes its next move and has said nothing for longer than a working session does, so it has not been able to report whether a person is waiting. A slow step and one that will never finish look the same from outside",
+  // A message sent to a session, which the daemon leaves in its detail. Signed as
+  // incoming so that nobody reads a sender's words as the session's own reason.
+  incoming: "Incoming",
+  incoming_from: "Incoming from",
   open_card: "card",
   open_card_hint: "Open this session's card",
   silent_unmeasured: "not measured",
@@ -379,6 +383,8 @@ const ru = {
   waiting_unanswered: "не отвечает",
   waiting_in_call: "молчит внутри",
   waiting_unanswered_hint: "сессия должна сделать следующий шаг и молчит дольше, чем молчит работающая сессия, поэтому сказать, ждёт ли она человека, она не могла. Медленный шаг и шаг, который не завершится, снаружи выглядят одинаково",
+  incoming: "Входящее",
+  incoming_from: "Входящее от",
   open_card: "карточка",
   open_card_hint: "Открыть карточку этой сессии",
   silent_unmeasured: "не измерено",

@@ -19,7 +19,7 @@
 // opens at the orchestrator step: that is how the wizard is run again.
 
 import { t, langCode } from "./i18n.js";
-import { envelopeText } from "./envelope.js";
+import { envelopeText, incomingMessage, incomingText } from "./envelope.js";
 import { belongsTo, fleetFromSearch, withFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
 import { showSteps } from "./steplist.js";
@@ -233,8 +233,12 @@ function contextPercent(s) {
 // doing is what a session is busy with, in the daemon's own words: a question
 // it is waiting on first, because that is what a person has to act on, then its
 // detail. The envelope a fleet message arrives in comes off; nothing else does.
+// A detail that is a message sent to the session is signed as incoming, so it is
+// not read as what the session itself is doing.
 function doing(s) {
   if (s.needs) return `${t("wizard_waiting_for_you")}: ${envelopeText(s.needs)}`;
+  const letter = incomingMessage(s.detail);
+  if (letter) return incomingText(letter);
   return envelopeText(s.detail || "");
 }
 

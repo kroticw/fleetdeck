@@ -268,25 +268,17 @@ test("a multi-line detail is carried as one line's worth of text, newlines and a
   assert.equal(title, multi, "the title keeps the reason exactly as the daemon wrote it");
 });
 
-// --- the counter showed a whole tag where it meant to show a reason ---
+// --- a message sent to a session is not the reason it stopped ---
+//
+// The counter used to print the envelope, then the words inside it, as the
+// reason. They are somebody else's words; the property across every kind of
+// envelope lives in incoming-detail.test.js.
 
-test("a stalled reason wrapped in an envelope is shown without the tag", () => {
+test("a stalled session whose detail is an incoming message lists no reason", () => {
   const wrapped = '<agent-message id="m-3" from="06a1f607" at="2026-09-10T14:00:00+05:00">waiting on a decision</agent-message>';
   const html = stalledList([{ needs: "", state: "blocked", detail: wrapped }]);
-  // Only what is on screen: the title deliberately still holds the envelope, so
-  // asserting on the whole markup would be asserting the opposite of the rule.
-  const [shown] = shownReasons(html);
-
-  assert.ok(!shown.includes("&lt;agent-message"), "the counter was printing the envelope");
-  assert.ok(shown.includes("waiting on a decision"), "and not the reason inside it");
-  assert.ok(shown.includes("06a1f607"), "who is waiting on whom is part of the reason");
-});
-
-test("the counter's title keeps the reason exactly as it arrived", () => {
-  const wrapped = '<agent-message id="m-3" from="x" at="t">waiting</agent-message>';
-  const html = stalledList([{ needs: "", state: "blocked", detail: wrapped }]);
-  const title = html.match(/title="([^"]*)"/)?.[1];
-  assert.ok(title.includes("&lt;agent-message"), "nothing is put out of reach");
+  assert.equal(shownReasons(html).length, 0, "the letter is not the session's reason");
+  assert.ok(!html.includes("waiting on a decision"), "not on screen and not in a title");
 });
 
 test("a reason that is not an envelope is untouched", () => {

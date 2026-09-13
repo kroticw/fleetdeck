@@ -1033,6 +1033,23 @@ main {
   overflow-wrap: anywhere;
 }
 
+/* A message sent to the session, which the daemon leaves in `detail`. Clipped
+ * like a reason, but set in italics so that it does not read as one: these are
+ * the sender's words, not the session's.
+ */
+.sincoming {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--fs-2xs);
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
 .scard {
   margin-top: 4px;
   font-size: var(--fs-2xs);

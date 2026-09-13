@@ -1,7 +1,7 @@
 // web/js/header.js
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
-import { envelopeText } from "./envelope.js";
+import { envelopeText, incomingMessage } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
 import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
@@ -198,9 +198,13 @@ export function createUsageErrorTracker() {
 
 // The row text a person reads for a stalled session. needs wins when present
 // (it already matched a stalled prefix); otherwise detail must be shown
-// verbatim (spec 3.1: the row MUST carry detail's text verbatim).
+// verbatim (spec 3.1: the row MUST carry detail's text verbatim) -- unless
+// detail is a message sent to the session. That is somebody else's words, which
+// the daemon leaves in detail until the session speaks, and it is no reason for
+// anything (see envelope.js, incomingMessage).
 export function stallReason(s) {
-  return s.needs || s.detail || "";
+  if (s.needs) return s.needs;
+  return incomingMessage(s.detail) ? "" : s.detail || "";
 }
 
 const MAX_STALL_REASONS = 3;

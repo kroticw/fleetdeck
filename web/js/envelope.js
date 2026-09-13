@@ -182,3 +182,64 @@ export function envelopeText(text) {
   if (!wrapper) return String(text ?? "");
   return [wrapper.label, wrapper.body].filter(Boolean).join(" · ");
 }
+
+// incomingMessage is the question a pane showing a session's `detail` has to ask
+// before it shows anything as the session's reason: is this a message somebody
+// sent to the session, rather than the session's own words?
+//
+// It has to be asked because the daemon writes the text of the last message sent
+// to a session into that session's `detail`, and leaves it there until the
+// session says something of its own. Shown as the reason a session stopped, it
+// told a person that a sender's words were the session's explanation of itself;
+// an orchestrator writing to a frozen session saw its own letter there.
+//
+// Measured in the job store's timelines, the text arrives in two shapes. Usually
+// the envelope opens it, cut off with an ellipsis and no closing tag. When more
+// than one thing queued up while the session was busy, they run together into
+// one string: the operator's typed text first, an agent's envelope straight
+// after it, with or without a space between. So a tag in the middle of the text
+// counts too — but only one carrying the id, the sender and the time the fleet
+// always writes, because a session's own status may well name the tag it is
+// waiting for, and calling a session's words somebody else's is the same mistake
+// in the other direction.
+//
+// What it returns is the message in parts, each with its sender where the text
+// names one. Text that came before the first envelope keeps an empty sender: it
+// is not the agent's, and signing a person's words with a session's name is what
+// parseCrossSessionMessage was written to avoid.
+//
+// A prompt typed or queued with no envelope at all cannot be told from the
+// session's own words by this text alone, and is not guessed at.
+const INCOMING_TAG = /<(agent-message|cross-session-message)\s[^>]*>/g;
+
+function opensIncoming(match, atStart) {
+  const attributes = {};
+  for (const [, name, value] of match[0].matchAll(ATTRIBUTE)) attributes[name] = value;
+  if (match[1] === "cross-session-message") return Boolean(attributes.from || attributes["from-name"]);
+  if (!attributes.from) return false;
+  return atStart || (attributes.id !== undefined && attributes.at !== undefined);
+}
+
+export function incomingMessage(text) {
+  const source = String(text ?? "").trim();
+  const opens = [...source.matchAll(INCOMING_TAG)].filter((match) => opensIncoming(match, match.index === 0));
+  if (opens.length === 0) return null;
+  const parts = [];
+  const before = stripToolNote(source.slice(0, opens[0].index));
+  if (before) parts.push({ from: "", at: "", body: before });
+  opens.forEach((open, i) => {
+    const piece = source.slice(open.index, i + 1 < opens.length ? opens[i + 1].index : source.length);
+    const message = parseAgentMessage(piece) ?? parseCrossSessionMessage(piece);
+    parts.push({ from: message.from, at: message.at, body: stripToolNote(message.body) });
+  });
+  return { parts };
+}
+
+// incomingText is an incoming message as one line of plain text, every part
+// signed as incoming and named by its sender where it has one. Nothing is
+// rendered: like a reason, it is carried as the words that arrived.
+export function incomingText(message) {
+  return message.parts
+    .map((part) => (part.from ? `${t("incoming_from")} ${part.from}: ${part.body}` : `${t("incoming")}: ${part.body}`))
+    .join(" · ");
+}
