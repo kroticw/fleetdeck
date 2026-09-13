@@ -58,7 +58,7 @@ type faultyTransport struct {
 
 func (ft *faultyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ft.mu.Lock()
-	if req.Method != http.MethodGet {
+	if req.Method != http.MethodGet && !strings.HasSuffix(req.URL.Path, "/generate-notes") {
 		ft.mutations = append(ft.mutations, req.Method+" "+req.URL.Path)
 	}
 	var fire *e2eRule
@@ -175,7 +175,41 @@ func (e *e2e) publisher(waits ...time.Duration) *Publisher {
 		Client: &http.Client{Transport: e.ft},
 		Log:    e.t.Output(),
 		Waits:  waits,
+		Settle: DefaultSettle,
 	}
+}
+
+// listed waits until the release list shows every one of ids: it trails a create by
+// a second or two, and a scene is not set until the list shows it.
+func (e *e2e) listed(ids ...int64) {
+	e.t.Helper()
+	for range 60 {
+		all, err := e.admin.listReleases(context.Background())
+		e.must(err)
+		seen := map[int64]bool{}
+		for _, r := range all {
+			seen[r.ID] = true
+		}
+		missing := 0
+		for _, id := range ids {
+			if !seen[id] {
+				missing++
+			}
+		}
+		if missing == 0 {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	e.t.Fatalf("releases %v did not appear in the list within 30 seconds", ids)
+}
+
+// settledReleases are the releases on the tag once the list has stopped changing for
+// a few seconds.
+func (e *e2e) settledReleases() []release {
+	e.t.Helper()
+	time.Sleep(5 * time.Second)
+	return e.releases()
 }
 
 func (e *e2e) makeTag() {
@@ -202,6 +236,7 @@ func (e *e2e) makeTag() {
 func (e *e2e) makeBuild() {
 	dir := e.t.TempDir()
 	e.files = map[string]string{}
+	e.paths = nil
 	for _, suffix := range []string{"darwin-amd64.tar.gz", "darwin-arm64.tar.gz", "macos.zip", "macos.dmg"} {
 		name := "fleetdeck-" + e.tag + "-" + suffix
 		content := name + " " + randomHex(e.t)
@@ -288,6 +323,7 @@ func TestE2EADraftIsNotFoundByItsTag(t *testing.T) {
 	e := newE2E(t, "lookup")
 	var draft release
 	e.must(e.admin.call(context.Background(), http.MethodPost, e.admin.repoURL("/releases"), map[string]any{"tag_name": e.tag, "draft": true}, &draft))
+	e.listed(draft.ID)
 
 	err := e.admin.call(context.Background(), http.MethodGet, e.admin.repoURL("/releases/tags/"+e.tag), nil, nil)
 	if apiErr, ok := err.(*APIError); !ok || apiErr.Status != http.StatusNotFound {
@@ -319,6 +355,7 @@ func TestE2EFinishesALeftoverEmptyDraft(t *testing.T) {
 	ctx := context.Background()
 	var draft release
 	e.must(e.admin.call(ctx, http.MethodPost, e.admin.repoURL("/releases"), map[string]any{"tag_name": e.tag, "draft": true}, &draft))
+	e.listed(draft.ID)
 
 	if err := e.publisher().Publish(ctx, e.tag, e.paths); err != nil {
 		t.Fatal(err)
@@ -327,6 +364,22 @@ func TestE2EFinishesALeftoverEmptyDraft(t *testing.T) {
 		t.Errorf("published %d, want the draft that was there, %d", rel.ID, draft.ID)
 	}
 	if n := len(e.releases()); n != 1 {
+		t.Errorf("%d releases carry the tag, want one", n)
+	}
+}
+
+// The same failure with no pause before the next attempt, so the next reading of the
+// list comes while it still trails the create: the publisher has to read it again
+// until the draft shows, rather than make a second one.
+func TestE2ECreateThatFailedButHappenedWithNoPause(t *testing.T) {
+	e := newE2E(t, "create500nopause")
+	e.ft.add(e2eRule{name: "create 500 after creating", match: isCreate, times: 1, after: true})
+
+	if err := e.publisher(0).Publish(context.Background(), e.tag, e.paths); err != nil {
+		t.Fatal(err)
+	}
+	e.requirePublished()
+	if n := len(e.settledReleases()); n != 1 {
 		t.Errorf("%d releases carry the tag, want one", n)
 	}
 }
@@ -340,6 +393,7 @@ func TestE2EStopsOnTwoDrafts(t *testing.T) {
 	e.must(e.admin.call(ctx, http.MethodPost, e.admin.repoURL("/releases"), map[string]any{"tag_name": e.tag, "draft": true}, &first))
 	e.must(e.admin.call(ctx, http.MethodPost, e.admin.repoURL("/releases"), map[string]any{"tag_name": e.tag, "draft": true}, &second))
 	t.Logf("GitHub accepted two drafts on one tag: %d and %d", first.ID, second.ID)
+	e.listed(first.ID, second.ID)
 
 	err := e.publisher(e2eWaits...).Publish(ctx, e.tag, e.paths)
 	if err == nil {
@@ -360,7 +414,7 @@ func TestE2EFinishesADraftAnEarlierAttemptMade(t *testing.T) {
 	if err := e.publisher().Publish(context.Background(), e.tag, e.paths); err == nil {
 		t.Fatal("a run with uploads failing reported success")
 	}
-	rels := e.releases()
+	rels := e.settledReleases()
 	if len(rels) != 1 || !rels[0].Draft || rels[0].Body == "" {
 		t.Fatalf("want one draft carrying generated notes: %+v", rels)
 	}
@@ -388,7 +442,7 @@ func TestE2ERerunFinishesARunThatDiedDuringUploads(t *testing.T) {
 	if err := e.publisher().Publish(context.Background(), e.tag, e.paths); err == nil {
 		t.Fatal("the interrupted run reported success")
 	}
-	rels := e.releases()
+	rels := e.settledReleases()
 	if len(rels) != 1 || !rels[0].Draft || len(rels[0].Assets) != 1 {
 		t.Fatalf("the interrupted run did not leave one draft with one file: %+v", rels)
 	}
@@ -410,7 +464,7 @@ func TestE2ERerunReplacesAnEarlierBuildOnADraft(t *testing.T) {
 	if err := e.publisher().Publish(context.Background(), e.tag, e.paths); err == nil {
 		t.Fatal("a run whose publish failed reported success")
 	}
-	if rels := e.releases(); len(rels) != 1 || !rels[0].Draft || len(rels[0].Assets) != 4 {
+	if rels := e.settledReleases(); len(rels) != 1 || !rels[0].Draft || len(rels[0].Assets) != 4 {
 		t.Fatalf("want one draft with all four files of the first build: %+v", rels)
 	}
 
@@ -446,7 +500,7 @@ func TestE2EOutageLeavesADraftTheRerunOnlyPublishes(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not published") {
 		t.Fatalf("an outage outlasting the retries ended with %v, want a failure saying the release is not published", err)
 	}
-	rels := e.releases()
+	rels := e.settledReleases()
 	if len(rels) != 1 || !rels[0].Draft || len(rels[0].Assets) != len(e.paths) {
 		t.Fatalf("the failed run did not leave one draft with every file: %+v", rels)
 	}
