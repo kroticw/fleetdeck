@@ -64,6 +64,19 @@ type SessionView struct {
 	CardPath  string            `json:"cardPath,omitempty"`
 	SilentFor time.Duration     `json:"silentFor"`
 
+	// UnansweredFor is how long the session has owed its next move and said nothing --
+	// a call that has not come back, a result it has not acted on, a message it has not
+	// answered -- or zero when it owes nothing. What the panel concludes from it, that
+	// past UnansweredLimit the daemon's "no question" is no longer an answer, is
+	// Waiting's to say.
+	UnansweredFor time.Duration `json:"unansweredFor,omitempty"`
+
+	// InCall is the tool call the session's transcript shows it standing inside, nil
+	// when none is on disk. It names what is unanswered when it can and decides
+	// nothing: Claude Code writes some calls only when they return, so a session frozen
+	// inside one of those has no InCall at all.
+	InCall *transcript.Call `json:"inCall,omitempty"`
+
 	// CardID is the number of the card at CardPath ("T-NNN"), empty when that
 	// card has none or there is no card. It rides beside the path so the
 	// session list can name the card a session is busy with.
@@ -291,8 +304,8 @@ type FleetBoard struct {
 // and this package does neither — Task 11's Collect does both and hands the
 // finished views back. So a zero SilentFor out of Link means "not measured", never
 // "not silent", and the two cannot be told apart from the field alone. Silence is
-// measured from the transcript, as the age of the last write to the session's
-// file, and a session may well have no transcript at all: one that has just
+// measured from the transcript, as how long ago the session itself last said
+// anything there, and a session may well have no transcript at all: one that has just
 // started and whose file does not exist yet, one transcript.Locate cannot find,
 // one from another backend. Anything reading SilentFor must therefore treat zero
 // as "no measurement" — the silence rule in Diff does, which is why a session in

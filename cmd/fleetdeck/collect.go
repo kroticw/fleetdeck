@@ -98,6 +98,7 @@ var jobStoreDir = func() string {
 // read hundreds of megabytes a minute to learn nothing.
 type cachedUsage struct {
 	usage transcript.Usage
+	voice transcript.Voice
 	size  int64
 	mtime time.Time
 }
@@ -270,49 +271,100 @@ func (c *Collector) reportFor(sessionID string) (reported, bool) {
 	return r, true
 }
 
-// transcriptState returns everything one stat of a session's transcript tells the
-// panel: the context estimate, whether there is one, and how long the session has
-// been silent.
+// transcriptState returns everything a session's transcript tells the panel: the
+// context estimate, whether there is one, how long the session has been silent, and
+// the tool call it is standing inside, if any.
 //
-// Both answers come from the same os.Stat deliberately. Silence is the age of the
-// last write to the transcript (spec section 6) and the estimate cache is keyed on
-// size and mtime, so statting twice would be the same syscall run twice and could
-// disagree with itself in between.
+// Silence is how long ago the session last said anything (spec section 6), read by
+// transcript.ReadVoice -- not the age of the file. The file is also written by whoever
+// addresses the session: a message sent to a session frozen inside a tool call lands in
+// its transcript at once, and silence measured by modification time was reset by
+// exactly the person trying to reach it (T-047). The file's age is used only for a
+// transcript with no timestamped line to read a voice from, where it is all there is.
+//
+// It also returns how long the session has owed its next move without saying anything
+// (transcript.Voice.Unanswered), zero when it owes nothing.
+//
+// Both readings are cached on the transcript's size and mtime, from one os.Stat, so an
+// idle session costs no reads. The one exception is a session that owes its move: its
+// voice is read again on every call, because while it works through a subagent -- or
+// through a batch Claude Code has not written yet -- the parent file does not change at
+// all, and a cached reading would let the unanswered stretch grow over a subagent that
+// is busy throughout.
 //
 // A transcript that cannot be stat'ed at all returns a zero duration. Per spec
 // section 6 that reads as "not measured", never as "silent forever": state.Diff does
 // not fire the silence rule on a zero, which is what keeps a session whose transcript
 // does not exist yet from being reported as half an hour silent in its first second.
-func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.Duration) {
+func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.Duration, time.Duration, *transcript.Call) {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return transcript.Usage{}, false, 0
-	}
-
-	silentFor := c.now().Sub(fi.ModTime())
-	if silentFor < 0 {
-		// A transcript stamped in the future (a clock adjustment, a copied file) has
-		// not been silent for a negative time. Zero is the honest answer: not
-		// measured.
-		silentFor = 0
+		return transcript.Usage{}, false, 0, 0, nil
 	}
 
 	c.cacheMu.Lock()
 	hit, ok := c.contextCache[path]
 	c.cacheMu.Unlock()
-	if ok && hit.size == fi.Size() && hit.mtime.Equal(fi.ModTime()) {
-		return hit.usage, true, silentFor
+	fresh := ok && hit.size == fi.Size() && hit.mtime.Equal(fi.ModTime())
+
+	voice := hit.voice
+	if !fresh || !voice.Unanswered.IsZero() {
+		voice, err = transcript.ReadVoice(path)
+		if err != nil {
+			voice = transcript.Voice{}
+		}
+	}
+	silentFor := c.silence(voice, fi.ModTime())
+	unansweredFor := c.since(voice.Unanswered)
+
+	if fresh {
+		if !hit.voice.Unanswered.IsZero() {
+			hit.voice = voice
+			c.cacheMu.Lock()
+			c.contextCache[path] = hit
+			c.cacheMu.Unlock()
+		}
+		return hit.usage, true, silentFor, unansweredFor, voice.InCall
 	}
 
 	u, err := transcript.ContextUsage(path)
 	if err != nil {
-		return transcript.Usage{}, false, silentFor
+		return transcript.Usage{}, false, silentFor, unansweredFor, voice.InCall
 	}
 
 	c.cacheMu.Lock()
-	c.contextCache[path] = cachedUsage{usage: u, size: fi.Size(), mtime: fi.ModTime()}
+	c.contextCache[path] = cachedUsage{usage: u, voice: voice, size: fi.Size(), mtime: fi.ModTime()}
 	c.cacheMu.Unlock()
-	return u, true, silentFor
+	return u, true, silentFor, unansweredFor, voice.InCall
+}
+
+// since is now minus t, or zero for a zero t or a moment in the future: zero is "not
+// measured" everywhere a duration crosses into the snapshot.
+func (c *Collector) since(t time.Time) time.Duration {
+	if t.IsZero() {
+		return 0
+	}
+	if d := c.now().Sub(t); d > 0 {
+		return d
+	}
+	return 0
+}
+
+// silence turns a voice reading into a duration: now minus the moment the session last
+// spoke, or minus the file's modification time when the transcript held nothing
+// timestamped to read a voice from.
+func (c *Collector) silence(voice transcript.Voice, modTime time.Time) time.Duration {
+	since := voice.LastSpoke
+	if since.IsZero() {
+		since = modTime
+	}
+	silentFor := c.now().Sub(since)
+	if silentFor < 0 {
+		// A moment in the future (a clock adjustment, a copied file) has not been
+		// silent for a negative time. Zero is the honest answer: not measured.
+		silentFor = 0
+	}
+	return silentFor
 }
 
 // enrich fills the two fields state.Link cannot: the context reading and the silence
@@ -351,7 +403,7 @@ func (c *Collector) enrich(views []state.SessionView, labels map[string]string) 
 		views[i].Label = labels[id]
 		// A label survives a session stopping — it is the operator's own
 		// name for the work, and the row still shows it. The readings below
-		// do not: silence is the age of the last write to a transcript
+		// do not: silence is the age of the last line in a transcript
 		// nothing is writing any more, which would report a session that
 		// stopped this morning as having been silent for hours, and the
 		// context bar would draw a reading frozen at the moment it stopped
@@ -363,8 +415,10 @@ func (c *Collector) enrich(views []state.SessionView, labels map[string]string) 
 		}
 		if path, err := transcript.Locate(c.projectsDir, id); err == nil {
 			live[path] = struct{}{}
-			estimate, haveEstimate, silentFor := c.transcriptState(path)
+			estimate, haveEstimate, silentFor, unansweredFor, inCall := c.transcriptState(path)
 			views[i].SilentFor = silentFor
+			views[i].UnansweredFor = unansweredFor
+			views[i].InCall = inCall
 			if haveEstimate {
 				u := estimate
 				views[i].Context = &u
