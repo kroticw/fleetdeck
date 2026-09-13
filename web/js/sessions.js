@@ -21,7 +21,7 @@
 // only field that still explains a flags-only Stalled session.
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
-import { envelopeText } from "./envelope.js";
+import { envelopeText, incomingMessage, incomingText } from "./envelope.js";
 import { setSessionLabel, resumeSession } from "./api.js";
 import { createStalledTracker } from "./header.js";
 import { SESSIONS_KEYS } from "./columnwidth.js";
@@ -42,8 +42,12 @@ import { cardNumberHTML } from "./cardnumber.js";
 // rowHtml): a flag-only stall not yet counted by the tracker must not show
 // detail either, or the row would carry a "why it stopped" reason for a stop the
 // badge itself does not yet claim happened.
+//
+// A detail that is a message sent to the session is not a reason at all: it is
+// somebody else's words, which the daemon leaves there until the session speaks
+// (see envelope.js, incomingMessage). The row shows it as incoming instead.
 function reasonText(s, fallBackToDetail) {
-  if (fallBackToDetail && !s.needs) return s.detail || "";
+  if (fallBackToDetail && !s.needs) return incomingMessage(s.detail) ? "" : s.detail || "";
   return s.needs || "";
 }
 
@@ -185,13 +189,12 @@ export function rowHtml(s, stalledNow) {
           : "";
 
   // The reason is clipped to a few lines by the stylesheet, with the whole of
-  // it in title. The daemon writes an incoming message's text into detail
-  // verbatim, so this is a paragraph as often as it is a phrase, and an
+  // it in title. A reason can be a paragraph as often as a phrase, and an
   // unclipped one pushes every session below it off the screen. Clipping in
   // CSS rather than by substring keeps the cut at the column's real width and
-  // keeps the text itself intact -- spec 3.1 wants detail carried verbatim
-  // because a person has to read it, so it has to stay reachable here rather
-  // than only in the daemon.
+  // keeps the text itself intact -- spec 3.1 wants a session's own words carried
+  // verbatim because a person has to read them, so they have to stay reachable
+  // here rather than only in the daemon.
   const raw = waiting || stalled || unknown ? reasonText(s, stalled || unknown) : "";
   // The envelope comes off, and nothing else does. What a session says about
   // why it stopped is carried verbatim (spec 3.1) because a person decides from
@@ -204,6 +207,15 @@ export function rowHtml(s, stalledNow) {
   const reason = envelopeText(raw);
   const reasonHtml = reason
     ? `<div class="sreason" title="${escapeHtml(raw)}">${escapeHtml(reason)}</div>`
+    : "";
+
+  // Where the row would have shown detail and detail is a message sent to the
+  // session, the message is still worth seeing — it may be exactly what the
+  // session has not answered — but as what it is: signed as incoming, with its
+  // sender, on a line of its own and never in the reason's place.
+  const letter = (stalled || unknown) && !s.needs ? incomingMessage(s.detail) : null;
+  const incomingHtml = letter
+    ? `<div class="sincoming" title="${escapeHtml(s.detail)}">${escapeHtml(incomingText(letter))}</div>`
     : "";
 
   // label is the operator's own name for the session (internal/config's
@@ -252,6 +264,7 @@ export function rowHtml(s, stalledNow) {
         ${costHtml}
       </div>
       ${reasonHtml}
+      ${incomingHtml}
       ${contextBarHtml(s.context)}
       ${cardHtml}
     </article>`;
