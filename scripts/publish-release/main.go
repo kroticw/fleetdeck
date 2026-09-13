@@ -38,13 +38,14 @@ func main() {
 	defer stop()
 
 	p := &releasepublish.Publisher{
-		API:    api,
-		Repo:   *repo,
-		Token:  os.Getenv("GITHUB_TOKEN"),
-		Client: &http.Client{},
-		Log:    os.Stdout,
-		Waits:  releasepublish.DefaultWaits,
-		Settle: releasepublish.DefaultSettle,
+		API:      api,
+		Repo:     *repo,
+		Token:    os.Getenv("GITHUB_TOKEN"),
+		Client:   &http.Client{},
+		Log:      os.Stdout,
+		Waits:    releasepublish.DefaultWaits,
+		Settle:   releasepublish.DefaultSettle,
+		Deadline: releasepublish.DefaultDeadline,
 	}
 	if err := p.Publish(ctx, *tag, flag.Args()); err != nil {
 		fmt.Printf("::error::%s\n", strings.ReplaceAll(err.Error(), "\n", " "))

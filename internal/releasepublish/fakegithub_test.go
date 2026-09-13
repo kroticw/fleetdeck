@@ -44,6 +44,8 @@ type fakeGitHub struct {
 	// mangle is where GitHub gives a release a tag named untagged-... in place of
 	// its own: "create", "notes" (an update that does not publish), "publish", or
 	// "read" (a release read by its id reports it, while its state keeps the tag).
+	// "no-digest" gives no digest for any asset, the way the API is allowed to;
+	// "no-digest-corrupt" also stores every upload with its first byte flipped.
 	// "drop" loses a file of the release as it is published. "unnamed-update" is
 	// what the sandbox showed on 2026-09-13: an update of a draft that does not
 	// publish it and does not name its tag leaves it with untagged-....
@@ -155,6 +157,19 @@ func (fg *fakeGitHub) vanish(rel *fakeRelease, n int) {
 	fg.mu.Lock()
 	defer fg.mu.Unlock()
 	rel.vanishAfter, rel.listed = n, 0
+}
+
+// downloads counts the requests for an asset's bytes that reached the server.
+func (fg *fakeGitHub) downloads() int {
+	fg.mu.Lock()
+	defer fg.mu.Unlock()
+	n := 0
+	for _, r := range fg.requests {
+		if strings.HasPrefix(r, "GET /repos/"+fakeRepo+"/releases/assets/") {
+			n++
+		}
+	}
+	return n
 }
 
 // uploads counts the upload requests that reached the server.
@@ -282,6 +297,9 @@ func route(r *http.Request) (string, int64) {
 		return "create", 0
 	case p == releases+"/generate-notes" && r.Method == http.MethodPost:
 		return "notes", 0
+	case strings.HasPrefix(p, releases+"/assets/") && r.Method == http.MethodGet:
+		id, _ := strconv.ParseInt(strings.TrimPrefix(p, releases+"/assets/"), 10, 64)
+		return "download", id
 	case strings.HasPrefix(p, releases+"/assets/") && r.Method == http.MethodDelete:
 		id, _ := strconv.ParseInt(strings.TrimPrefix(p, releases+"/assets/"), 10, 64)
 		return "delete-asset", id
@@ -329,6 +347,13 @@ func (fg *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		publishing = json.Unmarshal(body, &in) == nil && in.Draft != nil && !*in.Draft
 	}
 	fg.mu.Lock()
+	if op == "create" {
+		var in struct {
+			TagName string `json:"tag_name"`
+		}
+		_ = json.Unmarshal(body, &in)
+		fg.writes = append(fg.writes, writeRequest{Op: op, Tag: in.TagName, Draft: true, AfterPublish: len(fg.publishRequests) > 0})
+	}
 	target := fg.find(id)
 	if op == "delete-asset" {
 		target = fg.owner(id)
@@ -530,6 +555,23 @@ func (fg *fakeGitHub) handle(w http.ResponseWriter, r *http.Request, op string, 
 		}
 		fg.writeJSON(w, http.StatusOK, map[string]string{"name": in.TagName, "body": generatedNotes(in.TagName)})
 
+	case "download":
+		for _, rel := range fg.releases {
+			for _, a := range rel.Assets {
+				if a.ID == id {
+					if r.Header.Get("Accept") != "application/octet-stream" {
+						fg.writeJSON(w, http.StatusOK, fg.renderAsset(a))
+						return
+					}
+					w.Header().Set("Content-Type", "application/octet-stream")
+					w.WriteHeader(http.StatusOK)
+					w.Write(a.Data)
+					return
+				}
+			}
+		}
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+
 	case "delete-asset":
 		for _, rel := range fg.releases {
 			for i, a := range rel.Assets {
@@ -563,9 +605,14 @@ func (fg *fakeGitHub) handle(w http.ResponseWriter, r *http.Request, op string, 
 				return
 			}
 		}
-		a := &fakeAsset{ID: fg.id(), Name: name, State: "uploaded", ContentType: r.Header.Get("Content-Type"), Data: body}
+		stored := body
+		if fg.mangle == "no-digest-corrupt" && len(body) > 0 {
+			stored = append([]byte(nil), body...)
+			stored[0] ^= 0xff
+		}
+		a := &fakeAsset{ID: fg.id(), Name: name, State: "uploaded", ContentType: r.Header.Get("Content-Type"), Data: stored}
 		rel.Assets = append(rel.Assets, a)
-		fg.writeJSON(w, http.StatusCreated, renderAsset(a))
+		fg.writeJSON(w, http.StatusCreated, fg.renderAsset(a))
 	}
 }
 
@@ -614,7 +661,7 @@ func (fg *fakeGitHub) list(w http.ResponseWriter, r *http.Request) {
 func (fg *fakeGitHub) render(rel *fakeRelease) map[string]any {
 	assets := []map[string]any{}
 	for _, a := range rel.Assets {
-		assets = append(assets, renderAsset(a))
+		assets = append(assets, fg.renderAsset(a))
 	}
 	return map[string]any{
 		"id":         rel.ID,
@@ -628,7 +675,7 @@ func (fg *fakeGitHub) render(rel *fakeRelease) map[string]any {
 	}
 }
 
-func renderAsset(a *fakeAsset) map[string]any {
+func (fg *fakeGitHub) renderAsset(a *fakeAsset) map[string]any {
 	out := map[string]any{
 		"id":           a.ID,
 		"name":         a.Name,
@@ -637,7 +684,7 @@ func renderAsset(a *fakeAsset) map[string]any {
 		"content_type": a.ContentType,
 		"digest":       nil,
 	}
-	if a.State == "uploaded" {
+	if a.State == "uploaded" && !strings.HasPrefix(fg.mangle, "no-digest") {
 		out["digest"] = fmt.Sprintf("sha256:%x", sha256.Sum256(a.Data))
 	}
 	return out

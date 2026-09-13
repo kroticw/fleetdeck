@@ -1,6 +1,7 @@
 package releasepublish
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -340,13 +341,27 @@ func TestPublishLeavesACompletePublishedReleaseAlone(t *testing.T) {
 		"app-" + tag + "-macos.dmg":           "disk image, earlier build",
 	}
 	fg.addRelease(tag, false, generatedNotes(tag), earlier)
+	var log bytes.Buffer
 
-	if err := fg.publisher(t.Output(), 0).Publish(context.Background(), tag, paths); err != nil {
+	if err := fg.publisher(&log, 0).Publish(context.Background(), tag, paths); err != nil {
 		t.Fatal(err)
 	}
 	requirePublished(t, fg, earlier)
 	if m := fg.mutations(); len(m) != 0 {
 		t.Errorf("a complete published release was changed: %v", m)
+	}
+	// Green is right, and so is saying what it means: the release people download is
+	// not this build.
+	warning := ""
+	for _, line := range strings.Split(log.String(), "\n") {
+		if strings.HasPrefix(line, "::warning::") {
+			warning = line
+		}
+	}
+	for name := range earlier {
+		if !strings.Contains(warning, name) {
+			t.Errorf("no warning names %s, whose bytes are not this build's; log:\n%s", name, log.String())
+		}
 	}
 }
 
@@ -409,6 +424,9 @@ func TestPublishFailsWhenThePublishNeverGoesThrough(t *testing.T) {
 	}
 	if slept != 4 {
 		t.Errorf("waited %d times, want every one of the 4 retries used", slept)
+	}
+	if n := len(fg.publishRequests); n != 1 {
+		t.Errorf("%d publish requests were sent, want one; the retries only read", n)
 	}
 }
 
@@ -601,21 +619,110 @@ func TestPublishStopsWhenAPublishedReleaseComesBackWithAnotherTag(t *testing.T) 
 	}
 }
 
-// A publish that failed before it did anything is sent again, and only ever to the
-// same release.
-func TestPublishRepeatsAFailedPublishOnlyForTheSameRelease(t *testing.T) {
+// A publish request is sent once. When it fails, the run only reads the release
+// afterwards, even though nothing was published: a read can show a published release
+// as a draft, and acting on that read could write to something public. The run ends
+// red, and a rerun of the publish, which is a minute, finishes the release.
+func TestPublishSendsItsPublishRequestOnce(t *testing.T) {
 	fg := newFakeGitHub(t)
 	files, paths := build(t)
-	fg.inject(fault{op: "update", times: 2, status: http.StatusBadGateway})
+	fg.inject(fault{op: "publish", times: 1, status: http.StatusInternalServerError})
 
-	if err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths); err != nil {
+	err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths)
+	if err == nil || !strings.Contains(err.Error(), "not published") {
+		t.Fatalf("a publish request that failed ended with %v, want a failure saying the release is not published", err)
+	}
+	if n := len(fg.publishRequests); n != 1 {
+		t.Errorf("%d publish requests were sent, want one", n)
+	}
+	for _, w := range fg.writes {
+		if w.AfterPublish {
+			t.Errorf("a %s went to release %d after the publish request", w.Op, w.ID)
+		}
+	}
+
+	fg.recover()
+	if err := fg.publisher(t.Output(), 0).Publish(context.Background(), tag, paths); err != nil {
 		t.Fatal(err)
 	}
-	rel := requirePublished(t, fg, files)
-	for _, r := range fg.publishRequests {
-		if r.ID != rel.ID {
-			t.Errorf("a publish request went to release %d, want only %d", r.ID, rel.ID)
+	requirePublished(t, fg, files)
+}
+
+// GitHub may give no digest for an asset. A matching size says nothing about the
+// bytes, so the file is downloaded and hashed: the same bytes are not uploaded again,
+// and the release is still published.
+func TestPublishChecksTheBytesOfFilesGitHubGivesNoDigestFor(t *testing.T) {
+	fg := newFakeGitHub(t)
+	files, paths := build(t)
+	fg.mangle = "no-digest"
+	fg.addRelease(tag, true, generatedNotes(tag), files)
+
+	if err := fg.publisher(t.Output(), 0).Publish(context.Background(), tag, paths); err != nil {
+		t.Fatal(err)
+	}
+	requirePublished(t, fg, files)
+	if n := fg.uploads(); n != 0 {
+		t.Errorf("%d files with this build's bytes were uploaded again", n)
+	}
+	if fg.downloads() == 0 {
+		t.Error("no file was downloaded, so no bytes were checked")
+	}
+}
+
+// With no digest to go by, bytes GitHub stored differently are found by hashing them,
+// and the draft is not published.
+func TestPublishDoesNotPublishBytesThatDifferWhenGitHubGivesNoDigest(t *testing.T) {
+	fg := newFakeGitHub(t)
+	_, paths := build(t)
+	fg.mangle = "no-digest-corrupt"
+
+	if err := fg.publisher(t.Output(), 3).Publish(context.Background(), tag, paths); err == nil {
+		t.Fatal("publish succeeded with every file stored wrong")
+	}
+	if n := len(fg.publishRequests); n != 0 {
+		t.Errorf("%d publish requests were sent for files whose bytes differ", n)
+	}
+}
+
+// A 422 after a failed read is a refusal: a read changes nothing, so nothing an
+// earlier attempt did can explain it.
+func TestPublishDoesNotRetryAValidationErrorAfterAFailedRead(t *testing.T) {
+	fg := newFakeGitHub(t)
+	_, paths := build(t)
+	fg.inject(fault{op: "list", times: 1, status: http.StatusBadGateway})
+	fg.inject(fault{op: "create", times: -1, status: http.StatusUnprocessableEntity})
+	var slept int
+	p := fg.publisher(t.Output(), 5)
+	p.Sleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+	if err := p.Publish(context.Background(), tag, paths); err == nil {
+		t.Fatal("a refused create was reported as success")
+	}
+	if slept != 1 {
+		t.Errorf("waited %d times, want the one for the failed read", slept)
+	}
+}
+
+// A publish has a limit of its own, well under the job's, and says it ran out of time
+// rather than being cancelled with the job.
+func TestPublishGivesUpAtItsDeadline(t *testing.T) {
+	fg := newFakeGitHub(t)
+	_, paths := build(t)
+	fg.inject(fault{op: "list", times: -1, status: http.StatusBadGateway})
+	p := fg.publisher(t.Output(), 3)
+	p.Waits = []time.Duration{time.Hour, time.Hour, time.Hour}
+	p.Sleep = nil
+	p.Deadline = 200 * time.Millisecond
+
+	done := make(chan error, 1)
+	go func() { done <- p.Publish(context.Background(), tag, paths) }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "within") {
+			t.Fatalf("got %v, want a failure saying the publish ran out of its time", err)
 		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("publish was still waiting 10 seconds after its 200ms deadline")
 	}
 }
 
@@ -624,7 +731,7 @@ func TestPublishRepeatsAFailedPublishOnlyForTheSameRelease(t *testing.T) {
 // a draft carrying our tag, one run publishes at most one release, and a run that
 // succeeds leaves exactly one complete published release with our tag.
 func TestPublishNeverPublishesAReleaseWhoseTagIsNotOurs(t *testing.T) {
-	manglings := []string{"", "create", "notes", "unnamed-update", "read", "publish", "drop"}
+	manglings := []string{"", "create", "notes", "unnamed-update", "read", "publish", "drop", "no-digest", "no-digest-corrupt"}
 	faults := map[string][]fault{
 		"no failure":                    nil,
 		"create 500 after creating":     {{op: "create", times: 1, status: http.StatusInternalServerError, after: true}},
@@ -682,9 +789,12 @@ func TestPublishNeverPublishesAReleaseWhoseTagIsNotOurs(t *testing.T) {
 							if !w.Draft {
 								t.Errorf("a %s went to release %d after it was published", w.Op, w.ID)
 							}
-							if w.AfterPublish && w.ID != fg.publishRequests[0].ID {
-								t.Errorf("a %s went to release %d after a publish request for %d", w.Op, w.ID, fg.publishRequests[0].ID)
+							if w.AfterPublish {
+								t.Errorf("a %s went to release %d after a publish request had been sent", w.Op, w.ID)
 							}
+						}
+						if n := len(fg.publishRequests); n > 1 {
+							t.Errorf("%d publish requests were sent in one run", n)
 						}
 						if n := len(fg.published); n > 1 {
 							t.Errorf("%d releases were published in one run: %v", n, fg.published)

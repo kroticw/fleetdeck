@@ -30,10 +30,10 @@
 // that showed untagged-... was probably the same rule: before that was seen, an
 // update carrying only a name and no tag_name went to it and was answered with a 5xx,
 // and whether that update was carried out was not checked; the other draft, which no
-// update touched, kept v0.8.0. So updates name the tag, and the tag is still checked rather than
-// trusted: on the release found, after writing notes, on the release itself just
-// before a publish, and after it; and once a publish request has gone out, nothing
-// but that one release is written to again.
+// update touched, kept v0.8.0. So updates name the tag, and the tag is still checked
+// rather than trusted: on the release found, after writing notes, on the release
+// itself just before a publish, and after it. Once a publish request has gone out,
+// nothing is written again at all, not even to that release: it is only read.
 package releasepublish
 
 import (
@@ -57,10 +57,10 @@ import (
 )
 
 // DefaultWaits are the pauses between passes after a failure that may clear up: a
-// little under seven minutes in all, spread over ten retries. That covers the blips
-// that should not cost a build whose notarization took minutes of Apple's queue, and
-// stays well inside the release job's timeout. An outage that lasts longer ends the
-// run red, and a rerun later picks the release up where this one stopped.
+// little under seven minutes of pauses, spread over ten retries, on top of the time
+// the requests themselves take. DefaultDeadline bounds the whole. An outage that lasts
+// longer ends the run red, and a rerun of the publish picks the release up where this
+// one stopped.
 var DefaultWaits = []time.Duration{
 	5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second,
 	60 * time.Second, 60 * time.Second, 60 * time.Second, 60 * time.Second,
@@ -75,6 +75,12 @@ var DefaultWaits = []time.Duration{
 var DefaultSettle = []time.Duration{
 	1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second,
 }
+
+// DefaultDeadline is how long a whole publish may take, retries and uploads included.
+// It is well under the publish job's own timeout, so that a publish that runs out of
+// time ends with an error saying the release was not published, rather than with a
+// job GitHub cancelled in the middle of a request.
+const DefaultDeadline = 20 * time.Minute
 
 const (
 	apiTimeout    = 2 * time.Minute
@@ -106,6 +112,8 @@ type Publisher struct {
 	// Sleep waits between passes and readings; nil means a real wait that a
 	// cancelled context cuts short.
 	Sleep func(context.Context, time.Duration) error
+	// Deadline is how long Publish may take in all; zero means no limit of its own.
+	Deadline time.Duration
 }
 
 // APIError is GitHub answering a request with an error status.
@@ -122,7 +130,10 @@ func (e *APIError) Error() string {
 
 // transportError is a request whose outcome is unknown: the connection failed, timed
 // out, or the answer could not be read.
-type transportError struct{ err error }
+type transportError struct {
+	method string
+	err    error
+}
 
 func (e *transportError) Error() string { return e.err.Error() }
 func (e *transportError) Unwrap() error { return e.err }
@@ -168,6 +179,15 @@ type expectation struct {
 	digest string
 }
 
+// expectations are the size and digest of each of this build's files.
+func expectations(arts []artifact) map[string]expectation {
+	expect := make(map[string]expectation, len(arts))
+	for _, a := range arts {
+		expect[a.name] = expectation{size: a.size, digest: a.digest}
+	}
+	return expect
+}
+
 // Publish makes the release for tag exist, carry generated notes and every one of
 // paths, and be published, starting from whatever state the release is in. It
 // returns nil only after reading the release back in that state.
@@ -189,11 +209,24 @@ func (p *Publisher) Publish(ctx context.Context, tag string, paths []string) err
 		return fmt.Errorf("release %s was not published: %w", tag, err)
 	}
 
-	st := &runState{warned: map[int64]bool{}}
+	parent := ctx
+	if p.Deadline > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.Deadline)
+		defer cancel()
+	}
+	outOfTime := func(err error) error {
+		return fmt.Errorf("release %s was not published as it should be within %s, the time a publish is given: %w", tag, p.Deadline, err)
+	}
+
+	st := &runState{warned: map[int64]bool{}, digests: map[int64]string{}}
 	for attempt := 1; ; attempt++ {
 		err := p.pass(ctx, tag, arts, st)
 		if err == nil {
 			return nil
+		}
+		if ctx.Err() != nil && parent.Err() == nil {
+			return outOfTime(err)
 		}
 		if !retryable(ctx, err, st.uncertain) {
 			return fmt.Errorf("release %s was not published as it should be: %w", tag, err)
@@ -201,20 +234,37 @@ func (p *Publisher) Publish(ctx context.Context, tag string, paths []string) err
 		if attempt > len(p.Waits) {
 			return fmt.Errorf("release %s was not published as it should be after %d attempts: %w", tag, attempt, err)
 		}
-		// From here on an earlier request may have landed without an answer.
-		st.uncertain = true
+		// From here on a request that could change something may have landed without
+		// an answer. A failed read changes nothing and leaves nothing to be unsure of.
+		if uncertainWrite(err) {
+			st.uncertain = true
+		}
 		wait := p.Waits[attempt-1]
 		p.warnf("attempt %d of %d to publish %s failed, trying again in %s: %v", attempt, len(p.Waits)+1, tag, wait, err)
-		if err := p.sleep(ctx, wait); err != nil {
-			return fmt.Errorf("release %s was not published: %w", tag, err)
+		if serr := p.sleep(ctx, wait); serr != nil {
+			if ctx.Err() != nil && parent.Err() == nil {
+				return outOfTime(err)
+			}
+			return fmt.Errorf("release %s was not published: %w", tag, serr)
 		}
 	}
 }
 
+// uncertainWrite says whether err is a request that could have changed something and
+// whose outcome is unknown.
+func uncertainWrite(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Method != http.MethodGet && (apiErr.Status >= 500 || apiErr.Status == http.StatusTooManyRequests)
+	}
+	var transport *transportError
+	return errors.As(err, &transport) && transport.method != http.MethodGet
+}
+
 // retryable says whether another pass can succeed where this one failed. A refusal is
 // final: GitHub gives the same answer minutes later, and waiting only hides it. A 422
-// is a refusal too, unless an earlier attempt may have done the thing it now refuses
-// to do twice.
+// is a refusal too, unless an earlier write may have done the thing it now refuses to
+// do twice.
 func retryable(ctx context.Context, err error, uncertain bool) bool {
 	if ctx.Err() != nil {
 		return false
@@ -249,8 +299,12 @@ func stopf(format string, args ...any) error {
 // runState is what one run of Publish remembers between its passes.
 type runState struct {
 	warned map[int64]bool
-	// uncertain: an earlier pass failed in a way GitHub may have acted on.
+	// uncertain: an earlier write failed in a way GitHub may have acted on.
 	uncertain bool
+	// digests are the sha256 digests of assets GitHub gave none for, by asset id,
+	// computed from their downloaded bytes. An asset id names fixed content: a
+	// replaced file gets a new one.
+	digests map[int64]string
 	// created is the release a create of this run was answered with. The release
 	// list trails a create by a second or two, and this is how the release is found
 	// in that time without making another.
@@ -261,9 +315,12 @@ type runState struct {
 	// already published. From then on no other release is created, finished or
 	// published by this run.
 	pinned int64
-	// publishSent: a publish request has gone out. Nothing is written to a
-	// published release after that.
+	// publishSent: a publish request has gone out. Nothing at all is written after
+	// that.
 	publishSent bool
+	// keptWarned: the files of a published release that are not this build's
+	// bytes have been named.
+	keptWarned bool
 	// sawPublished: a pass has already found the pinned release published. The next
 	// one only reads it.
 	sawPublished bool
@@ -285,13 +342,21 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, st *r
 		return err
 	}
 
-	// A release found published, by a run that has not published anything itself, may
-	// get the files it is missing, once. Otherwise a published release is only read:
-	// writing to something already public again, or after this run's own publish, is
-	// a retry after publication.
+	if st.publishSent {
+		// A publish request has gone out for this release. Whatever it did, nothing
+		// more is written, not even to this release: a read can show a release that
+		// was published as a draft, and a pass acting on that read could delete a
+		// public file. The release is read until it reads back published, and if it
+		// never does the run ends red and a rerun of the publish takes it from there.
+		return p.confirm(ctx, rel, tag, arts, expectations(arts), st)
+	}
+
+	// A release found published may get the files it is missing, once. After that it
+	// is only read: writing to something already public again is a retry after
+	// publication.
 	writes := true
 	if !rel.Draft {
-		writes = !st.sawPublished && !st.publishSent
+		writes = !st.sawPublished
 		st.sawPublished = true
 		st.pinned = rel.ID
 		p.logf("release %d for %s is published; checking it is complete", rel.ID, tag)
@@ -308,16 +373,25 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, st *r
 	}
 
 	expect := map[string]expectation{}
+	var kept []string
 	for _, a := range arts {
 		have := findAsset(rel.Assets, a.name)
+		same := false
+		if have != nil && have.State == stateUploaded && have.Size == a.size {
+			digest, err := p.digestOf(ctx, *have, st)
+			if err != nil {
+				return err
+			}
+			same = digest == a.digest
+		}
 		switch {
-		case have != nil && have.State == stateUploaded && have.holds(a):
+		case same:
 			// Already this build's bytes, uploaded by an earlier pass or run.
 		case have != nil && have.State == stateUploaded && !rel.Draft:
 			// A published file is not swapped for a rebuilt one: people may have
 			// downloaded it, and the updater would briefly find nothing at its address.
-			p.logf("%s is already published on %s and stays as it is", a.name, tag)
-			expect[a.name] = expectation{size: have.Size, digest: deref(have.Digest)}
+			kept = append(kept, a.name)
+			expect[a.name] = expectation{size: have.Size}
 			continue
 		case !writes:
 			// Reported by the check below.
@@ -335,6 +409,10 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, st *r
 		}
 		expect[a.name] = expectation{size: a.size, digest: a.digest}
 	}
+	if len(kept) > 0 && !st.keptWarned {
+		st.keptWarned = true
+		p.warnf("release %d for %s was already published and keeps its own %s, which are not the bytes of this build; this build's were not uploaded", rel.ID, tag, strings.Join(kept, ", "))
+	}
 
 	if rel.Draft {
 		// The last look before the one step that cannot be taken back, at the release
@@ -347,7 +425,11 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, st *r
 			return err
 		}
 		if fresh.Draft {
-			if problems := contentProblems(fresh, arts, expect); len(problems) > 0 {
+			problems, err := p.contentProblems(ctx, fresh, arts, expect, st)
+			if err != nil {
+				return err
+			}
+			if len(problems) > 0 {
 				return &unfinishedError{problems: problems}
 			}
 			st.pinned = rel.ID
@@ -368,12 +450,21 @@ func (p *Publisher) pass(ctx context.Context, tag string, arts []artifact, st *r
 	if err := requireTag(got, tag); err != nil {
 		return err
 	}
+	return p.confirm(ctx, got, tag, arts, expect, st)
+}
+
+// confirm is the last word on a release: published with everything expected of it,
+// still a draft, which another reading may change, or published and wrong, which
+// nothing this program sends can put right.
+func (p *Publisher) confirm(ctx context.Context, got release, tag string, arts []artifact, expect map[string]expectation, st *runState) error {
 	if got.Draft {
-		// Not published, so not yet past the point of no return: the next pass looks
-		// at this same release again and may publish it, and nothing else.
-		return &unfinishedError{problems: []string{fmt.Sprintf("release %d is still a draft", got.ID)}}
+		return &unfinishedError{problems: []string{fmt.Sprintf("release %d still reads as a draft; after a publish request it is only read, and a rerun of the publish takes it from here", got.ID)}}
 	}
-	if problems := contentProblems(got, arts, expect); len(problems) > 0 {
+	problems, err := p.contentProblems(ctx, got, arts, expect, st)
+	if err != nil {
+		return err
+	}
+	if len(problems) > 0 {
 		return stopf("release %d for %s is published but not right, and nothing more is sent to it: %s", got.ID, tag, strings.Join(problems, "; "))
 	}
 	p.logf("published %s: %s", tag, got.HTMLURL)
@@ -491,8 +582,9 @@ func requireTag(rel release, tag string) error {
 }
 
 // contentProblems is what a release lacks: notes, and each artifact uploaded with the
-// size and digest expected of it.
-func contentProblems(got release, arts []artifact, expect map[string]expectation) []string {
+// size and digest expected of it. A matching size says nothing about the bytes, so a
+// file GitHub gives no digest for is downloaded and hashed.
+func (p *Publisher) contentProblems(ctx context.Context, got release, arts []artifact, expect map[string]expectation, st *runState) ([]string, error) {
 	var problems []string
 	if got.Body == "" {
 		problems = append(problems, "it has no notes")
@@ -507,11 +599,66 @@ func contentProblems(got release, arts []artifact, expect map[string]expectation
 			problems = append(problems, fmt.Sprintf("%s is in state %q", a.name, have.State))
 		case have.Size != want.size:
 			problems = append(problems, fmt.Sprintf("%s holds %d bytes, want %d", a.name, have.Size, want.size))
-		case want.digest != "" && have.Digest != nil && *have.Digest != want.digest:
-			problems = append(problems, fmt.Sprintf("%s has digest %s, want %s", a.name, *have.Digest, want.digest))
+		case want.digest != "":
+			digest, err := p.digestOf(ctx, *have, st)
+			if err != nil {
+				return nil, err
+			}
+			if digest != want.digest {
+				problems = append(problems, fmt.Sprintf("%s has digest %s, want %s", a.name, digest, want.digest))
+			}
 		}
 	}
-	return problems
+	return problems, nil
+}
+
+// digestOf is the sha256 digest of an uploaded asset: the one GitHub gives, or, when
+// it gives none, the digest of the bytes it serves.
+func (p *Publisher) digestOf(ctx context.Context, a asset, st *runState) (string, error) {
+	if a.Digest != nil {
+		return *a.Digest, nil
+	}
+	if digest, ok := st.digests[a.ID]; ok {
+		return digest, nil
+	}
+	p.logf("GitHub gives no digest for %s; downloading it to check its bytes", a.Name)
+	digest, err := p.download(ctx, a.ID)
+	if err != nil {
+		return "", err
+	}
+	st.digests[a.ID] = digest
+	return digest, nil
+}
+
+// download hashes an asset's bytes as GitHub serves them. The API answers with a
+// redirect to where the bytes are kept; the client follows it without the token, which
+// net/http does not send to another host.
+func (p *Publisher) download(ctx context.Context, id int64) (string, error) {
+	u := p.repoURL(fmt.Sprintf("/releases/assets/%d", id))
+	ctx, cancel := context.WithTimeout(ctx, uploadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/octet-stream")
+	req.Header.Set("Authorization", "Bearer "+p.Token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "fleetdeck-publish-release")
+	resp, err := p.client().Do(req)
+	if err != nil {
+		return "", &transportError{method: http.MethodGet, err: fmt.Errorf("GET %s: %w", u, err)}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		return "", &APIError{Method: http.MethodGet, URL: u, Status: resp.StatusCode, Message: message(data)}
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, resp.Body); err != nil {
+		return "", &transportError{method: http.MethodGet, err: fmt.Errorf("GET %s: reading the file: %w", u, err)}
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func (p *Publisher) releaseURL(id int64) string {
@@ -656,28 +803,31 @@ func (p *Publisher) do(ctx context.Context, timeout time.Duration, method, u str
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("User-Agent", "fleetdeck-publish-release")
 
-	client := p.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
+	resp, err := p.client().Do(req)
 	if err != nil {
-		return nil, &transportError{fmt.Errorf("%s %s: %w", method, u, err)}
+		return nil, &transportError{method: method, err: fmt.Errorf("%s %s: %w", method, u, err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, &transportError{fmt.Errorf("%s %s: reading the answer: %w", method, u, err)}
+		return nil, &transportError{method: method, err: fmt.Errorf("%s %s: reading the answer: %w", method, u, err)}
 	}
 	if resp.StatusCode >= 300 {
 		return nil, &APIError{Method: method, URL: u, Status: resp.StatusCode, Message: message(data)}
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
-			return nil, &transportError{fmt.Errorf("%s %s: unreadable answer: %w", method, u, err)}
+			return nil, &transportError{method: method, err: fmt.Errorf("%s %s: unreadable answer: %w", method, u, err)}
 		}
 	}
 	return resp.Header, nil
+}
+
+func (p *Publisher) client() *http.Client {
+	if p.Client != nil {
+		return p.Client
+	}
+	return http.DefaultClient
 }
 
 func (p *Publisher) apiRoot() string { return strings.TrimSuffix(p.API, "/") }
@@ -770,17 +920,6 @@ func findAsset(assets []asset, name string) *asset {
 		}
 	}
 	return nil
-}
-
-func (a *asset) holds(art artifact) bool {
-	return a.Size == art.size && a.Digest != nil && *a.Digest == art.digest
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 // nextLink is the rel="next" address in a Link header, or "".
