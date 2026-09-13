@@ -41,3 +41,9 @@ The panel's Content-Security-Policy is `'self'` everywhere except `style-src`, w
 The vendored xterm.js builds `<style>` elements at runtime and fills them with the terminal's measured cell size and theme colours, and that version has no nonce option. Without the keyword the terminal draws in a proportional font with no colour.
 
 `script-src` and `default-src` stay `'self'`, so what this allows is an injected appearance, not injected behaviour. See the comment on `contentSecurityPolicy` in `internal/server/static.go`.
+
+## A frozen session and a slow one look the same
+
+A session frozen inside a tool call — `ssh` asking about a host key nobody will see, a network call with no timeout, an MCP call that never returns — cannot say so, and the daemon goes on describing it as working. Nothing outside the session tells a step that will never finish from a step that is merely slow: not the daemon's flags, not the process, not the transcript.
+
+What the panel can establish is how long the session has owed its next move and said nothing. Past sixteen minutes it stops repeating the daemon's "no question outstanding" and shows that it does not know whether anyone is waiting, naming the tool call only when the transcript shows one. Claude Code writes some calls to the transcript only once they return, so for those the panel can say that the session is not answering, but not what it is inside. It does not raise a banner of its own for this; the silence notification still does, after `notify.silence_after`.
