@@ -1940,8 +1940,9 @@ main {
   container-type: inline-size;
 }
 
-/* On the screen tab the header holds the terminal's font buttons too
- * (web/js/fontcontrols.js). Found live: in a narrow centre the tabs, the
+/* The header holds the terminal's font buttons (web/js/fontcontrols.js).
+ * Found live, while it also held the digest and screen tabs: in a narrow
+ * centre the tabs, the
  * buttons and the close button were wider than the panel, the centre scrolled
  * sideways, and the close button went off its edge. Below the width they fit
  * in beside the tabs and the close button — measured at 354 px with the name
@@ -1955,11 +1956,6 @@ main {
   .session-panel .term-font {
     display: none;
   }
-}
-
-.session-panel .s-tabs {
-  display: flex;
-  gap: 2px;
 }
 
 .session-panel button {
@@ -1999,12 +1995,6 @@ main {
   background: var(--surface-hover);
 }
 
-.session-panel .s-tab-on {
-  font-weight: 600;
-  background: var(--surface);
-  border-color: var(--accent);
-}
-
 .session-panel .s-key {
   font-variant-numeric: tabular-nums;
   min-width: 34px;
@@ -2020,8 +2010,8 @@ main {
  * session running elsewhere, in work that is somebody's, and nothing takes it
  * back. Drawn beside ✕ they read as one set of window controls, and the first
  * person to see this panel who had not written it read them as exactly that and
- * asked what the buttons were for. They are grouped down here with the box that
- * writes into the same session, behind a label naming where the press lands.
+ * asked what the buttons were for. They are grouped down here, under the
+ * terminal they press into, behind a label naming where the press lands.
  * The grouping is the message: what stays here is at the top, what leaves is at
  * the bottom. */
 .session-panel .s-close {
@@ -2043,7 +2033,7 @@ main {
   font-weight: 400;
 }
 
-/* The name of the session this panel is pointing at, beside the tabs. It is a
+/* The name of the session this panel is pointing at, in the header. It is a
  * session's own name and can be any length, so it shrinks and clips with an
  * ellipsis rather than pushing the close button off the row — min-width:0
  * because a flex item will not shrink below its content without it. */
@@ -2056,41 +2046,99 @@ main {
   color: var(--text);
 }
 
-/* The body is the one part that scrolls: the tabs, the error line and the
- * input must stay put while a session talks. */
+/* The cards this session has worked on, oldest first, above its terminal.
+ *
+ * One line, whatever it holds. A row above a terminal that changes height takes
+ * the room from the terminal, and every refit resizes the session for everyone
+ * watching it (docs/engineering/live-terminal.md) — so the row's height is
+ * fixed, it never wraps, and a history wider than the panel scrolls sideways.
+ *
+ * The height has room for a scrollbar under the cards. Found on a stand: at the
+ * height of the cards alone, a long history's scrollbar was drawn over them and
+ * cut the text in half. Cards sit at the top of the row, so the row looks the
+ * same whether the scrollbar is there or not. */
+.session-panel .s-cards {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-sm);
+  height: 36px;
+  padding-top: 2px;
+  box-sizing: border-box;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+.session-panel .s-cards-label {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.session-panel .s-cards-none,
+.session-panel .s-cards-loading,
+.session-panel .s-cards-sep {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.session-panel .s-cards-error {
+  flex: none;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.session-panel .s-card {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 28em;
+  padding: 1px 8px;
+  font-size: var(--fs-xs);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.session-panel .s-card-id {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-panel .s-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-panel .s-card-stage {
+  color: var(--text-muted);
+}
+
+/* Archived: the card has left the board. Dashed and dimmed, and text rather
+ * than a button — the card panel reads the board and has nothing to show. */
+.session-panel .s-card-archived {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+/* The body holds the terminal and takes the height the rows around it leave.
+ * It does not scroll: the terminal scrolls its own screen, and a body that grew
+ * scrollbars would take room from the terminal and resize the session
+ * (docs/engineering/live-terminal.md). */
 .session-panel .s-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--gap);
   background: var(--surface);
-}
-
-.session-panel .s-step {
-  font-size: var(--fs-sm);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.session-panel .s-step:last-child {
-  border-bottom: none;
-}
-
-.session-panel .s-step-user {
-  font-weight: 600;
-}
-
-.session-panel .s-step-assistant,
-.session-panel .s-step-other {
-  color: var(--text-muted);
-}
-
-.session-panel .s-empty {
-  color: var(--text-muted);
 }
 
 .session-panel .s-term {
@@ -2098,8 +2146,8 @@ main {
   /* So the size note (.term-size) is placed over this terminal. */
   position: relative;
   /* For the moment between a bigger type and the refit the terminal is larger
-   * than this element. Spilling into .s-body, which scrolls, gave it
-   * scrollbars; the refit measured the room they left, they went away, and
+   * than this element. Spilling into .s-body, which scrolled while it also
+   * held the digest, gave it scrollbars; the refit measured the room they left, they went away, and
    * the pane refitted again — two resizes of the session for one step (found
    * live). Kept here instead, as .o-term keeps it in the column. */
   overflow: hidden;
@@ -2119,65 +2167,14 @@ main {
   background-color: var(--surface);
 }
 
-/* Errors sit between what the tab is showing and the box being typed into,
- * where a person is already looking — never on top of the content, which
- * would cost them the very output they were reading. */
+/* Errors sit under the terminal, where a person is already looking — never on
+ * top of it, which would cost them the very output they were reading. */
 .session-panel .s-error {
   flex: none;
   color: var(--danger);
   font-weight: 600;
   font-size: var(--fs-sm);
   overflow-wrap: anywhere;
-}
-
-.session-panel .s-form {
-  flex: none;
-  display: flex;
-}
-
-.session-panel .s-input {
-  flex: 1;
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  padding: 6px;
-  resize: vertical;
-}
-
-/* One transcript step: attribution and rendered body.
- *
- * Named for the shared renderer in web/js/steps.js rather than for the pane
- * that draws a step with it — the session panel's digest tab. A pane owns what
- * its ROW is called; everything inside a step is these two classes.
- *
- * Kept as its own block at the end of the file, so that a task rewriting this
- * stylesheet has one self-contained piece to place rather than edits scattered
- * through it.
- *
- * A step's body is markdown now, which brings its own elements; only the two
- * that would otherwise be indistinguishable from the text around them are
- * styled here. Everything else inherits.
- */
-
-.step-from {
-  margin-bottom: 4px;
-  font-size: 0.85em;
-  opacity: 0.7;
-}
-
-.step-body > :first-child {
-  margin-top: 0;
-}
-
-.step-body > :last-child {
-  margin-bottom: 0;
-}
-
-.step-body pre {
-  overflow-x: auto;
 }
 
 /* Markdown tables.
@@ -2233,12 +2230,10 @@ main {
 }
 
 
-/* A notice is not a failure and must not look like one: the session stopping to
- * ask for permission is an expected step, and colouring it like an error teaches
- * the operator to read the error line as noise. It is where a pasted image
- * reports itself — there is no attach control any more, by the operator's own
- * request: pasting is the gesture, and a button beside the box was taking room
- * for something that should simply happen. */
+/* A notice is not a failure and must not look like one: what the terminal says
+ * about itself — that it cannot type, that it could not measure its pane — is a
+ * standing fact, and colouring it like an error teaches the operator to read the
+ * error line as noise. */
 
 .session-panel .s-notice {
   font-size: 0.85em;
@@ -2426,43 +2421,6 @@ main {
   border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
   color: var(--text);
   font-size: var(--fs-2xs);
-}
-
-/* The operator's own words in a thread.
- *
- * A thread holds three different things — what the operator typed, what the
- * session answered, and what another agent sent — and the first and the third
- * were drawn in the same class, separated by a tint of background and by
- * align-self: flex-end, which does nothing at all to any line long enough to
- * wrap. In the dark theme the tint was very nearly the surface it sat on.
- *
- * So the distinction is a word and a bar, not a shade: a signature that reads
- * at a glance, and an edge that finds the message in a thread where one answer
- * can be twenty times the height of the line that prompted it.
- *
- * Every colour here is a theme token rather than a literal, which is what makes
- * it survive both themes: --accent-strong is a different colour in each, and
- * the mark stays as legible against one surface as the other.
- *
- * The row is found by its data attribute, not by a role class. Both panes give
- * a typed message and a forwarded one the same role; only steps.js knows which
- * of the two a row holds, and it says so there.
- */
-
-.step-typed {
-  /* .step-from dims itself to sit out of the way. This one is the opposite:
-   * it is the thing a person scans for. */
-  opacity: 1;
-  color: var(--accent-strong);
-  font-weight: 700;
-  font-size: 0.72em;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.session-panel .s-step[data-typed="1"] {
-  border-left: 3px solid var(--accent-strong);
-  padding-left: 5px;
 }
 
 /* What the orchestrator column's terminal says about itself: that it cannot

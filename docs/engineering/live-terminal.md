@@ -26,7 +26,7 @@ Read this before changing `web/js/liveterminal.js`, `internal/server/pty.go` or 
    | 4404 | no such session |
    | 4503 | no daemon to attach through |
 
-5. **Decided:** the orchestrator column reconnects by itself after 1, 2, 5 and then every 10 s. 4000, 4001 and 4404 are final. 4403 is retried: the token lives exactly as long as the panel's process, so the one moment a page presents a stale token is a panel restart between reading the token and opening the socket, which is the very case reconnecting is for. The screen tab does not reconnect on its own; reopening the tab is its reconnect.
+5. **Decided:** the orchestrator column reconnects by itself after 1, 2, 5 and then every 10 s. 4000, 4001 and 4404 are final. 4403 is retried: the token lives exactly as long as the panel's process, so the one moment a page presents a stale token is a panel restart between reading the token and opening the socket, which is the very case reconnecting is for. The session panel does not reconnect on its own; opening the session again is its reconnect.
 
 ## 2. The session's size belongs to everyone
 
@@ -79,7 +79,7 @@ An element with `position: absolute` is out of the flow. It covers the terminal 
 **Why the terminal's element must have `overflow: hidden`.**
 
 1. Right after a change of font (or of anything else that changes the cell size), and until the refit 150 ms later, xterm is drawn at the old column and row counts with the new cells. It is larger than its element.
-2. If the element lets that spill out, it spills into the nearest ancestor that scrolls. The screen tab's body scrolls, because the digest tab needs it to.
+2. If the element lets that spill out, it spills into the nearest ancestor that scrolls. The screen tab's body scrolled then, because the digest tab, since removed, needed it to.
 3. That ancestor grows scrollbars, and the scrollbars take room from the terminal's element.
 4. The refit measures the element with the scrollbars in it: fewer columns and rows than the real room.
 5. The terminal shrinks to that size, the overflow is gone, the scrollbars go away, the element grows back, the observer fires, and the terminal refits a second time.

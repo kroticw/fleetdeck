@@ -337,32 +337,24 @@ test("the font buttons never grow their row, go away with a folded column, and l
   assert.match(body("\\.term-font-reset"), /min-width:/, "the size label changes width, and A+ moves from under the pointer");
 });
 
-// The mark on the operator's own messages is the whole of the distinction
-// between their words and an agent's, in both themes. One pane draws steps now:
-// the orchestrator column is a terminal, and the session panel's digest tab is
-// what is left of the feed.
-test("the operator's own messages are marked, in colours that follow the theme", () => {
+// The row of cards a session worked on sits above its terminal, and a row above
+// a terminal that changes height resizes the session for everyone watching it
+// (docs/engineering/live-terminal.md). So the row holds one line whatever it
+// lists: it scrolls sideways instead of wrapping, and its height is fixed.
+test("the session's card history is one line that never wraps", () => {
   const { topLevel } = scan(css);
   const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));
-
-  for (const selector of [".step-typed", '.session-panel .s-step[data-typed="1"]']) {
+  for (const selector of [".session-panel .s-cards", ".session-panel .s-card", ".session-panel .s-card-archived"]) {
     assert.ok(selectors.has(selector), `${selector} is not a top-level rule in web/app.css`);
   }
 
-  // A literal colour here is the failure this is guarding: the two themes do
-  // not share a palette, and a shade picked against the light surface can come
-  // out all but invisible against the dark one — which is how the tint it
-  // replaces failed. Every colour must be a token, so it changes with the theme
-  // rather than being chosen for one of them.
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  for (const selector of [".step-typed", '\\.session-panel \\.s-step\\[data-typed="1"\\]']) {
-    const block = new RegExp(`${selector.replace(/^\.step-typed$/, "\\.step-typed")}\\s*\\{([^}]*)\\}`).exec(stripped);
-    assert.ok(block, `${selector} has no rule body to check`);
-    assert.ok(
-      !/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.test(block[1]),
-      `${selector} names a colour outright instead of a theme token: ${block[1].trim()}`,
-    );
-  }
+  const row = /(^|\})\s*\.session-panel \.s-cards\s*\{([^}]*)\}/m.exec(stripped);
+  assert.ok(row, ".session-panel .s-cards has no rule body to check");
+  assert.match(row[2], /flex:\s*none/, "the row can grow or shrink with the terminal");
+  assert.match(row[2], /white-space:\s*nowrap/, "the row wraps, and a longer history makes the terminal shorter");
+  assert.match(row[2], /overflow-x:\s*auto/, "a history wider than the panel cannot be scrolled to");
+  assert.match(row[2], /\bheight:/, "the row's height depends on what it holds");
 });
 
 // The application's icon ships as two drawings, one per theme, and the

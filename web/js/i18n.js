@@ -11,7 +11,6 @@ const en = {
   no_sessions: "No sessions",
   only_orchestrator: "No sessions besides the orchestrator",
   background_task: "background task",
-  typed_here: "operator",
 
   // The controls that size the orchestrator column. "unfold" especially: when
   // the column is folded it is the only thing left on screen, and a button
@@ -209,39 +208,44 @@ const en = {
   // Session panel (web/js/session.js). close_session is its own key rather than
   // card_close above: the two buttons close different things, and a single key
   // shared between them would tie one panel's wording to the other's.
-  tab_digest: "digest",
-  tab_screen: "screen",
   // Says where a press lands, not what the key is called: the glyph on the
   // button already says Esc or ↓, and what no glyph can say is that the press
   // happens in a Claude Code session running elsewhere, where nothing undoes
   // it. The operator read the bare row as window controls for this panel.
   keys_to_session: "these keys are pressed in the live session:",
-  // The box types into that same live session, and Enter sends it there with
-  // no confirmation — a fact the box otherwise keeps to itself.
-  write_to_session: "write to the live session — Enter sends…",
   close_session: "close",
-  no_steps: "no readable steps yet",
   terminal_missing: "the terminal library did not load",
+  // The cards the session has worked on, in a row above its terminal. "none" is
+  // a sentence rather than an empty row, because an empty row reads as a history
+  // that failed to load.
+  session_cards: "cards this session worked on:",
+  session_cards_none: "none — this session has not taken a card",
+  session_cards_loading: "reading the board…",
+  session_cards_failed: "the cards could not be read",
+  session_card_archived: "archived",
+  // The key under the terminal that opens the session's whole conversation.
+  key_transcript: "transcript",
+  key_transcript_hint: "Ctrl+O: the session's whole conversation, including what has scrolled off the screen — press again to come back",
 
-  // The live terminal (web/js/liveterminal.js), on the session panel's screen
-  // tab and in the orchestrator column. Each ending is named apart, because each
-  // asks something different of the operator: wait, look elsewhere, fix the
-  // key, start the daemon, or simply reopen the tab. The column reconnects by
-  // itself and has no tab to reopen, so what it says while it tries again ends
-  // in terminal_reconnecting instead of in that advice.
+  // The live terminal (web/js/liveterminal.js), in the session panel and in the
+  // orchestrator column. Each ending is named apart, because each asks something
+  // different of the operator: wait, look elsewhere, fix the key, start the
+  // daemon, or simply open the session again. The column reconnects by itself
+  // and has nothing to reopen, so what it says while it tries again ends in
+  // terminal_reconnecting instead of in that advice.
   terminal_not_connected: "the terminal is not connected yet",
   terminal_read_only: "this terminal only shows the session: the control key is unavailable, so typing is off",
   terminal_not_fitted: "the terminal could not measure this pane, so it is drawn at its default size — and the session runs at that size too",
   terminal_session_ended: "the session has ended",
   terminal_kicked: "the session was opened in another window",
-  terminal_stream_dropped: "the daemon closed this terminal's connection, but the session is still running — reopen the tab to reconnect",
-  terminal_stream_unexplained: "the terminal stream ended and the daemon could not say whether the session is still running — reopen the tab to find out",
-  terminal_token_refused: "the panel did not accept this terminal's token — reopen the tab to try again",
+  terminal_stream_dropped: "the daemon closed this terminal's connection, but the session is still running — reopen the session to reconnect",
+  terminal_stream_unexplained: "the terminal stream ended and the daemon could not say whether the session is still running — reopen the session to find out",
+  terminal_token_refused: "the panel did not accept this terminal's token — reopen the session to try again",
   terminal_token_unavailable: "the terminal could not get its token from the panel",
   terminal_no_session: "there is no such session any more",
   terminal_key_refused: "the daemon refused the control key",
   terminal_daemon_unavailable: "the daemon is not running",
-  terminal_connection_lost: "the terminal connection was lost — reopen the tab to reconnect",
+  terminal_connection_lost: "the terminal connection was lost — reopen the session to reconnect",
   terminal_reconnecting: "reconnecting by itself…",
   terminal_link_lost: "the terminal lost its connection",
   terminal_token_stale: "the panel did not accept this terminal's token",
@@ -255,16 +259,6 @@ const en = {
   terminal_font_smaller: "smaller type (⌘−)",
   terminal_font_bigger: "bigger type (⌘+)",
   terminal_font_reset: "back to 12 px (⌘0)",
-
-  // Attaching an image to a session (web/js/session.js, web/js/imagefile.js).
-  // Both refusals are worded as what the panel will accept rather than as what
-  // was wrong, because the person is about to pick another file and that is the
-  // useful half. The permission line is not a warning: it names an expected step
-  // so a session that stops to ask is not read as one that hung.
-  image_no_session: "there is no session to attach an image to",
-  image_too_large: "that image is too large to attach",
-  image_wrong_type: "that file is not an image the panel can attach",
-  image_may_ask_permission: "the session will ask your permission the first time it reads from here — answer it in this panel",
 
   // The session list's own header (web/js/sessions.js) and the theme
   // override (web/js/theme.js's button, rendered by header.js). "auto" is
@@ -373,7 +367,6 @@ const ru = {
   no_sessions: "Нет сессий",
   only_orchestrator: "Кроме оркестратора сессий нет",
   background_task: "фоновая задача",
-  typed_here: "оператор",
 
   column_drag: "потяните, чтобы изменить ширину колонки",
   column_fold: "свернуть колонку",
@@ -507,27 +500,30 @@ const ru = {
   docs_empty: "в настроенных каталогах нет документов",
   docs_list_failed: "не удалось построить список документации",
   doc_open_failed: "не удалось открыть документ",
-  tab_digest: "выжимка",
-  tab_screen: "экран",
   keys_to_session: "эти клавиши нажимаются в живой сессии:",
-  write_to_session: "написать в живую сессию — Enter отправит…",
   close_session: "закрыть",
-  no_steps: "читаемых шагов пока нет",
   terminal_missing: "библиотека терминала не загрузилась",
+  session_cards: "карточки сессии:",
+  session_cards_none: "ни одной — сессия не брала карточек",
+  session_cards_loading: "читаю доску…",
+  session_cards_failed: "карточки прочитать не удалось",
+  session_card_archived: "в архиве",
+  key_transcript: "транскрипт",
+  key_transcript_hint: "Ctrl+O: весь разговор сессии, включая то, что ушло за экран, — нажмите ещё раз, чтобы вернуться",
 
   terminal_not_connected: "терминал ещё не подключён",
   terminal_read_only: "этот терминал только показывает сессию: ключа управления нет, поэтому набор выключен",
   terminal_not_fitted: "терминал не смог измерить панель и нарисован в размере по умолчанию — в этом же размере теперь работает и сессия",
   terminal_session_ended: "сессия завершилась",
   terminal_kicked: "сессию открыли в другом окне",
-  terminal_stream_dropped: "демон закрыл соединение этого терминала, но сессия продолжает работать — откройте вкладку заново, чтобы переподключиться",
-  terminal_stream_unexplained: "поток терминала закончился, и демон не смог сказать, работает ли сессия — откройте вкладку заново, чтобы узнать",
-  terminal_token_refused: "пульт не принял токен этого терминала — откройте вкладку заново, чтобы попробовать ещё раз",
+  terminal_stream_dropped: "демон закрыл соединение этого терминала, но сессия продолжает работать — откройте сессию заново, чтобы переподключиться",
+  terminal_stream_unexplained: "поток терминала закончился, и демон не смог сказать, работает ли сессия — откройте сессию заново, чтобы узнать",
+  terminal_token_refused: "пульт не принял токен этого терминала — откройте сессию заново, чтобы попробовать ещё раз",
   terminal_token_unavailable: "терминал не смог получить свой токен у пульта",
   terminal_no_session: "такой сессии больше нет",
   terminal_key_refused: "демон отверг ключ управления",
   terminal_daemon_unavailable: "демон не запущен",
-  terminal_connection_lost: "связь с терминалом потеряна — откройте вкладку заново, чтобы переподключиться",
+  terminal_connection_lost: "связь с терминалом потеряна — откройте сессию заново, чтобы переподключиться",
   terminal_reconnecting: "переподключаюсь сам…",
   terminal_link_lost: "терминал потерял связь",
   terminal_token_stale: "пульт не принял токен этого терминала",
@@ -536,11 +532,6 @@ const ru = {
   terminal_font_smaller: "шрифт мельче (⌘−)",
   terminal_font_bigger: "шрифт крупнее (⌘+)",
   terminal_font_reset: "вернуть 12 px (⌘0)",
-
-  image_no_session: "прикреплять картинку не к чему: сессия не выбрана",
-  image_too_large: "эта картинка слишком велика, чтобы её прикрепить",
-  image_wrong_type: "этот файл — не та картинка, которую пульт умеет прикреплять",
-  image_may_ask_permission: "при первом чтении отсюда сессия спросит вашего разрешения — ответьте ей в этом же пульте",
 
   sessions_title: "Сессии",
   // --- fleets (web/js/fleet.js, header.js's switcher, sessions.js's groups) ---

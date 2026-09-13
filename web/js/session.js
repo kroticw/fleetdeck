@@ -1,48 +1,35 @@
 // web/js/session.js
 //
-// The session panel: two tabs over one session, and the input that types into
-// it. This is the first part of the interface that writes.
+// The session panel: one screen over one session. The session's live terminal,
+// the keys that press into it, and the cards the session has worked on.
 //
-// The two tabs have two sources and are never mixed. The digest is readable
-// text reconstructed from the session's transcript file — what the session
-// said, after the fact, with the housekeeping stripped out. The screen is the
-// session's live terminal, escape sequences and all, from the moment the tab
-// was opened. They disagree by design: the transcript lags behind, and the
-// screen remembers nothing from before the tab was opened — the daemon hands a
-// new viewer the current screen, not the history. One pane that showed sometimes one and
-// sometimes the other would leave a person unable to tell which they were
-// reading, so each tab keeps its own source and says which it is.
+// It used to be two tabs and a box. The digest tab was the session's
+// conversation rebuilt from its transcript — the same conversation the terminal
+// shows, only behind it — and the box under both was a second way into the same
+// session that put text there differently from typing it. Both are gone: the
+// terminal is where a session is read and where it is written to, the same way a
+// session is talked to everywhere else.
+//
+// What the terminal cannot show is the session's path: which cards it took, in
+// what order, the finished ones included. That is the one thing about a session
+// its own output does not contain, so it is what the panel adds above the
+// terminal.
 //
 // Nothing here is built out of an HTML string. Every node is created and every
 // piece of text is assigned as .textContent, which means a session's own words
-// — and sessions we did not write can join this fleet (spec 3.1) — have no path
-// into markup at all, and a translated string cannot break out of an attribute
-// it was interpolated into. It also makes the panel drivable under node's test
-// runner against the stand-in document in web/tests/fake-dom.js. Only the clock
-// is reached through a parameter: the document, fetch, WebSocket and the
-// terminal constructor are read from the global object, which is where the
-// browser puts them and where a test can put its own.
+// and a card's title — and sessions we did not write can join this fleet (spec
+// 3.1) — have no path into markup at all. It also makes the panel drivable under
+// node's test runner against the stand-in document in web/tests/fake-dom.js. The
+// clock and the snapshot store are reached through parameters; the document,
+// fetch, WebSocket and the terminal constructor are read from the global object,
+// which is where the browser puts them and where a test can put its own.
 
-import { fetchDigest, sendText } from "./api.js";
-import { get } from "./store.js";
+import { fetchSessionCards } from "./api.js";
+import { subscribe as subscribeToStore } from "./store.js";
 import { t } from "./i18n.js";
-import { syncSteps } from "./steps.js";
-import { createPending } from "./pending.js";
-import { wireImagePaste } from "./pasteimage.js";
-import { pageStorage } from "./buildcheck.js";
 import { createLiveTerminal } from "./liveterminal.js";
 import { FONT_KEYS } from "./terminalfont.js";
 import { buildFontControls } from "./fontcontrols.js";
-
-// How many transcript steps the digest asks for, and how often it refreshes.
-// The digest is polled: it only changes when a session speaks.
-//
-// The screen is not polled. It is the session's live terminal, from
-// web/js/liveterminal.js — the same one the orchestrator column draws — held
-// for as long as the tab is open. It is never reopened by itself: coming back to
-// the tab is what reconnects.
-const DIGEST_LIMIT = 30;
-const DIGEST_INTERVAL_MS = 3000;
 
 // The key buttons send bytes, not names.
 //
@@ -52,161 +39,64 @@ const DIGEST_INTERVAL_MS = 3000;
 // "up" would type the letters u and p into a live session instead of moving its
 // selection.
 export const KEYS = [
-  { id: "escape", label: "Esc", bytes: "\u001b" },
-  { id: "up", label: "\u2191", bytes: "\u001b[A" },
-  { id: "down", label: "\u2193", bytes: "\u001b[B" },
+  { id: "escape", label: "Esc", bytes: "" },
+  { id: "up", label: "↑", bytes: "[A" },
+  { id: "down", label: "↓", bytes: "[B" },
   { id: "enter", label: "Enter", bytes: "\r" },
+  // Ctrl+O: Claude Code's own view of the whole conversation. It is the way to
+  // read what has scrolled off this screen and what came before the panel was
+  // opened, which the terminal is never sent — the daemon hands a new viewer
+  // the current screen, not the history. The same key takes it back. A word
+  // rather than a glyph, because no glyph says "the whole conversation".
+  { id: "transcript", labelKey: "key_transcript", hintKey: "key_transcript_hint", bytes: "" },
 ];
 
-// The roles a transcript step may claim. The value reaches a class name, and it
-// comes out of a file written by a session, so it is matched against this list
-// rather than trusted into the DOM.
-const KNOWN_ROLES = new Set(["user", "assistant"]);
-
-// createPoller runs `pass` now and then every delayMs, with exactly one timer
-// outstanding at any moment.
+// historyKey is what tells the panel the session's cards may have changed: the
+// cards of this session the snapshot holds, with what can change about them.
 //
-// That invariant is the whole point of this function. The obvious way to write
-// this — arming a fresh timer at the end of the very function the timer calls,
-// without clearing the one that fired it — doubles the number of live timers on
-// every tick, so a tab left open for a minute is issuing thousands of requests
-// a second. It is invisible until the machine is on fire, so it is a unit test
-// (session.test.js) rather than a comment.
-//
-// The second rule: a pass that fails is still a pass. The next one is armed
-// whether `pass` resolved or threw, so one dropped attach or a daemon restarted
-// underneath the panel does not freeze a tab on an error until a person thinks
-// to close and reopen it.
-//
-// A failing pass throws, and this is the only place that catches — deliberately.
-// If each tab caught its own failures, each tab would decide for itself whether
-// to keep polling, and the plan this replaces had exactly that: the digest tab
-// retried and the screen tab froze on the first error. One catch, one rule, no
-// way for the two tabs to disagree.
-export function createPoller(pass, delayMs, { timers = globalThis, onError = () => {} } = {}) {
-  let handle = null;
-  let stopped = false;
-
-  const arm = () => {
-    if (stopped) return;
-    // Clear before setting. Nothing should reach here with a timer already
-    // armed, and if anything ever does — a second start(), a double click on a
-    // tab — the old one is cancelled rather than left running unreferenced.
-    if (handle !== null) timers.clearTimeout(handle);
-    handle = timers.setTimeout(tick, delayMs);
-  };
-
-  const tick = () => {
-    handle = null;
-    void run();
-  };
-
-  const run = async () => {
-    if (stopped) return;
-    try {
-      await pass();
-    } catch (err) {
-      onError(err);
-    }
-    arm();
-  };
-
-  return {
-    start() {
-      void run();
-    },
-    stop() {
-      // Must leave nothing running: a stop that misses a timer leaves a panel
-      // nobody is looking at still polling a session.
-      stopped = true;
-      if (handle !== null) timers.clearTimeout(handle);
-      handle = null;
-    },
-  };
+// The history itself is not in the snapshot — closed cards go to the board's
+// archive, which the snapshot never reads — so it is asked for from the server.
+// Asking once a second, with every snapshot, would read the whole board and its
+// archive for nothing almost every time. What does change the history always
+// shows here first: a card taken puts this session's id on a card, a card
+// closed changes its stage, and a card archived leaves the board.
+function historyKey(snapshot, short) {
+  const cards = (snapshot?.cards ?? []).filter((c) => String(c.session ?? "").trim() === short);
+  return JSON.stringify(cards.map((c) => [c.path, c.stage, c.title]));
 }
 
-// Which tab a session panel was on, kept across a reload of the page.
+// renderSession draws the panel for one session into `root` and opens its
+// terminal. It returns a stop function; calling it, or the panel's own close
+// button, leaves no terminal and no subscription behind.
 //
-// The window reloads the page by itself, and main.js opens the session that was
-// open again (web/js/buildcheck.js keeps that); the tab inside it is this
-// module's to keep. Written on every tab switch and removed when the panel is
-// closed or replaced, so only a panel the page lost without closing it — a
-// reload — comes back on its tab; one opened afresh starts on the digest as it
-// always has.
+// The panel is opened with the daemon's short id, because that is the identity
+// the session list hands over, the one the daemon answers the terminal to, and
+// the one a card's session field holds.
 //
-// The page's session storage, from buildcheck.js's pageStorage, for the reason
-// it gives: this is about one reload of one window. It may be undefined where
-// site data is blocked, and getItem/setItem can still throw on what it returns,
-// so every access below is guarded; a panel without this memory still works.
-const TAB_KEY = "fleetdeck-session-tab";
-const TABS = new Set(["digest", "screen"]);
-
-function recalledTab(storage, short) {
-  try {
-    const kept = JSON.parse(storage?.getItem(TAB_KEY) ?? "null");
-    return kept?.short === short && TABS.has(kept.tab) ? kept.tab : "digest";
-  } catch {
-    return "digest";
-  }
-}
-
-function keepTab(storage, short, tab) {
-  try {
-    if (tab) storage?.setItem(TAB_KEY, JSON.stringify({ short, tab }));
-    else storage?.removeItem(TAB_KEY);
-  } catch {
-    // The panel comes back on the digest after a reload, as it did before.
-  }
-}
-
-// renderSession draws the panel for one session into `root` and starts polling.
-// It returns a stop function; calling it, or the panel's own close button,
-// leaves no timer and no terminal behind.
-//
-// The panel is opened with a short id, because that is the identity the session
-// list hands over — and the two tabs are keyed differently, which is the one
-// thing about this panel that cannot be guessed from the routes' names. The
-// daemon knows a session by its short id and answers EUNKNOWN to the full one,
-// so the screen, the keys and the text go out under `short`. The transcript is
-// a file named after the full session id and the digest route resolves nothing
-// shorter, so the digest needs that instead. Sending either to the other route
-// fails at runtime and in no other way: the panel said "transcript not found"
-// on every session until the two were told apart.
-//
-// The full id is looked up in the snapshot on every digest pass rather than
-// captured when the panel opens. Captured once, a panel opened before the first
-// snapshot arrives holds an empty id for as long as it stays open, and says the
-// session is not listed while the session sits in the list beside it — seen in a
-// screenshot, not deduced.
-//
-// timers and lookup exist for the tests, which cannot wait three real seconds
-// for a second poll or drive a live WebSocket. Both default to the real thing,
-// so nothing in the shipped path is a stand-in.
+// timers and subscribe exist for the tests, which cannot wait on real clocks or
+// drive a live socket. Both default to the real thing, so nothing in the shipped
+// path is a stand-in.
 export function renderSession(
   root,
   short,
   onClose,
   {
     timers = globalThis,
-    lookup = (id) => (get()?.sessions ?? []).find((s) => s.short === id),
-    storage = pageStorage(),
-    // Handed to the screen tab's terminal as it is (see createLiveTerminal).
+    subscribe = subscribeToStore,
+    // Handed to the terminal as it is (see createLiveTerminal).
     links = null,
+    // Opens a card on the board from the history. Absent, the history is text.
+    onOpenCard = null,
   } = {},
 ) {
-
-  let tab = recalledTab(storage, short);
-  let poller = null;
-  // The screen tab's live terminal, while the tab is open, and the font buttons
-  // in the header that size it, painted from what it says about its size.
   let live = null;
   let fontButtons = null;
-  let body = null;
+  let nameLine = null;
+  let cardsRow = null;
   let errorLine = null;
   let noticeLine = null;
-  let disposePaste = null;
-  let input = null;
-  let nameLine = null;
+  let unsubscribe = null;
+  let latest = null;
 
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -221,13 +111,12 @@ export function renderSession(
   // match against that list, whereas a blank header says only that the panel
   // does not know where it points — under a key row that promises to press keys
   // in "the live session".
-  const currentName = () => lookup(short)?.name || short;
+  const currentName = () => (latest?.sessions ?? []).find((s) => s.short === short)?.name || short;
 
-  // Resolved on every poll pass rather than captured when the panel opens, for
-  // the same reason the digest's full session id is (see the note above
-  // renderSession): a panel opened before the first snapshot lands would
-  // otherwise hold whatever was known then — nothing — for as long as it stays
-  // open, while the session sits named in the list beside it.
+  // Resolved on every snapshot rather than captured when the panel opens: a
+  // panel opened before the first snapshot lands would otherwise hold whatever
+  // was known then — nothing — for as long as it stays open, while the session
+  // sits named in the list beside it.
   //
   // Written only when it actually changed. A header rewritten once a second
   // drops any selection inside it and costs the work for no visible difference,
@@ -239,178 +128,149 @@ export function renderSession(
     if (nameLine.textContent !== name) nameLine.textContent = name;
   };
 
-  // What the two message lines are saying, held here rather than only in the
-  // nodes. drawShell builds fresh lines on every tab switch, so a message that
-  // lived only in a node was silently lost by switching to the screen tab to
-  // look at what the session was asking — which is precisely when there is a
-  // message worth keeping.
-  //
-  // The error is two states, not one. A background poll used to clear the same
-  // variable an operator's own failure was written to, and the digest polls
-  // every few seconds: a refused paste or a failed send vanished within one
-  // tick, leaving a person who had just pasted a file with no idea why nothing
-  // happened. Found by comparing this pane against the orchestrator column,
-  // which carries two independent slots for exactly this reason and says so.
-  //
-  // One line rather than two, because the two are never equally urgent — what
-  // the operator just did wins, and a failing background refresh waits behind
-  // it. What matters is that neither can erase the other.
+  // The error line holds two states, not one. What the operator's own action
+  // reported — a key pressed into a terminal that cannot type — and what the
+  // stream reported, which the operator did not cause. What the operator just
+  // did wins; neither can erase the other.
   let actionError = "";
-  let pollError = "";
-  let noticeText = "";
+  let streamError = "";
 
-  // What the screen tab says about its own terminal, for as long as it holds
-  // one: that the stream cannot type, and that the terminal is not the size of
-  // its pane. Kept apart from noticeText for the same reason the two errors are
-  // kept apart: a sent message clears the notice line, and these two sentences
-  // are still true afterwards. They are shown when nothing else is, and they go
-  // with the terminal they describe.
+  // What the terminal says about itself for as long as it holds: that the
+  // stream cannot type, and that the terminal is not the size of its pane.
   const standingNotice = () =>
     [live?.readOnly ? t("terminal_read_only") : "", live?.unfitted ? t("terminal_not_fitted") : ""]
       .filter(Boolean)
       .join("; ");
 
-  // paintError and paintNotice write into a line of their own above the input,
-  // rather than replacing what the tab is showing. Replacing it would throw away
-  // the terminal or the last digest that did arrive, and a transient failure
-  // would cost a person the content they were reading.
+  // Both lines sit under the terminal rather than replacing it: a transient
+  // failure must not cost a person the screen they were reading.
   const paintError = () => {
     if (!errorLine) return;
-    const message = actionError || pollError;
+    const message = actionError || streamError;
     errorLine.textContent = message;
     errorLine.hidden = !message;
   };
 
   const paintNotice = () => {
     if (!noticeLine) return;
-    const message = noticeText || standingNotice();
+    const message = standingNotice();
     noticeLine.textContent = message;
     noticeLine.hidden = !message;
   };
 
-  // What the operator's own action reported — a send, a key, a pasted image.
-  // Cleared only by the next such action.
   const showError = (message) => {
     actionError = message ?? "";
     paintError();
   };
 
-  // What the background poll reported. Cleared only by that poll succeeding, so
-  // it can neither erase nor be erased by the line above.
-  const showPollError = (message) => {
-    pollError = message ?? "";
+  const showStreamError = (message) => {
+    streamError = message ?? "";
     paintError();
   };
 
-  // showNotice is the same idea for something that is not a failure. It has a
-  // line of its own rather than sharing the error line: "the session may ask you
-  // for permission" is an expected step, and showing it where failures appear
-  // would teach the operator to read the error line as noise.
-  const showNotice = (message) => {
-    noticeText = message ?? "";
-    paintNotice();
+  // --- the cards the session worked on -----------------------------------------
+  //
+  // Drawn into a row of its own that is there from the start and never changes
+  // height: a row above a terminal that grows takes the room from the terminal,
+  // and every refit resizes the session for everyone watching it
+  // (docs/engineering/live-terminal.md). So a history that is loading, empty,
+  // failed or long is still one line — the long one scrolls sideways — and the
+  // failure is said here rather than on the error line, which would appear.
+
+  // Each request is numbered, and only the latest one is drawn: two requests a
+  // moment apart can answer in either order, and the older answer drawn last
+  // would put back a history that has already changed.
+  let historyRequest = 0;
+  let historyFailed = false;
+  let knownHistory = null;
+
+  const drawCardsRow = (...contents) => {
+    if (!cardsRow) return;
+    cardsRow.replaceChildren(el("span", "s-cards-label", t("session_cards")), ...contents);
   };
 
-  // formatBytes is only ever given this module's own ceiling, so it needs no
-  // more than whole mebibytes and no rounding rules worth arguing about.
-  const formatBytes = (bytes) => `${Math.round(bytes / (1024 * 1024))} MiB`;
-
-  // The terminal goes with the tab: its socket, its attach on the daemon and
-  // everything xterm holds.
-  const stopTerminal = () => {
-    if (live) live.stop();
-    live = null;
-  };
-
-  const stopPolling = () => {
-    if (poller) poller.stop();
-    poller = null;
-  };
-
-  const stop = () => {
-    stopPolling();
-    stopTerminal();
-    // The paste handler goes with the panel. Left attached, it would keep
-    // uploading into a session nobody is looking at any more.
-    if (disposePaste) {
-      disposePaste();
-      disposePaste = null;
+  const cardNode = (card) => {
+    const archived = card.archived === true;
+    const openable = !archived && typeof onOpenCard === "function";
+    // A card still on the board opens in the card panel. An archived one does
+    // not: the card panel reads the board, and a click that opens an empty panel
+    // is worse than text that does not pretend to be a control.
+    const node = el(openable ? "button" : "span", archived ? "s-card s-card-archived" : "s-card");
+    if (openable) {
+      node.type = "button";
+      node.addEventListener("click", () => onOpenCard(card.path));
     }
+    node.dataset.path = String(card.path ?? "");
+    if (card.id) node.appendChild(el("span", "s-card-id", String(card.id)));
+    node.appendChild(el("span", "s-card-title", String(card.title || card.path || "")));
+    node.appendChild(el("span", "s-card-stage", String(card.stage ?? "")));
+    // Properties, never interpolated into markup.
+    node.title = [
+      [card.id, card.title].filter(Boolean).join(" "),
+      [card.stage, card.created].filter(Boolean).join(", "),
+      archived ? t("session_card_archived") : "",
+    ]
+      .filter(Boolean)
+      .join(" — ");
+    return node;
   };
 
-  // How a step's row is classed here. The shared renderer owns everything
-  // inside a step; this pane owns what its rows are called.
-  const stepClass = (role) => `s-step s-step-${KNOWN_ROLES.has(role) ? role : "other"}`;
-
-  // The last list the server sent, kept so the thread can be redrawn between
-  // polls — which is the whole point of drawing a sent message at once.
-  let serverSteps = [];
-
-  // What has been sent and has not come back out of the transcript yet. Shared
-  // with the orchestrator column rather than written twice: the two panes
-  // disagreeing about when a message is on screen is exactly the class of
-  // defect this pair has already produced once.
-  const pending = createPending();
-
-  const renderSteps = (fromServer) => {
-    // merge, not the server's list alone: whatever has been sent and has not
-    // come back out of the transcript yet is drawn at the end, where the real
-    // one will land.
-    const steps = pending.merge(fromServer);
-    if (steps.length === 0) {
-      // The server errors on a transcript it cannot read, so an empty list is
-      // a transcript that exists and holds nothing readable. Still says so:
-      // an empty pane is indistinguishable from a pane that failed to load.
-      body.replaceChildren(el("div", "s-empty", t("no_steps")));
+  const drawHistory = (cards) => {
+    if (cards.length === 0) {
+      drawCardsRow(el("span", "s-cards-none", t("session_cards_none")));
       return;
     }
-    // Drawn by web/js/steps.js, the same renderer the orchestrator column uses.
-    // Before this, these two panes drew a step with two different pieces of
-    // code, and only one of them had learned markdown, envelope unwrapping and
-    // leaving an unchanged step alone — which is a defect no test on either
-    // side could see.
-    //
-    // A pane that was showing the "no steps" message has that message as its
-    // only child, and it is not a step; clearing it here means syncSteps always
-    // starts from rows it wrote itself.
-    if (body.firstChild && !body.firstChild.dataset?.stepKey) body.replaceChildren();
-    syncSteps(body, steps, stepClass);
+    const nodes = [];
+    // Oldest first, as the server orders them, with the order spelled out
+    // between them: the point of the row is the path, not the set.
+    cards.forEach((card, i) => {
+      if (i > 0) nodes.push(el("span", "s-cards-sep", "→"));
+      nodes.push(cardNode(card));
+    });
+    drawCardsRow(...nodes);
   };
 
-  // Neither pass catches. A session with no transcript, a route that is not
-  // there, a daemon that went away: all of them are failures a person must see,
-  // and all of them must be tried again. Both happen in createPoller, once, for
-  // both tabs. Whatever was last drawn stays under the message, so one failed
-  // poll does not blank a pane that was full a second ago.
-  const digestPass = async () => {
-    const sessionId = lookup(short)?.sessionId ?? "";
-    if (!sessionId) {
-      // No snapshot yet, or a session that has left the fleet. Saying so beats
-      // asking the server for /api/sessions//digest and reporting whatever that
-      // returns — and because this runs on every pass, the tab starts working
-      // by itself once the session is in a snapshot.
-      throw new Error(t("session_not_listed"));
+  const loadHistory = async () => {
+    const request = ++historyRequest;
+    try {
+      const cards = await fetchSessionCards(short);
+      if (request !== historyRequest) return;
+      historyFailed = false;
+      knownHistory = cards;
+      drawHistory(cards);
+    } catch (err) {
+      if (request !== historyRequest) return;
+      historyFailed = true;
+      // A history drawn before stays readable only in the sentence's absence;
+      // a failure replaces it, because a list that may be stale is not what the
+      // row claims to be.
+      knownHistory = null;
+      drawCardsRow(el("span", "s-cards-error", `${t("session_cards_failed")}: ${err.message}`));
     }
-    serverSteps = await fetchDigest(sessionId, DIGEST_LIMIT);
-    renderSteps(serverSteps);
-    showPollError("");
   };
 
-  // openTerminal is the screen tab's whole life: one live terminal for as long
-  // as the tab is open, drawn into an element of the tab's body.
-  const openTerminal = () => {
-    const host = el("div", "s-term");
-    // Marks the element keys typed into a live session come from, so the rest of
-    // the page can leave them alone — Escape above all, which interrupts a Claude
-    // Code session's turn (see onKey in web/js/card.js).
-    host.dataset.terminal = "";
-    body.replaceChildren(host);
+  let lastKey = null;
+  const onSnapshot = (snapshot) => {
+    latest = snapshot ?? null;
+    refreshName();
+    const key = historyKey(latest, short);
+    // A failed history is asked for again with the next snapshot, which is
+    // what retries it: a board that was briefly unreadable recovers without the
+    // panel being reopened.
+    if (key === lastKey && !historyFailed) return;
+    lastKey = key;
+    void loadHistory();
+  };
+
+  // --- the terminal ------------------------------------------------------------
+
+  const openTerminal = (host) => {
     live = createLiveTerminal(host, short, {
       timers,
       links,
       fontKey: FONT_KEYS.screen,
       report: {
-        streamError: showPollError,
+        streamError: showStreamError,
         actionError: showError,
         standing: paintNotice,
         ready: refreshName,
@@ -418,36 +278,6 @@ export function renderSession(
       },
     });
     live.open();
-  };
-
-  const startPolling = () => {
-    if (tab === "screen") {
-      openTerminal();
-      return;
-    }
-    poller = createPoller(
-      async () => {
-        // Before the pass, not after it: a pass that throws — a session with no
-        // transcript, a daemon that went away — must still leave the header
-        // naming the session, and the digest pass throws precisely when the
-        // snapshot does not hold the session yet, which is the case the header
-        // has to recover from.
-        refreshName();
-        await digestPass();
-      },
-      DIGEST_INTERVAL_MS,
-      { timers, onError: (err) => showPollError(err.message) },
-    );
-    poller.start();
-  };
-
-  const selectTab = (next) => {
-    if (next === tab) return;
-    tab = next;
-    keepTab(storage, short, tab);
-    stop();
-    drawShell();
-    startPolling();
   };
 
   // Through the stream the terminal already holds, like any keystroke: a
@@ -458,75 +288,31 @@ export function renderSession(
     else showError(t("terminal_not_connected"));
   };
 
-  const submitTyped = async () => {
-    // The raw value, not the trimmed one: if the send fails this is what goes
-    // back into the box, and it must be what the person typed.
-    const typed = input.value;
-    if (typed.trim() === "") return;
-    input.value = "";
-    // Drawn before the request goes out, not after it comes back: the wait a
-    // person feels is not the request (about six milliseconds) but the poll
-    // that brings the message back out of the transcript, which was a second in
-    // the common case and ten in the worst one measured.
-    //
-    // Only on the digest tab. The screen tab has the terminal in this same
-    // container, and drawing steps into it would take the terminal off screen.
-    const echo = pending.add(typed.trim());
-    if (tab === "digest") renderSteps(serverSteps);
-    try {
-      await sendText(short, typed.trim());
-      showError("");
-      // Only now, and only here. Whatever the last paste had to say, it said it
-      // about a path that has just left the box — but if the send had failed the
-      // path would be back in the box below, and the sentence explaining that
-      // the session is about to ask permission would still be true.
-      showNotice("");
-    } catch (err) {
-      // The one failure this panel must not have. Losing what somebody typed
-      // is worse than any error message, so the text goes back exactly as it
-      // was and the message goes beside it. And off the thread with it: the
-      // message is in nobody's hands, and leaving it drawn would say it reached
-      // the session.
-      pending.drop(echo);
-      if (tab === "digest") renderSteps(serverSteps);
-      input.value = typed;
-      showError(err.message);
-    }
+  // Everything that goes with the panel: the subscription, the terminal's
+  // socket, its attach on the daemon and everything xterm holds, and any history
+  // answer still on its way.
+  const stop = () => {
+    if (unsubscribe) unsubscribe();
+    unsubscribe = null;
+    if (live) live.stop();
+    live = null;
+    historyRequest += 1;
   };
 
-  function drawShell() {
+  const drawShell = () => {
     root.hidden = false;
-
-    // What is in the box outlives the redraw. drawShell builds a new textarea on
-    // every tab switch, and this panel already holds the rule that a person's
-    // unsent words are the one thing it must not lose — text that failed to send
-    // comes back into the box. A tab switch is not even a failure, which makes
-    // dropping the words worse rather than better: nothing went wrong and they
-    // are gone anyway. And switching to the screen tab to see what a session is
-    // actually asking is exactly when a half-written answer exists.
-    //
-    // The caret is not carried with it: the redraw does not preserve focus
-    // either, so there is nothing to put a caret back into.
-    const typed = input ? input.value : "";
 
     const head = el("div", "s-head");
 
-    const tabs = el("div", "s-tabs");
-    for (const [id, key] of [
-      ["digest", "tab_digest"],
-      ["screen", "tab_screen"],
-    ]) {
-      const button = el("button", id === tab ? "s-tab s-tab-on" : "s-tab", t(key));
-      button.type = "button";
-      button.dataset.tab = id;
-      button.addEventListener("click", () => selectTab(id));
-      tabs.appendChild(button);
-    }
+    // The size of the terminal's type (web/js/fontcontrols.js, the same buttons
+    // as the orchestrator column's). Built here, before the terminal is, and the
+    // same height as the rest of the header, so the header does not grow under a
+    // terminal that has already been fitted.
+    fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "s-font-btn" });
 
-    // Beside the tabs, because the header is where a person looks to find out
-    // what they are looking at — and because the keys at the foot of the panel
-    // now say they are pressed in a live session, which is only half an answer
-    // until the panel says which one.
+    // The header is where a person looks to find out what they are looking at,
+    // and the keys at the foot of the panel say they are pressed in a live
+    // session, which is only half an answer until the panel says which one.
     nameLine = el("div", "s-who", currentName());
     // The name is the session list's own, and two sessions may carry the same
     // one; the short id under the pointer tells them apart. A property, never
@@ -537,59 +323,22 @@ export function renderSession(
     close.type = "button";
     close.title = t("close_session");
     close.addEventListener("click", () => {
-      dispose();
+      stop();
       onClose();
     });
 
-    // The header holds the controls that act on this panel and nothing else:
-    // the tabs, the button that closes it, and on the screen tab the size of
-    // its terminal's type (web/js/fontcontrols.js, the same buttons as the
-    // orchestrator column's). They are built here, before the tab's terminal
-    // is, and are the same height as the tabs beside them, so the header does
-    // not grow under a terminal that has already been fitted.
-    head.appendChild(tabs);
-    fontButtons = null;
-    if (tab === "screen") {
-      fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "s-font-btn" });
-      head.appendChild(fontButtons.node);
-    }
-    head.appendChild(nameLine);
-    head.appendChild(close);
+    head.append(fontButtons.node, nameLine, close);
 
-    // The keys are not among them, and this is the change the operator's first
-    // look at this panel bought. Drawn where they used to be — a bare
-    // `Esc ↑ ↓ Enter ✕` row in the top-right corner, opposite the tabs — they
-    // are in the exact place every window on the operator's machine puts
-    // controls that act on the window, and he read them as that and asked what
-    // they were for. They are not that: each one presses a key inside a Claude
-    // Code session running somewhere else, in work that is somebody's, and
-    // nothing takes it back. A button whose purpose is unclear is either never
-    // pressed or pressed to find out, and `↓` pressed to find out moves a menu
-    // selection in that session.
-    //
-    // So they sit down here instead, against the box that writes into the same
-    // session, under a label that names the destination. Grouped by where the
-    // press lands, not by which corner had room.
-    //
-    // Only on the screen tab. The digest is transcript text already spoken, and
-    // it is the tab the panel opens on: the first meeting with these buttons was
-    // on the one tab where pressing them answers nothing on the screen in front
-    // of you. A control that does nothing meaningful where it is shown teaches a
-    // person that controls in this panel need not be understood.
-    let keys = null;
-    if (tab === "screen") {
-      keys = el("div", "s-keys");
-      keys.appendChild(el("span", "s-keys-label", t("keys_to_session")));
-      for (const key of KEYS) {
-        const button = el("button", "s-key", key.label);
-        button.type = "button";
-        button.dataset.key = key.id;
-        button.addEventListener("click", () => pressKey(key));
-        keys.appendChild(button);
-      }
-    }
+    cardsRow = el("div", "s-cards");
+    drawCardsRow(el("span", "s-cards-loading", t("session_cards_loading")));
 
-    body = el("div", "s-body");
+    const body = el("div", "s-body");
+    const host = el("div", "s-term");
+    // Marks the element keys typed into a live session come from, so the rest of
+    // the page can leave them alone — Escape above all, which interrupts a Claude
+    // Code session's turn (see onKey in web/js/card.js).
+    host.dataset.terminal = "";
+    body.appendChild(host);
 
     errorLine = el("div", "s-error");
     errorLine.hidden = true;
@@ -597,62 +346,33 @@ export function renderSession(
     noticeLine = el("div", "s-notice");
     noticeLine.hidden = true;
 
-    const form = el("form", "s-form");
-    // A form left to its default behaviour navigates the page away on Enter,
-    // taking the whole panel with it.
-    form.addEventListener("submit", (event) => event.preventDefault());
-    input = el("textarea", "s-input");
-    input.rows = 2;
-    // Set as a property, never interpolated into markup: a translation holding
-    // a quote would otherwise break out of the attribute it was written into.
-    input.placeholder = t("write_to_session");
-    input.value = typed;
-    input.addEventListener("keydown", (event) => {
-      // Enter sends, Shift+Enter is a newline — the same bargain every chat
-      // input makes.
-      if (event.key !== "Enter" || event.shiftKey) return;
-      event.preventDefault();
-      return submitTyped();
-    });
+    // The keys are not in the header, and this is the change the operator's
+    // first look at this panel bought. Drawn in the top-right corner beside ✕,
+    // they are in the exact place every window on the operator's machine puts
+    // controls that act on the window, and he read them as that and asked what
+    // they were for. They are not that: each one presses a key inside a Claude
+    // Code session running somewhere else, in work that is somebody's, and
+    // nothing takes it back. So they sit under the terminal they press into,
+    // under a label that names the destination.
+    const keys = el("div", "s-keys");
+    keys.appendChild(el("span", "s-keys-label", t("keys_to_session")));
+    for (const key of KEYS) {
+      const button = el("button", "s-key", key.labelKey ? t(key.labelKey) : key.label);
+      button.type = "button";
+      button.dataset.key = key.id;
+      if (key.hintKey) button.title = t(key.hintKey);
+      button.addEventListener("click", () => pressKey(key));
+      keys.appendChild(button);
+    }
 
-    // Pasting an image goes to the same session this panel is pointing at. The
-    // textarea is rebuilt on every tab switch, so the handler is attached here
-    // rather than once at open — and disposed with the node it sat on, which is
-    // what keeps a tab switch from leaving a second one behind and uploading a
-    // pasted image twice.
-    if (disposePaste) disposePaste();
-    disposePaste = wireImagePaste(input, () => short, {
-      onError: showError,
-      onNotice: showNotice,
-    });
+    root.replaceChildren(head, cardsRow, body, errorLine, noticeLine, keys);
+    return host;
+  };
 
-    form.appendChild(input);
-
-    // keys is absent on the digest tab, and filtered out rather than replaced by
-    // an empty node: an empty container still takes the row's gap and leaves the
-    // writing area sitting at a different height on each tab.
-    root.replaceChildren(...[head, body, errorLine, noticeLine, keys, form].filter(Boolean));
-
-    // The lines above are brand new and empty; what they were saying is held in
-    // state, so it is written back. Without this, switching to the screen tab to
-    // see what a session is actually asking threw away the message that said
-    // why — the same rule this panel already holds for the half-written text in
-    // the box, applied to the two lines beside it.
-    paintError();
-    paintNotice();
-  }
-
-  // What the panel's owner, and its own close button, end it with: stop, and
-  // forget the tab, because a panel closed on purpose is not one a reload lost.
-  // selectTab stops without forgetting.
-  function dispose() {
-    keepTab(storage, short, "");
-    stop();
-  }
-
-  drawShell();
-  startPolling();
-  return dispose;
+  const host = drawShell();
+  unsubscribe = subscribe(onSnapshot);
+  openTerminal(host);
+  return stop;
 }
 
 export default renderSession;

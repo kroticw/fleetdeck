@@ -13,7 +13,6 @@ import (
 
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/state"
-	"github.com/kroticw/fleetdeck/internal/transcript"
 )
 
 // testDeps returns a Deps whose every function is wired to a recorder, plus the
@@ -25,20 +24,12 @@ func testDeps() (Deps, *[]string) {
 		Snapshot: func() state.Snapshot {
 			return state.Snapshot{Cards: []board.Card{{Path: "/b/c.md", Stage: "active"}}}
 		},
-		SendText: func(session, text string) error {
-			calls = append(calls, "text:"+session+":"+text)
-			return nil
-		},
 		SetCardField: func(path, field, value string) error {
 			calls = append(calls, "card:"+path+":"+field+":"+value)
 			return nil
 		},
 		PutStatus: func(sessionID, model string, contextPercent, costUSD float64) {
 			calls = append(calls, fmt.Sprintf("status:%s:%s:%.1f:%.2f", sessionID, model, contextPercent, costUSD))
-		},
-		Digest: func(sessionID string, limit int) ([]transcript.Step, error) {
-			calls = append(calls, fmt.Sprintf("digest:%s:%d", sessionID, limit))
-			return []transcript.Step{{Role: "assistant", Text: "hi"}}, nil
 		},
 		SetOrchestratorSession: func(id string) error {
 			calls = append(calls, "orchestrator:"+id)
@@ -84,54 +75,6 @@ func TestSnapshotIsServedAsJSON(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"/b/c.md"`) {
 		t.Fatalf("snapshot body missing cards: %s", rec.Body.String())
-	}
-}
-
-func TestSendTextReachesTheSession(t *testing.T) {
-	d, calls := testDeps()
-	rec := do(d, http.MethodPost, "/api/sessions/abc123/text", `{"text":"hi","submit":true}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(*calls) != 1 || (*calls)[0] != "text:abc123:hi" {
-		t.Fatalf("unexpected calls: %v", *calls)
-	}
-}
-
-func TestSendTextAcceptsAnAbsentSubmitField(t *testing.T) {
-	d, calls := testDeps()
-	rec := do(d, http.MethodPost, "/api/sessions/abc123/text", `{"text":"hi"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(*calls) != 1 {
-		t.Fatalf("unexpected calls: %v", *calls)
-	}
-}
-
-// The daemon's reply operation always submits: there is no way to place text in a
-// session's prompt without sending it. Accepting submit:false and ignoring it would
-// be a promise the server cannot keep, so it is refused outright.
-func TestSendTextRefusesAnExplicitSubmitFalse(t *testing.T) {
-	d, calls := testDeps()
-	rec := do(d, http.MethodPost, "/api/sessions/abc123/text", `{"text":"hi","submit":false}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("submit:false must be refused with 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if len(*calls) != 0 {
-		t.Fatalf("nothing must reach the daemon, got %v", *calls)
-	}
-	if !strings.Contains(rec.Body.String(), "submit") {
-		t.Fatalf("the refusal must explain itself, got %s", rec.Body.String())
-	}
-}
-
-func TestSendTextReportsADaemonFailure(t *testing.T) {
-	d, _ := testDeps()
-	d.SendText = func(string, string) error { return errors.New("daemon is down") }
-	rec := do(d, http.MethodPost, "/api/sessions/abc/text", `{"text":"hi"}`)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("want 502, got %d", rec.Code)
 	}
 }
 
@@ -315,7 +258,7 @@ func TestWrongMethodIsRefused(t *testing.T) {
 
 func TestMalformedBodyIsRejected(t *testing.T) {
 	d, _ := testDeps()
-	if rec := do(d, http.MethodPost, "/api/sessions/abc/text", `{`); rec.Code != http.StatusBadRequest {
+	if rec := do(d, http.MethodPatch, "/api/config", `{`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("a truncated body must be refused, got %d", rec.Code)
 	}
 }
@@ -324,7 +267,7 @@ func TestMalformedBodyIsRejected(t *testing.T) {
 // the same decision internal/config took with KnownFields(true).
 func TestUnknownJSONFieldIsRejected(t *testing.T) {
 	d, calls := testDeps()
-	rec := do(d, http.MethodPost, "/api/sessions/abc/text", `{"txet":"hi"}`)
+	rec := do(d, http.MethodPatch, "/api/config", `{"orchestratorSesion":"abc"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("an unknown field must be refused with 400, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -335,15 +278,15 @@ func TestUnknownJSONFieldIsRejected(t *testing.T) {
 
 func TestASecondJSONValueIsRejected(t *testing.T) {
 	d, _ := testDeps()
-	if rec := do(d, http.MethodPost, "/api/sessions/abc/text", `{"text":"hi"}{"text":"again"}`); rec.Code != http.StatusBadRequest {
+	if rec := do(d, http.MethodPatch, "/api/config", `{"orchestratorSession":"a"}{"orchestratorSession":"b"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", rec.Code)
 	}
 }
 
 func TestOversizedBodyIsRejected(t *testing.T) {
 	d, calls := testDeps()
-	huge := `{"text":"` + strings.Repeat("x", maxBodyBytes+1) + `"}`
-	rec := do(d, http.MethodPost, "/api/sessions/abc/text", huge)
+	huge := `{"orchestratorSession":"` + strings.Repeat("x", maxBodyBytes+1) + `"}`
+	rec := do(d, http.MethodPatch, "/api/config", huge)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("an oversized body must be refused with 413, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -363,10 +306,8 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 		body   string
 	}{
 		{"snapshot", func(d *Deps) { d.Snapshot = nil }, http.MethodGet, "/api/snapshot", ""},
-		{"text", func(d *Deps) { d.SendText = nil }, http.MethodPost, "/api/sessions/a/text", `{"text":"hi"}`},
 		{"cards", func(d *Deps) { d.SetCardField = nil }, http.MethodPatch, "/api/cards", `{"path":"/b/c.md","field":"stage","value":"new"}`},
 		{"status", func(d *Deps) { d.PutStatus = nil }, http.MethodPost, "/api/status", `{"sessionId":"a","model":"m","costUSD":0,"contextPercent":0}`},
-		{"digest", func(d *Deps) { d.Digest = nil }, http.MethodGet, "/api/sessions/a/digest", ""},
 		{"config", func(d *Deps) { d.SetOrchestratorSession = nil }, http.MethodPatch, "/api/config", `{"orchestratorSession":"abc"}`},
 		{"label", func(d *Deps) { d.SetSessionLabel = nil }, http.MethodPatch, "/api/sessions/a/label", `{"label":"x"}`},
 	}
@@ -428,45 +369,6 @@ func TestPatchCardTreatsNothingToCommitAsSuccessEvenWhenWrappedAsUncommitted(t *
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDigestIsServed(t *testing.T) {
-	d, _ := testDeps()
-	d.Digest = func(_ string, limit int) ([]transcript.Step, error) {
-		if limit != 7 {
-			t.Errorf("limit must reach the source, got %d", limit)
-		}
-		return []transcript.Step{{Role: "assistant", Text: "hello"}}, nil
-	}
-	rec := httptest.NewRecorder()
-	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/sessions/abc/digest?limit=7", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "hello") {
-		t.Fatalf("digest not served: %d %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDigestWithoutTranscriptIsNotAnEmptyList(t *testing.T) {
-	d, _ := testDeps()
-	d.Digest = func(string, int) ([]transcript.Step, error) { return nil, transcript.ErrNoTranscript }
-	rec := httptest.NewRecorder()
-	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/sessions/abc/digest", nil))
-	if rec.Code == http.StatusOK {
-		t.Fatal("a missing transcript must be an error, not an empty digest that looks like a quiet session")
-	}
-}
-
-func TestDigestDefaultsTheLimit(t *testing.T) {
-	d, _ := testDeps()
-	d.Digest = func(_ string, limit int) ([]transcript.Step, error) {
-		if limit != 20 {
-			t.Errorf("want the default limit of 20, got %d", limit)
-		}
-		return []transcript.Step{{Role: "assistant", Text: "hello"}}, nil
-	}
-	rec := do(d, http.MethodGet, "/api/sessions/abc/digest", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

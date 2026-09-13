@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/kroticw/fleetdeck/internal/board"
@@ -114,34 +113,6 @@ func (d Deps) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 // error is a fleet no configuration has, which the caller answers with 404.
 func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
 	return state.ForFleet(d.Snapshot(), r.URL.Query().Get(fleetParam))
-}
-
-func (d Deps) handleSendText(w http.ResponseWriter, r *http.Request) {
-	if d.SendText == nil {
-		unavailable(w, "a daemon")
-		return
-	}
-	var body struct {
-		Text string `json:"text"`
-		// Submit is a pointer so an absent field can be told apart from an
-		// explicit false. The daemon's reply operation always delivers and
-		// submits — there is no way to place text in a session's prompt without
-		// sending it — so an explicit false is refused rather than accepted and
-		// ignored, which would be a promise this server cannot keep.
-		Submit *bool `json:"submit"`
-	}
-	if !decodeBody(w, r, &body) {
-		return
-	}
-	if body.Submit != nil && !*body.Submit {
-		fail(w, http.StatusBadRequest, "submit:false is not possible: the daemon always submits, and text cannot be placed in a session's prompt without sending it")
-		return
-	}
-	if err := d.SendText(r.PathValue("id"), body.Text); err != nil {
-		fail(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleResume brings a stopped session back.
@@ -379,33 +350,10 @@ func (d Deps) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDigest serves the readable moments of a session's transcript. id is
-// the transcript UUID (daemon.Session.SessionID), not the daemon's short id —
-// transcript.Locate matches on the UUID and nothing else.
-func (d Deps) handleDigest(w http.ResponseWriter, r *http.Request) {
-	if d.Digest == nil {
-		unavailable(w, "a transcript reader")
-		return
-	}
-	limit := 20
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	steps, err := d.Digest(r.PathValue("id"), limit)
-	if err != nil {
-		fail(w, http.StatusNotFound, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, steps)
-}
-
 // handlePatchConfig writes the one setting spec section 11 has this panel
 // write: which session is pinned to the orchestrator column. The field is a
 // pointer because an absent key (400: nothing was asked for) and an explicit
-// empty string (204: unpin, a legal request) are different outcomes — the
-// same device handleSendText uses for Submit *bool.
+// empty string (204: unpin, a legal request) are different outcomes.
 func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 	d, ok := d.forFleet(w, r)
 	if !ok {
@@ -437,7 +385,7 @@ func (d Deps) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetSessionLabel writes the operator's own name for one session, id
-// is the session's transcript UUID (handleDigest's own convention — never
+// is the session's transcript UUID (never
 // the daemon's short id). No frontend calls this route yet; see
 // Deps.SetSessionLabel's own comment for why.
 //
