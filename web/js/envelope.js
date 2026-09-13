@@ -7,14 +7,13 @@
 // needs. A month from now nobody would be able to say which half a change
 // belongs to if the two were one file.
 //
-// It is separate from steps.js for a sharper reason. Four places show text that
-// can arrive wrapped: the orchestrator column, the session panel's digest, a
-// session's reason in the right-hand column, and the stalled counter in the
-// header. All four must strip the envelope. Only the first two may render what
-// is inside as markdown — a session's `detail` is carried verbatim on purpose
+// It renders nothing, for a sharper reason. The places that show text which can
+// arrive wrapped — a session's reason in the right-hand column, the stalled
+// counter in the header, the setup page — must strip the envelope and must not
+// render what is inside: a session's `detail` is carried verbatim on purpose
 // (spec 3.1), because a person decides from its exact words whether they are
-// being called. Folding "unwrap" and "render" into one function would make
-// those two panes render markdown they must not.
+// being called. Folding "unwrap" and "render" into one function would make those
+// panes render markdown they must not.
 
 import { t } from "./i18n.js";
 

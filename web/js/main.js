@@ -92,7 +92,9 @@ function openSession(short) {
   // be up, or they cover each other in whichever order they happened to open.
   cardPanel.close();
   reader.close();
-  stopSession = renderSession(sessionPanel, short, closeSession, { links: terminalLinks });
+  // A card in the session's history opens the way a [[link]] in its terminal
+  // does: the session panel goes, the card panel comes up.
+  stopSession = renderSession(sessionPanel, short, closeSession, { links: terminalLinks, onOpenCard: terminalLinks.open });
   rememberOpenSession(storage, short);
 }
 

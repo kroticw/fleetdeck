@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, sendText, resumeSession, fetchDigest, fetchTerminalToken, createCard, setOrchestratorSession } from "../js/api.js";
+import { setCardField, resumeSession, fetchSessionCards, fetchTerminalToken, createCard, setOrchestratorSession } from "../js/api.js";
 
 let calls = [];
 let realFetch;
@@ -103,28 +103,6 @@ test("a refusal with no JSON body still throws something readable", async () => 
   });
 });
 
-test("sending text posts JSON and says it submits", async () => {
-  stubFetch(answer({ status: 204 }));
-
-  await sendText("a1b2c3", "yes, go ahead");
-
-  assert.equal(calls[0].url, "/api/sessions/a1b2c3/text");
-  assert.equal(calls[0].init.method, "POST");
-  assert.equal(calls[0].init.headers["Content-Type"], "application/json");
-  assert.deepEqual(JSON.parse(calls[0].init.body), { text: "yes, go ahead", submit: true });
-});
-
-test("a session id is escaped into the path", async () => {
-  stubFetch(answer({ status: 204 }));
-  await sendText("a/b c", "hi");
-  assert.equal(calls[0].url, "/api/sessions/a%2Fb%20c/text");
-});
-
-test("a refused session write throws", async () => {
-  stubFetch(answer({ status: 502, body: { error: "daemon: EAUTH" } }));
-  await assert.rejects(() => sendText("a1b2c3", "hello"), { message: "daemon: EAUTH" });
-});
-
 // A resume is addressed by short id, not by the transcript UUID its
 // neighbouring routes take: a stopped session is one the daemon no longer
 // lists, and the short id is what the job store names its directory by.
@@ -166,24 +144,32 @@ test("a session that cannot be resumed throws the reason it cannot", async () =>
   await assert.rejects(() => resumeSession("bb22cc33"), /never prompted/);
 });
 
-// The digest is read here rather than taken from the snapshot because it is too
-// large to push to every tab once a second and is wanted only while somebody has
-// a session open.
+// A session's card history is read here rather than taken from the snapshot:
+// closed cards leave the board for its archive, which the snapshot never reads,
+// and the history is wanted only while somebody has a session open.
 
-test("a digest asks for the limit it was given and comes back as steps", async () => {
-  const steps = [{ role: "user", text: "go" }, { role: "assistant", text: "done" }];
-  stubFetch(answer({ status: 200, body: steps }));
+test("a session's cards are asked for under its short id and come back as the list", async () => {
+  const cards = [{ id: "T-001", title: "one", stage: "done", created: "2026-09-11", path: "/b/archive/one.md", archived: true }];
+  stubFetch(answer({ status: 200, body: cards }));
 
-  assert.deepEqual(await fetchDigest("abc123", 30), steps);
-  assert.equal(calls[0].url, "/api/sessions/abc123/digest?limit=30");
+  assert.deepEqual(await fetchSessionCards("abc12345"), cards);
+  assert.equal(calls[0].url, "/api/sessions/abc12345/cards");
 });
 
-test("a transcript that cannot be read throws the server's own words", async () => {
-  // The route answers 404 for a session that has left no transcript, and that
-  // has to reach the operator: an empty pane reads as a quiet session.
-  stubFetch(answer({ status: 404, statusText: "Not Found", body: { error: "transcript not found: abc123" } }));
+test("a short id is escaped into the cards path", async () => {
+  stubFetch(answer({ status: 200, body: [] }));
+  await fetchSessionCards("a/b c");
+  assert.equal(calls[0].url, "/api/sessions/a%2Fb%20c/cards");
+});
 
-  await assert.rejects(() => fetchDigest("abc123", 30), /transcript not found: abc123/);
+test("an answer that is not a list is no cards, never undefined", async () => {
+  stubFetch(answer({ status: 200, body: null }));
+  assert.deepEqual(await fetchSessionCards("abc12345"), []);
+});
+
+test("a history that cannot be read throws the server's own words", async () => {
+  stubFetch(answer({ status: 503, statusText: "Service Unavailable", body: { error: "this panel is not wired to a board" } }));
+  await assert.rejects(() => fetchSessionCards("abc12345"), /not wired to a board/);
 });
 
 test("a refusal whose body is not JSON still produces words, not undefined", async () => {
@@ -191,7 +177,7 @@ test("a refusal whose body is not JSON still produces words, not undefined", asy
   // to the static file server, whose 404 body is plain text.
   stubFetch(answer({ status: 404, statusText: "Not Found" }));
 
-  await assert.rejects(() => fetchDigest("abc123", 30), (err) => {
+  await assert.rejects(() => fetchSessionCards("abc12345"), (err) => {
     assert.equal(err.message, "Not Found");
     return true;
   });

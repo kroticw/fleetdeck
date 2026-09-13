@@ -1,11 +1,12 @@
 // The panel's write client, and the reads that cannot come from the snapshot.
 //
 // Almost every module renders from the snapshot the socket pushes into
-// store.js. The session panel is the exception: a transcript digest is far too
-// large to push to every open tab once a second, and is wanted only while
-// somebody is looking at one session, so it is fetched here on demand — see
-// fetchDigest at the bottom. A session's screen is not read here at all: it is
-// the live terminal (web/js/liveterminal.js).
+// store.js. The session panel is the exception: the cards a session has worked
+// on include the ones archived off the board, which the snapshot never reads,
+// and are wanted only while somebody is looking at one session, so they are
+// fetched here on demand — see fetchSessionCards at the bottom. A session's
+// screen is not read here at all: it is the live terminal
+// (web/js/liveterminal.js).
 //
 // application/json is mandatory on every route with a body, not a habit: the
 // server's guard answers 415 to anything else, and that requirement is one of
@@ -121,23 +122,13 @@ async function post(url, body) {
   }
 }
 
-// sendText types text into a session and sends it.
-//
-// submit defaults to true and there is no working way to pass false: the daemon's
-// reply operation always delivers and submits, so the server refuses an explicit
-// submit:false with 400 rather than accepting a promise it cannot keep. The
-// parameter exists because the call site reads better with the submission stated.
-export function sendText(sessionId, text, submit = true) {
-  return post(`/api/sessions/${encodeURIComponent(sessionId)}/text`, { text, submit });
-}
-
 // resumeSession brings a stopped session back, under its own short id and with
 // its history, and resolves only once it is actually up.
 //
-// It is addressed by short id, not by the transcript UUID sendText's
-// neighbours use: a stopped session is one the daemon is no longer listing, and
-// the short id is what Claude Code's job store — the only source that still
-// knows anything about it — names its directory by.
+// It is addressed by short id, not by the transcript UUID the label route
+// takes: a stopped session is one the daemon is no longer listing, and the
+// short id is what Claude Code's job store — the only source that still knows
+// anything about it — names its directory by.
 //
 // It sends an empty object rather than no body at all. There is nothing to say
 // beyond the id in the path, but the server's guard requires application/json
@@ -150,39 +141,6 @@ export function sendText(sessionId, text, submit = true) {
 // button replaces. The caller must show that it is waiting.
 export function resumeSession(short) {
   return post(`/api/sessions/${encodeURIComponent(short)}/resume`, {});
-}
-
-// uploadSessionImage writes an image into the panel's own store and returns the
-// path it was written to. It sends nothing into the session: the path goes into
-// the operator's message, and the operator presses send.
-//
-// base64 in an ordinary JSON body rather than multipart, deliberately. The two
-// checks that stand between a page in another tab and a live session are the
-// mandatory application/json and the Origin rule (internal/server/guard.go), and
-// multipart is one of the three content types a browser sends cross-origin with
-// no preflight — accepting it here would carve an exception through the guard
-// for the one route that writes a file.
-//
-// The name of the file is not sent. The server chooses it; a name from the
-// request is a path, and a path from a request goes wherever it says.
-export async function uploadSessionImage(sessionId, base64) {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/image`, {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ data: base64 }),
-  });
-  if (!response.ok) {
-    throw await refusal(response);
-  }
-  const body = await readJSON(response);
-  const path = typeof body?.path === "string" ? body.path : "";
-  if (path === "") {
-    // A 200 with no path is a success we cannot use: there is nothing to put in
-    // the box, and pretending otherwise would leave the operator sending a
-    // message about an image that is not named in it.
-    throw new Error("the panel stored the image but the server did not say where");
-  }
-  return path;
 }
 
 // setOrchestratorSession pins, or unpins, the session the left column shows.
@@ -203,9 +161,9 @@ export async function setOrchestratorSession(id) {
 
 // setSessionLabel writes, or given an empty label removes, the operator's own
 // name for one session. sessionId is the transcript UUID
-// (internal/server's route is PATCH /api/sessions/{id}/label, keyed the same
-// way the digest route is — never the daemon's short id, which is reassigned
-// on every restart and cannot durably name anything).
+// (internal/server's route is PATCH /api/sessions/{id}/label — never the
+// daemon's short id, which is reassigned on every restart and cannot durably
+// name anything).
 //
 // An empty label is a legal value and means "forget this session's name": the
 // route takes a pointer, so an absent key is a 400 and an explicit empty
@@ -223,24 +181,21 @@ export async function setSessionLabel(sessionId, label) {
   }
 }
 
-// fetchDigest returns a session's most recent readable steps, oldest first, as
-// {role, text, at} (internal/transcript.Step).
+// fetchSessionCards returns the cards a session has worked on, oldest first, as
+// {id, title, stage, created, path, archived} (internal/board.SessionCard). It
+// is addressed by the daemon's short id, which is what a card's session field
+// holds, and in the fleet the tab's address names, whose board it reads.
 //
-// It throws when the transcript cannot be read, carrying the server's own words
-// — the route answers 404 with {"error": "transcript not found: …"} for a
-// session that has left no transcript. That has to reach the operator: an empty
-// pane is indistinguishable from a session that is simply quiet, which is the
-// same reason the route refuses to answer an unreadable transcript with an
-// empty list.
-export async function fetchDigest(sessionId, limit) {
-  const response = await fetch(
-    `/api/sessions/${encodeURIComponent(sessionId)}/digest?limit=${encodeURIComponent(limit)}`,
-  );
+// It throws when the board cannot be read, carrying the server's own words: a
+// history that could not be read has to look different from a session that
+// took no card, and an empty list is what the second one looks like.
+export async function fetchSessionCards(short) {
+  const response = await fetch(inFleet(`/api/sessions/${encodeURIComponent(short)}/cards`));
   if (!response.ok) {
     throw await refusal(response);
   }
-  const steps = await readJSON(response);
-  return Array.isArray(steps) ? steps : [];
+  const cards = await readJSON(response);
+  return Array.isArray(cards) ? cards : [];
 }
 
 // fetchTerminalToken reads the token a terminal socket must send as its first

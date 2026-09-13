@@ -148,25 +148,20 @@ const KEYS = [
   // being checked is the same one, and because a key that only exists in the
   // language this machine happens to run in is exactly as invisible here as it
   // is there.
-  "tab_digest",
-  "tab_screen",
-  "write_to_session",
   "close_session",
-  "no_steps",
   "terminal_missing",
   // The one string in the panel that says a button leaves this machine. Missing
   // from a dictionary it renders as "keys_to_session" above four bare glyphs,
   // which is the state the operator already could not read.
   "keys_to_session",
-
-  // Attaching an image (web/js/session.js). The permission line especially: it
-  // is the one that keeps a session stopping to ask from being read as a hang,
-  // and falling through to its own key would say "image_may_ask_permission" at
-  // exactly the moment a person needs a sentence.
-  "image_no_session",
-  "image_too_large",
-  "image_wrong_type",
-  "image_may_ask_permission",
+  // The cards a session worked on. "none" especially: an empty history drawn as
+  // its own key name reads as a history that failed, which is the confusion the
+  // sentence exists to prevent.
+  "session_cards",
+  "session_cards_none",
+  "session_cards_loading",
+  "session_cards_failed",
+  "session_card_archived",
 
   // web/js/sessions.js's own column header and the theme override's button
   // (web/js/header.js renders it, web/js/theme.js decides its state) — both
@@ -192,12 +187,6 @@ const KEYS = [
   // falls back to usage.Fetcher's cache (cmd/fleetdeck/collect.go) instead
   // of blanking the limits to "—" for one poll cycle.
   "last_known",
-
-  // The signature under the operator's own words in a thread (web/js/steps.js).
-  // It is the whole of the distinction between what he typed and what an agent
-  // sent him, so falling through to its own key would print "typed_here" where
-  // the point was to be readable at a glance.
-  "typed_here",
 
   // The controls that size the orchestrator column (web/js/orchestrator.js).
   // The unfold one carries the most weight: when the column is folded it is the
