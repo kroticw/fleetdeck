@@ -192,8 +192,19 @@ jobs:
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
+      # The only step whose effects outlive the run, and so the one a rerun has to be
+      # able to repeat. `gh release create` could not: on 2026-09-13 GitHub answered
+      # its create with a 500 and made a draft anyway, a draft is not found by its
+      # tag, and every rerun after that was refused until somebody deleted the draft
+      # by hand. What runs here instead reads the releases GitHub holds, drafts
+      # included, and finishes the release from whatever stage it is at: creates it,
+      # fills a draft, replaces the files an earlier run left on a draft, publishes.
+      # After a failure GitHub may have acted on it looks again rather than repeating
+      # the request, gives a blip a few minutes to clear, and succeeds only once the
+      # release reads back published with every file below -- a release left a draft
+      # turns this run red, it never passes quietly.
       - name: Publish
-        run: gh release create "$RELEASE_VERSION" dist/*.tar.gz dist/*.zip dist/*.dmg --generate-notes
+        run: make publish-release VERSION="$RELEASE_VERSION"
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

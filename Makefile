@@ -80,7 +80,7 @@ else
 EXPECT_SEAL := developer-id
 endif
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app notarize-app dist-dmg verify-dist-dmg notarize-dmg dmg-background dmg-layout window-app install icon
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app notarize-app dist-dmg verify-dist-dmg notarize-dmg publish-release dmg-background dmg-layout window-app install icon
 
 # Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
 # see BUILD_BIN_NAMES above.
@@ -261,6 +261,18 @@ verify-dist-dmg:
 notarize-dmg:
 	@scripts/notarize-dist-dmg.sh "$(DISTDIR)" "$(VERSION)"
 	@$(MAKE) --no-print-directory verify-dist-dmg EXPECT_SEAL=notarized
+
+# publish-release publishes the release for VERSION on GitHub with the archives, the
+# zip and the image in $(DISTDIR), and is the one target a rerun has to be able to
+# repeat: a release GitHub half made -- a draft holding some of the files, or one
+# published after the run was marked failed -- outlives the run. It reads what GitHub
+# holds and finishes it, retries what may clear up, and succeeds only once the
+# release reads back published with every file. Why that is not `gh release create`
+# is in internal/releasepublish. It needs GITHUB_TOKEN and GITHUB_REPOSITORY, which the
+# release workflow has; the globs are the shell's, and a kind of file that is missing
+# fails before GitHub is touched.
+publish-release:
+	go run ./scripts/publish-release --tag "$(VERSION)" "$(DISTDIR)"/*.tar.gz "$(DISTDIR)"/*.zip "$(DISTDIR)"/*.dmg
 
 # dmg-background and dmg-layout rebuild the two committed files the image's
 # window is made of. Human tools, like `icon` below and for the same reason:
