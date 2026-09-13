@@ -289,7 +289,7 @@ func (e *e2e) requirePublished() release {
 			e.t.Errorf("%s is missing", a.name)
 		case have.State != stateUploaded:
 			e.t.Errorf("%s is in state %q", a.name, have.State)
-		case !have.holds(a):
+		case have.Size != a.size || deref(have.Digest) != a.digest:
 			e.t.Errorf("%s on GitHub is %d bytes, digest %v; the local file is %d bytes, %s", a.name, have.Size, deref(have.Digest), a.size, a.digest)
 		}
 	}
@@ -305,6 +305,13 @@ func (e *e2e) must(err error) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func randomHex(t *testing.T) string {
@@ -381,6 +388,40 @@ func TestE2ECreateThatFailedButHappenedWithNoPause(t *testing.T) {
 	e.requirePublished()
 	if n := len(e.settledReleases()); n != 1 {
 		t.Errorf("%d releases carry the tag, want one", n)
+	}
+}
+
+// A publish request answered with a 500 that GitHub did not act on. The run sends it
+// once and then only reads, so it ends red with a draft; the rerun of the publish
+// sends the publish and nothing else.
+func TestE2EPublishThatFailedWithoutHappeningIsRedAndTheRerunFinishes(t *testing.T) {
+	e := newE2E(t, "publish500")
+	e.ft.add(e2eRule{name: "publish 500, not sent", match: isUpdate, times: 1})
+
+	err := e.publisher(e2eWaits...).Publish(context.Background(), e.tag, e.paths)
+	if err == nil || !strings.Contains(err.Error(), "not published") {
+		t.Fatalf("the run ended with %v, want a failure saying the release is not published", err)
+	}
+	patches := 0
+	for _, m := range e.ft.takeMutations() {
+		if strings.HasPrefix(m, "PATCH ") {
+			patches++
+		}
+	}
+	if patches != 1 {
+		t.Errorf("%d updates were sent, want the one publish request", patches)
+	}
+	if rels := e.settledReleases(); len(rels) != 1 || !rels[0].Draft || len(rels[0].Assets) != len(e.paths) {
+		t.Fatalf("the red run did not leave one draft with every file: %+v", rels)
+	}
+
+	e.ft = &faultyTransport{t: t, base: http.DefaultTransport}
+	if err := e.publisher().Publish(context.Background(), e.tag, e.paths); err != nil {
+		t.Fatal(err)
+	}
+	e.requirePublished()
+	if m := e.ft.takeMutations(); len(m) != 1 || !strings.HasPrefix(m[0], "PATCH ") {
+		t.Errorf("the rerun sent %v, want the publish alone", m)
 	}
 }
 
