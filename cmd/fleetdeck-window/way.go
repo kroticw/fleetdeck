@@ -94,6 +94,9 @@ type way struct {
 	Source supervisor.Source
 	// Refusal is the code for why there is none.
 	Refusal string
+	// Running is what the source compares with what it offers: the commit
+	// for a tree, the release version for a release.
+	Running string
 }
 
 // updateWay works out which of the two ways this app updates itself.
@@ -117,13 +120,14 @@ func updateWay(cfg config) way {
 	// moved are a refusal at the moment they are needed, with their own
 	// sentence, and TreeSource makes it.
 	if cfg.tree != "" {
-		return way{Source: &supervisor.TreeSource{
+		running := ownRevision()
+		return way{Running: running, Source: &supervisor.TreeSource{
 			Dir:      cfg.tree,
 			Remote:   updateRemote,
 			Branch:   updateBranch,
 			Embedded: supervisor.Tools{Git: gitPath, Go: goPath, Make: makePath},
 			Env:      os.Environ(),
-			Running:  ownRevision(),
+			Running:  running,
 		}}
 	}
 	if cfg.teamID == "" {
@@ -132,7 +136,7 @@ func updateWay(cfg config) way {
 	if _, err := supervisor.Newer(cfg.version, cfg.version); err != nil {
 		return way{Refusal: refusalNoVersion}
 	}
-	return way{Source: &supervisor.ReleaseSource{
+	return way{Running: cfg.version, Source: &supervisor.ReleaseSource{
 		Releases: &supervisor.Releases{Base: releasesBase},
 		Seal:     &supervisor.Seal{Codesign: codesignPath, Spctl: spctlPath, TeamID: cfg.teamID},
 		Running:  cfg.version,

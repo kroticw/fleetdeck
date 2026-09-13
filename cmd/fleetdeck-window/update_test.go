@@ -91,7 +91,10 @@ func TestThePageAsksAboutUpdatingByTheNameTheWindowBindsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{updateBindingName, wayBindingName, progressFunction} {
+	if knownBindingName != "fleetdeckUpdateKnown" {
+		t.Errorf("knownBindingName = %q, want fleetdeckUpdateKnown", knownBindingName)
+	}
+	for _, name := range []string{updateBindingName, knownBindingName, progressFunction} {
 		if !strings.Contains(string(src), name) {
 			t.Errorf("web/js/update.js never mentions %q, which the window binds", name)
 		}

@@ -132,11 +132,11 @@ rm ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
 
 ## Updating the app
 
-The app has an Update button in its header. It is there only in the app: a browser tab has nothing to run an update with.
+When a version newer than the installed one is out, an Update button appears in the app's header, with the version beside it. While there is nothing to update to, there is no button at all: its appearing is the notice. The button is only ever in the app: a browser tab has nothing to run an update with.
 
-What the button does depends on how the app got onto your Mac. An app built from a git checkout brings that checkout forward; an app installed from a release downloads the next release. A build that can do neither still has the button, and says which of those it is instead of leaving you to work it out from a button that is not there.
+The app finds out about a new version by itself while it is open. Every six hours it asks GitHub which release is newest — one small request, at most four a day however long the window stays open. It keeps the answer, so starting the app again neither asks again nor loses what was found. When GitHub cannot be reached, the app claims nothing: it shows no button if it did not already know of a newer version, and does not hide one it already knew of. It asks again a few minutes later, so once the network is back the button appears by itself.
 
-The app also asks GitHub once a day, when it starts, whether there is a newer version, and says so in the header when there is. It asks nothing else and at no other time, and when it cannot reach GitHub it says nothing — press the button to ask out loud and see why.
+What the button does depends on how the app got onto your Mac. An app built from a git checkout brings that checkout forward; an app installed from a release downloads the next release. A build that can do neither does not look for new versions and shows no button.
 
 ### An app built from a checkout
 

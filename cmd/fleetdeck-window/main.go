@@ -68,6 +68,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	webview "github.com/webview/webview_go"
 
@@ -181,12 +182,11 @@ func main() {
 	if err := w.Bind(chooseFolderBindingName, chooseFolder); err != nil {
 		log.Printf("fleetdeck-window: the setup page will offer no folder chooser: %v", err)
 	}
-	// The button is bound whatever this build is, and that is the change this
-	// file exists for. A window that created no button left a person who had
-	// installed the app from a release with no way to find out that updating
-	// existed at all -- a refusal so quiet that nobody knew there was one.
-	// Now there is always a button; a build that cannot update says so when it
-	// is pressed, and again when the page first loads.
+	// The update button is on screen only while there is something to update
+	// to, and its appearing is the notice (watch.go). A build that cannot
+	// update itself never finds anything to update to, so it shows no button;
+	// why it cannot is in the log, and in the answer to the update binding
+	// should anything call it anyway.
 	canonical := canonicalBundle(exe, *toldCanonical)
 	how := updateWay(config{
 		tree:    treeDir,
@@ -197,13 +197,29 @@ func main() {
 	if how.Refusal != "" {
 		log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
 	}
-	if err := w.Bind(wayBindingName, func() report {
-		if how.Refusal != "" {
-			return refusalProgress(how.Refusal)
+	var watch *updateWatch
+	if how.Source != nil {
+		if markPath, err := askedMarkPath(); err != nil {
+			log.Printf("fleetdeck-window: no home directory to keep the answer about a newer version in, so this window will not look for one: %v", err)
+		} else {
+			watch = &updateWatch{
+				source:   how.Source,
+				running:  how.Running,
+				markPath: markPath,
+				tell:     func(r report) { tell(w, r) },
+				now:      time.Now,
+			}
 		}
-		return report{Step: "can"}
+	}
+	// A page asks this as it loads -- the first time, and again after every
+	// reload -- because it misses every report sent before it was there.
+	if err := w.Bind(knownBindingName, func() report {
+		if watch == nil {
+			return report{Step: "none"}
+		}
+		return watch.known()
 	}); err != nil {
-		log.Printf("fleetdeck-window: the page will not learn whether this build can update: %v", err)
+		log.Printf("fleetdeck-window: a page that loads will not learn of a newer version until the window next finds one: %v", err)
 	}
 	var updating atomic.Bool
 	if err := w.Bind(updateBindingName, func() {
@@ -224,11 +240,12 @@ func main() {
 	}); err != nil {
 		log.Printf("fleetdeck-window: the update button will not work: %v", err)
 	}
-	// One question at startup, at most once a day, and silent unless there is
-	// an answer worth a person's attention. A window started by a handover
-	// asks nothing: it has just been installed, and it knows it is the newest.
-	if how.Source != nil && *handover == "" {
-		go askAtStart(w, how.Source)
+	// Looking for a newer version runs beside the window for as long as it is
+	// open, silent unless what it knows changes. A window started by a
+	// handover looks too: it stays open as long as the one it replaced would
+	// have, and the answer kept for the version before it does not apply.
+	if watch != nil {
+		go watch.run(context.Background(), time.NewTicker(lookEvery).C)
 	}
 
 	// The window's own ground until the keeper's first word, which comes within

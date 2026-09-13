@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 
 import {
   UPDATE_BINDING,
-  WAY_BINDING,
+  KNOWN_BINDING,
   WAIT_SHOWN_AFTER_MS,
   UPDATE_REPAINT_MS,
   initialState,
@@ -85,7 +85,7 @@ test("each step says what is happening, with the build it is about", () => {
   assert.ok(has(updateHTML(state, 2), "update_step_swapped"));
 });
 
-test("the ends: done, already current, busy, failed -- each in words, each pressable again but done", () => {
+test("the ends: done, already current, busy, failed -- each in words, pressable again only where there is something to do", () => {
   const running = onPress(initialState(), { unsent: false, now: 0 }).state;
 
   const done = onProgress(running, { step: "done", detail: "abc1234def" }, 1);
@@ -95,7 +95,7 @@ test("the ends: done, already current, busy, failed -- each in words, each press
   const current = onProgress(running, { step: "current", detail: "abc1234def" }, 1);
   assert.equal(current.phase, "current");
   assert.ok(has(updateHTML(current, 1), "update_current", { rev: "abc1234" }));
-  assert.equal(onPress(current, { unsent: false, now: 2 }).start, true);
+  assert.doesNotMatch(updateHTML(current, 1), /update-button/, "already up to date, and still a button to update with");
 
   const busy = onProgress(running, { step: "busy", detail: "" }, 1);
   assert.ok(has(updateHTML(busy, 1), "update_busy"));
@@ -112,24 +112,68 @@ test("what the window reports is escaped before it reaches the page", () => {
   assert.doesNotMatch(updateHTML(failed, 1), /<img/);
 });
 
-// The defect this whole change is about: the page used to decide whether to
-// show an update button by whether the window had bound one, so an app
-// installed from a release -- which could not update, and said nothing about
-// it -- showed no button at all. Nobody could learn that updating existed.
-//
-// The button is always there now. A build that cannot update says so, in
-// words, beside a button that is visibly not pressable.
+// The button is on screen only while there is something to update to: its
+// appearing is the notice that a newer version exists. A button that stood
+// there always meant "press and I will go and look", was pressed for nothing,
+// and changed nothing on screen on the day a release came out.
 
-test("the way binding is the one cmd/fleetdeck-window gives the page", () => {
-  assert.equal(WAY_BINDING, "fleetdeckUpdateWay");
+test("the known binding is the one cmd/fleetdeck-window gives the page", () => {
+  assert.equal(KNOWN_BINDING, "fleetdeckUpdateKnown");
 });
 
-test("a build that cannot update shows the button and says why", () => {
+test("with nothing to update to there is no button at all, not even a disabled one", () => {
+  const html = updateHTML(initialState(), 0);
+
+  assert.doesNotMatch(html, /update-button/, `a button with nothing to update to: ${html}`);
+  assert.equal(html, '<span class="update-control"></span>', "the empty control must be empty, so CSS can take it out of the row");
+});
+
+test("a window that knows of nothing newer leaves no button", () => {
+  const state = onProgress(initialState(), { step: "none" }, 0);
+
+  assert.equal(state.phase, "idle");
+  assert.doesNotMatch(updateHTML(state, 0), /update-button/);
+});
+
+test("a version the window found takes the button back off when the window says there is none", () => {
+  const offered = onProgress(initialState(), { step: "available", detail: "v0.8.0" }, 0);
+
+  const withdrawn = onProgress(offered, { step: "none" }, 1);
+
+  assert.doesNotMatch(updateHTML(withdrawn, 1), /update-button/);
+});
+
+// The window looks on its own schedule, so what it finds can arrive in the
+// middle of an update, or while the page is asking about unsent text. Neither
+// may be knocked back to an offer.
+test("what the window finds on its own does not interrupt a press", () => {
+  const confirm = onPress(onProgress(initialState(), { step: "available", detail: "v0.8.0" }, 0), { unsent: true, now: 1 }).state;
+  const running = onPress(initialState(), { unsent: false, now: 0 }).state;
+  const done = onProgress(running, { step: "done", detail: "abc1234" }, 1);
+  for (const state of [confirm, running, done]) {
+    for (const report of [{ step: "available", detail: "v0.9.0" }, { step: "none" }]) {
+      assert.equal(onProgress(state, report, 2), state, `${report.step} knocked ${state.phase} out of the way`);
+    }
+  }
+});
+
+test("a failed or refused update keeps its button, so it can be tried again", () => {
+  const running = onPress(initialState(), { unsent: false, now: 0 }).state;
+  const failed = onProgress(running, { step: "failed", reason: "offline", detail: "no route" }, 1);
+  const busy = onProgress(running, { step: "busy" }, 1);
+
+  assert.match(updateHTML(failed, 1), /class="update-button"/);
+  assert.match(updateHTML(busy, 1), /class="update-button"/);
+});
+
+// A build that cannot update itself never finds anything to update to, so it
+// has no button to press; this answer only arrives if something calls the
+// update binding anyway. It is said in words, and still offers no button.
+test("a build that cannot update says why, and offers no button", () => {
   const state = onProgress(initialState(), { step: "cannot", reason: "built-here" }, 0);
   const html = updateHTML(state, 0);
 
-  assert.match(html, /class="update-button"/, "no button at all: the silent refusal is back");
-  assert.match(html, /disabled/, "the button offers an update this build cannot do");
+  assert.doesNotMatch(html, /update-button/, `a button for an update this build cannot do: ${html}`);
   assert.ok(has(html, "update_cannot_built_here"), `no reason on screen: ${html}`);
 });
 
@@ -196,10 +240,10 @@ test("downloading and checking are steps the person can see", () => {
 // A build that cannot update must not start one when the button is pressed
 // anyway -- by a keyboard, or by a click the browser delivered before the
 // answer arrived.
-// The window asks GitHub once a day, at startup, and says nothing unless
-// there is something to say. When there is, it has to be visible without
-// anybody having pressed anything -- that is the whole point of asking.
-test("a version found at startup is shown, and the button still works", () => {
+// The window looks for a newer version by itself while it runs, and says
+// nothing unless there is something to say. When there is, it has to be
+// visible without anybody having pressed anything -- that is the whole point.
+test("a version the window found is shown with a button that installs it", () => {
   const state = onProgress(initialState(), { step: "available", detail: "v0.4.0" }, 0);
   const html = updateHTML(state, 0);
 

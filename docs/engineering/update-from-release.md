@@ -96,12 +96,21 @@ The survivor was a real hole: nothing asked whether Gatekeeper had accepted the 
 
 **The lesson is the one release-app.md section 8 already recorded in other words:** a mutant that survives is worth more than the ones that die, and a pass where everything dies on the first try has usually measured the harness.
 
-## 6. The startup check
+## 6. Finding a newer version while the window runs
 
-- **Decided, by the operator, 2026-09-12: one question at startup, at most once a day, silent unless the answer is yes.** Not a poll: no timer runs while the window is open and nothing repeats. Opening and closing the window ten times in an afternoon asks GitHub once.
-- **Decided: the startup check says nothing about refusals.** Nobody asked the question, so "GitHub could not be reached" on a laptop opening on a train is noise, and noise is what gets a notice ignored. Pressing the button asks out loud, and then every refusal is shown.
-- **Decided: every way of failing to read the mark means ask.** An unreadable mark, a mark from the future, no mark at all — all answer yes. One extra redirect is the cheap mistake; a check that quietly stops asking is the expensive one, and that is the defect this whole page is about.
-- **Decided: a window started by a handover asks nothing.** It has just been installed and knows it is the newest.
+This section replaced "the startup check" on 2026-09-13 (`cmd/fleetdeck-window/watch.go`).
+
+- **Decided, by the operator, 2026-09-13: the Update button is on screen only while there is something to update to.** Its appearing is the notice. From 2026-09-12 the button stood there always and meant "press and I will go and look": it was pressed for nothing, and on the day a release came out nothing on screen changed. This reverses the 2026-09-12 rule that every build shows the button, including a build that cannot update; such a build now shows nothing, and says why in its log.
+- **Decided: the window looks while it runs, not only at startup.** The 2026-09-12 rule — one question at startup, at most once a day, no timer — could not satisfy "appears by itself": a window left open for a week never learned of anything.
+- **Decided: the releases page is asked at most every six hours (`askEvery`).** A release published in the morning is on screen by the afternoon, and the page gets at most four HEAD requests a day per machine however long the window is open. Section 1 is why these requests cost nothing against the API allowance.
+- **Decided: a local look every ten minutes (`lookEvery`) decides whether to ask, by the wall clock and the mark on disk.** Not a timer set for six hours: a Mac's monotonic clock stops while it sleeps, so such a timer on a laptop closed overnight fires hours late. The look reads a file and asks nothing while the answer there is fresh.
+- **Decided: the mark keeps the answer, not only the time of the question.** `~/.config/fleetdeck/last-update-check` is JSON: when, for which running version, and what was offered. A window opened again inside the six hours shows what the last question found; with only the time it would show no button for the rest of the interval, a false "nothing newer". An answer about another running version is not used: after an update the version it offered is the one running.
+- **Decided: no network is not an answer.** A question that fails tells the page nothing — neither "there is a version" nor "there is none" — keeps a version already found, and is not written down, so the next look, within ten minutes, asks again. That is how a network coming back is noticed with no hook into the system's network state. It also means an offline laptop tries every ten minutes; the attempt fails before it leaves the machine.
+- **Decided: finding nothing is said only when it takes something back.** The page hears "none" when a version it was shown is gone, not after every look.
+- **Decided: the page asks what is known as it loads.** A report sent before the page was there, or before a reload, is lost; `fleetdeckUpdateKnown` answers with what the window knows. The page takes only a found version from that answer, so it cannot undo a report that arrived while the answer was on its way.
+- **Kept: a question nobody asked says nothing about refusals.** "GitHub could not be reached" on a laptop opening on a train is noise. Pressing the button, once there is one, shows every refusal.
+- **Kept: every way of failing to read the mark means ask** — unreadable, from the future, in the plain-time format of the previous version, or missing.
+- **Changed: a window started by a handover looks too.** It stays open as long as the one it replaced would have, and the answer kept for the version before it does not apply.
 
 ## 7. Refusals are codes, not sentences
 
