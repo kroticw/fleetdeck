@@ -64,6 +64,23 @@ func TestASignedCheckoutBuildStillPrefersItsTree(t *testing.T) {
 	}
 }
 
+// The window keeps the last answer about a newer version against the version
+// it runs (watch.go), so that after an update the answer about the old version
+// is not taken for one about the new. That version has to be the one the
+// source itself compares with, or the kept answer would be about something
+// else.
+func TestAWayNamesTheVersionItsSourceComparesWith(t *testing.T) {
+	release := updateWay(config{exe: inBundle, version: "v0.7.0", teamID: "PTLLPQ8LY4"})
+	if src, _ := release.Source.(*supervisor.ReleaseSource); src == nil || release.Running != "v0.7.0" || release.Running != src.Running {
+		t.Errorf("a release build says it runs %q, and its source compares with %+v", release.Running, release.Source)
+	}
+
+	tree := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "dev"})
+	if src, _ := tree.Source.(*supervisor.TreeSource); src == nil || tree.Running != src.Running {
+		t.Errorf("a checkout build says it runs %q, and its source compares with %+v", tree.Running, tree.Source)
+	}
+}
+
 // Each refusal is a code rather than a sentence: the page is shown in the
 // reader's own language, and an English string from Go cannot be translated
 // once it has been built into a message.

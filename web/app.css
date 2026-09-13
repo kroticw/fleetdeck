@@ -585,6 +585,12 @@ body {
   gap: 6px;
 }
 
+/* Nothing to update to: the control is empty, and an empty flex item would
+   still take the header's gap. */
+.update-control:empty {
+  display: none;
+}
+
 .update-button {
   font: inherit;
   font-size: var(--fs-xs);

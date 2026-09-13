@@ -15,25 +15,26 @@
 // and not sent is not lost without a word -- an update ends with the page
 // reloading into the new version.
 //
-// One rule was added on 2026-09-12, and it is why this file changed: a build
-// that cannot update itself says so. It used to say nothing, because the page
-// drew a button only where the window had bound one -- so an app installed
-// from a release had no button, and nobody who had one could find out that
-// updating existed at all. The button is always drawn now; window.
-// fleetdeckUpdateWay is what the page asks, as it loads, about whether this
-// build can use it, and a build that cannot answers with the reason.
+// One more rule, from 2026-09-13: the button is on screen only while there is
+// something to update to, and its appearing is the notice that a newer version
+// is out. From 2026-09-12 it stood there always, meaning "press and I will go
+// and look": it was pressed for nothing, and on the day a release came out
+// nothing on screen changed. The window now looks by itself while it runs and
+// reports what it finds ("available", and "none" when it takes one back);
+// window.fleetdeckUpdateKnown is what the page asks, as it loads, for what
+// the window already knows.
 
 import { t } from "./i18n.js";
 
 export const UPDATE_BINDING = "fleetdeckUpdate";
-export const WAY_BINDING = "fleetdeckUpdateWay";
+export const KNOWN_BINDING = "fleetdeckUpdateKnown";
 export const PROGRESS_FUNCTION = "fleetdeckUpdateProgress";
 export const WAIT_SHOWN_AFTER_MS = 2000;
 // How often a running update is repainted: the time of a wait appears no
 // later than this after it passes WAIT_SHOWN_AFTER_MS.
 export const UPDATE_REPAINT_MS = 250;
 
-// phase: idle | cannot | confirm | running | done | current | busy | failed
+// phase: idle | available | cannot | confirm | running | done | current | busy | failed
 export function initialState() {
   return { phase: "idle" };
 }
@@ -73,14 +74,14 @@ export function onProgress(state, { step, detail = "", reason = "" }, now) {
     // What the window answers when this build cannot update itself at all.
     case "cannot":
       return { phase: "cannot", reason };
-    // The window asked GitHub at startup, unprompted, and there is a newer
-    // version. Nobody pressed anything, so this has to show itself.
+    // What the window found by looking on its own: a newer version, or no
+    // longer one. Nobody pressed anything, so a version has to show itself.
+    // It never interrupts a press -- an update running, the question about
+    // unsent text, or an update just done and about to reload the page.
     case "available":
-      return { phase: "available", detail };
-    // The window's answer when it can. Nothing to show, and it must not be
-    // taken for a step of an update that is not running.
-    case "can":
-      return state;
+    case "none":
+      if (state.phase === "running" || state.phase === "confirm" || state.phase === "done") return state;
+      return step === "available" ? { phase: "available", detail } : initialState();
     default:
       // A new step starts its own clock: the time shown is how long this step
       // has taken, which is the wait the person is in now.
@@ -167,11 +168,13 @@ export function updateHTML(state, now) {
     case "done":
       inner = status(fill("update_done", { rev: shortRev(state.detail) }));
       break;
+    // A press found nothing newer after all. There is nothing to update to, so
+    // there is no button -- only the answer.
     case "current":
-      inner = button(t("update_button"), false) + status(fill("update_current", { rev: shortRev(state.detail) }));
+      inner = status(fill("update_current", { rev: shortRev(state.detail) }));
       break;
-    // Found at startup, with nobody asking. The button beside it is the one
-    // that installs it, and it stays pressable.
+    // Found by the window, with nobody asking. This is the notice: the button
+    // beside it is the one that installs it.
     case "available":
       inner = button(t("update_button"), false) + status(fill("update_available", { version: state.detail }), "update-available");
       break;
@@ -191,16 +194,17 @@ export function updateHTML(state, now) {
       inner = button(t("update_button"), false) + status(text, "update-problem");
       break;
     }
-    // This build cannot update itself at all. The button stays on screen and
-    // stays unpressable: its being there is how a person learns that updating
-    // exists, and the sentence beside it is how they learn why not here.
+    // This build cannot update itself at all. It never finds anything to
+    // update to, so this arrives only if the update binding is called anyway;
+    // the answer is said in words, with no button for an update it cannot do.
     case "cannot":
-      inner =
-        button(t("update_button"), true) +
-        status(reasonText("update_cannot", state.reason) || t("update_cannot_other"), "update-problem");
+      inner = status(reasonText("update_cannot", state.reason) || t("update_cannot_other"), "update-problem");
       break;
+    // Nothing to update to: no button at all, not even a disabled one. The
+    // control stays in the page, empty, as the place a found version is
+    // painted into.
     default:
-      inner = button(t("update_button"), false);
+      inner = "";
   }
   return `<span class="update-control">${inner}</span>`;
 }

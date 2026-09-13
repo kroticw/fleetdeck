@@ -149,6 +149,17 @@ test("hidden actually hides, whatever display a section's own rule sets", () => 
   }
 });
 
+// With nothing to update to, the update control is an empty span: the header
+// repaints the button into it when the window finds a version. #header lays
+// its children out with a gap, and an empty flex item still takes one, so an
+// empty control left a hole in the header where the button would be.
+test("an empty update control takes no room in the header", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const block = /\.update-control:empty\s*\{([^}]*)\}/.exec(stripped);
+  assert.ok(block, "web/app.css has no .update-control:empty rule, so the header keeps a gap where no button is");
+  assert.match(block[1], /display\s*:\s*none/, ".update-control:empty must not be displayed");
+});
+
 test("the session panel's rules are top-level rules", () => {
   const { topLevel } = scan(css);
   const selectors = new Set(topLevel.flatMap((rule) => rule.split(",").map((s) => s.trim())));

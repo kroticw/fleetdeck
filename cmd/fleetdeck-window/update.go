@@ -35,13 +35,10 @@ const (
 const (
 	updateBindingName = "fleetdeckUpdate"
 	progressFunction  = "fleetdeckUpdateProgress"
-	// wayBindingName is what the page asks, as it loads, about whether this
-	// build can update itself at all. The page cannot learn that from the
-	// presence of the update binding any more: the binding is always there
-	// now, and a build that cannot update answers this with the reason. The
-	// name is a contract across two languages, and way_test.go holds both
-	// sides to the same spelling.
-	wayBindingName = "fleetdeckUpdateWay"
+	// knownBindingName is what the page asks, as it loads, about a newer
+	// version the window already knows of. The name is a contract across two
+	// languages, and update_test.go holds both sides to the same spelling.
+	knownBindingName = "fleetdeckUpdateKnown"
 )
 
 // How long the new window has, from its start to its panel answering from the
