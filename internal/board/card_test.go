@@ -212,14 +212,69 @@ func TestParseCardLinkNeedsClosingBrackets(t *testing.T) {
 }
 
 func TestParseCardLinkTrimsHeadingAndAlias(t *testing.T) {
-	body := "[[note#heading]] and [[note|alias]]\n"
+	body := "[[note#heading]] and [[other|alias]]\n"
 	card := "---\nzone: planned\nstage: new\nprogress: 0\nsession: abc12345\nrepo: work/thing\ncreated: 2026-09-09\n---\n\n" + body
 	c, err := ParseCard(writeCard(t, t.TempDir(), "trim.md", card))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Links) != 2 || c.Links[0] != "note" || c.Links[1] != "note" {
+	if len(c.Links) != 2 || c.Links[0] != "note" || c.Links[1] != "other" {
 		t.Fatalf("both a heading link and an alias link must resolve to the bare note name, got %v", c.Links)
+	}
+}
+
+// A card that explains the link syntax writes it in backticks. That is text
+// about a link, not a link, and the panel renders it as code (web/js/markdown.js),
+// so it must not reach the card's link list either: there it became a document
+// named "имя" that does not exist. The lines are the board's own, from T-013.
+func TestParseCardIgnoresLinksInsideInlineCode(t *testing.T) {
+	body := "# Title with `code`\n\n" +
+		"- номер карточки как якорь (`[[имя]]` сегодня по имени файла)\n" +
+		"- Ссылки `[[...]]` между карточками и ``[[…]]`` тоже\n\n" +
+		"A lone ` backtick here.\n\nSee [[real-link]].\n"
+	card := "---\nzone: planned\nstage: new\nprogress: 0\nsession: abc12345\nrepo: work/thing\ncreated: 2026-09-09\n---\n\n" + body
+	c, err := ParseCard(writeCard(t, t.TempDir(), "inline.md", card))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Links) != 1 || c.Links[0] != "real-link" {
+		t.Fatalf("a link inside backticks is code, not a link, got %v", c.Links)
+	}
+	if c.Title != "Title with `code`" {
+		t.Fatalf("the title keeps its code span as written, got %q", c.Title)
+	}
+}
+
+// A fence closes only on a fence of its own character, at least as long, with
+// nothing after it: that is how Obsidian reads it. A card showing a fenced
+// example inside a fence has an inner ``` that is part of the example, and
+// toggling on it let the example's links out.
+func TestParseCardIgnoresLinksInsideNestedFences(t *testing.T) {
+	body := "````markdown\n```\n[[fake-a]]\n```\n````\n\n" +
+		"~~~\n```\n[[fake-b]]\n~~~\n\n" +
+		"```\n```go\n[[fake-c]]\n```\n\n" +
+		"See [[real-link]].\n"
+	card := "---\nzone: planned\nstage: new\nprogress: 0\nsession: abc12345\nrepo: work/thing\ncreated: 2026-09-09\n---\n\n" + body
+	c, err := ParseCard(writeCard(t, t.TempDir(), "nested.md", card))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Links) != 1 || c.Links[0] != "real-link" {
+		t.Fatalf("links must come from outside every fence, got %v", c.Links)
+	}
+}
+
+// A card names its report in the goal, again in the log, and again when it
+// goes to review. That is one document, and the panel showed it as three.
+func TestParseCardListsEachLinkOnce(t *testing.T) {
+	body := "[[a]] [[b]] [[a]]\n\n- [[a#heading]] and [[b|alias]] and [[c]]\n"
+	card := "---\nzone: planned\nstage: new\nprogress: 0\nsession: abc12345\nrepo: work/thing\ncreated: 2026-09-09\n---\n\n" + body
+	c, err := ParseCard(writeCard(t, t.TempDir(), "repeat.md", card))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.Links, ",") != "a,b,c" {
+		t.Fatalf("each link once, in the order it first appears, got %v", c.Links)
 	}
 }
 

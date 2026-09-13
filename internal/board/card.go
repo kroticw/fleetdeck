@@ -26,6 +26,11 @@ var (
 	frontmatterRe = regexp.MustCompile(`(?s)\A---\r?\n(.*?)\r?\n---\r?\n`)
 	linkRe        = regexp.MustCompile(`\[\[([^\[\]\r\n]+?)\]\]`)
 	titleRe       = regexp.MustCompile(`(?m)^#\s+(.+)$`)
+	fenceRe       = regexp.MustCompile("^(`{3,}|~{3,})")
+	// A code span as web/js/markdown.js reads one, kept to a single line: a
+	// stray backtick must not pair with one paragraphs away and hide a real
+	// link between them.
+	codeSpanRe = regexp.MustCompile("`[^`\n]+`")
 )
 
 type Card struct {
@@ -89,30 +94,46 @@ func ParseCard(path string) (Card, error) {
 	if t := titleRe.FindStringSubmatch(stripped); t != nil {
 		c.Title = strings.TrimSpace(t[1])
 	}
-	for _, l := range linkRe.FindAllStringSubmatch(stripped, -1) {
-		c.Links = append(c.Links, trimLinkTarget(l[1]))
+	// Links also skip code spans: "`[[имя]]`" is a card explaining the
+	// syntax, and the panel renders it as code. Each link is listed once,
+	// where it first appears: a card that names its report three times has
+	// one report.
+	seen := make(map[string]bool)
+	for _, l := range linkRe.FindAllStringSubmatch(codeSpanRe.ReplaceAllString(stripped, " "), -1) {
+		name := trimLinkTarget(l[1])
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		c.Links = append(c.Links, name)
 	}
 	return c, nil
 }
 
-// stripFencedCode returns body with every fenced code region (delimited by a
-// line whose trimmed form starts with ``` or ~~~) replaced by nothing, so
-// title and link extraction never look inside a fence. An unterminated fence
-// drops everything from its opening marker to the end of the body.
+// stripFencedCode returns body with every fenced code region replaced by
+// nothing, so title and link extraction never look inside a fence. A fence
+// opens on a line whose trimmed form starts with three or more ` or ~, and
+// closes only on a line made of the same character, at least as many of them
+// and nothing else — so a ``` shown inside a ```` fence, or inside a ~~~ one,
+// is part of the code. An unterminated fence drops everything from its
+// opening marker to the end of the body.
 func stripFencedCode(body string) string {
 	lines := strings.Split(body, "\n")
 	out := make([]string, 0, len(lines))
-	inFence := false
+	fence := ""
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
+		if fence == "" {
+			if open := fenceRe.FindString(trimmed); open != "" {
+				fence = open
+				continue
+			}
+			out = append(out, line)
 			continue
 		}
-		if inFence {
-			continue
+		if len(trimmed) >= len(fence) && strings.Trim(trimmed, fence[:1]) == "" {
+			fence = ""
 		}
-		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
 }
