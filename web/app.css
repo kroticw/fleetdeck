@@ -2038,15 +2038,23 @@ main {
  * One line, whatever it holds. A row above a terminal that changes height takes
  * the room from the terminal, and every refit resizes the session for everyone
  * watching it (docs/engineering/live-terminal.md) — so the row's height is
- * fixed, it never wraps, and a history wider than the panel scrolls sideways. */
+ * fixed, it never wraps, and a history wider than the panel scrolls sideways.
+ *
+ * The height has room for a scrollbar under the cards. Found on a stand: at the
+ * height of the cards alone, a long history's scrollbar was drawn over them and
+ * cut the text in half. Cards sit at the top of the row, so the row looks the
+ * same whether the scrollbar is there or not. */
 .session-panel .s-cards {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--gap-sm);
-  height: 26px;
+  height: 36px;
+  padding-top: 2px;
+  box-sizing: border-box;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: thin;
   white-space: nowrap;
   font-size: var(--fs-xs);
   font-weight: 400;
