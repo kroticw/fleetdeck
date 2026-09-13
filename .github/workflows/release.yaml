@@ -231,8 +231,9 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    # Uploads of about a hundred megabytes, plus the publisher's own few minutes of
-    # patience with GitHub when writes to releases are failing.
+    # The publisher gives itself twenty minutes in all, retries and uploads of about a
+    # hundred megabytes included, and ends with an error of its own when they run out;
+    # this is the margin above that, so the job is not cancelled in the middle of it.
     timeout-minutes: 30
     permissions:
       contents: write
@@ -257,9 +258,10 @@ jobs:
       # stops it, because publishing that draft would publish whatever somebody put
       # in it. After a failure GitHub may have acted on it looks again rather than
       # repeating the request, gives a blip a few minutes to clear, and succeeds only
-      # once the release reads back published with every file -- a release left a
+      # once the release reads back published with every file, byte for byte. Once
+      # the publish request has gone out nothing more is written; a release left a
       # draft turns this run red, it never passes quietly, and what reached the draft
-      # stays there for the rerun.
+      # stays there for a rerun of this job.
       - name: Publish
         run: make publish-release VERSION="$RELEASE_VERSION"
         env:
