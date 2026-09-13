@@ -34,11 +34,14 @@ const en = {
   // way of saying no, and the difference between the two is what this marker is for.
   waiting_unknown: "not reported",
   waiting_unknown_hint: "this session's source does not report whether a person is waiting — which is not the same as nobody waiting",
-  // Shown instead when the session has stood inside one tool call, saying nothing,
-  // for longer than any ordinary call runs. The label is followed by the call's name.
-  // It states what is known and nothing more: slow and never-returning look the same.
+  // Shown instead when the session has owed its next move -- a call that has not come
+  // back, a result it has not acted on, a message it has not answered -- and said
+  // nothing for longer than a working session does. waiting_in_call is followed by the
+  // call's name, used only when the transcript shows that call. Both state what is
+  // known and nothing more: a slow step and one that will never finish look the same.
+  waiting_unanswered: "not answering",
   waiting_in_call: "silent inside",
-  waiting_in_call_hint: "this session has been inside one tool call and has said nothing for longer than an ordinary call runs, so it has not been able to report whether a person is waiting. A slow call and one that will never return look the same from outside",
+  waiting_unanswered_hint: "this session owes its next move and has said nothing for longer than a working session does, so it has not been able to report whether a person is waiting. A slow step and one that will never finish look the same from outside",
   open_card: "card",
   open_card_hint: "Open this session's card",
   silent_unmeasured: "not measured",
@@ -372,8 +375,9 @@ const ru = {
   waiting: "Ждёт",
   stalled: "Застряла",
   context_unknown: "транскрипта пока нет",
+  waiting_unanswered: "не отвечает",
   waiting_in_call: "молчит внутри",
-  waiting_in_call_hint: "сессия стоит внутри одного вызова инструмента и молчит дольше, чем идёт обычный вызов, поэтому сказать, ждёт ли она человека, она не могла. Медленный вызов и вызов, который не вернётся, снаружи выглядят одинаково",
+  waiting_unanswered_hint: "сессия должна сделать следующий шаг и молчит дольше, чем молчит работающая сессия, поэтому сказать, ждёт ли она человека, она не могла. Медленный шаг и шаг, который не завершится, снаружи выглядят одинаково",
   open_card: "карточка",
   open_card_hint: "Открыть карточку этой сессии",
   silent_unmeasured: "не измерено",

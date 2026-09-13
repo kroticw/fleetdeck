@@ -30,7 +30,7 @@ import { isMultiFleet, groupSessions, switchFleet } from "./fleet.js";
 import { pageStorage } from "./buildcheck.js";
 import { isLive, isResumable } from "./lifecycle.js";
 import { sessionMarks } from "./initials.js";
-import { isWaiting, isWaitingUnknown, isSilencedInCall } from "./needs.js";
+import { isWaiting, isWaitingUnknown, isLeftUnanswered } from "./needs.js";
 import { cardNumberHTML } from "./cardnumber.js";
 
 // The text explaining *why* a session isn't moving. Where needs has words, they
@@ -131,15 +131,21 @@ function applyContextWidths(root) {
 // (every existing caller that is not testing the badge itself) reads as
 // false, matching a session that has not been through the tracker at all.
 // The not-known badge has two causes and says which. A source that never reports
-// whether anyone is waiting gets "not reported". A session that has stood inside one
-// tool call, silent, past the limit gets the call named instead: that is the one fact
-// the panel has about it, and it is stated as a fact -- the call has not come back --
-// never as a guess about why. Both are the same verdict and the same badge class, so
-// every counter that reads isWaitingUnknown treats them alike.
+// whether anyone is waiting gets "not reported". A session that has owed its next move,
+// silent, past the limit gets "not answering" -- and the call's name instead, when the
+// transcript shows the call it is inside. That is the one fact the panel has about it,
+// stated as a fact, never as a guess about why; and a call is named only when it is on
+// disk, because Claude Code writes some calls only once they return, and naming one
+// nobody can see would be a precise lie. Both causes are the same verdict and the same
+// badge class, so every counter that reads isWaitingUnknown treats them alike.
 function unknownBadge(s) {
-  if (isSilencedInCall(s)) {
-    const label = `${t("waiting_in_call")} ${s.inCall.tool}`;
-    return `<span class="sbadge sbadge-unknown sbadge-incall" title="${escapeHtml(t("waiting_in_call_hint"))}">${escapeHtml(label)}</span>`;
+  if (isLeftUnanswered(s)) {
+    const hint = escapeHtml(t("waiting_unanswered_hint"));
+    if (s.inCall) {
+      const label = `${t("waiting_in_call")} ${s.inCall.tool}`;
+      return `<span class="sbadge sbadge-unknown sbadge-unanswered sbadge-incall" title="${hint}">${escapeHtml(label)}</span>`;
+    }
+    return `<span class="sbadge sbadge-unknown sbadge-unanswered" title="${hint}">${escapeHtml(t("waiting_unanswered"))}</span>`;
   }
   return `<span class="sbadge sbadge-unknown" title="${escapeHtml(t("waiting_unknown_hint"))}">${escapeHtml(t("waiting_unknown"))}</span>`;
 }
@@ -159,18 +165,18 @@ export function rowHtml(s, stalledNow) {
   if (stalled) classes.push("srow-stalled");
 
   // At most one badge, the most specific thing that can honestly be said: a definite
-  // question first; then a session silent inside a named tool call; then a stop that
-  // needs no answer; then "not reported". A session a source never reports on can also
-  // be flag-only stalled, and stalled says more than "not reported", so it wins there.
-  // A session silent inside a call is the other way round: a frozen session was seen
-  // holding state "blocked" throughout, so the stall tracker counts it too, and a bare
-  // flag -- with the last message sent to it standing in as the reason -- says less
-  // than the call it has not come back from. A stall in words never gets here: words
-  // make waiting "no", not unknown.
-  const silentInCall = unknown && isSilencedInCall(s);
+  // question first; then a session left unanswered; then a stop that needs no answer;
+  // then "not reported". A session a source never reports on can also be flag-only
+  // stalled, and stalled says more than "not reported", so it wins there. A session
+  // left unanswered is the other way round: a frozen session was seen holding state
+  // "blocked" throughout, so the stall tracker counts it too, and a bare flag -- with
+  // the last message sent to it standing in as the reason -- says less than the move it
+  // has owed for sixteen minutes. A stall in words never gets here: words make waiting
+  // "no", not unknown.
+  const leftUnanswered = unknown && isLeftUnanswered(s);
   const badge = waiting
     ? `<span class="sbadge sbadge-waiting">${escapeHtml(t("waiting"))}</span>`
-    : silentInCall
+    : leftUnanswered
       ? unknownBadge(s)
       : stalled
         ? `<span class="sbadge sbadge-stalled">${escapeHtml(t("stalled"))}</span>`

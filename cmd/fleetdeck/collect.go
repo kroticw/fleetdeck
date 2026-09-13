@@ -282,20 +282,24 @@ func (c *Collector) reportFor(sessionID string) (reported, bool) {
 // exactly the person trying to reach it (T-047). The file's age is used only for a
 // transcript with no timestamped line to read a voice from, where it is all there is.
 //
+// It also returns how long the session has owed its next move without saying anything
+// (transcript.Voice.Unanswered), zero when it owes nothing.
+//
 // Both readings are cached on the transcript's size and mtime, from one os.Stat, so an
-// idle session costs no reads. The one exception is a session standing inside a call:
-// its voice is read again on every call, because a subagent working for that call
-// speaks in its own transcript while the parent file does not change at all, and a
-// cached reading would let silence grow over a subagent that is busy throughout.
+// idle session costs no reads. The one exception is a session that owes its move: its
+// voice is read again on every call, because while it works through a subagent -- or
+// through a batch Claude Code has not written yet -- the parent file does not change at
+// all, and a cached reading would let the unanswered stretch grow over a subagent that
+// is busy throughout.
 //
 // A transcript that cannot be stat'ed at all returns a zero duration. Per spec
 // section 6 that reads as "not measured", never as "silent forever": state.Diff does
 // not fire the silence rule on a zero, which is what keeps a session whose transcript
 // does not exist yet from being reported as half an hour silent in its first second.
-func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.Duration, *transcript.Call) {
+func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.Duration, time.Duration, *transcript.Call) {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return transcript.Usage{}, false, 0, nil
+		return transcript.Usage{}, false, 0, 0, nil
 	}
 
 	c.cacheMu.Lock()
@@ -304,33 +308,46 @@ func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.D
 	fresh := ok && hit.size == fi.Size() && hit.mtime.Equal(fi.ModTime())
 
 	voice := hit.voice
-	if !fresh || voice.InCall != nil {
+	if !fresh || !voice.Unanswered.IsZero() {
 		voice, err = transcript.ReadVoice(path)
 		if err != nil {
 			voice = transcript.Voice{}
 		}
 	}
 	silentFor := c.silence(voice, fi.ModTime())
+	unansweredFor := c.since(voice.Unanswered)
 
 	if fresh {
-		if hit.voice.InCall != nil {
+		if !hit.voice.Unanswered.IsZero() {
 			hit.voice = voice
 			c.cacheMu.Lock()
 			c.contextCache[path] = hit
 			c.cacheMu.Unlock()
 		}
-		return hit.usage, true, silentFor, voice.InCall
+		return hit.usage, true, silentFor, unansweredFor, voice.InCall
 	}
 
 	u, err := transcript.ContextUsage(path)
 	if err != nil {
-		return transcript.Usage{}, false, silentFor, voice.InCall
+		return transcript.Usage{}, false, silentFor, unansweredFor, voice.InCall
 	}
 
 	c.cacheMu.Lock()
 	c.contextCache[path] = cachedUsage{usage: u, voice: voice, size: fi.Size(), mtime: fi.ModTime()}
 	c.cacheMu.Unlock()
-	return u, true, silentFor, voice.InCall
+	return u, true, silentFor, unansweredFor, voice.InCall
+}
+
+// since is now minus t, or zero for a zero t or a moment in the future: zero is "not
+// measured" everywhere a duration crosses into the snapshot.
+func (c *Collector) since(t time.Time) time.Duration {
+	if t.IsZero() {
+		return 0
+	}
+	if d := c.now().Sub(t); d > 0 {
+		return d
+	}
+	return 0
 }
 
 // silence turns a voice reading into a duration: now minus the moment the session last
@@ -398,8 +415,9 @@ func (c *Collector) enrich(views []state.SessionView, labels map[string]string) 
 		}
 		if path, err := transcript.Locate(c.projectsDir, id); err == nil {
 			live[path] = struct{}{}
-			estimate, haveEstimate, silentFor, inCall := c.transcriptState(path)
+			estimate, haveEstimate, silentFor, unansweredFor, inCall := c.transcriptState(path)
 			views[i].SilentFor = silentFor
+			views[i].UnansweredFor = unansweredFor
 			views[i].InCall = inCall
 			if haveEstimate {
 				u := estimate

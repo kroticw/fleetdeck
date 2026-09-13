@@ -64,11 +64,17 @@ type SessionView struct {
 	CardPath  string            `json:"cardPath,omitempty"`
 	SilentFor time.Duration     `json:"silentFor"`
 
+	// UnansweredFor is how long the session has owed its next move and said nothing --
+	// a call that has not come back, a result it has not acted on, a message it has not
+	// answered -- or zero when it owes nothing. What the panel concludes from it, that
+	// past UnansweredLimit the daemon's "no question" is no longer an answer, is
+	// Waiting's to say.
+	UnansweredFor time.Duration `json:"unansweredFor,omitempty"`
+
 	// InCall is the tool call the session's transcript shows it standing inside, nil
-	// when it is not inside one. It is a fact read off the transcript, not a verdict:
-	// a slow call and a call that will never return look the same from outside. What
-	// the panel concludes from it -- that after CallSilenceLimit of silence inside one
-	// call the daemon's "no question" is no longer an answer -- is Waiting's to say.
+	// when none is on disk. It names what is unanswered when it can and decides
+	// nothing: Claude Code writes some calls only when they return, so a session frozen
+	// inside one of those has no InCall at all.
 	InCall *transcript.Call `json:"inCall,omitempty"`
 
 	// CardID is the number of the card at CardPath ("T-NNN"), empty when that

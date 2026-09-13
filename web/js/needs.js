@@ -59,33 +59,34 @@ export const WAITING_UNKNOWN = "unknown";
 //
 // Absent and empty are different facts, and this is where the difference is read:
 // undefined or null means the source said nothing; "" means the daemon looked and has
-// no question outstanding, which is an answer of no -- unless the session has been
-// silent inside one tool call past CALL_SILENCE_LIMIT_MS, when that "no" is words the
+// no question outstanding, which is an answer of no -- unless the session has owed its
+// next move, saying nothing, past UNANSWERED_LIMIT_MS, when that "no" is words the
 // session has not been able to update, and the answer is unknown. See
-// internal/state/incall.go, SessionView.Waiting.
+// internal/state/unanswered.go, SessionView.Waiting.
 export function waiting(s) {
   if (s.dying) return WAITING_NO;
   if (s.needs === undefined || s.needs === null) return WAITING_UNKNOWN;
-  if (s.needs === "") return isSilencedInCall(s) ? WAITING_UNKNOWN : WAITING_NO;
+  if (s.needs === "") return isLeftUnanswered(s) ? WAITING_UNKNOWN : WAITING_NO;
   if (isStalledNeeds(s.needs)) return WAITING_NO;
   return WAITING_YES;
 }
 
-// How long a session may stand inside one tool call, saying nothing, before the
-// daemon's "no question outstanding" stops counting as an answer. Copied from
-// state.CallSilenceLimit, where the measurement behind the number is written up;
-// internal/state/incall_browser_test.go reads this line and fails if the two differ.
-export const CALL_SILENCE_LIMIT_MS = 11 * 60 * 1000;
+// How long a session may owe its next move, saying nothing, before the daemon's "no
+// question outstanding" stops counting as an answer. Copied from state.UnansweredLimit,
+// where the measurement behind the number is written up;
+// internal/state/unanswered_browser_test.go reads this line and fails if the two differ.
+export const UNANSWERED_LIMIT_MS = 16 * 60 * 1000;
 
-// silentFor crosses the wire as a Go time.Duration, in nanoseconds.
+// unansweredFor crosses the wire as a Go time.Duration, in nanoseconds.
 const NS_PER_MS = 1e6;
 
-// isSilencedInCall: the session's transcript shows it inside one tool call, and it has
-// said nothing for at least CALL_SILENCE_LIMIT_MS. A zero silentFor is "not measured"
-// and never counts. The call is a fact, not a diagnosis: a slow call and one that will
-// never return look the same from outside, and nothing here claims which it is.
-export function isSilencedInCall(s) {
-  return Boolean(s.inCall) && s.silentFor > 0 && s.silentFor / NS_PER_MS >= CALL_SILENCE_LIMIT_MS;
+// isLeftUnanswered: the session has owed its next move -- a call that has not come
+// back, a result it has not acted on, a message it has not answered -- and said
+// nothing for at least UNANSWERED_LIMIT_MS. Absent or zero means it owes nothing, or
+// nothing was measured, and never counts. It is a fact, not a diagnosis: a slow step
+// and one that will never finish look the same from outside.
+export function isLeftUnanswered(s) {
+  return s.unansweredFor > 0 && s.unansweredFor / NS_PER_MS >= UNANSWERED_LIMIT_MS;
 }
 
 // isWaiting is `waiting` narrowed to a plain predicate: true only for a definite yes.

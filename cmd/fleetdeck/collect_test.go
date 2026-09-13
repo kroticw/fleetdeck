@@ -141,7 +141,7 @@ func TestContextEstimateIsNotRecomputedForUnchangedFile(t *testing.T) {
 	}
 
 	c := NewCollector(config.Default(), nil, nil, dir)
-	first, ok, _, _ := c.transcriptState(p)
+	first, ok, _, _, _ := c.transcriptState(p)
 	if !ok || first.Tokens != 100 {
 		t.Fatalf("first read must compute 100 tokens, got %d ok=%v", first.Tokens, ok)
 	}
@@ -159,7 +159,7 @@ func TestContextEstimateIsNotRecomputedForUnchangedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, ok, _, _ := c.transcriptState(p)
+	second, ok, _, _, _ := c.transcriptState(p)
 	if !ok {
 		t.Fatal("second read must still succeed")
 	}
@@ -177,7 +177,7 @@ func TestContextEstimateIsRecomputedWhenFileGrows(t *testing.T) {
 	}
 
 	c := NewCollector(config.Default(), nil, nil, dir)
-	if u, _, _, _ := c.transcriptState(p); u.Tokens != 100 {
+	if u, _, _, _, _ := c.transcriptState(p); u.Tokens != 100 {
 		t.Fatalf("want 100, got %d", u.Tokens)
 	}
 
@@ -186,7 +186,7 @@ func TestContextEstimateIsRecomputedWhenFileGrows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if u, _, _, _ := c.transcriptState(p); u.Tokens != 250 {
+	if u, _, _, _, _ := c.transcriptState(p); u.Tokens != 250 {
 		t.Fatalf("a grown transcript must be re-read, got %d", u.Tokens)
 	}
 }
@@ -271,7 +271,7 @@ func TestEnrichLeavesLabelEmptyWithoutInventingAnything(t *testing.T) {
 func TestSilenceIsUnmeasuredForATranscriptThatCannotBeStatted(t *testing.T) {
 	c := NewCollector(config.Default(), nil, nil, t.TempDir())
 
-	_, ok, silentFor, _ := c.transcriptState(filepath.Join(t.TempDir(), "gone.jsonl"))
+	_, ok, silentFor, _, _ := c.transcriptState(filepath.Join(t.TempDir(), "gone.jsonl"))
 
 	if ok {
 		t.Fatal("a transcript that is not there has no context estimate")

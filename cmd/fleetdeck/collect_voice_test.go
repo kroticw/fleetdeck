@@ -94,6 +94,64 @@ func TestSilentForFollowsTheSubagentWhileTheParentFileStandsStill(t *testing.T) 
 	}
 }
 
+// A Read frozen on 2.1.269 is not on disk at all: the file ends at the previous result
+// for as long as the call hangs. The snapshot must still carry how long the session has
+// owed its move -- without naming a call it cannot see.
+func TestEnrichMeasuresAnUnansweredStretchWithNoCallOnDisk(t *testing.T) {
+	projects := t.TempDir()
+	path := filepath.Join(projects, "some-project", sampleUUID+".jsonl")
+	now := time.Now()
+	writeFile(t, path,
+		`{"type":"assistant","timestamp":"`+stamp(now.Add(-21*time.Minute))+`","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}`,
+		`{"type":"user","timestamp":"`+stamp(now.Add(-20*time.Minute))+`","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`,
+		`{"type":"queue-operation","operation":"enqueue","timestamp":"`+stamp(now.Add(-time.Minute))+`","content":"are you there?"}`,
+	)
+
+	got := enrichOne(t, NewCollector(config.Default(), nil, nil, projects))
+	if got.InCall != nil {
+		t.Fatalf("no call is on disk, so none is named: %+v", got.InCall)
+	}
+	if got.UnansweredFor < 19*time.Minute || got.UnansweredFor > 21*time.Minute {
+		t.Fatalf("the session has owed its move since the result twenty minutes ago, got %s", got.UnansweredFor)
+	}
+}
+
+// While a session owes its move and nothing of it reaches its own file -- a batch
+// Claude Code has not written yet, with an Agent in it -- a subagent speaking is the
+// session working. A cached reading keyed on the parent file would miss that and let
+// the unanswered stretch grow over a subagent busy throughout.
+func TestUnansweredFollowsASubagentWhileTheParentFileStandsStill(t *testing.T) {
+	projects := t.TempDir()
+	path := filepath.Join(projects, "some-project", sampleUUID+".jsonl")
+	subs := filepath.Join(projects, "some-project", sampleUUID, "subagents")
+	now := time.Now()
+	writeFile(t, path,
+		`{"type":"user","timestamp":"`+stamp(now.Add(-time.Hour))+`","message":{"content":[{"type":"tool_result","tool_use_id":"t0","content":"ok"}]}}`,
+	)
+	writeFile(t, filepath.Join(subs, "agent-y.jsonl"),
+		`{"type":"assistant","timestamp":"`+stamp(now.Add(-30*time.Minute))+`","message":{"content":[{"type":"text","text":"working"}]}}`,
+	)
+
+	c := NewCollector(config.Default(), nil, nil, projects)
+	if first := enrichOne(t, c); first.UnansweredFor < 29*time.Minute || first.UnansweredFor > 31*time.Minute {
+		t.Fatalf("the subagent last spoke half an hour ago, got %s", first.UnansweredFor)
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(subs, "agent-y.jsonl"),
+		`{"type":"assistant","timestamp":"`+stamp(time.Now())+`","message":{"content":[{"type":"text","text":"still working"}]}}`,
+	)
+	if err := os.Chtimes(path, fi.ModTime(), fi.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if second := enrichOne(t, c); second.UnansweredFor > time.Minute {
+		t.Fatalf("the subagent just spoke, so the session is working, got %s", second.UnansweredFor)
+	}
+}
+
 // A session whose transcript is between calls reports no call, so the panel never
 // shows one that is not there.
 func TestEnrichReportsNoCallWhenEveryCallCameBack(t *testing.T) {
