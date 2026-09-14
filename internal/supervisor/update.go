@@ -185,6 +185,14 @@ type Takeover struct {
 	Registry Registry
 	// LockPath is the update lock the old window holds while it runs the update.
 	LockPath string
+	// OldWindowGone reports whether the window that started this one has
+	// exited. The old window lets go of the lock when its update returns and
+	// quits only after that, running out of the bundle swapped out until it
+	// has; so the bundle is removed only once this says so. Nil counts as gone.
+	OldWindowGone func() bool
+	// RetireWait bounds the wait for the lock and the old window; zero is
+	// retireWait.
+	RetireWait time.Duration
 	// Done is called once StepDone is reported.
 	Done func()
 	// Logf says what went wrong without failing the takeover; nil says nothing.
@@ -272,33 +280,55 @@ func (t *Takeover) reregister() {
 	}
 }
 
-// retireWait bounds how long the new window waits for the old one's update to
-// let go of the lock before the bundle swapped out is removed. The old window
-// lets go as soon as it reads done, within one look at the handover file
-// (handoverPoll); this is the bound on a window that never does.
+// retireWait bounds how long the new window waits for the old one to quit and
+// let go of the update lock before the bundle swapped out is removed. The old
+// window's update returns as soon as it reads done, within one look at the
+// handover file (handoverPoll), and the window quits right after; this is the
+// bound on a window that does not. Past it the bundle stays, and says so.
 const retireWait = time.Minute
 
-// retire removes the bundle swapped out, once the old window's update has let
-// go of the lock: until then that window is still running out of it. Nothing
-// goes back to that bundle -- an update that fails does so before the swap and
-// leaves the canonical bundle as it was -- and left in place it is the old
-// version under the app's own identifier, which LaunchServices finds again the
-// next time anything walks it. The handover file and the new window's log
-// beside it stay.
+// retire removes the bundle swapped out, once the old window has quit and its
+// update has let go of the lock. The order matters, and the lock alone is not
+// enough: the old window's update releases the lock as it returns, and the
+// window quits only after that -- running, until it has, out of the very
+// bundle this removes. Nothing goes back to that bundle -- an update that
+// fails does so before the swap and leaves the canonical bundle as it was --
+// and left in place it is the old version under the app's own identifier,
+// which LaunchServices finds again the next time anything walks it. The
+// handover file and the new window's log beside it stay.
 func (t *Takeover) retire(ctx context.Context) {
+	if err := t.retirable(); err != nil {
+		t.logf("the bundle swapped out is not removed: %v", err)
+		return
+	}
 	if t.LockPath == "" {
 		t.logf("no update lock to wait on; the bundle swapped out stays at %s", t.Staged)
 		return
 	}
-	deadline := time.Now().Add(retireWait)
-	for {
-		release, err := Acquire(t.LockPath)
-		if err == nil {
-			defer release()
-			break
+	wait := t.RetireWait
+	if wait <= 0 {
+		wait = retireWait
+	}
+	deadline := time.Now().Add(wait)
+	var release func()
+	for waiting := false; ; {
+		if t.OldWindowGone == nil || t.OldWindowGone() {
+			r, err := Acquire(t.LockPath)
+			if err == nil {
+				release = r
+				break
+			}
+			if !errors.Is(err, ErrBusy) {
+				t.logf("the bundle swapped out stays at %s: the update lock could not be taken: %v", t.Staged, err)
+				return
+			}
 		}
-		if !errors.Is(err, ErrBusy) || time.Now().After(deadline) {
-			t.logf("the bundle swapped out stays at %s: the update lock was not free: %v", t.Staged, err)
+		if !waiting {
+			waiting = true
+			t.logf("waiting for the old window to quit and let go of the update lock before removing the bundle swapped out at %s", t.Staged)
+		}
+		if time.Now().After(deadline) {
+			t.logf("the bundle swapped out stays at %s: the old window had not quit and let go of the update lock within %s", t.Staged, wait)
 			return
 		}
 		select {
@@ -307,9 +337,49 @@ func (t *Takeover) retire(ctx context.Context) {
 		case <-time.After(handoverPoll):
 		}
 	}
+	defer release()
+	// Asked again at the moment of removal: a minute may have passed.
+	if err := t.retirable(); err != nil {
+		t.logf("the bundle swapped out is not removed: %v", err)
+		return
+	}
 	if err := os.RemoveAll(t.Staged); err != nil {
 		t.logf("the bundle swapped out could not be removed from %s: %v", t.Staged, err)
 	}
+}
+
+// retirable says why Staged may not be removed, or nil. The removal happens
+// beside the installed app, in /Applications on a person's machine, and it
+// checks what it removes itself rather than trusting how Staged and Canonical
+// were worked out: exactly the bundle in the installed app's staging
+// directory, not a symlink, and not the installed app.
+func (t *Takeover) retirable() error {
+	if t.Staged == "" || t.Canonical == "" {
+		return fmt.Errorf("no bundle to remove was named (staged %q, installed %q)", t.Staged, t.Canonical)
+	}
+	info, err := os.Lstat(t.Staged)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink, not the bundle swapped out", t.Staged)
+	}
+	staged, err := filepath.EvalSymlinks(t.Staged)
+	if err != nil {
+		return err
+	}
+	canonical, err := filepath.EvalSymlinks(t.Canonical)
+	if err != nil {
+		return fmt.Errorf("the installed app %s: %w", t.Canonical, err)
+	}
+	if staged == canonical {
+		return fmt.Errorf("%s is the installed app", t.Staged)
+	}
+	want := filepath.Join(StagingDir(t.Canonical), BundleName)
+	if resolved, err := filepath.EvalSymlinks(want); err != nil || staged != resolved {
+		return fmt.Errorf("%s is not %s, the bundle in the installed app's staging directory", t.Staged, want)
+	}
+	return nil
 }
 
 // waitOwnAnswer waits for the keeper to say its own panel answers.
