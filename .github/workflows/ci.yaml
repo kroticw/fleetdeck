@@ -324,6 +324,25 @@ jobs:
           FLEETDECK_STAND_APPEARANCE: dark
           FLEETDECK_STAND_OPEN: newcard
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7799 out/dark-newcard exec content
+      # On macOS 26 a capsule's glass takes the system's mode, not the app's: with
+      # a theme other than the system's, controls drawn in the app's mode were
+      # white on white or dark on dark (runs 34863293838 and 34864709919). The
+      # operator's system is dark, and a light theme is one press of the theme
+      # capsule away. The stands above keep the system light; this one turns it
+      # dark and the app light, and fails unless the window says its capsules on
+      # glass are drawn in the system's dark mode.
+      - name: This build's window in its frame, the system dark and the app light
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES_MODE: dark
+        run: |
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== the system's appearance: $(defaults read -g AppleInterfaceStyle 2>/dev/null || echo light)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7801 out/system-dark-app-light exec content
+      - name: The system light again
+        if: always()
+        run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
       - name: The window's tests on macOS 26
         run: go test -count=1 ./cmd/fleetdeck-window/
