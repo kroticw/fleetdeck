@@ -29,7 +29,8 @@
 // the red button -- is not the window going: the process runs on, and so does
 // the panel. A panel a window left behind that still answers is replaced; a
 // panel started from a terminal, or anything that is not a fleetdeck panel,
-// is used as it is (see internal/supervisor's Keeper).
+// is used as it is (see internal/supervisor's Keeper) -- and, when it is not
+// this window's build, named over its page (foreign.go).
 //
 // Why webview_go, and what the fallback is: this needed a native window
 // without a second build toolchain in a project that currently has only Go.
