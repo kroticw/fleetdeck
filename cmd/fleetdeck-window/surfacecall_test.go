@@ -35,6 +35,23 @@ func TestTheReplySettlesThePromiseWithTheAnswerOrTheError(t *testing.T) {
 	}
 }
 
+func TestASurfaceCallIsAnsweredForTheSurfaceThatMadeIt(t *testing.T) {
+	b := newBridge()
+	b.handle("fleetdeckOpen", func(surface string, args json.RawMessage) (any, error) {
+		return surface + " " + string(args), nil
+	})
+	got := answerSurfaceCall(b, "sessions", `{"id":2,"name":"fleetdeckOpen","args":"x"}`)
+	if got != `window.fleetdeckHost&&window.fleetdeckHost._reply(2,true,"sessions \"x\"")` {
+		t.Fatalf("reply = %s", got)
+	}
+	if got := answerSurfaceCall(b, "sessions", `{"id":3,"name":"fleetdeckTeleport","args":null}`); got != `window.fleetdeckHost&&window.fleetdeckHost._reply(3,false,"unknown binding: fleetdeckTeleport")` {
+		t.Fatalf("unknown = %s", got)
+	}
+	if got := answerSurfaceCall(b, "sessions", `hello`); got != "" {
+		t.Fatalf("not a call = %q, want nothing", got)
+	}
+}
+
 func TestAMessageForThePageIsHandedToItsHost(t *testing.T) {
 	got := receiveScript(map[string]any{"type": "folded", "folded": true})
 	want := `window.fleetdeckHost&&window.fleetdeckHost.receive({"folded":true,"type":"folded"})`

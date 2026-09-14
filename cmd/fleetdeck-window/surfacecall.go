@@ -44,6 +44,17 @@ func replyScript(id int64, value any, err error) string {
 	return fmt.Sprintf("window.fleetdeckHost&&window.fleetdeckHost._reply(%d,true,%s)", id, answer)
 }
 
+// answerSurfaceCall runs the binding call in message for surface and answers
+// with the script that settles its promise, or "" for a message that is no call.
+func answerSurfaceCall(b *bridge, surface, message string) string {
+	call, err := parseSurfaceCall(message)
+	if err != nil {
+		return ""
+	}
+	value, err := b.call(surface, call.Name, call.Args)
+	return replyScript(call.ID, value, err)
+}
+
 // receiveScript hands the window's message to the page (web/js/host.js).
 func receiveScript(message map[string]any) string {
 	text, _ := json.Marshal(message)

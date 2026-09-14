@@ -12,6 +12,9 @@ void fd_capsules_draw(void *container, const char *mode, const char **tabIDs, co
                       int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
                       const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount);
 
+// fd_capsules_clear takes every capsule out of container: no panel page, no row.
+void fd_capsules_clear(void *container);
+
 // For capsules_darwin_test.go, which cannot use cgo itself: what the last draw
 // made, and presses sent the way a click sends them.
 int fd_test_capsule_count(void);

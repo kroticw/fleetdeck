@@ -201,17 +201,24 @@ static id row(id views[], int count) {
   return stack;
 }
 
-void fd_capsules_draw(void *container, const char *mode, const char **tabIDs, const char **tabLabels, int tabCount,
-                      int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
-                      const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount) {
+void fd_capsules_clear(void *container) {
   void *pool = objc_autoreleasePoolPush();
-  id parent = (id)container;
-  id old = send0(send0(parent, sel("subviews")), sel("copy"));
+  id old = send0(send0((id)container, sel("subviews")), sel("copy"));
   for (long i = 0, n = sendLong0(old, sel("count")); i < n; i++) {
     sendVoid0(((id (*)(id, SEL, unsigned long))objc_msgSend)(old, sel("objectAtIndex:"), (unsigned long)i),
               sel("removeFromSuperview"));
   }
   sendVoid0(old, sel("release"));
+  capsulesDrawn = 0;
+  objc_autoreleasePoolPop(pool);
+}
+
+void fd_capsules_draw(void *container, const char *mode, const char **tabIDs, const char **tabLabels, int tabCount,
+                      int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
+                      const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount) {
+  void *pool = objc_autoreleasePoolPush();
+  id parent = (id)container;
+  fd_capsules_clear(container);
 
   CGRect bounds = sendRect0(parent, sel("bounds"));
   id rowView = initWithFrame((id)rowClass(), bounds);

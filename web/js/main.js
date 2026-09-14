@@ -16,7 +16,7 @@ import { readHost, callHost } from "./host.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
-import { applyTheme, cycleTheme, initTheme } from "./theme.js";
+import { applyTheme, cycleTheme, currentTheme, initTheme } from "./theme.js";
 import { capsuleModel } from "./capsules.js";
 
 // In the fleetdeck window this page is one of three web views, and mounts only
@@ -48,6 +48,9 @@ subscribe((snap) => {
   if (!report || layoutReported) return;
   layoutReported = true;
   callHost(window, "fleetdeckLayout", report);
+  // The theme the board opened on, so the window's look and the other surfaces
+  // match an explicit choice before anyone cycles it.
+  callHost(window, "fleetdeckTheme", currentTheme() ?? "auto");
 });
 
 // This module and every one it imports have arrived. The window reads this
