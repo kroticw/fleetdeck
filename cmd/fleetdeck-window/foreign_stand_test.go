@@ -161,6 +161,9 @@ type standWindow struct {
 // ends it when the case ends; its panel goes with it by itself.
 func startStandWindow(t *testing.T, bin, url string) *standWindow {
 	t.Helper()
+	if bundle := bundleOf(bin); bundle != "" {
+		forgetBundle(t, bundle)
+	}
 	w := &standWindow{log: filepath.Join(t.TempDir(), "window.log")}
 	out, err := os.Create(w.log)
 	if err != nil {

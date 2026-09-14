@@ -73,12 +73,18 @@ func bundleOf(exe string) string {
 
 // canonicalBundle is the installed bundle this window updates: the one it was
 // told when it was started by a handover -- its own path is then where the
-// old bundle lies -- and otherwise its own.
+// old bundle lies -- and otherwise its own, unless its own is in a staging
+// directory, which is never the installed app (staged.go). Taking it for one
+// is how an update came to run inside .fleetdeck-update on 2026-09-14.
 func canonicalBundle(exe, told string) string {
 	if told != "" {
 		return told
 	}
-	return bundleOf(exe)
+	bundle := bundleOf(exe)
+	if _, staged := installedBeside(bundle); staged {
+		return ""
+	}
+	return bundle
 }
 
 // ownRevision is the commit this window was built from.
@@ -116,7 +122,7 @@ func reportScript(r report) string {
 // window's failure report can point.
 func launchNewWindow(url string) func(staged, canonical, handover string) (func(), error) {
 	return func(staged, canonical, handover string) (func(), error) {
-		logPath := filepath.Join(filepath.Dir(handover), "new-window.log")
+		logPath := filepath.Join(filepath.Dir(handover), supervisor.NewWindowLog)
 		log, err := os.Create(logPath)
 		if err != nil {
 			return nil, err

@@ -38,10 +38,17 @@ func TestTheAppBundleCarriesThePanelWhereTheWindowLooksForIt(t *testing.T) {
 	}
 	const probe = "bundle-probe"
 	bindir := t.TempDir()
-	cmd := exec.Command("make", "window-app", "BINDIR="+bindir, "VERSION="+probe)
+	// Under the stand identifier: a bundle a test builds is never one
+	// LaunchServices could open as the app (supervisor.StandBundleID).
+	cmd := exec.Command("make", "window-app", "BINDIR="+bindir, "VERSION="+probe, "BUNDLE_ID="+supervisor.StandBundleID)
 	cmd.Dir = filepath.Join("..", "..")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("make window-app: %v\n%s", err, out)
+	}
+	app := filepath.Join(bindir, "fleetdeck.app")
+	forgetBundle(t, app)
+	if id := plistKeys(t, filepath.Join(app, "Contents", "Info.plist"))["CFBundleIdentifier"]; id != supervisor.StandBundleID {
+		t.Fatalf("make window-app BUNDLE_ID=%s built a bundle called %v", supervisor.StandBundleID, id)
 	}
 	window := filepath.Join(bindir, "fleetdeck.app", "Contents", "MacOS", "fleetdeck-window")
 	for _, bin := range []string{window, panelBinary(window)} {
@@ -88,8 +95,9 @@ func TestTheScreenOpensThePanelOnceItAnswers(t *testing.T) {
 	if !navigate || html != "" {
 		t.Fatalf("on(Answering) = %v, %q; want to navigate to the panel", navigate, html)
 	}
-	// Once it shows, a second Answering -- the keeper taking a panel after a
-	// restart -- does not reload the page under the person.
+	// Once the page says it has loaded, a second Answering -- the keeper taking
+	// a panel after a restart -- does not reload the page under the person.
+	s.pageSays(pagePanel)
 	if navigate, html := s.on(supervisor.Event{State: supervisor.Answering, Ours: true}); navigate || html != "" {
 		t.Fatalf("second on(Answering) = %v, %q; want nothing", navigate, html)
 	}
@@ -109,6 +117,7 @@ func TestTheScreenSaysThePanelIsStartingWhenNothingShowsYet(t *testing.T) {
 func TestTheScreenLeavesThePanelsPageAloneDuringARestart(t *testing.T) {
 	s := &screen{url: testURL, logPath: "/log"}
 	s.on(supervisor.Event{State: supervisor.Answering})
+	s.pageSays(pagePanel)
 	if navigate, html := s.on(supervisor.Event{State: supervisor.Starting, PID: 43}); navigate || html != "" {
 		t.Fatalf("on(Starting) over the panel = %v, %q; want nothing", navigate, html)
 	}
@@ -198,7 +207,8 @@ func TestThePanelUnderstandsHowTheWindowNamesItsOwner(t *testing.T) {
 	// board and fleet daemon anyway: HOME of its own, and a -stand-socket
 	// nothing listens on (the daemon is found by uid, not by HOME).
 	dir := t.TempDir()
-	cmd := exec.Command(panel, append([]string{"--stand-socket", filepath.Join(dir, "no-daemon.sock")}, panelArgs(1)...)...)
+	// The stand socket goes the way a stand's window hands it on, in panelArgs.
+	cmd := exec.Command(panel, panelArgs(1, filepath.Join(dir, "no-daemon.sock"))...)
 	cmd.Env = append(os.Environ(), "HOME="+dir)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -210,7 +220,7 @@ func TestThePanelUnderstandsHowTheWindowNamesItsOwner(t *testing.T) {
 }
 
 func TestThePanelIsToldWhichWindowItBelongsTo(t *testing.T) {
-	got := panelArgs(4242)
+	got := panelArgs(4242, "")
 	if want := []string{"--owner-pid", "4242"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("panelArgs(4242) = %q, want %q", got, want)
 	}

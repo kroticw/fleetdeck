@@ -3,10 +3,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
+	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
@@ -24,8 +27,41 @@ func panelBinary(windowExecutable string) string {
 // panelArgs tells the panel which window it belongs to: the panel refuses to
 // start unless that window is its parent, and goes when it is gone
 // (cmd/fleetdeck, owner.go).
-func panelArgs(window int) []string {
-	return []string{"--owner-pid", strconv.Itoa(window)}
+//
+// On a stand it also hands on the stand's socket (standIsolation): a panel
+// finds the fleet daemon by uid, not by HOME, and -stand-socket is the only
+// thing that keeps it off the real one. The keeper starts every panel with
+// these arguments -- the restart after an update's swap too -- so none is
+// started without it.
+func panelArgs(window int, standSocket string) []string {
+	args := []string{"--owner-pid", strconv.Itoa(window)}
+	if standSocket != "" {
+		args = append(args, "--stand-socket", standSocket)
+	}
+	return args
+}
+
+// standSocketEnv names a stand's daemon socket for a window run on a stand.
+// An environment variable rather than a flag, because a window is also started
+// by another window -- an update's new window, by the one it replaces, which
+// may be a version that knows nothing of stands -- and the environment is what
+// passes through every such start untouched.
+const standSocketEnv = "FLEETDECK_STAND_SOCKET"
+
+// standIsolation is the stand socket this window hands its panels, "" when it
+// is not on a stand, and an error when it is on one that names no socket: a
+// variable templated from nothing must not become a panel that finds the real
+// daemon, as an empty -stand-socket is refused by the panel itself
+// (cmd/fleetdeck, checkStandSocket).
+func standIsolation(lookup func(string) (string, bool)) (string, error) {
+	socket, set := lookup(standSocketEnv)
+	if !set {
+		return "", nil
+	}
+	if strings.TrimSpace(socket) == "" {
+		return "", fmt.Errorf("%s is set but empty: this window is on a stand that names no daemon socket, and a panel started without one would find the real fleet daemon; refusing to start", standSocketEnv)
+	}
+	return socket, nil
 }
 
 // How long a panel the window started has to answer: the worst of ten
@@ -67,45 +103,223 @@ const startBindingName = "fleetdeckStartPanel"
 
 // screen is what the window shows for each thing the keeper reports. It is
 // driven from the UI thread only.
+//
+// A navigation is a request, not a page. Until 2026-09-14 the screen took the
+// panel's first answer, and the navigation it asked for, as the panel's page
+// being shown, and let every later answer go by. An update restarts its panel
+// a moment after that first answer, so the page was cut off while it loaded:
+// one window was left white -- the document had come, its styles and scripts
+// had not -- and the next stayed on its "Принимаю пульт" page, the navigation
+// refused before anything arrived. webview_go sets no navigation delegate, so
+// nothing said so. Now the page says it has loaded (pageLoadScript), and until
+// it has, the window asks for it again: when a panel answers again, and when
+// pageLoadWait goes by.
 type screen struct {
 	url     string
 	logPath string
-	// showingPanel: the web view has the panel's own page, as opposed to one
-	// of the window's pages below.
+	// showingPanel: the panel's own page has said it loaded, with its styles
+	// and its scripts, and has not left since.
 	showingPanel bool
+	// asked: the window has navigated to the panel, and the page has not said
+	// it loaded yet. askedAt is when, tries how many navigations in a row.
+	asked   bool
+	askedAt time.Time
+	tries   int
+	// answering: a panel answers, as the keeper last reported.
+	answering bool
+	// startingUp: the starting page is on screen.
+	startingUp bool
 	// takingOver: this window was started by an update to take the panel over
-	// from the previous version, rather than because nothing answered.
+	// from the previous version, rather than because nothing answered. Until
+	// handed, the handover is still restarting the panel, and its page is not
+	// asked for.
 	takingOver bool
+	handed     bool
+	now        func() time.Time
 }
+
+// What the panel's page says of itself, through pageLoadedBindingName.
+const (
+	// pagePanel: it loaded, and its styles and its scripts came with it.
+	pagePanel = "panel"
+	// pageBroken: it loaded without its styles or without its scripts -- the
+	// white window.
+	pageBroken = "broken"
+	// pageLeaving: it is going away, to be replaced by another load.
+	pageLeaving = "leaving"
+)
+
+const (
+	pageLoadedBindingName = "fleetdeckPageLoaded"
+	// pageRunningMarker is the data attribute web/js/main.js sets on the
+	// document once it and every module it imports have arrived. The name is
+	// a contract across two languages; pageload_test.go holds both sides.
+	pageRunningMarker = "fleetdeckPage"
+)
+
+// How long the panel's page has to say it loaded before it is asked for
+// again, and how many times it is asked for before the window says it did not
+// load: the worst of twenty measured loads, three times over.
+//
+// Measured on 2026-09-14 on the operator's machine, with the fleet running, on
+// a stand of its own (HOME, port 7791, a configured fleet, a -stand-socket
+// panel): twenty windows started one after another, each a new process with a
+// cold web view, timed from the navigation to the page saying it had loaded.
+// The board, /?fleet=stand, in ms: 177, 94, 94, 89, 89, 93, 90, 94, 94, 92 --
+// the first slower, as the first start of a web view is. The start page, /,
+// which the app opens on: 62, 63, 55, 61, 65, 56, 64, 61, 60, 62. Not
+// measured: a load straight after login, with nothing in the disk cache, or on
+// a board of hundreds of cards. A page slower than this is asked for again,
+// not given up on, and only pageLoadTries in a row are said to have failed.
+const (
+	measuredWorstPageLoad = 177 * time.Millisecond
+	pageLoadMargin        = 3
+	pageLoadWait          = measuredWorstPageLoad * pageLoadMargin
+	pageLoadTries         = 3
+	// pageLoadTick is how often the window looks at a page asked for: often
+	// enough that a wait is not stretched by much past pageLoadWait.
+	pageLoadTick = 100 * time.Millisecond
+)
 
 // on returns what to do for e: navigate to the panel, or show html, or --
 // both zero -- nothing.
 func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 	switch e.State {
 	case supervisor.Answering:
-		if s.showingPanel {
+		s.answering = true
+		if s.showingPanel || (s.takingOver && !s.handed) {
 			return false, ""
 		}
-		s.showingPanel = true
-		return true, ""
+		s.tries = 0
+		return s.ask(), ""
 	case supervisor.Starting:
+		s.answering = false
 		if s.showingPanel {
 			// A restart after a crash: the panel's own page already says it is
 			// offline and reconnects by itself, keeping what the person had
 			// open. Covering it with a page of the window's would lose that.
 			return false, ""
 		}
+		if s.startingUp {
+			// Already up, counting: the handover's second start, or a panel
+			// that died before it answered.
+			return false, ""
+		}
+		s.asked, s.startingUp = false, true
 		return false, startingPage(s.url, s.takingOver)
 	case supervisor.Replacing:
 		// Covers the panel's page too: that page belongs to the panel being
 		// stopped, and it would only go offline under the person.
-		s.showingPanel = false
+		s.answering = false
+		s.cover()
 		return false, replacingPage(e.Detail, e.Asked)
 	case supervisor.Failed:
-		s.showingPanel = false
+		s.answering = false
+		s.cover()
 		return false, failedPage(s.url, e, s.logPath)
 	}
 	return false, ""
+}
+
+// ask is a navigation to the panel, counted.
+func (s *screen) ask() bool {
+	s.showingPanel, s.startingUp = false, false
+	s.asked, s.askedAt = true, s.time()
+	s.tries++
+	return true
+}
+
+// time is now, by the screen's clock.
+func (s *screen) time() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
+}
+
+// cover is one of the window's own pages going up.
+func (s *screen) cover() {
+	s.showingPanel, s.asked, s.startingUp = false, false, false
+}
+
+// reopen is a navigation to the panel asked for by a person or by the page
+// itself, rather than by the keeper: counted like the keeper's.
+func (s *screen) reopen() {
+	s.tries = 0
+	s.ask()
+}
+
+// pageSays takes the panel's page's word about itself.
+func (s *screen) pageSays(state string) {
+	switch state {
+	case pagePanel:
+		s.showingPanel, s.asked, s.tries = true, false, 0
+	case pageBroken:
+		// Not the panel: left asked, so time asks for it again.
+		s.showingPanel = false
+	case pageLeaving:
+		if s.showingPanel {
+			s.showingPanel = false
+			s.asked, s.askedAt, s.tries = true, s.time(), 1
+		}
+	}
+}
+
+// handedOver is the handover this window was started for being done. It says
+// whether to navigate: the panel's page is asked for now if a panel answers,
+// and otherwise when one does.
+func (s *screen) handedOver() bool {
+	s.handed = true
+	if !s.answering || s.showingPanel {
+		return false
+	}
+	s.tries = 0
+	return s.ask()
+}
+
+// tick is time going by: a page asked for and not loaded within pageLoadWait
+// is asked for again, pageLoadTries times in all, and then said not to have
+// loaded.
+func (s *screen) tick() (navigate bool, page string) {
+	if !s.asked || s.time().Sub(s.askedAt) < pageLoadWait {
+		return false, ""
+	}
+	if s.tries < pageLoadTries {
+		return s.ask(), ""
+	}
+	s.cover()
+	return false, pageFailedPage(s.url, s.tries)
+}
+
+// pageLoadScript is put into every page the window loads. On the panel's own
+// page, and only there, it says whether the page loaded with its styles and
+// its scripts, and when it goes away. The window's own pages carry it too,
+// from another origin, and say nothing.
+func pageLoadScript(panelURL string) string {
+	origin := panelURL
+	if u, err := url.Parse(panelURL); err == nil {
+		origin = u.Scheme + "://" + u.Host
+	}
+	quoted, _ := json.Marshal(origin)
+	return `(() => {
+  if (location.origin !== ` + string(quoted) + `) return;
+  const say = (state) => {
+    if (typeof window.` + pageLoadedBindingName + ` === "function") window.` + pageLoadedBindingName + `(state);
+  };
+  window.addEventListener("load", () => {
+    const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+    const styled = links.length > 0 && links.every((link) => {
+      try {
+        return link.sheet !== null && link.sheet.cssRules.length > 0;
+      } catch {
+        return false;
+      }
+    });
+    const ran = document.documentElement.dataset.` + pageRunningMarker + ` === "running";
+    say(styled && ran ? "` + pagePanel + `" : "` + pageBroken + `");
+  });
+  window.addEventListener("pagehide", () => say("` + pageLeaving + `"));
+})();`
 }
 
 // blankPage is the window's ground before the keeper has said anything: the
@@ -171,6 +385,34 @@ func startingPage(url string, takingOver bool) string {
 </script>
 </body>
 </html>`, pageStyle, heading, text, waitShownAfter.Milliseconds())
+}
+
+// pageFailedPage says the panel answers but its page never loaded, and offers
+// to ask for it again.
+func pageFailedPage(panelURL string, tries int) string {
+	return fmt.Sprintf(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fleetdeck</title>
+%s
+</head>
+<body>
+<main>
+  <h1>Страница панели не загрузилась</h1>
+  <p>Панель отвечала на <code>%s</code>, но её страница так и не загрузилась целиком: окно просило её %d раз, каждый раз ждало %s.</p>
+  <button id="again">Открыть снова</button>
+</main>
+<script>
+  const again = document.getElementById("again");
+  again.addEventListener("click", () => {
+    again.disabled = true;
+    again.textContent = "Открываю…";
+    window.%s();
+  });
+</script>
+</body>
+</html>`, pageStyle, html.EscapeString(panelURL), tries, pageLoadWait, reloadBindingName)
 }
 
 // replacingPage is shown while a panel is being stopped for the window to
