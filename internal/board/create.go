@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -29,6 +30,10 @@ const (
 // beforeCardInPlace is called once a new card's content is written and before
 // the card is in place under its name: a test's look at that moment.
 var beforeCardInPlace = func(_ string) {}
+
+// linkCard puts a written card in place under its name; a test swaps it for a
+// file system that makes no hard links.
+var linkCard = os.Link
 
 // ErrInvalidCard means a card to be created would not be a valid card: an
 // unknown zone, or a title that is empty, too long or more than one line.
@@ -121,6 +126,11 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 // the board. The hidden file's name starts with a dot and does not end in .md,
 // so neither a scan of the board nor its validator takes it for a card, and it
 // is removed whatever happens.
+//
+// A board on a file system that makes no hard links -- exFAT, an SMB or FUSE
+// mount refuse link(2) with ENOTSUP or EPERM -- gets its card as it did before:
+// by an exclusive create at its name. Never over a card there either, but not
+// whole-or-nothing: that file system gives no way to be.
 func placeCard(cardsDir, path, content string) (bool, error) {
 	tmp, err := os.CreateTemp(cardsDir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -134,17 +144,46 @@ func placeCard(cardsDir, path, content string) (bool, error) {
 		return false, fmt.Errorf("write card %s: %w", path, errors.Join(werr, serr, cerr))
 	}
 	beforeCardInPlace(path)
-	if err := os.Link(tmp.Name(), path); err != nil {
-		if errors.Is(err, fs.ErrExist) {
+	if err := linkCard(tmp.Name(), path); err != nil {
+		switch {
+		case errors.Is(err, fs.ErrExist):
 			return false, nil
+		case errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EOPNOTSUPP), errors.Is(err, syscall.EPERM):
+			return createCardInPlace(cardsDir, path, content)
 		}
 		return false, fmt.Errorf("create card: %w", err)
 	}
-	if d, err := os.Open(cardsDir); err == nil {
+	syncDir(cardsDir)
+	return true, nil
+}
+
+// createCardInPlace is placeCard where hard links are refused: an exclusive
+// create at path, a card cut off by an error removed again.
+func createCardInPlace(cardsDir, path, content string) (bool, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("create card: %w", err)
+	}
+	_, werr := f.WriteString(content)
+	serr := f.Sync()
+	cerr := f.Close()
+	if werr != nil || serr != nil || cerr != nil {
+		_ = os.Remove(path)
+		return false, fmt.Errorf("write card %s: %w", path, errors.Join(werr, serr, cerr))
+	}
+	syncDir(cardsDir)
+	return true, nil
+}
+
+// syncDir makes a name just added to dir durable, as far as dir lets it.
+func syncDir(dir string) {
+	if d, err := os.Open(dir); err == nil {
 		_ = d.Sync()
 		_ = d.Close()
 	}
-	return true, nil
 }
 
 // slug makes a file name part from a title: latin letters and digits, Russian
