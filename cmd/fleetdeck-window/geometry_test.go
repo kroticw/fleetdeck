@@ -2,7 +2,10 @@
 
 package main
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestTheDefaultLayoutMatchesTheChosenDesign(t *testing.T) {
 	g := layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348})
@@ -97,5 +100,56 @@ func TestAPanelNeverGoesBelowItsReadableWidthOrAboveSixtyPercent(t *testing.T) {
 	// and the float product is not.
 	if g.Sessions.W != width*maxPanelShare {
 		t.Fatalf("sessions = %v, want 60%% of the window", g.Sessions.W)
+	}
+}
+
+// The capsule row needs its minimum (capsules_darwin.c): a window too narrow
+// for both panels at their widths and the row narrows the panels on screen,
+// never below their readable width and never folding them.
+func TestPanelsNarrowToGiveTheCapsuleRowItsMinimum(t *testing.T) {
+	g := layoutWithRow(1000, 700, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
+	if g.Capsules.W < 360-1e-9 {
+		t.Fatalf("capsule row = %v wide, want at least its minimum 360; %+v", g.Capsules.W, g)
+	}
+	if g.Orchestrator.W < minPanelWidth || g.Sessions.W < minPanelWidth {
+		t.Fatalf("panels = %v and %v, want neither below %v", g.Orchestrator.W, g.Sessions.W, minPanelWidth)
+	}
+	if !g.OrchestratorResizable || !g.SessionsResizable {
+		t.Fatal("a panel narrowed for the row is still an unfolded panel with an edge")
+	}
+	if math.Abs(g.Orchestrator.X+g.Orchestrator.W+capsuleGapLeft-g.Capsules.X) > 1e-9 || math.Abs(g.Capsules.X+g.Capsules.W+capsuleGapRight-g.Sessions.X) > 1e-9 {
+		t.Fatalf("the row is not between the narrowed panels: %+v", g)
+	}
+}
+
+func TestPanelsNarrowedForTheRowStopAtTheirReadableWidth(t *testing.T) {
+	g := layoutWithRow(800, 700, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
+	if g.Orchestrator.W != minPanelWidth || g.Sessions.W != minPanelWidth {
+		t.Fatalf("panels = %v and %v, want both at %v", g.Orchestrator.W, g.Sessions.W, minPanelWidth)
+	}
+}
+
+func TestAWindowWideEnoughKeepsThePanelsAtTheirWidths(t *testing.T) {
+	w := panelWidths{Orchestrator: 368, Sessions: 348}
+	if got, want := layoutWithRow(1440, 700, w, 360), layoutFor(1440, 700, w); got != want {
+		t.Fatalf("layout = %+v\nwant     %+v", got, want)
+	}
+}
+
+func TestAFoldedPanelIsNotWidenedOrNarrowedForTheRow(t *testing.T) {
+	g := layoutWithRow(800, 700, panelWidths{Orchestrator: 368, Sessions: 348, SessionsFolded: true}, 360)
+	if g.Sessions.W != foldedWidth {
+		t.Fatalf("folded sessions = %v, want the strip's %v", g.Sessions.W, foldedWidth)
+	}
+	if g.Capsules.W < 360-1e-9 {
+		t.Fatalf("capsule row = %v, want at least 360", g.Capsules.W)
+	}
+}
+
+// The window's minimum width, less the row's: both panels at their readable
+// width, the margins and the row's gaps to them.
+func TestTheFramesPartOfTheMinimumWidthIsBothPanelsMarginsAndGaps(t *testing.T) {
+	if got, want := frameMinWidth(), 2*panelMargin+2*minPanelWidth+capsuleGapLeft+capsuleGapRight; got != want {
+		t.Fatalf("frame minimum = %v, want %v", got, want)
 	}
 }
