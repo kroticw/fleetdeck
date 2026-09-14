@@ -408,6 +408,25 @@ func TestTheNewWindowStartsItsPanelTwiceStagedThenCanonical(t *testing.T) {
 	}
 }
 
+// The old window's deadline for the whole handover is its own, written into the
+// version already installed -- v0.9.2's handoverTimeout, 812 ms three times over
+// -- and a new window cannot change it. A staged panel that does not go at once
+// when the new window restarts it from the canonical path must not make the
+// handover miss it.
+func TestAHandoverWhoseStagedPanelIgnoresTermEndsWithinTheOldWindowsDeadline(t *testing.T) {
+	r := newUpdateRig(t)
+	r.newKind = "ignore-term"
+	u := r.update("old")
+	u.HandoverTimeout = 2436 * time.Millisecond
+
+	if err := u.Run(context.Background()); err != nil {
+		t.Fatalf("update: %v (steps %v)", err, r.steps())
+	}
+	if steps := r.steps(); len(steps) == 0 || steps[len(steps)-1] != "done" {
+		t.Fatalf("steps %v, want the handover done", steps)
+	}
+}
+
 // A new window whose panel will not start leaves everything as it was: the
 // canonical bundle untouched, and the old panel answering again.
 func TestAFailedHandoverLeavesTheOldBundleAndPanel(t *testing.T) {

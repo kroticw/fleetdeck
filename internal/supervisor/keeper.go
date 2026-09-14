@@ -89,6 +89,19 @@ type PanelBuild struct {
 // cmd/fleetdeck, 5 s) and one second more.
 const stopGrace = 6 * time.Second
 
+// handoverStopGrace is how long the panel a restart replaces is given to go on
+// SIGTERM before it is killed. Restart is an update's: the panel it replaces is
+// the one the new window started from the staging directory a moment earlier,
+// and the old window gives the whole handover 2.436 s, a deadline written into
+// the version already installed that no new version can change (T-060). A
+// panel told to stop cancels its collect cycle and goes -- 2-5 ms after SIGTERM,
+// measured on a stand with a HOME at the operator's scale -- so 300 ms is far
+// more than it needs, and leaves the handover most of its deadline. SIGKILL is
+// safe there: a panel writes nothing without a request, and every write a
+// request makes is whole or not at all (docs/engineering/window-and-panel.md,
+// "Stopping the staged panel").
+const handoverStopGrace = 300 * time.Millisecond
+
 // Keeper makes sure a panel answers at URL, and when none does, starts the
 // panel at Bin. This is what the launch agent did before the window took the
 // panel over: it started the panel, and launchd's KeepAlive started it again
@@ -434,7 +447,7 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 		return true
 	case bin := <-k.restartTo:
 		k.setBin(bin)
-		_ = p.Stop(stopGrace)
+		_ = p.Stop(handoverStopGrace)
 		return true
 	case <-p.Exited():
 		return k.afterExit(ctx, p, started, true)
