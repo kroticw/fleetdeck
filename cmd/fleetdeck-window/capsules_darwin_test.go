@@ -12,7 +12,10 @@ import (
 	"testing"
 )
 
-var capsulesResult capsulesProbe
+var (
+	capsulesResult capsulesProbe
+	themeResult    capsuleThemeProbe
+)
 
 func collectCapsuleResults() {
 	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[{"id":"board","label":"Доска","selected":true},{"id":"docs","label":"Доки","selected":false}],"newCard":{"label":"+ карточка"},"theme":{"label":"тема: авто"},"limits":[{"label":"5ч","text":"37%","level":"cool","color":"#2f9e44"}]}`))
@@ -21,6 +24,55 @@ func collectCapsuleResults() {
 	}
 	capsulesResult = probeCapsulesForTest(m)
 	collectCapsuleLayoutResults()
+	themeResult = probeCapsuleThemeForTest(m)
+}
+
+// --- the capsules and the app's theme ----------------------------------------------
+
+// Every capsule takes the theme chosen in fleetdeck, whatever the system's. On
+// the macOS 26 stand with real glass (run 34868250061) a capsule's glass took
+// its tint from the board under it, and controls drawn in the system's mode
+// were dark on dark glass or light on light: its controls keep the app's
+// appearance. An opaque capsule's background is resolved in the app's
+// appearance: resolved in the system's, it was white under white text with the
+// app dark and the system light (runs 34863293838 and 34864709919, taken while
+// the runner reduced transparency).
+
+func TestCapsulesOnGlassKeepTheAppsAppearanceForTheirControls(t *testing.T) {
+	if !themeResult.glass {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	if len(themeResult.onGlassInDarkApp) == 0 {
+		t.Fatal("no capsules drawn")
+	}
+	for i, name := range themeResult.onGlassInDarkApp {
+		if name != "" {
+			t.Errorf("capsule %d's content has an appearance of its own, %q, instead of the app's", i, name)
+		}
+	}
+}
+
+func TestOpaqueCapsulesTakeTheirBackgroundFromTheAppsTheme(t *testing.T) {
+	for _, c := range []struct {
+		theme  string
+		got    []float64
+		darker bool
+	}{{"dark", themeResult.opaqueInDarkApp, true}, {"light", themeResult.opaqueInLightApp, false}} {
+		if len(c.got) == 0 {
+			t.Fatalf("app %s: no capsules drawn", c.theme)
+		}
+		for i, b := range c.got {
+			if b < 0 || (b < 0.5) != c.darker {
+				t.Errorf("app %s: capsule %d's background is %.2f light, want it %s", c.theme, i, b, map[bool]string{true: "dark", false: "light"}[c.darker])
+			}
+		}
+	}
+}
+
+func TestTheThemeProbeLeavesTheAppsAppearanceAsItFoundIt(t *testing.T) {
+	if themeResult.appAppearanceAt != themeResult.appAppearanceBefore {
+		t.Fatalf("app appearance %q after the probe, %q before", themeResult.appAppearanceAt, themeResult.appAppearanceBefore)
+	}
 }
 
 func TestCapsulesDrawThePagesModel(t *testing.T) {
