@@ -519,3 +519,18 @@ test("every glass token has a light and both dark definitions", () => {
     assert.equal(countDefinitions(token), 3, token);
   }
 });
+
+// The board is dimmed while a card, a document or a session is open over it.
+// The stylesheet decides that from the overlays' own hidden attribute, so no
+// module has to keep a second piece of state in step with three panels.
+test("the board is dimmed under an open sheet and only then", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(ruleBody("#sheet-scrim"), /display:\s*none/, "the scrim shows with nothing open");
+  for (const panel of ["#card-panel", "#reader-panel", "#session-panel"]) {
+    assert.match(
+      stripped,
+      new RegExp(`:root\\[data-surface="board"\\] #center:has\\([^{]*${panel}:not\\(\\[hidden\\]\\)[^{]*\\) > #sheet-scrim\\s*\\{[^}]*display:\\s*block`),
+      `${panel} open does not dim the board`,
+    );
+  }
+});

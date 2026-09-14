@@ -45,4 +45,11 @@ export function fleetIconHTML(size) {
   return `<span class="app-icon" aria-hidden="true">${svg("app-icon-dark", size, ICON_DARK)}${svg("app-icon-light", size, ICON_LIGHT)}</span>`;
 }
 
+// closeCrossHTML is the cross a panel's close button draws. Drawn rather than
+// the ✕ glyph: in the window's round close button a glyph sits wherever its
+// font puts it, which is not the centre. The button keeps its aria-label; the
+// drawing is hidden from assistive technology.
+export const closeCrossHTML =
+  `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M3 3 L9 9 M9 3 L3 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`;
+
 export default fleetIconHTML;

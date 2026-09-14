@@ -1194,3 +1194,12 @@ test("the panel's terminal is the size remembered for it, and Cmd+- changes that
     assert.equal(map.get("fleetdeck-terminal-font-orchestrator"), "20", "the panel's key changed the column's size");
   });
 });
+
+// E layout, S1: the sheet keeps the session panel's header as it is, font
+// buttons first and close last; only its look changes.
+test("the session head keeps its order: font buttons, name, close", async () => {
+  const { root, stop } = await mount();
+  const head = root.querySelector(".s-head").children.map((node) => String(node.className).split(" ")[0]);
+  assert.deepEqual(head, ["term-font", "s-who", "s-close"]);
+  stop();
+});
