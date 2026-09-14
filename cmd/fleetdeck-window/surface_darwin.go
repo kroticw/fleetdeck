@@ -27,7 +27,7 @@ type surface struct {
 // report T-057 gives the board (owner.go), and the mark on a foreign build for
 // the surface that shows the build (noticescript.go).
 func surfaceScripts(kind, panelURL string, glass glassMode, b *bridge) []string {
-	scripts := []string{hostScript(kind, glass, b.names()), pageLoadScript(panelURL)}
+	scripts := []string{hostScript(kind, glass, b.surfaceNames()), pageLoadScript(panelURL)}
 	if notice := noticeScriptFor(kind); notice != "" {
 		scripts = append(scripts, notice)
 	}

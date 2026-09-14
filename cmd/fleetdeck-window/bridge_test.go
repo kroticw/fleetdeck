@@ -33,6 +33,27 @@ func TestAnUnknownBindingIsRefusedByName(t *testing.T) {
 	}
 }
 
+func TestABoardOnlyBindingRefusesASideSurfaceAndIsNotDefinedInIt(t *testing.T) {
+	b := newBridge()
+	called := 0
+	b.handleBoard("fleetdeckLayout", func(string, json.RawMessage) (any, error) {
+		called++
+		return nil, nil
+	})
+	b.handle("fleetdeckOpen", func(string, json.RawMessage) (any, error) { return nil, nil })
+	for _, surface := range []string{"orchestrator", "sessions"} {
+		if _, err := b.call(surface, "fleetdeckLayout", json.RawMessage(`{"version":1,"mode":"panel","fleet":"x"}`)); !errors.Is(err, errBoardOnly) {
+			t.Fatalf("the %s surface calling fleetdeckLayout: err = %v, want errBoardOnly", surface, err)
+		}
+	}
+	if _, err := b.call("board", "fleetdeckLayout", nil); err != nil || called != 1 {
+		t.Fatalf("the board calling fleetdeckLayout: err = %v, handler called %d times, want once", err, called)
+	}
+	if got := b.surfaceNames(); !reflect.DeepEqual(got, []string{"fleetdeckOpen"}) {
+		t.Fatalf("surface names = %v, want only the bindings a surface may call", got)
+	}
+}
+
 func TestBindingNamesAreSortedSoTheInjectedScriptIsStable(t *testing.T) {
 	b := newBridge()
 	for _, n := range []string{"fleetdeckReload", "fleetdeckOpen", "fleetdeckLayout"} {

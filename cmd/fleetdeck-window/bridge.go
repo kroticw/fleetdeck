@@ -14,6 +14,10 @@ import (
 // another build asking for something this window does not have.
 var errUnknownBinding = errors.New("unknown binding")
 
+// errBoardOnly is a side surface calling a binding only the board's page may:
+// what the board reports of itself.
+var errBoardOnly = errors.New("binding is the board's only")
+
 // bridgeHandler answers one binding for the web view that called it. surface is
 // "board", "orchestrator" or "sessions"; args is the call's one argument as the
 // page sent it.
@@ -25,14 +29,51 @@ type bridgeHandler func(surface string, args json.RawMessage) (any, error)
 type bridge struct {
 	mu       sync.Mutex
 	handlers map[string]bridgeHandler
+	// boardOnly names the bindings registered with handleBoard.
+	boardOnly map[string]bool
 }
 
-func newBridge() *bridge { return &bridge{handlers: map[string]bridgeHandler{}} }
+func newBridge() *bridge {
+	return &bridge{handlers: map[string]bridgeHandler{}, boardOnly: map[string]bool{}}
+}
 
 func (b *bridge) handle(name string, h bridgeHandler) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.handlers[name] = h
+	delete(b.boardOnly, name)
+}
+
+// handleBoard registers a binding only the board's page may call: what the
+// board reports of itself -- its layout, its capsules, its theme. A side
+// surface calling it is refused, and its host script does not define it
+// (surfaceNames): a surface's page reporting a layout would frame the window
+// on that surface's word.
+func (b *bridge) handleBoard(name string, h bridgeHandler) {
+	b.handle(name, func(surface string, args json.RawMessage) (any, error) {
+		if surface != "board" {
+			return nil, fmt.Errorf("%w: %s, called from the %s surface", errBoardOnly, name, surface)
+		}
+		return h(surface, args)
+	})
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.boardOnly[name] = true
+}
+
+// surfaceNames is every binding a side surface may call, sorted: all but the
+// board's own.
+func (b *bridge) surfaceNames() []string {
+	all := b.names()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]string, 0, len(all))
+	for _, n := range all {
+		if !b.boardOnly[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // names is every registered binding, sorted, so the script that defines them in

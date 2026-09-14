@@ -66,7 +66,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		g.w.Dispatch(func() { g.pageLoaded(surface, state) })
 		return nil, nil
 	})
-	g.bind("fleetdeckLayout", func(_ string, args json.RawMessage) (any, error) {
+	g.bindBoard("fleetdeckLayout", func(_ string, args json.RawMessage) (any, error) {
 		var report struct {
 			Version int    `json:"version"`
 			Mode    string `json:"mode"`
@@ -98,11 +98,11 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		g.later(g.ctl.switchFleet(name))
 		return nil, nil
 	})
-	g.bind("fleetdeckCapsules", func(_ string, args json.RawMessage) (any, error) {
+	g.bindBoard("fleetdeckCapsules", func(_ string, args json.RawMessage) (any, error) {
 		g.later(g.ctl.capsules(args))
 		return nil, nil
 	})
-	g.bind("fleetdeckTheme", func(_ string, args json.RawMessage) (any, error) {
+	g.bindBoard("fleetdeckTheme", func(_ string, args json.RawMessage) (any, error) {
 		var choice string
 		if err := json.Unmarshal(args, &choice); err != nil {
 			return nil, err
@@ -136,6 +136,16 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 // through the registry.
 func (g *glassWindow) bind(name string, h bridgeHandler) {
 	g.bridge.handle(name, h)
+	g.bindForBoard(name)
+}
+
+// bindBoard makes a binding only the board reaches: what it reports of itself.
+func (g *glassWindow) bindBoard(name string, h bridgeHandler) {
+	g.bridge.handleBoard(name, h)
+	g.bindForBoard(name)
+}
+
+func (g *glassWindow) bindForBoard(name string) {
 	if err := g.w.Bind(name, func(args json.RawMessage) (any, error) { return g.bridge.call("board", name, args) }); err != nil {
 		log.Printf("fleetdeck-window: the board page will not reach %s: %v", name, err)
 	}
