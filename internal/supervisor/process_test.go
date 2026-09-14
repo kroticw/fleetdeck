@@ -59,6 +59,10 @@ const reportOwnerEnv = "FLEETDECK_SUPERVISOR_HELPER_REPORT_OWNER"
 // termNotice is what the stand-in prints to its log when SIGTERM reaches it.
 const termNotice = "helper: SIGTERM, leaving"
 
+// slowTermNotice is what a "slow-term" stand-in prints when it leaves, a
+// second after SIGTERM reached it.
+const slowTermNotice = "helper: SIGTERM, left a second later"
+
 // crashNotice is the last thing the "crash" stand-in says before it dies.
 const crashNotice = "helper: config is broken, giving up"
 
@@ -80,6 +84,13 @@ func runHelper(mode string) {
 		signal.Notify(term, syscall.SIGTERM)
 		go func() {
 			<-term
+			if strings.HasSuffix(kind, "slow-term") {
+				// A panel that takes a moment to go: longer than an update's
+				// restart gives, well within an ordinary stop's grace.
+				time.Sleep(time.Second)
+				fmt.Println(slowTermNotice)
+				os.Exit(0)
+			}
 			fmt.Println(termNotice)
 			os.Exit(0)
 		}()
@@ -89,7 +100,7 @@ func runHelper(mode string) {
 		// A panel that dies before it ever listens: a broken config, a bad build.
 		fmt.Fprintln(os.Stderr, crashNotice)
 		os.Exit(3)
-	case "silent":
+	case "silent", "silent-slow-term":
 		// A panel that runs but never answers where it is looked for -- a port
 		// in its configuration other than the one the window asks.
 		select {}
