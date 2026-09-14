@@ -35,6 +35,49 @@ type options struct {
 	url                    string
 	wantRevision, wantOld  string
 	tagWindow              string
+	launchServices         bool
+}
+
+// retireWait bounds how long the new window has, once the update run is gone,
+// to remove the bundle swapped out: it does so within a look at the update
+// lock after its parent has gone.
+const retireWait = 30 * time.Second
+
+// checkLaunchServices is what an update leaves behind once the old window has
+// gone, as this program's update run has when this runs: the bundle swapped
+// out removed, and LaunchServices knowing the installed app once and nothing
+// in its staging directory.
+func checkLaunchServices(o options) error {
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		return errors.New("runs on a GitHub Actions runner only: it checks an app this program installed")
+	}
+	swappedOut := filepath.Join(supervisor.StagingDir(o.canonical), supervisor.BundleName)
+	deadline := time.Now().Add(retireWait)
+	for {
+		if _, err := os.Lstat(swappedOut); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s is still there %s after the update run went: the new window did not remove the bundle swapped out", swappedOut, retireWait)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	log.Printf("updatecheck: pass: the new window removed the bundle swapped out at %s", swappedOut)
+
+	out, err := exec.Command(supervisor.LsregisterPath, "-dump").Output()
+	if err != nil {
+		return fmt.Errorf("lsregister -dump: %w", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "path:") && strings.Contains(line, "fleetdeck") {
+			log.Printf("updatecheck: LaunchServices: %s", line)
+		}
+	}
+	if err := registeredOnce(string(out), o.canonical); err != nil {
+		return err
+	}
+	log.Printf("updatecheck: pass: LaunchServices knows %s once and nothing in %s", o.canonical, supervisor.StagingDir(o.canonical))
+	return nil
 }
 
 func main() {
@@ -47,8 +90,13 @@ func main() {
 	flag.StringVar(&o.wantRevision, "want-revision", "", "the commit this branch's app was built from")
 	flag.StringVar(&o.wantOld, "want-old-version", "v0.10.0", "the version the installed app reports")
 	flag.StringVar(&o.tagWindow, "tag-window", "", "cmd/fleetdeck-window of the v0.10.0 checkout this program was built in")
+	flag.BoolVar(&o.launchServices, "launchservices", false, "once an update run of this program has gone: check the bundle swapped out is removed and LaunchServices knows the installed app once")
 	flag.Parse()
-	if err := run(o); err != nil {
+	check := run
+	if o.launchServices {
+		check = checkLaunchServices
+	}
+	if err := check(o); err != nil {
 		log.Printf("updatecheck: FAILED: %v", err)
 		os.Exit(1)
 	}

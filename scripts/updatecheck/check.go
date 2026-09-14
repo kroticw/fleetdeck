@@ -28,6 +28,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,7 +37,43 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
+
+// lsPathLine is a bundle's path in `lsregister -dump`: "path:", any run of
+// spaces, the path, and the record's id in brackets, as read on macOS 26.6.2:
+// "path:                       /Applications/fleetdeck.app (0x3168)".
+var lsPathLine = regexp.MustCompile(`(?m)^path:[ \t]+(.+?)(?:[ \t]+\(0x[0-9a-fA-F]+\))?[ \t]*$`)
+
+// registeredOnce says whether a LaunchServices dump knows the installed app at
+// canonical exactly once and nothing in its staging directory. A path left
+// there is the version just replaced, under the app's name, which the next
+// "open fleetdeck" may start.
+func registeredOnce(dump, canonical string) error {
+	matches := lsPathLine.FindAllStringSubmatch(dump, -1)
+	if len(matches) == 0 {
+		return errors.New("the LaunchServices dump names no path at all: its format may have changed")
+	}
+	staging := supervisor.StagingDir(canonical) + string(filepath.Separator)
+	installed := 0
+	var swappedOut []string
+	for _, m := range matches {
+		switch path := m[1]; {
+		case path == canonical:
+			installed++
+		case strings.HasPrefix(path, staging):
+			swappedOut = append(swappedOut, path)
+		}
+	}
+	if len(swappedOut) > 0 {
+		return fmt.Errorf("LaunchServices still knows what the update swapped out: %s", strings.Join(swappedOut, ", "))
+	}
+	if installed != 1 {
+		return fmt.Errorf("LaunchServices knows %s %d times, want once", canonical, installed)
+	}
+	return nil
+}
 
 // windowLogLayout is how the window stamps its log lines
 // (log.LstdFlags | log.Lmicroseconds).

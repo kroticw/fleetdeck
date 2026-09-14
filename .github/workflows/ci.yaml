@@ -386,6 +386,12 @@ jobs:
             -url "http://127.0.0.1:$port/" \
             -want-revision "$(git rev-parse HEAD)" \
             -tag-window "$RUNNER_TEMP/v0.10.0/cmd/fleetdeck-window"
+      # With the update run gone, as the old window is once its update returns: the new
+      # window must remove the bundle swapped out within 30 s, and LaunchServices must
+      # know /Applications/fleetdeck.app once and nothing in .fleetdeck-update, or the
+      # next "open fleetdeck" may start the version just replaced.
+      - name: The swapped-out bundle is gone, and LaunchServices knows the installed app once
+        run: '"$RUNNER_TEMP/updatecheck" -launchservices -canonical /Applications/fleetdeck.app'
       - name: Keep what the update left, and stop its windows
         if: always()
         run: |

@@ -142,6 +142,36 @@ func TestATimelineWithNothingInItSaysSo(t *testing.T) {
 	}
 }
 
+func TestLaunchServicesMustKnowTheInstalledAppOnceAndNothingSwappedOut(t *testing.T) {
+	const canonical = "/Applications/fleetdeck.app"
+	entry := func(path string) string {
+		return "--------------------------------------------------------------------------------\n" +
+			"bundle id:                  dev.fleetdeck.stand\n" +
+			"path:                       " + path + " (0x1f2c)\n" +
+			"name:                       fleetdeck\n"
+	}
+	other := entry("/Applications/Safari.app")
+	cases := map[string]struct {
+		dump string
+		ok   bool
+	}{
+		"the installed app, once":            {other + entry(canonical), true},
+		"a copy elsewhere is not this check": {other + entry(canonical) + entry("/Users/runner/work/new/fleetdeck.app"), true},
+		"the installed app, twice":           {entry(canonical) + entry(canonical), false},
+		"not the installed app":              {other, false},
+		"the bundle swapped out":             {entry(canonical) + entry("/Applications/.fleetdeck-update/fleetdeck.app"), false},
+		"no path lines at all":               {"bundle id: x\nname: y\n", false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := registeredOnce(c.dump, canonical)
+			if (err == nil) != c.ok {
+				t.Fatalf("registeredOnce: %v, want ok %v", err, c.ok)
+			}
+		})
+	}
+}
+
 func TestTheHandoverStepsAreCheckedInOrder(t *testing.T) {
 	full := []string{"check", "unpack", "handover", "handover:alive", "handover:panel", "handover:swapped", "handover:done", "done"}
 	if err := handoverInOrder(full); err != nil {
