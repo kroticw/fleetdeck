@@ -45,6 +45,102 @@ export function boardScrollReport(win, board) {
   };
 }
 
+// listScrollReport is what the sessions surface's list (#sessions) in win says
+// of its vertical scrolling: how much taller its content is than it, and how wide
+// the bar beside it is. macOS draws a classic 15 px bar for a mouse; the islands
+// ask WebKit for 6 (web/app.css).
+export function listScrollReport(win, list) {
+  const style = win.getComputedStyle(list);
+  const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
+  return {
+    surface: "sessions",
+    scrollHeight: list.scrollHeight,
+    clientHeight: list.clientHeight,
+    scrollbarWidth: list.offsetWidth - list.clientWidth - border,
+    overflowY: style.overflowY,
+  };
+}
+
+// watchListScroll reports list's scrolling as watchBoardScroll does the
+// board's: once laid out, on a resize, whenever the list draws its rows, and
+// when the returned function is called; at most once a frame, and only when the
+// report changed.
+export function watchListScroll(win, list, report) {
+  let last = "";
+  let queued = false;
+  const measure = () => {
+    queued = false;
+    const now = listScrollReport(win, list);
+    const text = JSON.stringify(now);
+    if (text === last) return;
+    last = text;
+    report(now);
+  };
+  const later = () => {
+    if (queued) return;
+    queued = true;
+    win.requestAnimationFrame(measure);
+  };
+  win.addEventListener("resize", later);
+  if (typeof win.MutationObserver === "function") new win.MutationObserver(later).observe(list, { childList: true });
+  later();
+  return later;
+}
+
+// How long after a change the terminal is measured again: xterm's own bar fades
+// out over 800 ms (web/vendor/xterm.css), and a report taken while it fades
+// would be the last one the window hears.
+const TERMINAL_SETTLE_MS = 1500;
+
+// terminalScrollReport is what the orchestrator surface's column in win says of
+// the edges its terminal draws down its right side: the native bar under
+// xterm's viewport, which WebKit draws for overflow-y: scroll at all times, and
+// how visible xterm's own bar is. null while the column has no terminal.
+export function terminalScrollReport(win, column) {
+  const viewport = column.querySelector(".xterm-viewport");
+  const bar = column.querySelector(".xterm-scrollable-element > .scrollbar.vertical");
+  if (!viewport || !bar) return null;
+  const style = win.getComputedStyle(viewport);
+  const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
+  return {
+    surface: "orchestrator",
+    viewportScrollbarWidth: viewport.offsetWidth - viewport.clientWidth - border,
+    ownBarOpacity: Number(win.getComputedStyle(bar).opacity),
+  };
+}
+
+// watchTerminalScroll reports the terminal's edges once there is a terminal,
+// whenever the column's content or the window's size changes, and again once
+// the last change has settled; only when the report changed.
+export function watchTerminalScroll(win, column, report) {
+  let last = "";
+  let queued = false;
+  let settle = null;
+  const measure = () => {
+    queued = false;
+    const now = terminalScrollReport(win, column);
+    if (!now) return;
+    const text = JSON.stringify(now);
+    if (text === last) return;
+    last = text;
+    report(now);
+  };
+  const later = () => {
+    if (!queued) {
+      queued = true;
+      win.requestAnimationFrame(measure);
+    }
+    // Timed from the last change, not the first: a terminal that goes on
+    // writing keeps its bar in sight, and only its quiet has to be measured.
+    if (settle !== null && typeof win.clearTimeout === "function") win.clearTimeout(settle);
+    settle = win.setTimeout(measure, TERMINAL_SETTLE_MS);
+  };
+  win.addEventListener("resize", later);
+  if (typeof win.MutationObserver === "function") new win.MutationObserver(later).observe(column, { childList: true, subtree: true });
+  later();
+  return later;
+}
+
 // watchBoardScroll reports board's scrolling once the page has laid it out,
 // whenever the window is resized, whenever the board draws its columns, and
 // whenever the returned function is called -- after the window's insets change

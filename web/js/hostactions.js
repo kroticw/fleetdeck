@@ -9,7 +9,7 @@ import { callHost, onHostMessage } from "./host.js";
 
 const ACCEPTS = {
   board: new Set(["open", "show", "newCard", "cycleTheme", "insets", "glass"]),
-  orchestrator: new Set(["theme", "glass", "folded", "focusTerminal", "fullscreen"]),
+  orchestrator: new Set(["theme", "glass", "folded", "focusTerminal", "fullscreen", "titlebar"]),
   sessions: new Set(["theme", "glass", "folded"]),
 };
 
@@ -52,6 +52,11 @@ export function wireHostActions(win, host, targets) {
         return;
       case "fullscreen":
         targets.setFullscreen(message.on === true);
+        return;
+      case "titlebar":
+        // Where the title bar's buttons end over this panel: the header starts
+        // past them.
+        targets.setTitlebarInset(message.inset);
         return;
     }
   });

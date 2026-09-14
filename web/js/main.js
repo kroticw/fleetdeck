@@ -7,7 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
-import { watchBoardScroll } from "./standreport.js";
+import { watchBoardScroll, watchListScroll, watchTerminalScroll } from "./standreport.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -231,6 +231,8 @@ if (regions.has("center")) {
 
   // After the tabs, not before: createSections replaces the row's children.
   newCard = createNewCard(document.getElementById("tabs"));
+  // A stand's frame with the form open (web/js/host.js, open).
+  if (host?.open === "newcard") newCard.open();
 }
 
 // The window's capsules (web/js/capsules.js), handed over by the board whenever
@@ -259,6 +261,10 @@ if (host) {
   // On a CI stand only: the board's scrolling, in the window's log.
   const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
+  // And the sessions list's scrollbar, from the sessions surface.
+  if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And the edges down the orchestrator's terminal, from the orchestrator surface.
+  if (host.stand && host.surface === "orchestrator" && column) watchTerminalScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // The window's panel folds with the column: a fold the column makes itself
   // (its own button) is passed on, and one the window sends is not passed back.
   let panelFolded = column?.dataset.folded === "1";
@@ -304,6 +310,9 @@ if (host) {
       else delete column.dataset.folded;
     },
     focusTerminal: () => document.querySelector("#orchestrator .xterm-helper-textarea")?.focus(),
+    setTitlebarInset: (inset) => {
+      page.style.setProperty("--host-inset-titlebar", `${Number(inset) || 0}px`);
+    },
     setFullscreen: (on) => {
       if (on) page.dataset.fullscreen = "1";
       else delete page.dataset.fullscreen;

@@ -12,6 +12,7 @@ var standValues = map[string]string{
 	standPanelStartTimeoutEnv: "10s",
 	standWindowSizeEnv:        "1000x700",
 	standAppearanceEnv:        "dark",
+	standOpenEnv:              "newcard",
 }
 
 // A person's window: every stand variable set, and none of it read, because
@@ -43,7 +44,7 @@ func TestAStandSetsTheDeadlineTheSizeAndTheAppearance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.startTimeout() != 10*time.Second || s.appearance != "dark" {
+	if s.startTimeout() != 10*time.Second || s.appearance != "dark" || s.open != "newcard" {
 		t.Fatalf("settings %+v", s)
 	}
 	if w, h := s.size(); w != 1000 || h != 700 {
@@ -56,6 +57,7 @@ func TestAStandSettingThatMakesNoSenseIsRefusedByName(t *testing.T) {
 		standPanelStartTimeoutEnv: "ten seconds",
 		standWindowSizeEnv:        "300x200",
 		standAppearanceEnv:        "auto",
+		standOpenEnv:              "card",
 	} {
 		_, err := standSettingsFrom("/tmp/stand/no-daemon.sock", func(n string) (string, bool) {
 			if n == name {

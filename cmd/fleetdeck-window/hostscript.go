@@ -19,6 +19,10 @@ import (
 // alone cannot prove (web/js/standreport.js). Never set in a person's window.
 var hostOnStand bool
 
+// hostStandOpen is what a stand's board opens as it loads (standOpenEnv):
+// "newcard" or nothing. Read only when hostOnStand.
+var hostStandOpen string
+
 func hostScript(surface string, glass glassMode, bindings []string) string {
 	switch surface {
 	case "board", "orchestrator", "sessions":
@@ -34,6 +38,9 @@ func hostScript(surface string, glass glassMode, bindings []string) string {
 	fmt.Fprintf(&b, `var host={version:1,surface:%q,glass:%q,receive:function(){}};`, surface, string(glass))
 	if hostOnStand {
 		b.WriteString("host.stand=true;")
+		if hostStandOpen != "" {
+			fmt.Fprintf(&b, "host.standOpen=%q;", hostStandOpen)
+		}
 	}
 	b.WriteString("var pending={},next=0;")
 	b.WriteString("host._reply=function(id,ok,value){var p=pending[id];if(!p)return;delete pending[id];if(ok)p.resolve(value);else p.reject(new Error(value));};")
