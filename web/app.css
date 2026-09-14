@@ -3583,6 +3583,26 @@ body.is-resizing {
   padding: 0 10px 6px;
 }
 
+/* No second edge down the terminal's right side. xterm's viewport scrolls
+   natively under xterm's own bar (overflow-y: scroll in web/vendor/xterm.css),
+   and WebKit draws a classic bar for it at all times, a grey strip the height of
+   the terminal. That bar is hidden, the scrolling is not: xterm's own bar stays,
+   out of sight at rest, shown while the terminal scrolls, and shown under the
+   pointer. A scrollbar-width other than auto makes WebKit ignore
+   ::-webkit-scrollbar. */
+:root[data-surface="orchestrator"] .o-term .xterm-viewport {
+  scrollbar-width: auto;
+}
+
+:root[data-surface="orchestrator"] .o-term .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+}
+
+:root[data-surface="orchestrator"] .o-term:hover .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* One head for the sessions island: the fold button and the island's name on
    its top row, the counters under them, then the list. The two are the list's
    first children and scroll with it in a browser tab; here they are fixed to

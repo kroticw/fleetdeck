@@ -107,6 +107,28 @@ test("the sessions list stops short of the island's rounded bottom edge", () => 
   assert.match(ruleBody(':root[data-surface="sessions"] .col-sessions'), /padding-bottom:\s*10px/);
 });
 
+// The terminal's scroll bars read as the edge of one more frame down its right
+// side. xterm's viewport scrolls natively under its own bar (web/vendor/xterm.css,
+// overflow-y: scroll), and WebKit draws a classic bar for it that no one uses:
+// the orchestrator's surface hides that one without taking the scrolling away.
+// A scrollbar-width other than auto would make WebKit ignore the width asked
+// for, and none is ever hidden that way (web/tests/app-css.test.js).
+test("the orchestrator's terminal draws no native scroll bar beside its own", () => {
+  const viewport = ruleBody(':root[data-surface="orchestrator"] .o-term .xterm-viewport');
+  assert.match(viewport, /scrollbar-width:\s*auto/);
+  assert.doesNotMatch(viewport, /overflow/);
+  assert.match(ruleBody(':root[data-surface="orchestrator"] .o-term .xterm-viewport::-webkit-scrollbar'), /width:\s*0/);
+});
+
+// xterm's own bar is out of sight at rest and shows while the terminal scrolls
+// (its visibility is auto); over the terminal it shows as well, as the system's
+// does.
+test("the orchestrator's terminal shows its scroll bar under the pointer", () => {
+  const hover = ruleBody(':root[data-surface="orchestrator"] .o-term:hover .xterm-scrollable-element > .scrollbar.vertical');
+  assert.match(hover, /opacity:\s*1/);
+  assert.match(hover, /pointer-events:\s*auto/);
+});
+
 // Everything above is the window's: a browser tab keeps its columns.
 test("in a browser tab the columns keep their rows, rules, terminal and names", () => {
   assert.match(ruleBody("#header"), /background:\s*var\(--surface\)/);
