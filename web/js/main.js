@@ -306,6 +306,9 @@ if (host) {
       else delete column.dataset.folded;
     },
     focusTerminal: () => document.querySelector("#orchestrator .xterm-helper-textarea")?.focus(),
+    setTitlebarInset: (inset) => {
+      page.style.setProperty("--host-inset-titlebar", `${Number(inset) || 0}px`);
+    },
     setFullscreen: (on) => {
       if (on) page.dataset.fullscreen = "1";
       else delete page.dataset.fullscreen;

@@ -73,6 +73,8 @@ type controller struct {
 	// band is how far down from the top the board's page says nothing is
 	// (topBand): the band the window is dragged by, out of full screen.
 	band float64
+	// titlebar is where the title bar's zoom button ends (titlebar.go).
+	titlebar float64
 }
 
 // newController frames the panel at panelURL. The window may be opened on a
@@ -174,6 +176,9 @@ func (c *controller) pageLoaded(surface, state string) []effect {
 	out = append(out, c.to(surface, map[string]any{"type": "folded", "folded": c.folded(surface)})...)
 	if surface == "orchestrator" {
 		out = append(out, c.to(surface, map[string]any{"type": "fullscreen", "on": c.fullscreen})...)
+	}
+	if surface == "orchestrator" && c.titlebar > 0 {
+		out = append(out, c.titlebarMessage()...)
 	}
 	return out
 }

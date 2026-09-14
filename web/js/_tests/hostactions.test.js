@@ -19,7 +19,24 @@ const TARGETS = [
   "setFolded",
   "focusTerminal",
   "setFullscreen",
+  "setTitlebarInset",
 ];
+
+// The title bar's buttons float over the orchestrator panel; its surface starts
+// its header past them (cmd/fleetdeck-window/titlebar_test.go).
+test("the orchestrator surface takes where the title bar's buttons end", () => {
+  const { send, calls } = setup("orchestrator");
+  send({ type: "titlebar", inset: 76 });
+  assert.deepEqual(calls, [["setTitlebarInset", 76]]);
+});
+
+test("the sessions surface and the board ignore the title bar", () => {
+  for (const surface of ["sessions", "board"]) {
+    const { send, calls } = setup(surface);
+    send({ type: "titlebar", inset: 76 });
+    assert.deepEqual(calls, [], surface);
+  }
+});
 
 function setup(surface) {
   const calls = [];
