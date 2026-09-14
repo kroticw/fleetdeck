@@ -26,6 +26,10 @@ const (
 	maxNameAttempts = 100
 )
 
+// beforeCardInPlace is called once a new card's content is written and before
+// the card is in place under its name: a test's look at that moment.
+var beforeCardInPlace = func(_ string) {}
+
 // ErrInvalidCard means a card to be created would not be a valid card: an
 // unknown zone, or a title that is empty, too long or more than one line.
 var ErrInvalidCard = errors.New("invalid card")
@@ -90,28 +94,57 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 
 		id := fmt.Sprintf(idFormat, number)
 		path := filepath.Join(cardsDir, id+"-"+tail+".md")
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if errors.Is(err, fs.ErrExist) {
+		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\ncreated: %s\n---\n\n# %s\n", id, zone, date, title)
+		placed, err := placeCard(cardsDir, path, content)
+		if err != nil {
+			return "", err
+		}
+		if !placed {
 			// The number is spent either way: a claimed number is never
 			// released, so the next attempt takes the one after it.
 			continue
 		}
-		if err != nil {
-			return "", fmt.Errorf("create card: %w", err)
-		}
-		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\ncreated: %s\n---\n\n# %s\n", id, zone, date, title)
-		_, werr := f.WriteString(content)
-		cerr := f.Close()
-		if werr != nil || cerr != nil {
-			// A half-written card is a broken card on the board; the file was
-			// ours alone a moment ago, so it goes. The marker stays: the
-			// number is spent, and a marker with no card is harmless.
-			_ = os.Remove(path)
-			return "", fmt.Errorf("write card %s: %w", path, errors.Join(werr, cerr))
-		}
 		return path, nil
 	}
 	return "", fmt.Errorf("create card: %d names starting %s are already taken", maxNameAttempts, tail)
+}
+
+// placeCard puts a new card with content at path, whole or not at all, and
+// never over a file already there: it reports false, with nothing written,
+// when path is taken.
+//
+// The card is written to a hidden file beside it first and linked into place:
+// a link is atomic, and fails, as the exclusive create it replaces did, when
+// the name is taken. A panel can be stopped at any moment -- an update stops
+// the panel it replaces, with SIGKILL if it does not go at once (T-060) -- and
+// a card created in place and cut off half-written would be a broken card on
+// the board. The hidden file's name starts with a dot and does not end in .md,
+// so neither a scan of the board nor its validator takes it for a card, and it
+// is removed whatever happens.
+func placeCard(cardsDir, path, content string) (bool, error) {
+	tmp, err := os.CreateTemp(cardsDir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return false, fmt.Errorf("create card: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	_, werr := tmp.WriteString(content)
+	serr := tmp.Sync()
+	cerr := tmp.Close()
+	if werr != nil || serr != nil || cerr != nil {
+		return false, fmt.Errorf("write card %s: %w", path, errors.Join(werr, serr, cerr))
+	}
+	beforeCardInPlace(path)
+	if err := os.Link(tmp.Name(), path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create card: %w", err)
+	}
+	if d, err := os.Open(cardsDir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return true, nil
 }
 
 // slug makes a file name part from a title: latin letters and digits, Russian

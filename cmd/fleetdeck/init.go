@@ -461,16 +461,60 @@ func loadSettings(settingsPath string) (settings map[string]any, reformatted boo
 	return settings, reformatted, nil
 }
 
+// settingsWritten is called once the new settings are written and before they
+// take the place of the old ones: a test's look at that moment.
+var settingsWritten = func(_ string) {}
+
+// saveSettings writes settings to settingsPath whole or not at all.
+//
+// The file is Claude Code's own, shared by every session on the machine, and a
+// panel can be stopped at any moment -- an update stops the panel it replaces,
+// with SIGKILL if it does not go at once (T-060) -- so the new settings are
+// written beside the file, synced, and renamed over it: until the rename the
+// old settings stay whole.
+//
+// A settings file kept in a dotfiles repository is a symlink to it, and a
+// rename over the symlink would replace it with a plain file, quietly cutting
+// the settings off from that repository. So the write goes to where the symlink
+// points, and the symlink stays. The file keeps its permissions; settings that
+// did not exist are created 0600, as they always were.
 func saveSettings(settingsPath string, settings map[string]any) error {
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+	target, mode := settingsPath, os.FileMode(0o600)
+	if resolved, err := filepath.EvalSymlinks(settingsPath); err == nil {
+		target = resolved
+		if info, err := os.Stat(target); err == nil {
+			mode = info.Mode().Perm()
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("resolve settings %s: %w", settingsPath, err)
+	}
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create settings dir: %w", err)
 	}
-	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(target)+".tmp-*")
+	if err != nil {
 		return fmt.Errorf("write settings: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	_, werr := tmp.Write(append(out, '\n'))
+	merr := tmp.Chmod(mode)
+	serr := tmp.Sync()
+	cerr := tmp.Close()
+	if werr != nil || merr != nil || serr != nil || cerr != nil {
+		return fmt.Errorf("write settings: %w", errors.Join(werr, merr, serr, cerr))
+	}
+	settingsWritten(target)
+	if err := os.Rename(tmp.Name(), target); err != nil {
+		return fmt.Errorf("write settings: %w", err)
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 	return nil
 }
