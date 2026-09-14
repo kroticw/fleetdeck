@@ -9,19 +9,21 @@ import (
 )
 
 // slowerListen is how long the "slower" stand-ins take to listen: longer than
-// the 2.5 s the cases below give a whole handover, and shorter than the 5 s
-// ceiling the new window's keeper has of its own in updateRig. A takeover that
-// held its starts to that ceiling, and not to the old window's deadline, is
-// caught by the deadline running out: the old window says the new one did not
-// finish in time, not that it could not take over.
-const slowerListen = 3 * time.Second
+// the whole handover the cases below give, and shorter than the 5 s ceiling the
+// new window's keeper has of its own in updateRig. A takeover that held its
+// starts to that ceiling, and not to the old window's deadline, is caught by
+// the deadline running out: the old window says the new one did not finish in
+// time, not that it could not take over.
+const slowerListen = 4 * time.Second
 
 // A first start too slow for what is left of the old window's deadline is
 // given up on in time to say so: the new window reports failed before the
-// swap, and the installed bundle and panel stay as they were.
+// swap, and the installed bundle and panel stay as they were. The stand-in
+// takes a second to go on SIGTERM, as a real panel can while its collect cycle
+// ends and as any race-built stand-in does: the failure waits on that stop.
 func TestAFirstStartTooSlowForTheOldWindowsDeadlineFailsBeforeTheSwap(t *testing.T) {
 	r := newUpdateRig(t)
-	r.newKind = "slower"
+	r.newKind = "slower-slow-term"
 	u := r.update("old")
 	u.HandoverTimeout = 2500 * time.Millisecond
 
@@ -47,9 +49,9 @@ func TestAFirstStartTooSlowForTheOldWindowsDeadlineFailsBeforeTheSwap(t *testing
 // still reads the handover file.
 func TestASecondStartTooSlowForTheOldWindowsDeadlineIsReportedWithinIt(t *testing.T) {
 	r := newUpdateRig(t)
-	r.newKind = "slower-canonical"
+	r.newKind = "slower-canonical-slow-term"
 	u := r.update("old")
-	u.HandoverTimeout = 2500 * time.Millisecond
+	u.HandoverTimeout = 3500 * time.Millisecond
 
 	err := u.Run(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "could not take over") {

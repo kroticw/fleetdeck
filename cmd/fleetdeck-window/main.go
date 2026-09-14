@@ -477,7 +477,7 @@ func main() {
 		// Every start of the keeper held inside the old window's deadline: the
 		// keeper's own ceiling is longer than a v0.10.0 window's whole handover.
 		tk.Deadline = handoverDeadline(*toldHandoverTimeout)
-		keeper.StartTimeoutNow = func() time.Duration { return tk.StartTimeout(keeper.StartTimeout) }
+		keeper.StartLimitsNow = func() supervisor.StartLimits { return tk.StartLimits(keeper.StartTimeout) }
 		log.Printf("fleetdeck-window: taking the panel over by %s, the old window's deadline", tk.Deadline.Format("15:04:05.000"))
 		go func() {
 			err := keeperEvents.Take(context.Background(), tk)
