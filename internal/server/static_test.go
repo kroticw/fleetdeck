@@ -177,6 +177,8 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/docnames.js":       true,
 		"js/doccards.js":       true,
 		"js/reader.js":         true,
+		"js/host.js":           true,
+		"js/surfaces.js":       true,
 		"vendor/xterm.js":      true,
 		"vendor/xterm.css":     true,
 		"vendor/LICENSE.xterm": true,
