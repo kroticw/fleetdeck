@@ -55,6 +55,14 @@ export function currentTheme() {
   return readStored();
 }
 
+// Applies a choice made somewhere else without remembering it. In the fleetdeck
+// window the board owns the choice (and the storage all three web views share);
+// the orchestrator and sessions surfaces are told it and only follow. "auto" is
+// the no-override state, as null is here.
+export function applyTheme(choice) {
+  apply(choice === "light" || choice === "dark" ? choice : null);
+}
+
 // Advances the cycle, applies it, remembers it, and returns the new state
 // (null | "light" | "dark") so a caller can update a label immediately
 // rather than waiting for the next redraw.

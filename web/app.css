@@ -3565,7 +3565,9 @@ body.is-resizing {
   box-shadow: inset 3px 0 0 var(--border-strong), var(--island-shadow);
 }
 
-/* The board: no column chrome, and the tabs are the window's capsules. */
+/* The board: no column chrome, and the tabs and the new card button are the
+   window's capsules. The new card form stays: the capsule opens it, and it
+   drops down under the capsules. */
 :root[data-surface="board"] .col-center {
   background: var(--bg);
   border: none;
@@ -3573,6 +3575,17 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] #tabs {
+  position: absolute;
+  top: calc(var(--host-inset-top, 64px) - 8px);
+  left: var(--host-inset-left, 394px);
+  z-index: 3;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+:root[data-surface="board"] #tabs .tab,
+:root[data-surface="board"] #tabs .newcard-open {
   display: none;
 }
 

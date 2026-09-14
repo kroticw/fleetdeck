@@ -14,6 +14,8 @@ import { rememberFleet } from "./fleet.js";
 import { t } from "./i18n.js";
 import { readHost, callHost } from "./host.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
+import { wireHostActions } from "./hostactions.js";
+import { applyTheme, cycleTheme } from "./theme.js";
 
 // In the fleetdeck window this page is one of three web views, and mounts only
 // its own part of the panel (surfaces.js). The side surfaces keep the centre
@@ -162,8 +164,10 @@ if (regions.has("orchestrator")) renderOrchestrator(document.getElementById("orc
 // show rather than here: it fetches when it is built, and a panel with no
 // documentation directories configured would otherwise ask for them — and take
 // the server's 404 — before the operator had opened that section at all.
+let sections = null;
+let newCard = null;
 if (regions.has("center")) {
-  createSections(document.getElementById("tabs"), [
+  sections = createSections(document.getElementById("tabs"), [
     { id: "board", label: t("tab_board"), root: document.getElementById("board") },
     {
       id: "docs",
@@ -174,7 +178,43 @@ if (regions.has("center")) {
   ]);
 
   // After the tabs, not before: createSections replaces the row's children.
-  createNewCard(document.getElementById("tabs"));
+  newCard = createNewCard(document.getElementById("tabs"));
+}
+
+// What the fleetdeck window asks of this surface (web/js/hostactions.js). Wired
+// while the module runs, before the page's load event: the window sends nothing
+// until that event says the page is up, and by then this is listening.
+if (host) {
+  const page = document.documentElement;
+  const column = document.getElementById(host.surface);
+  wireHostActions(window, host, {
+    openCard: (path) => terminalLinks.open(path),
+    openDoc: (path) => {
+      closeSession();
+      cardPanel.close();
+      reader.open(path);
+    },
+    openSession,
+    showSection: (id) => sections?.show(id),
+    openNewCard: () => newCard?.open(),
+    cycleTheme: () => cycleTheme() ?? "auto",
+    applyTheme,
+    setInsets: (insets) => {
+      for (const side of ["top", "left", "right"]) page.style.setProperty(`--host-inset-${side}`, `${insets[side]}px`);
+    },
+    setGlass: (glass) => {
+      page.dataset.glass = glass;
+    },
+    setFolded: (folded) => {
+      if (folded) column.dataset.folded = "1";
+      else delete column.dataset.folded;
+    },
+    focusTerminal: () => document.querySelector("#orchestrator .xterm-helper-textarea")?.focus(),
+    setFullscreen: (on) => {
+      if (on) page.dataset.fullscreen = "1";
+      else delete page.dataset.fullscreen;
+    },
+  });
 }
 
 connect();
