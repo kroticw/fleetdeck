@@ -292,6 +292,18 @@ jobs:
         run: |
           sw_vers
           system_profiler SPDisplaysDataType | grep --extended-regexp 'Resolution|UI Looks like' || true
+      # With reduced transparency or increased contrast the window draws its
+      # frame and capsules opaque, not in glass (currentGlassMode), and a stand
+      # then shows nothing of the glass. What the runner has, and both turned off
+      # for the stands; the step after the tests puts them back.
+      - name: The runner's transparency and contrast, turned off for the stands
+        run: |
+          for key in reduceTransparency increaseContrast; do
+            was=$(defaults read com.apple.universalaccess "$key" 2>/dev/null || echo unset)
+            echo "$key $was" >>"$RUNNER_TEMP/universalaccess-before"
+            defaults write com.apple.universalaccess "$key" -bool false || echo "=== $key could not be written"
+            echo "=== $key: was $was, now $(defaults read com.apple.universalaccess "$key" 2>/dev/null || echo unset)"
+          done
       # The window's gate, before the tests. After them, on this runner, the
       # panel the window started did not answer in 330 ms in 3 runs of 3, while
       # before them it did in 2 of 2, and a panel started without a window
@@ -312,11 +324,13 @@ jobs:
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/light exec content
       - name: This build's window in its frame, dark
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
       - name: This build's window in its frame, dark, with the new card form open
         env:
@@ -324,9 +338,61 @@ jobs:
           FLEETDECK_STAND_APPEARANCE: dark
           FLEETDECK_STAND_OPEN: newcard
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7799 out/dark-newcard exec content
+      # The capsules take the theme chosen in fleetdeck, whatever the system's
+      # (capsules_darwin.c). With a theme other than the system's they were dark
+      # on dark or light on light on glass (run 34868250061), and white on white
+      # when opaque (runs 34863293838 and 34864709919). The operator's system is
+      # dark, and a light theme is one press of the theme capsule away. The dark
+      # stand above is glass with the system light and the app dark; these are
+      # glass with the system dark and the app light, then opaque, with reduced
+      # transparency, both ways. Each fails unless the window's log says the
+      # capsules are drawn in that material and the app's appearance: that is the
+      # wiring, not that the capsules can be read, which their screenshots show.
+      - name: This build's window in its frame, glass, the system dark and the app light
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+        run: |
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== the system's appearance: $(defaults read -g AppleInterfaceStyle 2>/dev/null || echo light)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7801 out/glass-system-dark-app-light exec content
+      - name: This build's window in its frame, opaque, the system dark and the app light
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          scripts/ci-window-stand.sh new/fleetdeck.app 7803 out/opaque-system-dark-app-light exec content
+      - name: This build's window in its frame, opaque, the system light and the app dark
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
+          scripts/ci-window-stand.sh new/fleetdeck.app 7805 out/opaque-system-light-app-dark exec content
+      - name: The system light again
+        if: always()
+        run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
       - name: The window's tests on macOS 26
         run: go test -count=1 ./cmd/fleetdeck-window/
+      - name: The runner's transparency and contrast as they were
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/universalaccess-before" ] || exit 0
+          while read -r key was; do
+            case $was in
+              unset) defaults delete com.apple.universalaccess "$key" 2>/dev/null || true ;;
+              1) defaults write com.apple.universalaccess "$key" -bool true || true ;;
+              *) defaults write com.apple.universalaccess "$key" -bool false || true ;;
+            esac
+          done <"$RUNNER_TEMP/universalaccess-before"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

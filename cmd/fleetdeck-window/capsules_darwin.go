@@ -212,3 +212,61 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 	out.minAfterClear = float64(C.fd_test_min_content_width(f.capsules()))
 	return out
 }
+
+// capsuleThemeProbe is the capsules drawn with the app dark, then light: the
+// appearance each capsule's content has of its own on glass, as
+// fd_test_capsule_slot_appearance names it, and how light each opaque capsule's
+// background is.
+type capsuleThemeProbe struct {
+	glass                                bool
+	onGlassInDarkApp                     []string
+	opaqueInDarkApp, opaqueInLightApp    []float64
+	appAppearanceBefore, appAppearanceAt string
+}
+
+func capsuleContentAppearances() []string {
+	var out []string
+	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {
+		out = append(out, C.GoString(C.fd_test_capsule_slot_appearance(C.int(i))))
+	}
+	return out
+}
+
+func capsuleBackgroundBrightness() []float64 {
+	var out []float64
+	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {
+		out = append(out, float64(C.fd_test_capsule_slot_background_brightness(C.int(i))))
+	}
+	return out
+}
+
+func setAppAppearanceForTest(name string) {
+	c := C.CString(name)
+	defer C.free(unsafe.Pointer(c))
+	C.fd_test_set_app_appearance(c)
+}
+
+func probeCapsuleThemeForTest(m capsuleModel) capsuleThemeProbe {
+	out := capsuleThemeProbe{glass: C.fd_glass_available() != 0}
+	window := C.fd_test_window(1512, 982)
+	f := installFrame(window)
+	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}))
+	out.appAppearanceBefore = C.GoString(C.fd_test_app_appearance())
+
+	setAppAppearanceForTest("NSAppearanceNameDarkAqua")
+	f.setMode(glassModeGlass)
+	drawCapsules(f.capsules(), m, glassModeGlass)
+	out.onGlassInDarkApp = capsuleContentAppearances()
+	f.setMode(glassModeOpaque)
+	drawCapsules(f.capsules(), m, glassModeOpaque)
+	out.opaqueInDarkApp = capsuleBackgroundBrightness()
+
+	setAppAppearanceForTest("NSAppearanceNameAqua")
+	drawCapsules(f.capsules(), m, glassModeOpaque)
+	out.opaqueInLightApp = capsuleBackgroundBrightness()
+
+	setAppAppearanceForTest(out.appAppearanceBefore)
+	clearCapsules(f.capsules())
+	out.appAppearanceAt = C.GoString(C.fd_test_app_appearance())
+	return out
+}

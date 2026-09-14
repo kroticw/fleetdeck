@@ -15,10 +15,12 @@
 
 #include "_cgo_export.h"
 
+#include <CoreGraphics/CGColor.h>
 #include <CoreGraphics/CGGeometry.h>
 #include <objc/message.h>
 #include <objc/objc.h>
 #include <objc/runtime.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -98,6 +100,7 @@ static int limitsDrawn;
 static int capsulesDrawn;
 
 static void placeCapsules(double rowWidth);
+static id appAppearance(void);
 
 // --- the row: a container that lets clicks through its gaps ---------------------
 
@@ -203,9 +206,21 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
     id layer = send0(wrapper, sel("layer"));
     sendVoidDouble(layer, sel("setCornerRadius:"), capsuleHeight / 2);
     if (strcmp(mode, "opaque") == 0) {
-      id colour = send0(cls("NSColor"), sel("controlBackgroundColor"));
-      ((void (*)(id, SEL, void *))objc_msgSend)(layer, sel("setBackgroundColor:"),
-                                                ((void *(*)(id, SEL))objc_msgSend)(colour, sel("CGColor")));
+      // Resolved in the app's appearance, as the capsule's controls are drawn:
+      // a CGColor taken outside it is resolved in the system's, and was white
+      // under white text with the app dark and the system light (runs
+      // 34863293838 and 34864709919).
+      void (^resolve)(void) = ^{
+        id colour = send0(cls("NSColor"), sel("controlBackgroundColor"));
+        ((void (*)(id, SEL, void *))objc_msgSend)(layer, sel("setBackgroundColor:"),
+                                                  ((void *(*)(id, SEL))objc_msgSend)(colour, sel("CGColor")));
+      };
+      id appearance = appAppearance();
+      if (appearance && respondsTo(appearance, "performAsCurrentDrawingAppearance:")) {
+        ((void (*)(id, SEL, void (^)(void)))objc_msgSend)(appearance, sel("performAsCurrentDrawingAppearance:"), resolve);
+      } else {
+        resolve();
+      }
     }
     sendVoid1(wrapper, sel("addSubview:"), holder);
   }
@@ -303,6 +318,21 @@ static void placeCapsules(double rowWidth) {
   put(theme, right - widthOf(theme), 1);
 }
 
+// --- the app's appearance -------------------------------------------------------
+
+// Every capsule takes the theme chosen in fleetdeck, whatever the system's: its
+// controls inherit the app's appearance, and an opaque capsule's background is
+// resolved in it. On the macOS 26 stand with real glass (run 34868250061) a
+// capsule's glass took its tint from the board under it, so controls drawn in
+// the system's mode were dark on dark glass or light on light.
+static id appAppearance(void) {
+  return send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("effectiveAppearance"));
+}
+
+static const char *appearanceName(id appearance) {
+  return appearance ? cstring(send0(appearance, sel("name"))) : "";
+}
+
 static void setMinContentWidth(id window, double width) {
   if (!window) return;
   CGSize min = sendSize0(window, sel("contentMinSize"));
@@ -357,6 +387,18 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   void *pool = objc_autoreleasePoolPush();
   id parent = (id)container;
   fd_capsules_clear(container);
+  // The window's log says the capsules' material and the appearance they are
+  // drawn in, once each time either changes: glass, vibrancy and opaque take
+  // their colours from different places, and a stand's screenshot cannot tell
+  // them apart. A stand checks this wiring by it; whether the capsules can be
+  // read is for its screenshot.
+  static char said[96];
+  char now[96];
+  snprintf(now, sizeof now, "%s, in %s", mode, appearanceName(appAppearance()));
+  if (strcmp(now, said) != 0) {
+    strncpy(said, now, sizeof said - 1);
+    fprintf(stderr, "fleetdeck-window: the capsules are drawn in %s\n", now);
+  }
 
   CGRect bounds = sendRect0(parent, sel("bounds"));
   id rowView = initWithFrame((id)rowClass(), bounds);
@@ -532,7 +574,36 @@ void fd_test_press_segment(int i) {
 }
 
 void fd_test_press_new_card(void) { sendAction(newCardDrawn); }
+
+const char *fd_test_capsule_slot_appearance(int i) {
+  id wrapper = slot(i, NULL);
+  if (!wrapper) return "";
+  id content = respondsTo(wrapper, "contentView")
+                   ? send0(wrapper, sel("contentView"))
+                   : ((id (*)(id, SEL, unsigned long))objc_msgSend)(send0(wrapper, sel("subviews")),
+                                                                    sel("objectAtIndex:"), 0);
+  return appearanceName(send0(content, sel("appearance")));
+}
+
+const char *fd_test_app_appearance(void) {
+  return appearanceName(send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("appearance")));
+}
+
+void fd_test_set_app_appearance(const char *name) {
+  id appearance = name && *name ? send1(cls("NSAppearance"), sel("appearanceNamed:"), nsstring(name)) : (id)0;
+  sendVoid1(send0(cls("NSApplication"), sel("sharedApplication")), sel("setAppearance:"), appearance);
+}
 void fd_test_press_theme_icon(void) { sendAction(themeIconDrawn); }
+
+double fd_test_capsule_slot_background_brightness(int i) {
+  id wrapper = slot(i, NULL);
+  if (!wrapper) return -1;
+  CGColorRef colour = ((CGColorRef(*)(id, SEL))objc_msgSend)(send0(wrapper, sel("layer")), sel("backgroundColor"));
+  if (!colour) return -1;
+  size_t n = CGColorGetNumberOfComponents(colour);
+  const CGFloat *c = CGColorGetComponents(colour);
+  return n >= 3 ? (c[0] + c[1] + c[2]) / 3 : n >= 1 ? c[0] : -1;
+}
 
 // Whether a capsule's control is drawn inside its glass: a descendant of the
 // contentView of the nearest NSGlassEffectView above it. which is as below.
