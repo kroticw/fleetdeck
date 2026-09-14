@@ -41,6 +41,11 @@ void fd_frame_set_drag_band(void *frame, double height);
 // content view was not a WKWebView.
 int fd_frame_board_observed(void *frame);
 
+// fd_frame_titlebar_inset is where the window's zoom button ends, in points
+// from the window's left edge: 0 when the window has no zoom button or it is
+// hidden.
+double fd_frame_titlebar_inset(void *frame);
+
 int fd_glass_available(void);
 int fd_reduce_transparency(void);
 int fd_increase_contrast(void);

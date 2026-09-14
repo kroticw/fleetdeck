@@ -25,6 +25,9 @@ const (
 	// appearance cannot be relied on to reach a window started after it
 	// changed.
 	standAppearanceEnv = "FLEETDECK_STAND_APPEARANCE"
+	// "newcard": the board opens its new card form as it loads, so a stand's
+	// screenshot shows the form without anyone pressing its capsule.
+	standOpenEnv = "FLEETDECK_STAND_OPEN"
 )
 
 // standSettings is what a stand set; the zero value is a person's window.
@@ -32,6 +35,7 @@ type standSettings struct {
 	panelStartTimeout time.Duration
 	width, height     int
 	appearance        string
+	open              string
 }
 
 // Smaller than this the frame has no room for both panels and the board.
@@ -64,6 +68,12 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 			return standSettings{}, fmt.Errorf("%s=%q is neither light nor dark", standAppearanceEnv, v)
 		}
 		s.appearance = v
+	}
+	if v, set := lookup(standOpenEnv); set {
+		if v != "newcard" {
+			return standSettings{}, fmt.Errorf("%s=%q is not newcard", standOpenEnv, v)
+		}
+		s.open = v
 	}
 	return s, nil
 }

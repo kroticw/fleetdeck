@@ -402,6 +402,21 @@ void fd_frame_set_drag_band(void *frame, double height) {
 
 void *fd_frame_board(void *frame) { return ((struct fd_frame *)frame)->board; }
 
+double fd_frame_titlebar_inset(void *frame) {
+  id window = ((struct fd_frame *)frame)->window;
+  // NSWindowZoomButton, the rightmost of the three.
+  id zoom = ((id (*)(id, SEL, unsigned long))objc_msgSend)(window, sel("standardWindowButton:"), 2);
+  if (!zoom || sendBool0(zoom, sel("isHidden"))) return 0;
+  CGRect bounds = sendRect0(zoom, sel("bounds"));
+  CGRect inWindow;
+#if defined(__x86_64__)
+  ((void (*)(CGRect *, id, SEL, CGRect, id))objc_msgSend_stret)(&inWindow, zoom, sel("convertRect:toView:"), bounds, nil);
+#else
+  inWindow = ((CGRect (*)(id, SEL, CGRect, id))objc_msgSend)(zoom, sel("convertRect:toView:"), bounds, nil);
+#endif
+  return inWindow.origin.x + inWindow.size.width;
+}
+
 int fd_glass_available(void) { return cls("NSGlassEffectView") != (id)0; }
 
 static id workspace(void) { return send0(cls("NSWorkspace"), sel("sharedWorkspace")); }

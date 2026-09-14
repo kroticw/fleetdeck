@@ -77,6 +77,10 @@ func (f *frame) panelContent(side string) unsafe.Pointer {
 // points tall across the window; 0 is none.
 func (f *frame) setDragBand(height float64) { C.fd_frame_set_drag_band(f.p, C.double(height)) }
 
+// titlebarInset is where the title bar's zoom button ends, in points from the
+// window's left edge; 0 when there is none (titlebar.go).
+func (f *frame) titlebarInset() float64 { return float64(C.fd_frame_titlebar_inset(f.p)) }
+
 func (f *frame) capsules() unsafe.Pointer { return C.fd_frame_capsules(f.p) }
 func (f *frame) board() unsafe.Pointer    { return C.fd_frame_board(f.p) }
 
@@ -132,6 +136,8 @@ type frameProbe struct {
 	windowFrameBefore                  rect
 	windowFrame, rootFrame, boardFrame rect
 	contentWidth, contentHeight        float64
+	// Where the title bar's zoom button ends once the frame is in.
+	titlebarInset float64
 }
 
 func rectOf(r C.fd_rect) rect {
@@ -149,6 +155,7 @@ func probeFrameForTest(g geometry) frameProbe {
 	out.rootFrame = rectOf(C.fd_test_frame_of(root))
 	out.boardFrame = rectOf(C.fd_test_frame_of(f.board()))
 	out.contentWidth, out.contentHeight = windowContentSize(window)
+	out.titlebarInset = f.titlebarInset()
 	out.glassAvailable = C.fd_glass_available() != 0
 	f.setMode(glassModeGlass)
 	content := f.panelContent("orchestrator")

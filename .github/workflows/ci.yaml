@@ -302,16 +302,28 @@ jobs:
       # another; it does not prove the text under the glass is sharp, since this
       # runner draws v0.10.0's capsules without the blur the operator's Mac
       # showed (run 34854756877).
+      #
+      # The frame is shown with content (scripts/standdaemon): a card in every
+      # stage, more long-named sessions than the sessions panel shows, one
+      # waiting and one stopped, and an orchestrator terminal with long lines
+      # and a status line. An empty frame hid what the operator saw broken in
+      # v0.10.0's panels. The last frame has the new card form open.
       - name: This build's window in its frame, light
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/light exec frame
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/light exec content
       - name: This build's window in its frame, dark
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec frame
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
+      - name: This build's window in its frame, dark, with the new card form open
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_OPEN: newcard
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7799 out/dark-newcard exec content
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
       - name: The window's tests on macOS 26
         run: go test -count=1 ./cmd/fleetdeck-window/
