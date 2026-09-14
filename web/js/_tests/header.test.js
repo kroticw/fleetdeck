@@ -35,6 +35,10 @@ import {
   RATE_LIMITS_AGE_WORTH_SHOWING_MS,
   fleetMenuHTML,
   nextMenuState,
+  menuGo,
+  limitsOf,
+  joinHeaderParts,
+  HEADER_PARTS,
   headerCounts,
   unknownMarkHTML,
 } from "../header.js";
@@ -754,4 +758,44 @@ test("the counter admits it is a floor when some session did not report", () => 
   assert.ok(html.includes("counter-unknown"));
   assert.ok(html.includes("+?"), "the mark is a qualifier, not a second count of people waiting");
   assert.ok(!html.includes(">3<"), "the number of unreported sessions is not a number of people waiting");
+});
+
+// The fleetdeck window switches fleet for all three of its web views, so a pick
+// of another fleet goes to the switcher the header was given; the start page and
+// a new fleet are still addresses.
+test("the fleet menu switches fleet through the given switcher and goes elsewhere by address", () => {
+  const went = [];
+  const assigned = [];
+  const deps = { switchFleet: (name) => went.push(name), assign: (path) => assigned.push(path) };
+  menuGo({ fleet: "B" }, deps);
+  menuGo({ path: "/" }, deps);
+  menuGo({ path: "/#new" }, deps);
+  assert.deepEqual(went, ["B"]);
+  assert.deepEqual(assigned, ["/", "/#new"]);
+});
+
+// The fleetdeck window draws the limits as capsules of its own, from data rather
+// than markup; the level has to be the one the header's gauge would show.
+test("the limits as data: the gauge's percentage and level, or none", () => {
+  const now = Date.parse("2026-09-14T10:00:00Z");
+  const fresh = { limits: { fetchedAt: "2026-09-14T09:59:30Z", fiveHour: { utilization: 37.4 }, sevenDay: { utilization: 91 } } };
+  assert.deepEqual(limitsOf(fresh, now), [
+    { label: t("limit_5h"), pct: 37, level: "cool" },
+    { label: t("limit_7d"), pct: 91, level: "hot" },
+  ]);
+  assert.deepEqual(limitsOf({}, now), [
+    { label: t("limit_5h"), pct: null, level: "off" },
+    { label: t("limit_7d"), pct: null, level: "off" },
+  ]);
+  const old = { limits: { ...fresh.limits, fetchedAt: "2026-09-13T10:00:00Z" } };
+  assert.deepEqual(limitsOf(old, now).map((limit) => limit.level), ["stale", "stale"]);
+});
+
+// In the window the orchestrator surface shows the brand row and the sessions
+// surface the counters; a browser tab shows every part, in the order it always has.
+test("the header draws only the parts it is given, in the header's own order", () => {
+  const html = Object.fromEntries(HEADER_PARTS.map((part) => [part, `<${part}>`]));
+  assert.equal(joinHeaderParts(HEADER_PARTS, html), HEADER_PARTS.map((part) => `<${part}>`).join(""));
+  assert.equal(joinHeaderParts(["update", "brand"], html), "<brand><update>");
+  assert.equal(joinHeaderParts(["counters"], html), "<counters>");
 });

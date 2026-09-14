@@ -5,7 +5,34 @@ package main
 #include "menu_darwin.h"
 */
 import "C"
-import "unsafe"
+
+import (
+	"sync"
+	"unsafe"
+)
+
+// menuReload is what the menu's Reload does: glasswindow.go sets it to reload
+// every web view. Until it is set, Reload does nothing.
+var menuReload = struct {
+	sync.Mutex
+	run func()
+}{}
+
+func setMenuReload(run func()) {
+	menuReload.Lock()
+	defer menuReload.Unlock()
+	menuReload.run = run
+}
+
+//export fleetdeckMenuReload
+func fleetdeckMenuReload() {
+	menuReload.Lock()
+	run := menuReload.run
+	menuReload.Unlock()
+	if run != nil {
+		run()
+	}
+}
 
 // installMenu builds the app's menu bar. Call it any time after
 // webview.New() returns -- by then the app has already finished launching

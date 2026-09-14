@@ -1,0 +1,368 @@
+//go:build darwin
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+
+	webview "github.com/webview/webview_go"
+)
+
+// glassWindow is the glass frame at work in the running window: the controller
+// deciding, and the frame, the surfaces and the capsules carrying its effects
+// out (natives). Its state is the main thread's; reports from anywhere else
+// reach it through the web view's Dispatch.
+type glassWindow struct {
+	w        webview.WebView
+	panelURL string
+	frame    *frame
+	bridge   *bridge
+	ctl      *controller
+	mode     glassMode
+
+	surfaces map[string]*surface
+	framed   bool
+	model    json.RawMessage
+
+	// askBoard asks for the board's page again, the way the page's own reload
+	// does; putUp puts a page of the window's own in the board, the way the
+	// screen's are put up (main.go).
+	askBoard func()
+	putUp    func(page string)
+
+	// The drag on a panel's edge under way: which panel, the width it began
+	// at, and the pointer's x at the press.
+	dragSide  string
+	dragWidth float64
+	dragX     float64
+}
+
+func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp func(page string)) *glassWindow {
+	mode := currentGlassMode()
+	g := &glassWindow{
+		w:        w,
+		panelURL: panelURL,
+		frame:    installFrame(w.Window()),
+		bridge:   newBridge(),
+		mode:     mode,
+		surfaces: map[string]*surface{},
+		askBoard: askBoard,
+		putUp:    putUp,
+	}
+	g.ctl = newController(panelURL, loadPanelWidths(), mode)
+	g.frame.setMode(mode)
+	width, height := windowContentSize(w.Window())
+	g.run(g.ctl.resized(width, height, windowIsFullscreen(w.Window())))
+
+	// A surface's page says where its load is through the same binding the
+	// board's does; the board's own goes to the screen (main.go).
+	g.bridge.handle(pageLoadedBindingName, func(surface string, args json.RawMessage) (any, error) {
+		var state string
+		if err := json.Unmarshal(args, &state); err != nil {
+			return nil, err
+		}
+		g.w.Dispatch(func() { g.pageLoaded(surface, state) })
+		return nil, nil
+	})
+	g.bindBoard("fleetdeckLayout", func(_ string, args json.RawMessage) (any, error) {
+		var report struct {
+			Version int    `json:"version"`
+			Mode    string `json:"mode"`
+			Fleet   string `json:"fleet"`
+		}
+		if err := json.Unmarshal(args, &report); err != nil {
+			return nil, err
+		}
+		g.later(g.ctl.layout(report.Version, report.Mode, report.Fleet))
+		return nil, nil
+	})
+	g.bind("fleetdeckOpen", func(_ string, args json.RawMessage) (any, error) {
+		var open struct {
+			Kind  string `json:"kind"`
+			Path  string `json:"path"`
+			Short string `json:"short"`
+		}
+		if err := json.Unmarshal(args, &open); err != nil {
+			return nil, err
+		}
+		g.later(g.ctl.open(open.Kind, open.Path, open.Short))
+		return nil, nil
+	})
+	g.bind("fleetdeckSwitchFleet", func(_ string, args json.RawMessage) (any, error) {
+		var name string
+		if err := json.Unmarshal(args, &name); err != nil {
+			return nil, err
+		}
+		g.later(g.ctl.switchFleet(name))
+		return nil, nil
+	})
+	g.bindBoard("fleetdeckCapsules", func(_ string, args json.RawMessage) (any, error) {
+		g.later(g.ctl.capsules(args))
+		return nil, nil
+	})
+	g.bindBoard("fleetdeckTheme", func(_ string, args json.RawMessage) (any, error) {
+		var choice string
+		if err := json.Unmarshal(args, &choice); err != nil {
+			return nil, err
+		}
+		g.later(g.ctl.theme(choice))
+		return nil, nil
+	})
+	g.bind("fleetdeckPanel", func(_ string, args json.RawMessage) (any, error) {
+		var fold struct {
+			Side   string `json:"side"`
+			Folded bool   `json:"folded"`
+		}
+		if err := json.Unmarshal(args, &fold); err != nil {
+			return nil, err
+		}
+		g.later(g.ctl.panel(fold.Side, fold.Folded))
+		return nil, nil
+	})
+
+	setSurfaceEvents(g.surfaceMessage, g.surfaceNavigation)
+	setCapsuleEvents(func(action string) { g.run(g.ctl.capsuleAction(action)) })
+	setWindowEvents(g.windowChanged)
+	setMenuReload(func() { g.run(g.ctl.reload()) })
+	setResizeEvents(g.resize)
+	observeSurfaceNavigation(g.surfaceNavigated)
+	observeWindow(w.Window())
+	return g
+}
+
+// bind makes a binding the board reaches through webview_go and the surfaces
+// through the registry.
+func (g *glassWindow) bind(name string, h bridgeHandler) {
+	g.bridge.handle(name, h)
+	g.bindForBoard(name)
+}
+
+// bindBoard makes a binding only the board reaches: what it reports of itself.
+func (g *glassWindow) bindBoard(name string, h bridgeHandler) {
+	g.bridge.handleBoard(name, h)
+	g.bindForBoard(name)
+}
+
+func (g *glassWindow) bindForBoard(name string) {
+	if err := g.w.Bind(name, func(args json.RawMessage) (any, error) { return g.bridge.call("board", name, args) }); err != nil {
+		log.Printf("fleetdeck-window: the board page will not reach %s: %v", name, err)
+	}
+}
+
+// share puts a binding the board already has into the registry, for the
+// surfaces: the update button lives in the orchestrator's surface.
+func (g *glassWindow) share(name string, f func() (any, error)) {
+	g.bridge.handle(name, func(string, json.RawMessage) (any, error) { return f() })
+}
+
+// later carries effects out on the main thread, after whatever callback
+// produced them has returned: a surface is never taken down inside its own.
+func (g *glassWindow) later(effects []effect) {
+	if len(effects) == 0 {
+		return
+	}
+	g.w.Dispatch(func() { g.run(effects) })
+}
+
+func (g *glassWindow) run(effects []effect) { runEffects(g, effects) }
+
+// boardShowsOwnPage is main.go's show putting a page of the window's own into
+// the board.
+func (g *glassWindow) boardShowsOwnPage() { g.run(g.ctl.boardShowsOwnPage()) }
+
+// reloadSurfaces is the board's page reloading: the surfaces go with it.
+func (g *glassWindow) reloadSurfaces() { g.run(g.ctl.reloadSurfaces()) }
+
+// tick is time going by for the surfaces' pages asked for (main.go's ticker).
+func (g *glassWindow) tick() { g.run(g.ctl.tick()) }
+
+// surfaceMessage is a surface's page calling a binding, on the main thread: it
+// joins that web view's queue (callQueue), answered in order off the main
+// thread.
+func (g *glassWindow) surfaceMessage(surface, message, origin string, mainFrame bool) {
+	if !acceptSurfaceMessage(g.panelURL, origin, mainFrame) {
+		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surface, origin, mainFrame)
+		return
+	}
+	if s := g.surfaces[surface]; s != nil && s.calls != nil {
+		s.calls.push(message)
+	}
+}
+
+// answerCalls is what a surface's queue does with each call: answers it, and
+// settles its promise in that same web view, if it is still the one shown.
+func (g *glassWindow) answerCalls(kind string, s *surface) func(message string) {
+	return func(message string) {
+		reply := answerSurfaceCall(g.bridge, kind, message)
+		if reply == "" {
+			return
+		}
+		g.w.Dispatch(func() {
+			if replyGoesTo(g.surfaces, kind, s) {
+				s.eval(reply)
+			}
+		})
+	}
+}
+
+func (g *glassWindow) surfaceNavigation(_, target string, mainFrame bool) bool {
+	allow, effects := g.ctl.navigate(target, mainFrame)
+	g.later(effects)
+	return allow
+}
+
+func (g *glassWindow) pageLoaded(surface, state string) {
+	log.Printf("fleetdeck-window: %s", surfacePageSays(surface, state))
+	g.run(g.ctl.pageLoaded(surface, state))
+}
+
+// surfacePageSays is the window's log line for a surface's page's word about
+// itself. scripts/ci-window-stand.sh waits for it; glasswindow_test.go holds
+// both sides.
+func surfacePageSays(surface, state string) string {
+	return fmt.Sprintf("the %s surface's page says %q", surface, state)
+}
+
+// surfaceNavigated is WebKit's word about a surface's navigation, from inside
+// its delegate: carried out later, since it may take that web view down.
+func (g *glassWindow) surfaceNavigated(surface string, e navEvent) {
+	log.Printf("fleetdeck-window: the %s surface's navigation %s", surface, e)
+	g.later(g.ctl.surfaceNavigated(surface, e))
+}
+
+func (g *glassWindow) windowChanged(kind string) {
+	switch kind {
+	case "glass":
+		g.run(g.ctl.glassChanged(currentGlassMode()))
+	default:
+		width, height := windowContentSize(g.w.Window())
+		g.run(g.ctl.resized(width, height, windowIsFullscreen(g.w.Window())))
+	}
+}
+
+// resize is the width strip at a panel's edge (frame_darwin.c), on the main
+// thread: the frame follows every drag in this process, and the board hears of
+// the new width on release.
+func (g *glassWindow) resize(side string, phase int, x float64) {
+	switch phase {
+	case 0:
+		width, ok := g.ctl.resizeStart(side)
+		if !ok {
+			g.dragSide = ""
+			return
+		}
+		g.dragSide, g.dragWidth, g.dragX = side, width, x
+	case 1:
+		if g.dragSide == side {
+			g.run(g.ctl.resizeTo(side, g.dragWidth, x-g.dragX))
+		}
+	case 2:
+		g.dragSide = ""
+		g.run(g.ctl.resizeEnd())
+	}
+}
+
+// --- natives ---------------------------------------------------------------------
+
+func (g *glassWindow) createSurface(kind, url string, glass glassMode) {
+	if old := g.surfaces[kind]; old != nil {
+		old.close()
+	}
+	s := newSurface(g.frame.board(), g.frame.panelContent(kind), kind, g.panelURL, glass, g.bridge)
+	s.calls = newCallQueue(g.answerCalls(kind, s))
+	g.surfaces[kind] = s
+	g.framed = true
+	s.load(url)
+	g.redrawCapsules()
+}
+
+func (g *glassWindow) destroySurfaces() {
+	for _, s := range g.surfaces {
+		s.close()
+	}
+	g.surfaces = map[string]*surface{}
+	g.framed = false
+	// No panel page, no frame (spec 5.5): the panels and the capsules fold
+	// away until the board reports a panel again.
+	g.frame.layout(geometry{})
+	clearCapsules(g.frame.capsules())
+}
+
+func (g *glassWindow) send(surface string, msg map[string]any) {
+	if surface == "board" {
+		g.w.Eval(receiveScript(msg))
+		return
+	}
+	if s := g.surfaces[surface]; s != nil {
+		s.send(msg)
+	}
+}
+
+func (g *glassWindow) focus(surface string) {
+	if surface == "board" {
+		focusView(g.frame.board())
+		return
+	}
+	if s := g.surfaces[surface]; s != nil {
+		s.focus()
+	}
+}
+
+func (g *glassWindow) navigateBoard(url string) { g.w.Navigate(url) }
+func (g *glassWindow) openExternal(url string)  { openExternalURL(url) }
+
+func (g *glassWindow) reloadSurface(surface string) {
+	if s := g.surfaces[surface]; s != nil {
+		s.reload()
+	}
+}
+
+func (g *glassWindow) showWindowPage(page string) { g.putUp(page) }
+
+func (g *glassWindow) setAppearance(choice string) { applyAppearance(choice) }
+func (g *glassWindow) applyGeometry(geo geometry)  { g.frame.layout(geo) }
+func (g *glassWindow) saveWidths(w panelWidths)    { storePanelWidths(w) }
+
+func (g *glassWindow) setCapsules(model json.RawMessage) {
+	g.model = model
+	g.redrawCapsules()
+}
+
+func (g *glassWindow) setFrameMode(m glassMode) {
+	g.mode = m
+	g.frame.setMode(m)
+	g.redrawCapsules()
+}
+
+func (g *glassWindow) reloadBoard() { g.askBoard() }
+
+func (g *glassWindow) redrawCapsules() {
+	if !g.framed || g.model == nil {
+		return
+	}
+	m, err := parseCapsuleModel(g.model)
+	if err != nil {
+		log.Printf("fleetdeck-window: the capsules are not drawn: %v", err)
+		return
+	}
+	drawCapsules(g.frame.capsules(), m, g.mode)
+}
+
+// broadcast is the board's web view with Eval reaching the surfaces too: the
+// update's reports go to every page, since the update button lives in the
+// orchestrator's surface.
+type broadcast struct {
+	webview.WebView
+	g *glassWindow
+}
+
+func (b broadcast) Eval(js string) {
+	b.WebView.Eval(js)
+	for _, s := range b.g.surfaces {
+		s.eval(js)
+	}
+}
+
+func (g *glassWindow) view() webview.WebView { return broadcast{WebView: g.w, g: g} }

@@ -77,33 +77,122 @@ const (
 	processLossReset      = 30 * time.Second
 )
 
-// navSays takes WebKit's word about a navigation. It says whether to ask for
-// the page again now, or the failure page to put up.
-func (s *screen) navSays(e navEvent) (navigate bool, page string) {
-	s.navSeen = true
+// pageWatch is one web view's page asked for and shown, by WebKit's word
+// (nav_darwin.go) and the page's own (pageLoadScript): when it is asked for
+// again, and when the window gives up on it. The screen keeps the board's
+// (owner.go); the controller keeps one for each side surface, whose web views
+// start, fail and lose their process the way the board's does (controller.go).
+type pageWatch struct {
+	// showingPanel: the panel's own page has said it loaded, with its styles
+	// and its scripts, and has not left since.
+	showingPanel bool
+	// asked: the page is asked for, and has not said it loaded yet. askedAt is
+	// when, tries how many asks in a row.
+	asked   bool
+	askedAt time.Time
+	tries   int
+	// loading: the navigation asked for has reached its document, which is
+	// still loading.
+	loading bool
+	// href is where the panel's page last said it was; left, that the page
+	// went away to an address the window does not know yet.
+	href string
+	left bool
+	// waitFrom is when the wait running now began: the ask, the document
+	// beginning, or the failure it waits out (waitFor).
+	waitFrom time.Time
+	// committed: WebKit has committed a navigation since the page was last
+	// asked for, so the page's word is about a document that ask brought;
+	// navSeen, that WebKit has said anything at all.
+	committed, navSeen bool
+	// retrySoon: the page failed, or loaded broken, and is asked for again once
+	// navFailedRetryPause has gone by.
+	retrySoon bool
+	// processLosses counts the web content process going away under the shown
+	// page; finishedAt is the last load WebKit finished.
+	processLosses int
+	finishedAt    time.Time
+}
+
+// loadVerdict is what a pageWatch says is to be done.
+type loadVerdict int
+
+const (
+	// loadGoesOn: nothing, yet.
+	loadGoesOn loadVerdict = iota
+	// loadAskAgain: the page is to be asked for again, the ask counted.
+	loadAskAgain
+	// loadFailed: pageLoadTries asks in a row did not load, and the page is
+	// given up on.
+	loadFailed
+	// loadKeepsFalling: the web content process went away again soon after the
+	// page was asked for again for the same.
+	loadKeepsFalling
+)
+
+// ask is the page asked for, counted. It has not begun until WebKit or the
+// page says so.
+func (p *pageWatch) ask(now time.Time) {
+	p.showingPanel, p.loading, p.left = false, false, false
+	p.committed, p.retrySoon = false, false
+	p.asked, p.askedAt, p.waitFrom = true, now, now
+	p.tries++
+}
+
+// cover is a page of the window's own going up in place of the page.
+func (p *pageWatch) cover() {
+	p.showingPanel, p.asked, p.left = false, false, false
+	p.committed, p.retrySoon = false, false
+}
+
+// navSays takes WebKit's word about a navigation. It says what is to be done,
+// and, for a page given up on, how long it was waited for.
+func (p *pageWatch) navSays(e navEvent, now time.Time) (loadVerdict, time.Duration) {
+	p.navSeen = true
 	if e.kind == navFinished && e.href != "about:blank" {
-		s.finishedAt = s.time()
+		p.finishedAt = now
 	}
-	if e.kind == navProcessGone && s.showingPanel {
-		return s.processLost()
+	if e.kind == navProcessGone && p.showingPanel {
+		return p.processLost(now), 0
 	}
-	if !s.asked {
-		return false, ""
+	if !p.asked {
+		return loadGoesOn, 0
 	}
 	switch e.kind {
 	case navCommitted:
 		if e.href != "about:blank" {
-			s.committed = true
-			if !s.loading {
-				s.loading, s.waitFrom = true, s.time()
+			p.committed = true
+			if !p.loading {
+				p.loading, p.waitFrom = true, now
 			}
 		}
 	case navFailedProvisional, navFailed:
 		if !replaced(e) {
-			return s.failed()
+			return p.failed(now)
 		}
 	case navProcessGone:
-		return s.failed()
+		return p.failed(now)
+	}
+	return loadGoesOn, 0
+}
+
+// navSays takes WebKit's word about the board's navigation. It says whether to
+// ask for the page again now, or the failure page to put up.
+func (s *screen) navSays(e navEvent) (navigate bool, page string) {
+	return s.follow(s.pageWatch.navSays(e, s.time()))
+}
+
+// follow does for the board what its page watch says.
+func (s *screen) follow(v loadVerdict, waited time.Duration) (navigate bool, page string) {
+	switch v {
+	case loadAskAgain:
+		return s.ask(), ""
+	case loadFailed:
+		s.cover()
+		return false, pageFailedPage(s.target(), waited)
+	case loadKeepsFalling:
+		s.cover()
+		return false, processLostPage(s.target())
 	}
 	return false, ""
 }
@@ -115,20 +204,20 @@ func (s *screen) navSays(e navEvent) (navigate bool, page string) {
 // WebKit would: a second loss within processLossReset of the last finished
 // load puts up a page saying so, rather than reloading a page that takes its
 // process down every time it is shown.
-func (s *screen) processLost() (navigate bool, page string) {
-	if !s.finishedAt.IsZero() && s.time().Sub(s.finishedAt) >= processLossReset {
-		s.processLosses = 0
+func (p *pageWatch) processLost(now time.Time) loadVerdict {
+	if !p.finishedAt.IsZero() && now.Sub(p.finishedAt) >= processLossReset {
+		p.processLosses = 0
 	}
-	s.processLosses++
-	if s.processLosses > maxProcessLossReloads {
-		target := s.target()
+	p.processLosses++
+	if p.processLosses > maxProcessLossReloads {
 		// The button asks afresh, with a reload allowed again.
-		s.processLosses = 0
-		s.cover()
-		return false, processLostPage(target)
+		p.processLosses = 0
+		p.cover()
+		return loadKeepsFalling
 	}
-	s.reopen()
-	return true, ""
+	// Asked for afresh, the way a person's reload is.
+	p.tries = 0
+	return loadAskAgain
 }
 
 // processLostPage says the panel's page at pageURL took its web content process
@@ -167,24 +256,97 @@ func replaced(e navEvent) bool {
 }
 
 // failed is the page asked for failing: asked for again once
-// navFailedRetryPause has gone by, or, past pageLoadTries, the failure page.
-func (s *screen) failed() (navigate bool, page string) {
-	if s.tries < pageLoadTries {
-		s.retrySoon, s.loading, s.waitFrom = true, false, s.time()
-		return false, ""
+// navFailedRetryPause has gone by, or, past pageLoadTries, given up on.
+func (p *pageWatch) failed(now time.Time) (loadVerdict, time.Duration) {
+	if p.tries < pageLoadTries {
+		p.retrySoon, p.loading, p.waitFrom = true, false, now
+		return loadGoesOn, 0
 	}
-	target, waited := s.target(), s.time().Sub(s.askedAt)
-	s.cover()
-	return false, pageFailedPage(target, waited)
+	waited := now.Sub(p.askedAt)
+	p.cover()
+	return loadFailed, waited
 }
 
-// waitFor is how long the page asked for is left, from waitFrom, before tick
+// pageSays takes the page's word about itself, and the address it said it
+// from. It says whether the word was taken: one from a page no longer on
+// screen, or from a document the last ask cut off, is not.
+func (p *pageWatch) pageSays(state, href string, now time.Time) bool {
+	if !p.asked && !p.showingPanel {
+		// A page the window has covered with one of its own, still speaking
+		// as it goes: not what is on screen.
+		return false
+	}
+	if p.navSeen && !p.committed {
+		// A word from the document the last ask cut off, taken off the UI
+		// thread's queue after that ask: WebKit has not yet committed the
+		// navigation the window asked for. Without WebKit's word at all -- a
+		// delegate that never took -- the page's word is all there is.
+		return false
+	}
+	switch state {
+	case pagePanel:
+		p.showingPanel, p.asked, p.tries, p.loading, p.left = true, false, 0, false, false
+		if href != "" {
+			p.href = href
+		}
+	case pageLoading:
+		// The document has begun: given pageLoadingWait from here, and asked
+		// for again, if it has to be, where it began.
+		if !p.asked {
+			return false
+		}
+		if !p.loading {
+			p.loading, p.waitFrom = true, now
+		}
+		if href != "" {
+			p.href = href
+		}
+		if p.left {
+			// The page the person went to: counted from here, as a first try.
+			p.left, p.askedAt, p.waitFrom, p.tries = false, now, now, 1
+		}
+	case pageBroken:
+		// Not the panel, and finished: waiting longer mends nothing, so it is
+		// asked for again after navFailedRetryPause.
+		p.showingPanel, p.loading, p.retrySoon, p.waitFrom = false, false, true, now
+	case pageLeaving:
+		if p.showingPanel {
+			// Gone to an address the window does not know until the next page
+			// begins -- a fleet chosen on the start page, a reload. The window
+			// waits for that page and does not navigate for it: its own URL is
+			// the start page, and asking for it would lose where the person
+			// went. Should the next page never begin, it says so.
+			p.showingPanel, p.loading = false, false
+			p.asked, p.askedAt, p.tries, p.left = true, now, pageLoadTries, true
+			p.waitFrom = p.askedAt
+		}
+	}
+	return true
+}
+
+// due is time going by: a page asked for and not loaded is asked for again,
+// pageLoadTries times in all, and then given up on, having been given the wait
+// it says. How long that is follows from what WebKit and the page have said of
+// it (waitFor).
+func (p *pageWatch) due(now time.Time) (loadVerdict, time.Duration) {
+	wait := p.waitFor()
+	if !p.asked || now.Sub(p.waitFrom) < wait {
+		return loadGoesOn, 0
+	}
+	if p.tries < pageLoadTries {
+		return loadAskAgain, 0
+	}
+	p.cover()
+	return loadFailed, wait
+}
+
+// waitFor is how long the page asked for is left, from waitFrom, before due
 // asks for it again.
-func (s *screen) waitFor() time.Duration {
+func (p *pageWatch) waitFor() time.Duration {
 	switch {
-	case s.retrySoon:
+	case p.retrySoon:
 		return navFailedRetryPause
-	case s.loading || s.left:
+	case p.loading || p.left:
 		// A document that has begun, or a page the person went to.
 		return pageLoadingWait
 	default:

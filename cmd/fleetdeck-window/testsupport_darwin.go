@@ -63,6 +63,16 @@ static int t_item_has_action(id item, const char *actionName) {
   return t_action(item) == t_sel(actionName);
 }
 
+static int t_item_has_target(id item) { return t_send0(item, t_sel("target")) != (id)0; }
+
+// t_perform_item sends item's action to its target the way a click on the item
+// does, and reports whether anything took it.
+static int t_perform_item(id item) {
+  return ((signed char (*)(id, SEL, SEL, id, id))objc_msgSend)(t_shared_app(), t_sel("sendAction:to:from:"),
+                                                              t_action(item), t_send0(item, t_sel("target")),
+                                                              item) != 0;
+}
+
 // t_create_hidden_window mirrors the real window's own construction
 // (libs/webview/include/webview.h's set_up_window: same style mask, same
 // zero-size CGRectMake, same NSBackingStoreBuffered) with the one line that
@@ -188,6 +198,53 @@ func testMenuItemKey(menuTitle, action string) (key string, ok bool) {
 		}
 	}
 	return "", false
+}
+
+// testMenuItemHasTarget says whether the item with the given action in the
+// top-level menu titled menuTitle sends it to a target of its own rather than
+// up the responder chain.
+func testMenuItemHasTarget(menuTitle, action string) bool {
+	mainMenu := C.t_main_menu()
+	n := int(C.t_menu_item_count(mainMenu))
+	for i := 0; i < n; i++ {
+		item := C.t_menu_item_at(mainMenu, C.int(i))
+		if C.GoString(C.t_item_title(item)) != menuTitle {
+			continue
+		}
+		menu := C.t_submenu(item)
+		cAction := C.CString(action)
+		defer C.free(unsafe.Pointer(cAction))
+		for j := 0; j < int(C.t_menu_item_count(menu)); j++ {
+			entry := C.t_menu_item_at(menu, C.int(j))
+			if C.t_item_has_action(entry, cAction) != 0 {
+				return C.t_item_has_target(entry) != 0
+			}
+		}
+	}
+	return false
+}
+
+// testMenuItemPerform sends the action of the item with the given action in
+// the top-level menu titled menuTitle, as a click on it does, and reports
+// whether it was taken.
+func testMenuItemPerform(menuTitle, action string) bool {
+	mainMenu := C.t_main_menu()
+	cAction := C.CString(action)
+	defer C.free(unsafe.Pointer(cAction))
+	for i := 0; i < int(C.t_menu_item_count(mainMenu)); i++ {
+		item := C.t_menu_item_at(mainMenu, C.int(i))
+		if C.GoString(C.t_item_title(item)) != menuTitle {
+			continue
+		}
+		menu := C.t_submenu(item)
+		for j := 0; j < int(C.t_menu_item_count(menu)); j++ {
+			entry := C.t_menu_item_at(menu, C.int(j))
+			if C.t_item_has_action(entry, cAction) != 0 {
+				return C.t_perform_item(entry) != 0
+			}
+		}
+	}
+	return false
 }
 
 func testHasTopLevelMenuTitled(title string) bool {

@@ -40,6 +40,10 @@ var (
 	quitKeyOK             bool
 	reloadKey             string
 	reloadKeyOK           bool
+	reloadHasTarget       bool
+	// reloadRuns is how many times pressing Reload ran the window's reload.
+	reloadRuns    int
+	reloadPressed bool
 
 	closeHideWindow             unsafe.Pointer
 	closeHideShouldCloseResult  int
@@ -58,7 +62,13 @@ func TestMain(m *testing.M) {
 	hasAppMenu = testHasTopLevelMenuTitled("fleetdeck")
 	editMenuActionKeys = testEditMenuActionKeys()
 	quitKey, quitKeyOK = testAppMenuQuitKeyEquivalent()
-	reloadKey, reloadKeyOK = testMenuItemKey("View", "reload:")
+	reloadKey, reloadKeyOK = testMenuItemKey("View", "fleetdeckReloadAll:")
+	reloadHasTarget = testMenuItemHasTarget("View", "fleetdeckReloadAll:")
+	// Pressed as a click presses it: through the item's target, into what
+	// glasswindow.go sets as the reload.
+	setMenuReload(func() { reloadRuns++ })
+	reloadPressed = testMenuItemPerform("View", "fleetdeckReloadAll:")
+	setMenuReload(nil)
 
 	closeHideWindow = testNewHiddenWindow()
 	if closeHideWindow != nil {
@@ -69,6 +79,10 @@ func TestMain(m *testing.M) {
 		closeHideReopenResult = testDispatchReopen(false)
 		closeHideVisibleAfterReopen = testWindowIsVisible(closeHideWindow)
 	}
+
+	collectFrameResults()
+	collectSurfaceResults()
+	collectCapsuleResults()
 
 	os.Exit(m.Run())
 }
@@ -101,16 +115,25 @@ func TestAppMenuQuitRoutesToTerminate(t *testing.T) {
 
 // The page in the window used to live forever: the red button hides the
 // window rather than closing it, and there was no way to reload short of
-// quitting. reload: is WKWebView's own action, reached through the responder
-// chain the same way cut: and paste: are. As with those, this proves the item
-// exists with the right action and key; that Cmd+R reloads the page for a
-// person pressing it is checked on the live window, by hand.
-func TestViewMenuReloadRoutesToTheWebViewsReload(t *testing.T) {
+// quitting. With the glass frame the window holds three web views, and
+// WKWebView's own reload:, sent up the responder chain, reaches only the one
+// with focus -- a reload that left the board on an old build under a new
+// orchestrator column. So Reload has a target of the window's own, which
+// reloads all three. As with the Edit menu, this proves the item exists with
+// the right action, target and key; that Cmd+R reloads every web view for a
+// person pressing it is checked on the stand, by hand.
+func TestReloadReloadsEveryWebViewNotOnlyTheFocusedOne(t *testing.T) {
 	if !reloadKeyOK {
-		t.Fatal("no View menu item with action reload: -- the page in the window cannot be reloaded without quitting")
+		t.Fatal("no View menu item with action fleetdeckReloadAll: -- Reload would reach only the focused web view")
+	}
+	if !reloadHasTarget {
+		t.Fatal("Reload has no target of its own: its action would go up the responder chain and find nothing")
 	}
 	if reloadKey != "r" {
 		t.Fatalf("Reload key equivalent = %q, want \"r\"", reloadKey)
+	}
+	if !reloadPressed || reloadRuns != 1 {
+		t.Fatalf("pressing Reload: taken = %v, the window's reload ran %d times; want it run once", reloadPressed, reloadRuns)
 	}
 }
 

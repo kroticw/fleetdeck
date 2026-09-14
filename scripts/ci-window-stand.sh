@@ -7,10 +7,18 @@
 # on a person's machine a window needs a moment they agree to
 # (docs/engineering/window-and-panel.md, "Test stands on a machine with a live fleet").
 #
-# Usage: ci-window-stand.sh <app> <port> <out-dir> <how>
+# Usage: ci-window-stand.sh <app> <port> <out-dir> <how> [<expect>]
 #
-#   <how>  exec  the window binary started directly, the way a terminal starts it
-#          open  the bundle opened through LaunchServices, the way Finder opens it
+#   <how>     exec   the window binary started directly, the way a terminal starts it
+#             open   the bundle opened through LaunchServices, the way Finder opens it
+#
+#   <expect>  page   (the default) the panel's page says "panel"
+#             frame  the glass frame comes up too: the stand configures a fleet, the
+#                    window opens that fleet's page, and the orchestrator's and the
+#                    sessions' surfaces say "panel" as well (surfacePageSays in
+#                    cmd/fleetdeck-window/glasswindow.go). Only a fleet's page reports
+#                    the layout the frame follows; / is the start page, which does not.
+#                    A window from before the frame never says it.
 #
 # The stand is the documented one: its own HOME with a configuration naming <port>,
 # and FLEETDECK_STAND_SOCKET naming a socket nothing listens on, so the panel never
@@ -18,9 +26,9 @@
 # page that loaded with its styles and its scripts (pagePanel in
 # cmd/fleetdeck-window/owner.go); a window process that merely stays up is not that.
 #
-# Everything it saw goes to <out-dir>. It exits 0 only when the page said "panel",
-# the window was still running when asked, and the panel's log says it looks for no
-# daemon.
+# Everything it saw goes to <out-dir>. It exits 0 only when every page it expects
+# said "panel", the window was still running when asked, and the panel's log says it
+# looks for no daemon.
 #
 # Its screenshot is the whole screen, so it is taken on GitHub Actions only
 # (scripts/stand-capture.sh): on a person's Mac it would be everything they have open.
@@ -29,8 +37,8 @@ set -eu
 # shellcheck source=scripts/stand-capture.sh
 . "$(dirname "$0")/stand-capture.sh"
 
-if [ "$#" -ne 4 ]; then
-	echo "usage: $0 <app> <port> <out-dir> <exec|open>" >&2
+if [ "$#" -ne 4 ] && [ "$#" -ne 5 ]; then
+	echo "usage: $0 <app> <port> <out-dir> <exec|open> [page|frame]" >&2
 	exit 2
 fi
 
@@ -40,13 +48,28 @@ app=$(cd "$1" && pwd)
 port=$2
 out=$3
 how=$4
+expect=${5:-page}
+case $expect in
+	page | frame) ;;
+	*)
+		echo "unknown expectation: $expect" >&2
+		exit 2
+		;;
+esac
 
 mkdir -p "$out"
 stand=$(mktemp -d)
 mkdir -p "$stand/home/.config/fleetdeck"
-printf 'server:\n  port: %s\n' "$port" >"$stand/home/.config/fleetdeck/config.yaml"
+if [ "$expect" = frame ]; then
+	# An empty board is enough: the page reports its layout whatever the board holds.
+	mkdir -p "$stand/board/cards"
+	printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n' "$port" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
+	url="http://127.0.0.1:$port/?fleet=stand"
+else
+	printf 'server:\n  port: %s\n' "$port" >"$stand/home/.config/fleetdeck/config.yaml"
+	url="http://127.0.0.1:$port/"
+fi
 socket="$stand/no-daemon-here.sock"
-url="http://127.0.0.1:$port/"
 window_bin="$app/Contents/MacOS/fleetdeck-window"
 
 case $how in
@@ -82,15 +105,26 @@ case $how in
 		;;
 esac
 
+# missing names the pages that have not said "panel" yet.
 loaded=no
+missing="every page (the window went before it was looked at)"
 for _ in $(seq 60); do
 	kill -0 "$window" 2>/dev/null || break
-	if grep -q "the panel's page says \"panel\"" "$out/window.log" 2>/dev/null; then
+	missing=
+	grep -q "the panel's page says \"panel\"" "$out/window.log" 2>/dev/null || missing="the board"
+	if [ "$expect" = frame ]; then
+		grep -q "the orchestrator surface's page says \"panel\"" "$out/window.log" 2>/dev/null ||
+			missing="${missing:+$missing, }the orchestrator surface"
+		grep -q "the sessions surface's page says \"panel\"" "$out/window.log" 2>/dev/null ||
+			missing="${missing:+$missing, }the sessions surface"
+	fi
+	if [ -z "$missing" ]; then
 		loaded=yes
 		break
 	fi
 	sleep 1
 done
+# The screenshot comes after every page said so: for frame, it is the frame's.
 sleep 3
 capture_screen "$out/window.png"
 alive=no
@@ -115,5 +149,5 @@ echo "--- window log ($how)"
 cat "$out/window.log" 2>/dev/null || echo "(none)"
 echo "--- panel log"
 cat "$out/panel.log"
-echo "--- $app ($how): page said panel: $loaded, window still running: $alive, panel looks for no daemon: $discovery"
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery"
 [ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ]

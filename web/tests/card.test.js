@@ -897,3 +897,13 @@ test("the documents are listed once per opened card, not once per snapshot", asy
 
   assert.equal(calls, 1);
 });
+
+// E layout, K1: the close control is a round button in the sheet, and a bare
+// glyph sits off-centre in a round button. The cross is drawn instead.
+test("the close control is a round button with a drawn cross, not a bare glyph", () => {
+  const { root } = open(JSON.parse(FIXTURE));
+  const close = root.querySelector(".card-close");
+  assert.equal(close.getAttribute("aria-label"), t("card_close"));
+  assert.match(close.innerHTML, /^<svg[^>]*aria-hidden="true"/, "the cross is an svg so it sits centred in the round button");
+  assert.equal(close.textContent, "", "the old glyph is still in the button beside the drawing");
+});

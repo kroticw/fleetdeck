@@ -140,3 +140,13 @@ test("new card: Escape and Cancel close the form without sending", () => {
   assert.equal(form.hidden, true);
   assert.equal(sent.length, 0);
 });
+
+// The fleetdeck window's new card capsule opens the same form; the board hides
+// the button there.
+test("new card: the form opens without its button", () => {
+  const other = dom.element("nav");
+  dom.document.body.appendChild(other);
+  const card = createNewCard(other, { create: fakeCreate });
+  card.open();
+  assert.equal(other.querySelector("div.newcard").hidden, false);
+});

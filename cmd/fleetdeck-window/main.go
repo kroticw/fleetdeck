@@ -134,6 +134,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("fleetdeck-window: %v", err)
 	}
+	// A stand's panel widths stay out of the operator's app's defaults.
+	useWidthsSuite(widthsSuite(standSocket))
 
 	// A window in an update's staging directory opens the installed app and
 	// goes, before it has a window to flash (staged.go).
@@ -172,6 +174,22 @@ func main() {
 	}
 
 	scr := &screen{url: *url, logPath: logPath, takingOver: *handover != "", now: time.Now}
+	// The glass frame over the board (glasswindow.go): the panels with their
+	// web views and the capsules, up while the board's page is a panel page.
+	// Its bindings are bound here, before the first navigation.
+	glass := newGlassWindow(w, *url, func() {
+		if !scr.reload() {
+			log.Printf("fleetdeck-window: a reload over the window's own page asks for nothing")
+			return
+		}
+		log.Printf("fleetdeck-window: asked for the panel's page again at %s, with every web view", scr.target())
+		w.Navigate(scr.target())
+	}, func(page string) {
+		// A side surface's page given up on: said in the board, as its own is.
+		scr.cover()
+		log.Printf("fleetdeck-window: put up the window's page %q for a side surface", pageHeading(page))
+		w.SetHtml(page)
+	})
 	// show does what the screen says, on the UI thread.
 	show := func(navigate bool, page string) {
 		switch {
@@ -182,13 +200,15 @@ func main() {
 			// In the log by its heading: a page of the window's put up over a
 			// web view that never draws it looks, from outside, like none.
 			log.Printf("fleetdeck-window: put up the window's page %q", pageHeading(page))
+			// A page of the window's own is no panel page: the frame goes.
+			glass.boardShowsOwnPage()
 			w.SetHtml(page)
 		}
 	}
 	// What WKWebView says of each navigation, in the log with the time since
 	// the page was asked for: the page's own word begins only with its
 	// document, and a navigation that is slow before that says nothing.
-	observed := observeNavigation(w.Window(), func(e navEvent) {
+	observeBoardNavigation(func(e navEvent) {
 		if scr.asked {
 			log.Printf("fleetdeck-window: navigation %s, %s after the page was asked for", e, time.Since(scr.askedAt).Round(time.Millisecond))
 		} else {
@@ -197,8 +217,8 @@ func main() {
 		// WebKit calls its delegate on the UI thread, where the screen lives.
 		show(scr.navSays(e))
 	})
-	if !observed {
-		log.Printf("fleetdeck-window: the window's content view is not a WKWebView: WebKit will say nothing of navigations, and the panel's page is asked for again only every %s", navSilentWait)
+	if !glass.frame.boardObserved() {
+		log.Printf("fleetdeck-window: the board is not a WKWebView: WebKit will say nothing of its navigations, and the panel's page is asked for again only every %s", navSilentWait)
 	}
 	keeper := &supervisor.Keeper{
 		URL:  *url,
@@ -238,7 +258,8 @@ func main() {
 				} else {
 					log.Printf("fleetdeck-window: the notice about the panel at %s is taken down: %s", *url, describeEvent(e))
 				}
-				w.Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
+				// Every web view: the orchestrator's surface marks the build too.
+				glass.view().Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
 			}
 			show(scr.on(e))
 		})
@@ -254,9 +275,15 @@ func main() {
 		scr.reopen()
 		log.Printf("fleetdeck-window: asked for the panel's page again at %s, as the page asked", scr.target())
 		w.Navigate(scr.target())
+		glass.reloadSurfaces()
 	}, *url)); err != nil {
 		log.Printf("fleetdeck-window: the page will not be able to reload itself: %v", err)
 	}
+	// From a surface the same reload takes all three web views.
+	glass.share(reloadBindingName, func() (any, error) {
+		w.Dispatch(func() { glass.run(glass.ctl.reload()) })
+		return nil, nil
+	})
 	if err := w.Bind(pageLoadedBindingName, func(state, href string) {
 		w.Dispatch(func() {
 			if scr.asked {
@@ -278,6 +305,7 @@ func main() {
 	if err := w.Bind(noticeBindingName, notices.page); err != nil {
 		log.Printf("fleetdeck-window: a panel of another build will be shown without a word: %v", err)
 	}
+	glass.share(noticeBindingName, func() (any, error) { return notices.page(), nil })
 	if err := w.Bind(noticeShownBindingName, func(text string) {
 		if text == "" {
 			log.Printf("fleetdeck-window: the page took the notice about the panel down")
@@ -303,7 +331,9 @@ func main() {
 		log.Printf("fleetdeck-window: the notice's button will not replace the panel: %v", err)
 	}
 	// After the bindings, so the script finds them; before the first
-	// navigation, so it runs in the first page too.
+	// navigation, so it runs in the first page too. The host object tells the
+	// board's page it is the board of the glass window (web/js/host.js).
+	w.Init(hostScript("board", glass.mode, nil))
 	w.Init(noticeScript)
 	w.Init(pageLoadScript(*url))
 	// The update button is on screen only while there is something to update
@@ -331,23 +361,24 @@ func main() {
 				source:   how.Source,
 				running:  how.Running,
 				markPath: markPath,
-				tell:     func(r report) { tell(w, r) },
+				tell:     func(r report) { tell(glass.view(), r) },
 				now:      time.Now,
 			}
 		}
 	}
 	// A page asks this as it loads -- the first time, and again after every
 	// reload -- because it misses every report sent before it was there.
-	if err := w.Bind(knownBindingName, func() report {
+	known := func() report {
 		if watch == nil {
 			return report{Step: "none"}
 		}
 		return watch.known()
-	}); err != nil {
+	}
+	if err := w.Bind(knownBindingName, known); err != nil {
 		log.Printf("fleetdeck-window: a page that loads will not learn of a newer version until the window next finds one: %v", err)
 	}
 	var updating atomic.Bool
-	if err := w.Bind(updateBindingName, func() {
+	update := func() {
 		// The page takes no second press either, and the update itself holds
 		// a lock for a second window or a terminal; this is the third guard,
 		// for this window's own binding.
@@ -357,14 +388,21 @@ func main() {
 		go func() {
 			defer updating.Store(false)
 			if how.Refusal != "" {
-				tell(w, refusalProgress(how.Refusal))
+				tell(glass.view(), refusalProgress(how.Refusal))
 				return
 			}
-			runUpdate(w, *url, canonical, how.Source, kept)
+			runUpdate(glass.view(), *url, canonical, how.Source, kept)
 		}()
-	}); err != nil {
+	}
+	if err := w.Bind(updateBindingName, update); err != nil {
 		log.Printf("fleetdeck-window: the update button will not work: %v", err)
 	}
+	// The update button lives in the orchestrator's surface.
+	glass.share(knownBindingName, func() (any, error) { return known(), nil })
+	glass.share(updateBindingName, func() (any, error) {
+		update()
+		return nil, nil
+	})
 	// Looking for a newer version runs beside the window for as long as it is
 	// open, silent unless what it knows changes. A window started by a
 	// handover looks too: it stays open as long as the one it replaced would
@@ -423,7 +461,8 @@ func main() {
 		kept.start()
 	}
 
-	// Time going by for a page asked for and not loaded (screen.tick).
+	// Time going by for a page asked for and not loaded (screen.tick), the
+	// board's and the side surfaces'.
 	ticking, stopTicking := context.WithCancel(context.Background())
 	ticked := make(chan struct{})
 	go func() {
@@ -435,7 +474,10 @@ func main() {
 			case <-ticking.Done():
 				return
 			case <-tick.C:
-				w.Dispatch(func() { show(scr.tick()) })
+				w.Dispatch(func() {
+					show(scr.tick())
+					glass.tick()
+				})
 			}
 		}
 	}()

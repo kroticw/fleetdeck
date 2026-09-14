@@ -115,7 +115,7 @@ test("a session with no transcript UUID gets no edit button — there is nothing
 // drive renderSessions against the fake DOM and the real store, the same way
 // the orchestrator column's own tests do.
 
-import { installDOM, settle } from "../../tests/fake-dom.js";
+import { installDOM, settle, fireEvent } from "../../tests/fake-dom.js";
 
 class ListSocket {
   constructor() {
@@ -684,5 +684,19 @@ test("one fleet: the column looks exactly as it did before there were fleets", a
   const html = root.innerHTML;
   assert.ok(!html.includes("fleet-group-head") && !html.includes("fleet-other"), "nothing is grouped");
   assert.ok(html.includes('data-short="aa11"') && html.includes('data-short="nn33"'), "every session is a row");
+  dom.restore();
+});
+
+// The fleetdeck window switches fleet for all three of its web views, so the
+// column takes the switch it is given. The line is markup the fake DOM does not
+// parse; the click is delivered to the column with the line as its target, the
+// way a browser bubbles it.
+test("several fleets: another fleet's line switches through the switcher the column was given", async () => {
+  const went = [];
+  const { root, dom } = await list(structuredClone(TWO_FLEETS), { switchFleet: (name) => went.push(name) });
+  const line = { dataset: { fleet: "A" } };
+  fireEvent(root, "click", { target: { closest: (selector) => (selector === ".fleet-other" ? line : null) } });
+  fireEvent(root, "click", { target: { closest: () => null } });
+  assert.deepEqual(went, ["A"]);
   dom.restore();
 });

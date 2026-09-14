@@ -93,12 +93,14 @@ export function renderDocs(root, options = {}) {
   // point. The list is rebuilt only when the set of documents changes, so
   // opening one does not tear down and re-create the entry the operator's cursor
   // is on; the body is replaced on every open.
-  const nav = el("nav", "docs-list");
+  // docs-island and doc-island are the fleetdeck window's two islands (web/app.css,
+  // E layout); a browser tab has no rule for them.
+  const nav = el("nav", "docs-list docs-island");
   // The cards linking to the open document sit over its body in a slot of their
   // own, so redrawing them never touches the body. An empty slot takes no room.
   const cardsSlot = el("div", "docs-cards");
   const article = el("article", "docs-body");
-  const main = el("div", "docs-main");
+  const main = el("div", "docs-main doc-island");
   main.append(cardsSlot, article);
   const box = el("div", "docs");
   box.append(nav, main);

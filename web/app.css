@@ -88,6 +88,19 @@
   --fs-xs: 0.85rem;
   --fs-sm: 0.95rem;
   --fs-md: 1.15rem;
+
+  /* The fleetdeck window's E layout (the block at the end of this file): what
+     sits on glass, the opaque islands content is drawn in, and the sheet a card,
+     a session or a document opens as over the board. */
+  --on-glass-muted: #434a54;
+  --glass-control: rgb(255 255 255 / 52%);
+  --glass-control-edge: rgb(20 22 26 / 11%);
+  --surface-on-glass: rgb(255 255 255 / 80%);
+  --island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%);
+  --sheet-shadow: 0 2px 6px rgb(20 22 26 / 10%), 0 18px 48px rgb(20 22 26 / 24%);
+  --sheet-scrim: rgb(20 22 26 / 22%);
+  --radius-lg: 12px;
+  --radius-xl: 18px;
 }
 
 /* A control panel read for hours at a stretch does not need a 16px browser
@@ -127,6 +140,14 @@ html {
     --danger: #e5484d;
     --attn: #d88a15;
     --ok: #3fb950;
+
+    --on-glass-muted: #c1c7cf;
+    --glass-control: rgb(255 255 255 / 9%);
+    --glass-control-edge: rgb(255 255 255 / 15%);
+    --surface-on-glass: rgb(27 30 36 / 80%);
+    --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
+    --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
+    --sheet-scrim: rgb(0 0 0 / 48%);
   }
 }
 
@@ -151,6 +172,14 @@ html {
   --danger: #e5484d;
   --attn: #d88a15;
   --ok: #3fb950;
+
+  --on-glass-muted: #c1c7cf;
+  --glass-control: rgb(255 255 255 / 9%);
+  --glass-control-edge: rgb(255 255 255 / 15%);
+  --surface-on-glass: rgb(27 30 36 / 80%);
+  --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
+  --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
+  --sheet-scrim: rgb(0 0 0 / 48%);
 }
 
 :root[data-theme="light"] {
@@ -3445,4 +3474,266 @@ body.is-resizing {
 .ksession-stopped {
   color: var(--text-muted);
   font-weight: 600;
+}
+
+/* --- the fleetdeck window: E layout ---
+ *
+ * In the fleetdeck window this page is one of three web views (web/js/surfaces.js):
+ * the board fills the window, and the orchestrator and sessions columns are web
+ * views of their own inside glass panels the window lays over it. The window
+ * sends the room its panels and capsules take as --host-inset-*, and whether
+ * there is glass under a web view as data-glass. Content sits on glass as opaque
+ * islands; a card, a session or a document opens as a sheet over the board.
+ *
+ * Every rule is under :root[data-surface] or :root[data-glass], which only the
+ * window sets: a browser tab keeps the three columns exactly as they were. */
+
+:root[data-glass="glass"] body,
+:root[data-glass="vibrancy"] body {
+  background: transparent;
+}
+
+/* The board is the ground the glass samples, not glass itself. */
+:root[data-surface="board"][data-glass] body {
+  background: var(--bg);
+}
+
+/* No glass, no edge of glass: an opaque side surface is drawn with the border a
+   column has (spec 7.2), inside the panel's rounded frame. */
+:root[data-glass="opaque"]:not([data-surface="board"]) body {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+:root[data-surface] main {
+  padding: 0;
+  background: transparent;
+}
+
+/* Grey text on glass is drawn over whatever the board has under it, so it is
+   darker (lighter, in dark) than on a flat surface. */
+:root[data-glass="glass"]:not([data-surface="board"]),
+:root[data-glass="vibrancy"]:not([data-surface="board"]) {
+  --text-muted: var(--on-glass-muted);
+  --text-faint: var(--on-glass-muted);
+  --border: var(--glass-control-edge);
+}
+
+/* A side surface is its column and nothing else: the window sizes and folds the
+   panel, so the column fills the web view whatever its width says. */
+:root[data-surface]:not([data-surface="board"]) .col {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+:root[data-surface] #header:empty {
+  display: none;
+}
+
+/* The window drags a panel's width at the panel's own edge, natively; the
+   page's strip would drag a column that already fills its web view. */
+:root[data-surface] .col-grip {
+  display: none;
+}
+
+:root[data-surface="orchestrator"] .o-screen {
+  padding: 0 10px 10px;
+}
+
+:root[data-surface="orchestrator"] .o-term {
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
+}
+
+:root[data-surface="sessions"] .srow,
+:root[data-surface="sessions"] .sgone {
+  margin: 10px 10px 0;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
+}
+
+/* Waiting and stalled carry meaning; the island rule above must not wash them
+   out. */
+:root[data-surface="sessions"] .srow-waiting {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  box-shadow: inset 0 0 0 2px var(--danger), var(--island-shadow);
+}
+
+:root[data-surface="sessions"] .srow-stalled {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  box-shadow: inset 0 0 0 1px var(--on-glass-muted);
+}
+
+:root[data-surface="sessions"] .sgone-stopped {
+  box-shadow: inset 3px 0 0 var(--border-strong), var(--island-shadow);
+}
+
+/* The board: no column chrome, and the tabs and the new card button are the
+   window's capsules. The new card form stays: the capsule opens it, and it
+   drops down under the capsules. */
+:root[data-surface="board"] .col-center {
+  background: var(--bg);
+  border: none;
+  border-radius: 0;
+}
+
+:root[data-surface="board"] #tabs {
+  position: absolute;
+  top: calc(var(--host-inset-top, 64px) - 8px);
+  left: var(--host-inset-left, 394px);
+  z-index: 3;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+/* The build banner is the board's (only the board checks the build), and the
+   capsules sit where it would be: it drops in under them, between the panels. */
+:root[data-surface="board"] #build-banner {
+  position: absolute;
+  top: calc(var(--host-inset-top, 64px) - 8px);
+  left: var(--host-inset-left, 394px);
+  right: calc(var(--host-inset-content-right, 356px) + 16px);
+  z-index: 4;
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--island-shadow);
+}
+
+:root[data-surface="board"] #tabs .tab,
+:root[data-surface="board"] #tabs .newcard-open {
+  display: none;
+}
+
+:root[data-surface="board"] #board {
+  padding-top: var(--host-inset-top, 64px);
+  padding-left: var(--host-inset-left, 394px);
+  padding-right: var(--host-inset-right, 0px);
+  padding-bottom: 12px;
+  gap: var(--gap-lg);
+}
+
+:root[data-surface="board"] .kcol {
+  flex: 0 0 214px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  gap: var(--gap);
+}
+
+/* The zone stripe is a shadow rather than a border, so the card keeps its
+   rounded island shape on every side. */
+:root[data-surface="board"] .kcard {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 10px 8px 13px;
+  box-shadow: inset 3px 0 0 var(--zone-stripe, transparent), var(--island-shadow);
+}
+
+:root[data-surface="board"] .zone-urgent {
+  --zone-stripe: var(--zone-urgent);
+}
+
+:root[data-surface="board"] .zone-unplanned {
+  --zone-stripe: var(--zone-unplanned);
+}
+
+:root[data-surface="board"] .zone-planned {
+  --zone-stripe: var(--zone-planned);
+}
+
+:root[data-surface="board"] .zone-niceToHave {
+  --zone-stripe: var(--zone-nice);
+}
+
+:root[data-surface="board"] .zone-none {
+  --zone-stripe: var(--zone-none);
+}
+
+:root[data-surface="board"] .kcard-stopped {
+  --zone-stripe: var(--border-strong);
+}
+
+:root[data-surface="board"] .kcard-broken {
+  --zone-stripe: var(--danger);
+}
+
+/* K1, S1, D1: the card, the session and the document open as a sheet over the
+   board, between the panels, with the board dimmed under it. */
+#sheet-scrim {
+  display: none;
+}
+
+:root[data-surface="board"] #sheet-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--sheet-scrim);
+}
+
+/* Shown from the overlays' own hidden attribute, so no module keeps a second
+   piece of state in step with three panels. */
+:root[data-surface="board"] #center:has(#card-panel:not([hidden]), #reader-panel:not([hidden]), #session-panel:not([hidden])) > #sheet-scrim {
+  display: block;
+}
+
+:root[data-surface="board"] #card-panel,
+:root[data-surface="board"] #reader-panel,
+:root[data-surface="board"] #session-panel {
+  position: absolute;
+  inset: auto;
+  top: calc(var(--host-inset-top, 64px) - 4px);
+  left: var(--host-inset-left, 394px);
+  right: calc(var(--host-inset-content-right, 356px) + 16px);
+  bottom: 16px;
+  z-index: 2;
+  height: auto;
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  box-shadow: var(--sheet-shadow);
+}
+
+:root[data-surface="board"] .card-close,
+:root[data-surface="board"] .reader-close,
+:root[data-surface="board"] .session-panel .s-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-hover);
+}
+
+:root[data-surface="board"] .session-panel button {
+  border: none;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+:root[data-surface="board"] .docs {
+  padding: calc(var(--host-inset-top, 64px) - 4px) calc(var(--host-inset-content-right, 356px) + 16px) 16px var(--host-inset-left, 394px);
+}
+
+:root[data-surface="board"] .docs-island {
+  flex: 0 0 280px;
+  padding: var(--gap);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
+}
+
+:root[data-surface="board"] .doc-island {
+  padding: var(--gap-lg);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
 }

@@ -117,35 +117,9 @@ const startBindingName = "fleetdeckStartPanel"
 type screen struct {
 	url     string
 	logPath string
-	// showingPanel: the panel's own page has said it loaded, with its styles
-	// and its scripts, and has not left since.
-	showingPanel bool
-	// asked: the window has navigated to the panel, and the page has not said
-	// it loaded yet. askedAt is when, tries how many navigations in a row.
-	asked   bool
-	askedAt time.Time
-	tries   int
-	// loading: the navigation asked for has reached its document, which is
-	// still loading.
-	loading bool
-	// href is where the panel's page last said it was; left, that the page
-	// went away to an address the window does not know yet.
-	href string
-	left bool
-	// waitFrom is when the wait running now began: the ask, the document
-	// beginning, or the failure it waits out (waitFor).
-	waitFrom time.Time
-	// committed: WebKit has committed a navigation since the window last
-	// asked, so the page's word is about a document that ask brought; navSeen,
-	// that WebKit has said anything at all (navscreen.go).
-	committed, navSeen bool
-	// retrySoon: the page failed, or loaded broken, and is asked for again once
-	// navFailedRetryPause has gone by.
-	retrySoon bool
-	// processLosses counts the web content process going away under the shown
-	// panel; finishedAt is the last load WebKit finished (navscreen.go).
-	processLosses int
-	finishedAt    time.Time
+	// The board's page asked for and shown, by WebKit's word and the page's
+	// (navscreen.go).
+	pageWatch
 	// answering: a panel answers, as the keeper last reported.
 	answering bool
 	// startingUp: the starting page is on screen.
@@ -259,11 +233,8 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 // ask is a navigation to the panel, counted. It has not begun until the page
 // says so.
 func (s *screen) ask() bool {
-	s.showingPanel, s.startingUp, s.loading, s.left = false, false, false, false
-	s.committed, s.retrySoon = false, false
-	s.asked, s.askedAt = true, s.time()
-	s.waitFrom = s.askedAt
-	s.tries++
+	s.startingUp = false
+	s.pageWatch.ask(s.time())
 	return true
 }
 
@@ -277,8 +248,8 @@ func (s *screen) time() time.Time {
 
 // cover is one of the window's own pages going up.
 func (s *screen) cover() {
-	s.showingPanel, s.asked, s.startingUp, s.left = false, false, false, false
-	s.committed, s.retrySoon = false, false
+	s.startingUp = false
+	s.pageWatch.cover()
 }
 
 // reopen is a navigation to the panel asked for by a person or by the page
@@ -288,59 +259,27 @@ func (s *screen) reopen() {
 	s.ask()
 }
 
+// reload is a person's reload of the board -- Cmd+R, Reload in the menu. It
+// says whether to navigate: the panel's page is asked for again, as a first
+// try, only where the screen would ask for it itself -- a panel answering and
+// no handover still restarting it. Over the window's own pages it does
+// nothing: the starting page is replaced when the panel answers, the handover
+// page when the handover is done, and the keeper's failure page has its own
+// button to start the panel, which a reload should not become a second way to
+// press. The page saying the panel's page did not load is shown with a panel
+// answering, and a reload asks again there, as its button does.
+func (s *screen) reload() bool {
+	if !s.answering || (s.takingOver && !s.handed) {
+		return false
+	}
+	s.reopen()
+	return true
+}
+
 // pageSays takes the panel's page's word about itself, and the address it
 // said it from.
 func (s *screen) pageSays(state, href string) {
-	if !s.asked && !s.showingPanel {
-		// A page the window has covered with one of its own, still speaking
-		// as it goes: not what is on screen.
-		return
-	}
-	if s.navSeen && !s.committed {
-		// A word from the document the last ask cut off, taken off the UI
-		// thread's queue after that ask: WebKit has not yet committed the
-		// navigation the window asked for. Without WebKit's word at all -- a
-		// delegate that never took -- the page's word is all there is.
-		return
-	}
-	switch state {
-	case pagePanel:
-		s.showingPanel, s.asked, s.tries, s.loading, s.left = true, false, 0, false, false
-		if href != "" {
-			s.href = href
-		}
-	case pageLoading:
-		// The document has begun: given pageLoadingWait from here, and asked
-		// for again, if it has to be, where it began.
-		if !s.asked {
-			return
-		}
-		if !s.loading {
-			s.loading, s.waitFrom = true, s.time()
-		}
-		if href != "" {
-			s.href = href
-		}
-		if s.left {
-			// The page the person went to: counted from here, as a first try.
-			s.left, s.askedAt, s.waitFrom, s.tries = false, s.time(), s.time(), 1
-		}
-	case pageBroken:
-		// Not the panel, and finished: waiting longer mends nothing, so it is
-		// asked for again after navFailedRetryPause.
-		s.showingPanel, s.loading, s.retrySoon, s.waitFrom = false, false, true, s.time()
-	case pageLeaving:
-		if s.showingPanel {
-			// Gone to an address the window does not know until the next page
-			// begins -- a fleet chosen on the start page, a reload. The window
-			// waits for that page and does not navigate for it: its own URL is
-			// the start page, and asking for it would lose where the person
-			// went. Should the next page never begin, it says so.
-			s.showingPanel, s.loading = false, false
-			s.asked, s.askedAt, s.tries, s.left = true, s.time(), pageLoadTries, true
-			s.waitFrom = s.askedAt
-		}
-	}
+	s.pageWatch.pageSays(state, href, s.time())
 }
 
 // target is the address the window asks for: where the panel's page last
@@ -368,16 +307,7 @@ func (s *screen) handedOver() bool {
 // pageLoadTries times in all, and then said not to have loaded. How long it is
 // given follows from what WebKit and the page have said of it (waitFor).
 func (s *screen) tick() (navigate bool, page string) {
-	wait := s.waitFor()
-	if !s.asked || s.time().Sub(s.waitFrom) < wait {
-		return false, ""
-	}
-	if s.tries < pageLoadTries {
-		return s.ask(), ""
-	}
-	target := s.target()
-	s.cover()
-	return false, pageFailedPage(target, wait)
+	return s.follow(s.due(s.time()))
 }
 
 // pageLoadScript is put into every page the window loads. On the panel's own
