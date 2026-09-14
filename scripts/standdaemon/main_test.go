@@ -15,6 +15,8 @@ import (
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/daemon/daemontest"
 	"github.com/kroticw/fleetdeck/internal/jobs"
+	"github.com/kroticw/fleetdeck/internal/orchestrator"
+	"github.com/kroticw/fleetdeck/internal/transcript"
 )
 
 func TestTheStandsBoardHasALongTitledCardInEveryStage(t *testing.T) {
@@ -41,6 +43,59 @@ func TestTheStandsBoardHasALongTitledCardInEveryStage(t *testing.T) {
 		if !stages[stage] {
 			t.Errorf("no card in %s", stage)
 		}
+	}
+}
+
+// The orchestrator panel on a stand has to look as it does for the operator:
+// with its working order on disk and a terminal it can type into, it shows
+// neither the missing brief's warning nor the read-only notice above the
+// terminal.
+func TestTheStandsOrchestratorHasItsBriefAndItsTerminalAKey(t *testing.T) {
+	home, boardDir := t.TempDir(), t.TempDir()
+	if err := layout(home, boardDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := orchestrator.ReadBriefState(orchestrator.BriefPath(orchestrator.Paths{Board: boardDir})); got != orchestrator.BriefOurs {
+		t.Fatalf("the brief on the stand's board reads as %v, want the wizard's own", got)
+	}
+	t.Setenv("HOME", home)
+	if _, err := daemon.ControlKey(); err != nil {
+		t.Fatalf("the stand's control key: %v", err)
+	}
+}
+
+// A long-named session left unanswered inside AskUserQuestion: its row's badge,
+// "silent inside AskUserQuestion", is the widest a row gets, the one that cut
+// the operator's session names to "fl…". Read back through the panel's own
+// transcript reader, which finds the file by the session's id.
+func TestTheStandsSessionIsLeftUnansweredInsideAQuestion(t *testing.T) {
+	home := t.TempDir()
+	if err := layout(home, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	var silent *session
+	var id string
+	for i := range sessions {
+		if sessions[i].Short == silentShort {
+			silent, id = &sessions[i], sessionID(i)
+		}
+	}
+	if silent == nil || len(silent.Name) <= 60 || silent.Needs != "" || silent.Unreported {
+		t.Fatalf("the silent session %+v: want a name over 60 characters and an empty needs", silent)
+	}
+	path, err := transcript.Locate(filepath.Join(home, ".claude", "projects"), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voice, err := transcript.ReadVoice(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if voice.InCall == nil || voice.InCall.Tool != "AskUserQuestion" {
+		t.Fatalf("the transcript's open call: %+v, want AskUserQuestion", voice.InCall)
+	}
+	if since := time.Since(voice.Unanswered); since < 16*time.Minute {
+		t.Fatalf("unanswered for %v, want past the panel's 16 minutes", since)
 	}
 }
 
@@ -75,18 +130,23 @@ func TestTheStandsDaemonListsMoreLongNamedSessionsThanFitWithOneWaiting(t *testi
 	if len(listed) < 8 {
 		t.Fatalf("%d sessions listed, want at least 8 so the list scrolls", len(listed))
 	}
-	waiting, long, orchestrator := 0, 0, false
+	waiting, unknown, long, orchestrator := 0, 0, 0, false
 	for _, s := range listed {
-		if s.Waiting() == daemon.Yes {
+		switch s.Waiting() {
+		case daemon.Yes:
 			waiting++
+		case daemon.Unknown:
+			// A source that never said whether anyone waits: the row's widest
+			// badge, the one that left a long name "fl…" for the operator.
+			unknown++
 		}
 		if len(s.Name) > 60 {
 			long++
 		}
 		orchestrator = orchestrator || s.Short == orchestratorShort
 	}
-	if waiting != 1 || long < 5 || !orchestrator {
-		t.Fatalf("waiting %d, long names %d, orchestrator listed %v; want 1, at least 5, true", waiting, long, orchestrator)
+	if waiting != 1 || unknown < 1 || long < 5 || !orchestrator {
+		t.Fatalf("waiting %d, not reported %d, long names %d, orchestrator listed %v; want 1, at least 1, at least 5, true", waiting, unknown, long, orchestrator)
 	}
 }
 
@@ -123,5 +183,20 @@ func TestTheOrchestratorsTerminalShowsLongLinesAndAStatusLine(t *testing.T) {
 	}
 	if longest < 120 {
 		t.Fatalf("the longest line is %d bytes, too short to wrap in the orchestrator panel", longest)
+	}
+}
+
+// The stand with content (scripts/ci-window-stand.sh) starts this daemon and
+// pins, as its fleet's orchestrator, the session whose attach shows the
+// terminal: with any other pin the orchestrator panel says nothing is pinned.
+func TestTheWindowStandStartsThisDaemonAndPinsItsOrchestrator(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "ci-window-stand.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"go build -o \"$stand/standdaemon\" ./scripts/standdaemon", "\"$stand/standdaemon\" -socket", "session: " + orchestratorShort} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("scripts/ci-window-stand.sh lacks %q", want)
+		}
 	}
 }

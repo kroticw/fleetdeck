@@ -55,6 +55,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 	g.frame.setMode(mode)
 	width, height := windowContentSize(w.Window())
 	g.run(g.ctl.resized(width, height, windowIsFullscreen(w.Window())))
+	g.run(g.ctl.titlebarInset(g.frame.titlebarInset()))
 
 	// A surface's page says where its load is through the same binding the
 	// board's does; the board's own goes to the screen (main.go).
@@ -132,6 +133,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		return nil, nil
 	})
 
+	handleStandReports(g.bridge, hostOnStand, log.Printf)
 	setSurfaceEvents(g.surfaceMessage, g.surfaceNavigation)
 	setCapsuleEvents(func(action string) { g.run(g.ctl.capsuleAction(action)) })
 	setWindowEvents(g.windowChanged)
@@ -249,6 +251,7 @@ func (g *glassWindow) windowChanged(kind string) {
 	default:
 		width, height := windowContentSize(g.w.Window())
 		g.run(g.ctl.resized(width, height, windowIsFullscreen(g.w.Window())))
+		g.run(g.ctl.titlebarInset(g.frame.titlebarInset()))
 	}
 }
 
