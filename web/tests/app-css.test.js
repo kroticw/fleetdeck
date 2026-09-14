@@ -503,9 +503,10 @@ test("a web view on glass or vibrancy paints no background of its own", () => {
   assert.match(ruleBody(':root[data-glass="vibrancy"] body'), /background:\s*transparent/);
 });
 
-test("with reduced transparency a side surface paints its own panel", () => {
+test("with reduced transparency a side surface paints its own panel, with a column's border", () => {
   const body = ruleBody(':root[data-glass="opaque"]:not([data-surface="board"]) body');
   assert.match(body, /background:\s*var\(--surface\)/);
+  assert.match(body, /box-shadow:\s*inset 0 0 0 1px var\(--border\)/);
 });
 
 test("the board keeps clear of the panels by the insets the window sends", () => {

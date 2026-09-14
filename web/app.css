@@ -3498,8 +3498,11 @@ body.is-resizing {
   background: var(--bg);
 }
 
+/* No glass, no edge of glass: an opaque side surface is drawn with the border a
+   column has (spec 7.2), inside the panel's rounded frame. */
 :root[data-glass="opaque"]:not([data-surface="board"]) body {
   background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 :root[data-surface] main {
