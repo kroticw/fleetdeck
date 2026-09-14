@@ -72,6 +72,7 @@ func TestMain(m *testing.M) {
 
 	collectFrameResults()
 	collectSurfaceResults()
+	collectCapsuleResults()
 
 	os.Exit(m.Run())
 }
