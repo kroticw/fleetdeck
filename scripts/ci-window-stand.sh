@@ -31,9 +31,11 @@
 # FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
 # it is drawn in NSAppearanceNameDarkAqua for dark, NSAppearanceNameAqua for light.
 #
-# FLEETDECK_STAND_CAPSULES_MODE, when set, is the system's mode the capsules on
-# glass have to be drawn in, dark or light: the last word the window's log says
-# of them (cmd/fleetdeck-window/capsules_darwin.c) has to name it.
+# FLEETDECK_STAND_CAPSULES, when set with FLEETDECK_STAND_APPEARANCE, is the
+# material the capsules have to be drawn in, glass or opaque: the last word the
+# window's log says of them (cmd/fleetdeck-window/capsules_darwin.c) has to name
+# it and the app's appearance. It checks that wiring, not that the capsules can
+# be read; the screenshot is for that.
 #
 # The stand is the documented one: its own HOME with a configuration naming <port>,
 # and FLEETDECK_STAND_SOCKET naming the stand's socket -- nothing listens on it but
@@ -264,22 +266,22 @@ case ${FLEETDECK_STAND_APPEARANCE:-} in
 	light) grep -q 'the window is drawn in NSAppearanceNameAqua ' "$out/window.log" || appearance=no ;;
 esac
 
-# The system's mode the capsules on glass are drawn in, as the window last said
-# it: on macOS 26 their glass takes the system's mode, not the app's.
+# The capsules' material and the appearance they are drawn in, as the window
+# last said it: the app's, whatever the system's.
 capsules=yes
 capsules_said=
-if [ -n "${FLEETDECK_STAND_CAPSULES_MODE:-}" ]; then
-	case $FLEETDECK_STAND_CAPSULES_MODE in
-		dark) capsules_want=NSAppearanceNameDarkAqua ;;
-		light) capsules_want=NSAppearanceNameAqua ;;
+if [ -n "${FLEETDECK_STAND_CAPSULES:-}" ]; then
+	case ${FLEETDECK_STAND_APPEARANCE:-} in
+		dark) capsules_want="$FLEETDECK_STAND_CAPSULES, in NSAppearanceNameDarkAqua" ;;
+		light) capsules_want="$FLEETDECK_STAND_CAPSULES, in NSAppearanceNameAqua" ;;
 		*)
-			echo "unknown capsules mode: $FLEETDECK_STAND_CAPSULES_MODE" >&2
+			echo "FLEETDECK_STAND_CAPSULES needs FLEETDECK_STAND_APPEARANCE dark or light" >&2
 			exit 2
 			;;
 	esac
-	capsules_said=$(sed -n "s/.*the capsules on glass are drawn in \([A-Za-z]*\), the system's mode.*/\1/p" "$out/window.log" | tail -n 1)
+	capsules_said=$(sed -n 's/.*fleetdeck-window: the capsules are drawn in \(.*\)$/\1/p' "$out/window.log" | tail -n 1)
 	[ "$capsules_said" = "$capsules_want" ] || capsules=no
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules in the system's mode ${FLEETDECK_STAND_CAPSULES_MODE:-unset}: $capsules${capsules_said:+ ($capsules_said)}"
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}"
 [ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ]
