@@ -248,7 +248,8 @@ func main() {
 				} else {
 					log.Printf("fleetdeck-window: the notice about the panel at %s is taken down: %s", *url, describeEvent(e))
 				}
-				w.Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
+				// Every web view: the orchestrator's surface marks the build too.
+				glass.view().Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
 			}
 			show(scr.on(e))
 		})
@@ -294,6 +295,7 @@ func main() {
 	if err := w.Bind(noticeBindingName, notices.page); err != nil {
 		log.Printf("fleetdeck-window: a panel of another build will be shown without a word: %v", err)
 	}
+	glass.share(noticeBindingName, func() (any, error) { return notices.page(), nil })
 	if err := w.Bind(noticeShownBindingName, func(text string) {
 		if text == "" {
 			log.Printf("fleetdeck-window: the page took the notice about the panel down")

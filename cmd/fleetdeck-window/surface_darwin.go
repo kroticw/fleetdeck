@@ -22,10 +22,15 @@ type surface struct {
 }
 
 // surfaceScripts is what a surface's pages get at the start of every document,
-// in order: the host object with the bindings (hostscript.go), and the page
-// load report T-057 gives the board (owner.go).
+// in order: the host object with the bindings (hostscript.go), the page load
+// report T-057 gives the board (owner.go), and the mark on a foreign build for
+// the surface that shows the build (noticescript.go).
 func surfaceScripts(kind, panelURL string, glass glassMode, b *bridge) []string {
-	return []string{hostScript(kind, glass, b.names()), pageLoadScript(panelURL)}
+	scripts := []string{hostScript(kind, glass, b.names()), pageLoadScript(panelURL)}
+	if notice := noticeScriptFor(kind); notice != "" {
+		scripts = append(scripts, notice)
+	}
+	return scripts
 }
 
 // newSurface makes kind's web view in container, sharing board's process and

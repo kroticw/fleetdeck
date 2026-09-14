@@ -299,8 +299,11 @@ const (
 	noticeBtnStyle  = "font:inherit;margin-top:4px;padding:3px 12px;border-radius:5px;border:1px solid #a07a2c;background:#5a4518;color:#f5ead0;cursor:pointer"
 	// The header is the panel's page, and names the panel's build. The page
 	// may be of any age, so it is marked from outside it: by the markup every
-	// header has carried since the build was first shown there.
-	noticeHeaderStyle = `<style>#header .build-rev::before{content:"панель ";opacity:.75}</style>`
+	// header has carried since the build was first shown there. In the glass
+	// window the header's brand row is in the orchestrator's surface, which is
+	// given the same rule (noticescript.go).
+	noticeHeaderRule  = `#header .build-rev::before{content:"панель ";opacity:.75}`
+	noticeHeaderStyle = `<style>` + noticeHeaderRule + `</style>`
 )
 
 // noticeHTML is the notice as the page shows it, "" for none. Everything a

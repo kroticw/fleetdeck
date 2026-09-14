@@ -122,6 +122,7 @@ func newGlassWindow(w webview.WebView, panelURL string, reloadBoard func()) *gla
 	setSurfaceEvents(g.surfaceMessage, g.surfaceNavigation)
 	setCapsuleEvents(func(action string) { g.run(g.ctl.capsuleAction(action)) })
 	setWindowEvents(g.windowChanged)
+	setMenuReload(func() { g.run(g.ctl.reload()) })
 	observeWindow(w.Window())
 	return g
 }

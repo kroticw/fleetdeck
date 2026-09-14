@@ -7,6 +7,8 @@
 // menu's Paste already works today).
 #include "menu_darwin.h"
 
+#include "_cgo_export.h"
+
 #include <objc/message.h>
 #include <objc/objc.h>
 #include <objc/runtime.h>
@@ -52,6 +54,24 @@ static void itemSetSubmenu(id item, id submenu) {
   sendVoid1(item, sel("setSubmenu:"), submenu);
 }
 
+// The target of Reload: the window, not the responder chain.
+static void reloadAll(id self, SEL _cmd, id sender) {
+  (void)self;
+  (void)_cmd;
+  (void)sender;
+  fleetdeckMenuReload();
+}
+
+static id menuTarget(void) {
+  static id instance;
+  if (instance) return instance;
+  Class klass = objc_allocateClassPair((Class)objc_getClass("NSObject"), "FleetdeckMenuTarget", 0);
+  class_addMethod(klass, sel("fleetdeckReloadAll:"), (IMP)reloadAll, "v@:@");
+  objc_registerClassPair(klass);
+  instance = send0((id)klass, sel("new"));
+  return instance;
+}
+
 void fleetdeck_install_menu(void) {
   id app = send0(cls("NSApplication"), sel("sharedApplication"));
 
@@ -85,12 +105,15 @@ void fleetdeck_install_menu(void) {
   // View menu: Reload. Without it the page in this window lives until Quit --
   // the red button hides the window instead of closing it -- so a page left
   // open over a rebuilt panel kept running the old code with no way to swap
-  // it short of quitting. reload: is WKWebView's own action and needs no
-  // target, the same way cut: and paste: above do not: AppKit walks the
-  // responder chain to the web view.
+  // it short of quitting. The window holds three web views, and WKWebView's
+  // own reload:, walking the responder chain, would reach only the focused
+  // one; so the item has a target of its own, which reloads all three
+  // (menu_darwin.go).
   id viewMenuItem = newMenuItem("View", NULL, "");
   id viewMenu = newMenu("View");
-  menuAddItem(viewMenu, newMenuItem("Reload", "reload:", "r"));
+  id reloadItem = newMenuItem("Reload", "fleetdeckReloadAll:", "r");
+  sendVoid1(reloadItem, sel("setTarget:"), menuTarget());
+  menuAddItem(viewMenu, reloadItem);
   itemSetSubmenu(viewMenuItem, viewMenu);
   menuAddItem(menubar, viewMenuItem);
 
