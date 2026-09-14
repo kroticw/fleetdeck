@@ -152,6 +152,50 @@ func TestAPageThatLoadedWithoutItsStylesOrScriptsIsNotThePanel(t *testing.T) {
 	}
 }
 
+// A page whose document has begun is loading, not lost: asking for it again
+// would cut it off and start it over. On the T-057 stand the new window of an
+// update -- a binary never run before, a web view never started -- asked
+// twice before a load finished. Such a page gets pageLoadingWait; only a
+// navigation that never reached its document is asked for again at
+// pageLoadWait.
+func TestAPageThatHasBegunLoadingIsGivenLongerBeforeItIsAskedForAgain(t *testing.T) {
+	s, c := newScreen(false)
+	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 1})
+	s.pageSays(pageLoading)
+	c.t = c.t.Add(pageLoadWait)
+	if navigate, html := s.tick(); navigate || html != "" {
+		t.Fatalf("tick at pageLoadWait over a page that has begun = %v, %q; want it left to load", navigate, html)
+	}
+	c.t = c.t.Add(pageLoadingWait - pageLoadWait)
+	if navigate, _ := s.tick(); !navigate {
+		t.Fatal("a page that began and never finished within pageLoadingWait is not asked for again")
+	}
+	// The next navigation starts from nothing again: it has not begun.
+	s.pageSays(pagePanel)
+	if s.asked || !s.showingPanel {
+		t.Fatalf("after loading, asked = %v, showing = %v", s.asked, s.showingPanel)
+	}
+}
+
+func TestThePageLoadScriptSaysWhenTheDocumentBegins(t *testing.T) {
+	if script := pageLoadScript(testURL); !strings.Contains(script, `say("`+pageLoading+`")`) {
+		t.Fatalf("the script never says %q:\n%s", pageLoading, script)
+	}
+}
+
+// A stub has a test that fails while it is one.
+func TestThePageLoadingWaitIsTheMeasuredWorstColdLoadTimesThree(t *testing.T) {
+	if measuredWorstColdLoad <= 0 {
+		t.Fatal("a cold page load has not been measured: pageLoadingWait is a placeholder")
+	}
+	if measuredWorstColdLoad*pageLoadMargin != pageLoadingWait {
+		t.Fatalf("pageLoadingWait = %s, want the measured worst %s times %d", pageLoadingWait, measuredWorstColdLoad, pageLoadMargin)
+	}
+	if pageLoadingWait <= pageLoadWait {
+		t.Fatalf("pageLoadingWait %s is no longer than pageLoadWait %s", pageLoadingWait, pageLoadWait)
+	}
+}
+
 // Once loaded, the time since the navigation no longer matters.
 func TestALoadedPageIsNotAskedForAgainByTime(t *testing.T) {
 	s, c := newScreen(false)

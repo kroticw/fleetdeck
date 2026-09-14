@@ -125,6 +125,9 @@ type screen struct {
 	asked   bool
 	askedAt time.Time
 	tries   int
+	// loading: the navigation asked for has reached its document, which is
+	// still loading.
+	loading bool
 	// answering: a panel answers, as the keeper last reported.
 	answering bool
 	// startingUp: the starting page is on screen.
@@ -147,6 +150,27 @@ const (
 	pageBroken = "broken"
 	// pageLeaving: it is going away, to be replaced by another load.
 	pageLeaving = "leaving"
+	// pageLoading: its document has begun, and its styles and scripts are on
+	// their way.
+	pageLoading = "loading"
+)
+
+// How long a page whose document has begun has to finish loading before it is
+// asked for again: the slowest load seen to finish, three times over.
+//
+// Measured on 2026-09-14 on the operator's machine, on isolated stands. The
+// first run of the update stand, whose window could not yet tell a document
+// begun from one never reached, asked for the start page three times after
+// done; the third load finished 280 ms after it was asked for, and the first
+// two were cut off by the next ask, so how long they would have taken is not
+// known. Nothing measured since came near it: five freshly built binaries,
+// each run once on a warm HOME, reached the document in 53-74 ms and finished
+// in 67-88 ms; five windows in HOMEs no web view had run in, 56-70 and
+// 69-84 ms; the second update stand, 13 and 29 ms. What made the first run
+// slow was not found.
+const (
+	measuredWorstColdLoad = 280 * time.Millisecond
+	pageLoadingWait       = measuredWorstColdLoad * pageLoadMargin
 )
 
 const (
@@ -221,9 +245,10 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 	return false, ""
 }
 
-// ask is a navigation to the panel, counted.
+// ask is a navigation to the panel, counted. It has not begun until the page
+// says so.
 func (s *screen) ask() bool {
-	s.showingPanel, s.startingUp = false, false
+	s.showingPanel, s.startingUp, s.loading = false, false, false
 	s.asked, s.askedAt = true, s.time()
 	s.tries++
 	return true
@@ -254,9 +279,15 @@ func (s *screen) pageSays(state string) {
 	switch state {
 	case pagePanel:
 		s.showingPanel, s.asked, s.tries = true, false, 0
+	case pageLoading:
+		// The document has begun: given pageLoadingWait, not cut off at
+		// pageLoadWait.
+		if s.asked {
+			s.loading = true
+		}
 	case pageBroken:
 		// Not the panel: left asked, so time asks for it again.
-		s.showingPanel = false
+		s.showingPanel, s.loading = false, false
 	case pageLeaving:
 		if s.showingPanel {
 			s.showingPanel = false
@@ -277,11 +308,17 @@ func (s *screen) handedOver() bool {
 	return s.ask()
 }
 
-// tick is time going by: a page asked for and not loaded within pageLoadWait
-// is asked for again, pageLoadTries times in all, and then said not to have
-// loaded.
+// tick is time going by: a page asked for and not loaded is asked for again,
+// pageLoadTries times in all, and then said not to have loaded. A navigation
+// that never reached its document is asked for again after pageLoadWait; one
+// whose document has begun is left to load for pageLoadingWait, since asking
+// again would cut it off and start it over.
 func (s *screen) tick() (navigate bool, page string) {
-	if !s.asked || s.time().Sub(s.askedAt) < pageLoadWait {
+	wait := pageLoadWait
+	if s.loading {
+		wait = pageLoadingWait
+	}
+	if !s.asked || s.time().Sub(s.askedAt) < wait {
 		return false, ""
 	}
 	if s.tries < pageLoadTries {
@@ -306,6 +343,8 @@ func pageLoadScript(panelURL string) string {
   const say = (state) => {
     if (typeof window.` + pageLoadedBindingName + ` === "function") window.` + pageLoadedBindingName + `(state);
   };
+  // This script runs as the document starts: the navigation has reached it.
+  say("` + pageLoading + `");
   window.addEventListener("load", () => {
     const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
     const styled = links.length > 0 && links.every((link) => {
