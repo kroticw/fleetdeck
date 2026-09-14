@@ -102,6 +102,37 @@ func TestTheCopiedValuesAreV0100s(t *testing.T) {
 	}
 }
 
+func TestTheTimelineCountsFromTheNewWindowsStart(t *testing.T) {
+	at := func(s string) time.Time {
+		v, err := time.ParseInLocation(windowLogLayout, s, time.Local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	started := at("2026/09/14 14:53:27.350000")
+	log := "2026/09/14 14:53:27.910000 fleetdeck-window: on this stand: the panel has 3s to answer\n" +
+		"not a line of the log\n" +
+		"2026/09/14 14:53:28.100000 fleetdeck-window: taking the panel over by 14:53:29.786, the old window's deadline\n" +
+		"2026/09/14 14:53:28.300000 fleetdeck-window: panel starting (pid 7, started by this window)\n"
+	steps := []stepAt{
+		{"handover", at("2026/09/14 14:53:27.349000")},
+		{"handover:alive", at("2026/09/14 14:53:28.150000")},
+		{"handover:done", at("2026/09/14 14:53:28.900000")},
+		{"done", at("2026/09/14 14:53:28.901000")},
+	}
+	got := strings.Join(timeline(started, log, steps), "\n")
+	want := strings.Join([]string{
+		"+560ms the new window's first log line",
+		"+750ms the new window starts taking the panel over",
+		"+800ms handover:alive",
+		"+1550ms handover:done",
+	}, "\n")
+	if got != want {
+		t.Errorf("timeline:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestTheHandoverStepsAreCheckedInOrder(t *testing.T) {
 	full := []string{"check", "unpack", "handover", "handover:alive", "handover:panel", "handover:swapped", "handover:done", "done"}
 	if err := handoverInOrder(full); err != nil {

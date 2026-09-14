@@ -120,39 +120,44 @@ func run(o options) error {
 		return err
 	}
 	var (
-		mu       sync.Mutex
-		steps    []string
-		launched time.Time
+		mu      sync.Mutex
+		steps   []stepAt
+		started time.Time
 	)
 	u := &supervisor.Update{
 		Source:          &archiveSource{archive: o.newArchive, revision: o.wantRevision},
 		Canonical:       o.canonical,
 		LockPath:        lockPath,
 		HandoverTimeout: handoverTimeout,
-		Launch:          launchNewWindow(o.url),
-		Pause:           kept.stop,
-		Resume:          kept.start,
+		Launch: launchNewWindow(o.url, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			started = time.Now()
+		}),
+		Pause:  kept.stop,
+		Resume: kept.start,
 		Progress: func(p supervisor.Progress) {
 			mu.Lock()
 			defer mu.Unlock()
-			if p.Step == "handover" {
-				launched = time.Now()
-			}
-			steps = append(steps, p.Step)
+			steps = append(steps, stepAt{p.Step, time.Now()})
 			log.Printf("updatecheck: update %s %s", p.Step, p.Detail)
 		},
 	}
 	runErr := u.Run(context.Background())
 	mu.Lock()
-	took := time.Since(launched)
-	got := append([]string(nil), steps...)
+	took := time.Since(started)
+	timed := append([]stepAt(nil), steps...)
 	mu.Unlock()
+	windowLog := dump(staging)
+	log.Printf("updatecheck: from the new window's start, against v0.10.0's %s:\n  %s", handoverTimeout, strings.Join(timeline(started, windowLog, timed), "\n  "))
 	if runErr != nil {
-		dump(staging)
 		return fmt.Errorf("the update from v0.10.0 failed %s after the new window was started, against v0.10.0's %s: %w", took.Round(time.Millisecond), handoverTimeout, runErr)
 	}
+	got := make([]string, 0, len(timed))
+	for _, s := range timed {
+		got = append(got, s.step)
+	}
 	if err := handoverInOrder(got); err != nil {
-		dump(staging)
 		return err
 	}
 	log.Printf("updatecheck: pass: handover alive, panel, swapped, done, %s after the new window was started, within v0.10.0's %s", took.Round(time.Millisecond), handoverTimeout)
@@ -220,8 +225,10 @@ func (s *archiveSource) Stage(ctx context.Context, dir, _ string, say func(super
 	return final, nil
 }
 
-// launchNewWindow is v0.10.0's (cmd/fleetdeck-window/update.go of the tag).
-func launchNewWindow(url string) func(staged, canonical, handover string) (func(), error) {
+// launchNewWindow is v0.10.0's (cmd/fleetdeck-window/update.go of the tag),
+// with one thing v0.10.0's has not: onStart marks the moment the new window's
+// process has started, for the timeline.
+func launchNewWindow(url string, onStart func()) func(staged, canonical, handover string) (func(), error) {
 	return func(staged, canonical, handover string) (func(), error) {
 		logPath := filepath.Join(filepath.Dir(handover), supervisor.NewWindowLog)
 		out, err := os.Create(logPath)
@@ -234,6 +241,8 @@ func launchNewWindow(url string) func(staged, canonical, handover string) (func(
 			_ = out.Close()
 			return nil, err
 		}
+		onStart()
+		log.Printf("updatecheck: the new window started (pid %d)", cmd.Process.Pid)
 		done := make(chan struct{})
 		go func() {
 			_ = cmd.Wait()
@@ -329,9 +338,10 @@ func versionOf(bundle string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// dump prints what the new window left beside the handover: the handover file
-// and its log.
-func dump(staging string) {
+// dump prints what the new window left beside the handover -- the handover
+// file and its log -- and returns the log.
+func dump(staging string) string {
+	var windowLog string
 	for _, name := range []string{"handover", supervisor.NewWindowLog} {
 		data, err := os.ReadFile(filepath.Join(staging, name))
 		if err != nil {
@@ -339,5 +349,9 @@ func dump(staging string) {
 			continue
 		}
 		log.Printf("updatecheck: --- %s\n%s", name, data)
+		if name == supervisor.NewWindowLog {
+			windowLog = string(data)
+		}
 	}
+	return windowLog
 }

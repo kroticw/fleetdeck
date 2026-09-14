@@ -32,10 +32,57 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// windowLogLayout is how the window stamps its log lines
+// (log.LstdFlags | log.Lmicroseconds).
+const windowLogLayout = "2006/01/02 15:04:05.000000"
+
+// stepAt is an update's step and when this program heard of it.
+type stepAt struct {
+	step string
+	at   time.Time
+}
+
+// timeline is the handover counted from the new window's process start: its
+// first log line, the moment it starts taking the panel over, and each
+// handover step as the old window read it. It is what says where the old
+// window's deadline went.
+func timeline(started time.Time, windowLog string, steps []stepAt) []string {
+	var events []stepAt
+	first := true
+	for _, line := range strings.Split(windowLog, "\n") {
+		if len(line) < len(windowLogLayout) {
+			continue
+		}
+		at, err := time.ParseInLocation(windowLogLayout, line[:len(windowLogLayout)], time.Local)
+		if err != nil {
+			continue
+		}
+		if first {
+			events = append(events, stepAt{"the new window's first log line", at})
+			first = false
+		}
+		if strings.Contains(line, "taking the panel over by") {
+			events = append(events, stepAt{"the new window starts taking the panel over", at})
+		}
+	}
+	for _, s := range steps {
+		if strings.HasPrefix(s.step, "handover:") {
+			events = append(events, s)
+		}
+	}
+	sort.SliceStable(events, func(i, j int) bool { return events[i].at.Before(events[j].at) })
+	lines := make([]string, 0, len(events))
+	for _, e := range events {
+		lines = append(lines, fmt.Sprintf("+%dms %s", e.at.Sub(started).Milliseconds(), e.step))
+	}
+	return lines
+}
 
 // v0.10.0's handover deadline (cmd/fleetdeck-window/update.go of the tag):
 // the old window gives the new one this long from its start to done, and
