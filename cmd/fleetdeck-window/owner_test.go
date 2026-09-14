@@ -168,7 +168,7 @@ func TestPagesEscapeEverythingTheyInterpolate(t *testing.T) {
 	for name, page := range map[string]string{
 		"starting":    startingPage("http://x/"+evil, false),
 		"taking over": startingPage("http://x/"+evil, true),
-		"replacing":   replacingPage(evil),
+		"replacing":   replacingPage(evil, false),
 		"failed": failedPage("http://x/"+evil, supervisor.Event{
 			State: supervisor.Failed, Err: errors.New(evil), LogTail: evil,
 		}, "/log/"+evil),

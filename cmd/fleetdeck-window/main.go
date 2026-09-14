@@ -29,7 +29,8 @@
 // the red button -- is not the window going: the process runs on, and so does
 // the panel. A panel a window left behind that still answers is replaced; a
 // panel started from a terminal, or anything that is not a fleetdeck panel,
-// is used as it is (see internal/supervisor's Keeper).
+// is used as it is (see internal/supervisor's Keeper) -- and, when it is not
+// this window's build, named over its page (foreign.go).
 //
 // Why webview_go, and what the fallback is: this needed a native window
 // without a second build toolchain in a project that currently has only Go.
@@ -149,6 +150,12 @@ func main() {
 		MinUptime:    launchdThrottle,
 		Poll:         takenPanelPoll,
 	}
+	// A panel this window did not start, of another build than the window's,
+	// is used as it is and named over its page (foreign.go).
+	own := ownBuild()
+	notices := &panelNotice{}
+	// Asked again at a press, about the panel on the port by then.
+	keeper.MayReplace = mayReplace(own, *url, home)
 	// A takeover watches the keeper's events too, while it runs.
 	var takeoverEvents atomic.Pointer[chan supervisor.Event]
 	keeper.OnEvent = func(e supervisor.Event) {
@@ -159,7 +166,17 @@ func main() {
 			default:
 			}
 		}
+		// Worked out here, off the UI thread: it may read a launch agent's file.
+		n := noticeFor(own, *url, e, home)
 		w.Dispatch(func() {
+			if notices.set(n) {
+				if n != nil {
+					log.Printf("fleetdeck-window: %s", n)
+				} else {
+					log.Printf("fleetdeck-window: the notice about the panel at %s is taken down: %s", *url, describeEvent(e))
+				}
+				w.Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
+			}
 			navigate, page := scr.on(e)
 			switch {
 			case navigate:
@@ -182,6 +199,36 @@ func main() {
 	if err := w.Bind(chooseFolderBindingName, chooseFolder); err != nil {
 		log.Printf("fleetdeck-window: the setup page will offer no folder chooser: %v", err)
 	}
+	if err := w.Bind(noticeBindingName, notices.page); err != nil {
+		log.Printf("fleetdeck-window: a panel of another build will be shown without a word: %v", err)
+	}
+	if err := w.Bind(noticeShownBindingName, func(text string) {
+		if text == "" {
+			log.Printf("fleetdeck-window: the page took the notice about the panel down")
+			return
+		}
+		log.Printf("fleetdeck-window: the page shows the notice about the panel: %q", text)
+	}); err != nil {
+		log.Printf("fleetdeck-window: the log will not say whether the notice reached the page: %v", err)
+	}
+	// The press names the panel it was shown -- by the PID on the port when the
+	// notice was drawn -- and is taken only for the notice shown now. The page
+	// belongs to the panel, and its own script can call this as well as the
+	// button can; the keeper checks the port again before anything is stopped.
+	if err := w.Bind(replaceBindingName, func(pid int) {
+		want, ok := replaceRequest(notices.current(), pid)
+		if !ok {
+			log.Printf("fleetdeck-window: a press to replace the panel at %s (pid %d) is not for the notice shown now; ignored", *url, pid)
+			return
+		}
+		log.Printf("fleetdeck-window: replacing the panel at %s (pid %d), as asked from the notice", *url, pid)
+		keeper.Replace(want)
+	}); err != nil {
+		log.Printf("fleetdeck-window: the notice's button will not replace the panel: %v", err)
+	}
+	// After the bindings, so the script finds them; before the first
+	// navigation, so it runs in the first page too.
+	w.Init(noticeScript)
 	// The update button is on screen only while there is something to update
 	// to, and its appearing is the notice (watch.go). A build that cannot
 	// update itself never finds anything to update to, so it shows no button;
