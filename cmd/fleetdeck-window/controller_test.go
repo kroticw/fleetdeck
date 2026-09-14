@@ -354,7 +354,7 @@ func TestSwitchingFleetNavigatesTheBoardAndDropsTheSurfaces(t *testing.T) {
 }
 
 func TestASurfaceLinkElsewhereOnThePanelOpensInTheBoard(t *testing.T) {
-	allow, got := loadedFrame().navigate("http://127.0.0.1:7777/setup.html")
+	allow, got := loadedFrame().navigate("http://127.0.0.1:7777/setup.html", true)
 	want := []effect{destroySurfaces{}, navigateBoard{URL: "http://127.0.0.1:7777/setup.html"}}
 	if allow || !reflect.DeepEqual(got, want) {
 		t.Fatalf("allow = %v, effects = %#v", allow, got)
@@ -362,14 +362,14 @@ func TestASurfaceLinkElsewhereOnThePanelOpensInTheBoard(t *testing.T) {
 }
 
 func TestASurfaceLinkToAnotherSiteOpensInTheBrowser(t *testing.T) {
-	allow, got := loadedFrame().navigate("https://github.com/kroticw/fleetdeck/pull/1")
+	allow, got := loadedFrame().navigate("https://github.com/kroticw/fleetdeck/pull/1", true)
 	if allow || !reflect.DeepEqual(got, []effect{openExternal{URL: "https://github.com/kroticw/fleetdeck/pull/1"}}) {
 		t.Fatalf("allow = %v, effects = %#v", allow, got)
 	}
 }
 
 func TestASurfaceLoadingItsOwnPageIsLetThrough(t *testing.T) {
-	allow, got := loadedFrame().navigate("http://127.0.0.1:7777/?fleet=work")
+	allow, got := loadedFrame().navigate("http://127.0.0.1:7777/?fleet=work", true)
 	if !allow || len(got) != 0 {
 		t.Fatalf("allow = %v, effects = %#v", allow, got)
 	}
@@ -478,6 +478,16 @@ func TestTheCapsuleModelIsDrawnAsTheBoardGaveIt(t *testing.T) {
 	model := []byte(`{"version":1}`)
 	if got := loadedFrame().capsules(model); !reflect.DeepEqual(got, []effect{setCapsules{Model: model}}) {
 		t.Fatalf("effects = %#v", got)
+	}
+}
+
+// The window's policy is for the surface's page itself: a frame the page
+// embeds navigates as the page's content does, and is not sent to the board or
+// the browser.
+func TestAFrameInsideASurfacesPageIsNotTheWindowsToSend(t *testing.T) {
+	allow, got := loadedFrame().navigate("https://github.com/kroticw/fleetdeck/pull/1", false)
+	if !allow || len(got) != 0 {
+		t.Fatalf("a navigation of an embedded frame: allow = %v, effects = %#v; want it left to the page", allow, got)
 	}
 }
 

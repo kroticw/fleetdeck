@@ -11,6 +11,7 @@
 #include <objc/message.h>
 #include <objc/objc.h>
 #include <objc/runtime.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 // Declared by the runtime and not in a public header; webview.h's
@@ -64,13 +65,35 @@ static int liveHandlers;
 static int handlerClassRegistrations;
 static Class handlerSuper;
 
+// The origin of the document in frameInfo, as scheme://host[:port]: WebKit
+// reports a scheme's default port as 0, and the origin is then without it.
+static void originOf(id frameInfo, char *out, size_t size) {
+  out[0] = 0;
+  id origin = frameInfo ? send0(frameInfo, sel("securityOrigin")) : (id)0;
+  if (!origin) return;
+  const char *scheme = cstring(send0(origin, sel("protocol")));
+  const char *host = cstring(send0(origin, sel("host")));
+  long port = sendLong0(origin, sel("port"));
+  if (port) {
+    snprintf(out, size, "%s://%s:%ld", scheme, host, port);
+  } else {
+    snprintf(out, size, "%s://%s", scheme, host);
+  }
+}
+
 static void handlerReceive(id self, SEL _cmd, id controller, id message) {
   (void)_cmd;
   (void)controller;
   id body = send0(message, sel("body"));
   // The host script posts JSON text; anything else is not a call.
   if (!body || !((signed char (*)(id, SEL, id))objc_msgSend)(body, sel("isKindOfClass:"), cls("NSString"))) return;
-  fleetdeckSurfaceMessage((char *)nameOf(self), (char *)cstring(body));
+  // Which frame of which origin posted it: Go takes a call only from the
+  // panel's own main frame (acceptSurfaceMessage).
+  id frameInfo = send0(message, sel("frameInfo"));
+  int mainFrame = frameInfo && sendBool0(frameInfo, sel("isMainFrame"));
+  char origin[512];
+  originOf(frameInfo, origin, sizeof origin);
+  fleetdeckSurfaceMessage((char *)nameOf(self), (char *)cstring(body), origin, mainFrame);
 }
 
 static void handlerDealloc(id self, SEL _cmd) {
@@ -110,7 +133,11 @@ static const char *urlOf(id action) {
 static void navigationDecide(id self, SEL _cmd, id webView, id action, id decisionHandler) {
   (void)_cmd;
   (void)webView;
-  int allow = fleetdeckSurfaceNavigation((char *)nameOf(self), (char *)urlOf(action));
+  // The window's policy is for the page itself: a navigation of its main frame,
+  // or of a new window, which has no target frame.
+  id frame = send0(action, sel("targetFrame"));
+  int mainFrame = !frame || sendBool0(frame, sel("isMainFrame"));
+  int allow = fleetdeckSurfaceNavigation((char *)nameOf(self), (char *)urlOf(action), mainFrame);
   void (*invoke)(id, long) = (void (*)(id, long))((struct fd_block *)decisionHandler)->invoke;
   invoke(decisionHandler, allow ? 1 : 0);  // WKNavigationActionPolicyAllow is 1, Cancel 0
 }
@@ -121,7 +148,7 @@ static id navigationNewWindow(id self, SEL _cmd, id webView, id configuration, i
   (void)webView;
   (void)configuration;
   (void)features;
-  fleetdeckSurfaceNavigation((char *)nameOf(self), (char *)urlOf(action));
+  fleetdeckSurfaceNavigation((char *)nameOf(self), (char *)urlOf(action), 1);
   return (id)0;
 }
 

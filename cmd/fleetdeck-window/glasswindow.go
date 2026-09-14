@@ -181,7 +181,11 @@ func (g *glassWindow) tick() { g.run(g.ctl.tick()) }
 // surfaceMessage is a surface's page calling a binding, on the main thread: it
 // joins that web view's queue (callQueue), answered in order off the main
 // thread.
-func (g *glassWindow) surfaceMessage(surface, message string) {
+func (g *glassWindow) surfaceMessage(surface, message, origin string, mainFrame bool) {
+	if !acceptSurfaceMessage(g.panelURL, origin, mainFrame) {
+		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surface, origin, mainFrame)
+		return
+	}
 	if s := g.surfaces[surface]; s != nil && s.calls != nil {
 		s.calls.push(message)
 	}
@@ -203,8 +207,8 @@ func (g *glassWindow) answerCalls(kind string, s *surface) func(message string) 
 	}
 }
 
-func (g *glassWindow) surfaceNavigation(_, target string) bool {
-	allow, effects := g.ctl.navigate(target)
+func (g *glassWindow) surfaceNavigation(_, target string, mainFrame bool) bool {
+	allow, effects := g.ctl.navigate(target, mainFrame)
 	g.later(effects)
 	return allow
 }

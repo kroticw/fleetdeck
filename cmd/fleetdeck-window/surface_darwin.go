@@ -91,34 +91,36 @@ func (s *surface) close() {
 // surfaceEvents is where the surfaces' web views report to: a binding call from
 // a page, and a navigation to decide. effects.go sets both; until then a call is
 // dropped and a navigation cancelled.
+// A call carries the origin of the frame that posted it and whether that is the
+// page's main frame; a navigation, whether it is the main frame's.
 var surfaceEvents = struct {
 	sync.Mutex
-	message  func(surface, message string)
-	navigate func(surface, target string) bool
+	message  func(surface, message, origin string, mainFrame bool)
+	navigate func(surface, target string, mainFrame bool) bool
 }{}
 
-func setSurfaceEvents(message func(surface, message string), navigate func(surface, target string) bool) {
+func setSurfaceEvents(message func(surface, message, origin string, mainFrame bool), navigate func(surface, target string, mainFrame bool) bool) {
 	surfaceEvents.Lock()
 	defer surfaceEvents.Unlock()
 	surfaceEvents.message, surfaceEvents.navigate = message, navigate
 }
 
 //export fleetdeckSurfaceMessage
-func fleetdeckSurfaceMessage(surface, message *C.char) {
+func fleetdeckSurfaceMessage(surface, message, origin *C.char, mainFrame C.int) {
 	surfaceEvents.Lock()
 	handle := surfaceEvents.message
 	surfaceEvents.Unlock()
 	if handle != nil {
-		handle(C.GoString(surface), C.GoString(message))
+		handle(C.GoString(surface), C.GoString(message), C.GoString(origin), mainFrame != 0)
 	}
 }
 
 //export fleetdeckSurfaceNavigation
-func fleetdeckSurfaceNavigation(surface, target *C.char) C.int {
+func fleetdeckSurfaceNavigation(surface, target *C.char, mainFrame C.int) C.int {
 	surfaceEvents.Lock()
 	decide := surfaceEvents.navigate
 	surfaceEvents.Unlock()
-	if decide != nil && decide(C.GoString(surface), C.GoString(target)) {
+	if decide != nil && decide(C.GoString(surface), C.GoString(target), mainFrame != 0) {
 		return 1
 	}
 	return 0
@@ -154,7 +156,7 @@ func probeSurfacesForTest() surfaceProbe {
 	// installing the frame, as the window does, set the delegate on it.
 	out.boardObserved = f.boardObserved()
 	b := newBridge()
-	setSurfaceEvents(func(string, string) {}, func(string, string) bool { return false })
+	setSurfaceEvents(func(string, string, string, bool) {}, func(string, string, bool) bool { return false })
 	surfaceEvents.Lock()
 	out.eventsSet = surfaceEvents.message != nil && surfaceEvents.navigate != nil
 	surfaceEvents.Unlock()

@@ -419,10 +419,15 @@ func (c *controller) surfacesAskedAgain() []effect {
 }
 
 // navigate is a side surface's web view about to go to target (spec 6.7).
-// allow is the answer its navigation delegate gives at once.
-func (c *controller) navigate(target string) (allow bool, effects []effect) {
+// allow is the answer its navigation delegate gives at once. The policy is for
+// the page itself -- its main frame, or a new window: a frame the page embeds
+// navigates as the page's own content does.
+func (c *controller) navigate(target string, mainFrame bool) (allow bool, effects []effect) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !mainFrame {
+		return true, nil
+	}
 	if !c.framed {
 		return false, nil
 	}
