@@ -9,13 +9,11 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"net"
 	"os"
-	"strings"
 	"testing"
+
+	"github.com/kroticw/fleetdeck/internal/daemon/daemontest"
 )
 
 func TestCheckStandSocket(t *testing.T) {
@@ -52,48 +50,7 @@ func TestCheckStandSocket(t *testing.T) {
 // listens on -- the one fact daemonClient's override branch is handed.
 func fakeDaemonSocket(t *testing.T) string {
 	t.Helper()
-	// A short, hand-rolled temp dir rather than t.TempDir(): that embeds the
-	// full test name, which overflows macOS's ~104 byte sun_path limit on a
-	// unix socket a few directories down -- the same workaround
-	// collect_test.go's own fakeDaemon and internal/daemon's client_test.go
-	// use.
-	dir, err := os.MkdirTemp("", "fd")
-	if err != nil {
-		t.Fatalf("creating temp dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-
-	sockPath := dir + "/s.sock"
-	listener, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return // closed at test teardown
-			}
-			go func() {
-				defer conn.Close()
-				line, err := bufio.NewReader(conn).ReadString('\n')
-				if err != nil {
-					return
-				}
-				var req map[string]any
-				if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &req); err != nil {
-					return
-				}
-				if req["op"] == "ping" {
-					_, _ = conn.Write([]byte(`{"ok":true,"op":"ping","version":"test","proto":1}` + "\n"))
-				}
-			}()
-		}
-	}()
-
-	return sockPath
+	return daemontest.StartTest(t, nil).Socket
 }
 
 // The functional half of the guarantee: given a path, daemonClient's
