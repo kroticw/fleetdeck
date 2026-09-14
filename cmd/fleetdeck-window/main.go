@@ -109,6 +109,8 @@ func main() {
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	flag.Parse()
+	// For a window started by an update, the window that started it.
+	oldWindow := os.Getppid()
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -170,8 +172,8 @@ func main() {
 	show := func(navigate bool, page string) {
 		switch {
 		case navigate:
-			log.Printf("fleetdeck-window: asked for the panel's page at %s (try %d)", *url, scr.tries)
-			w.Navigate(*url)
+			log.Printf("fleetdeck-window: asked for the panel's page at %s (try %d)", scr.target(), scr.tries)
+			w.Navigate(scr.target())
 		case page != "":
 			w.SetHtml(page)
 		}
@@ -224,21 +226,23 @@ func main() {
 	// Bound before the first navigation, so the page finds them from its very
 	// first load. A reload the page or a person asks for is a navigation the
 	// screen counts, like the keeper's.
-	if err := w.Bind(reloadBindingName, reloadBinding(w.Dispatch, func(u string) {
+	// The page it was on, not the window's own URL: a reload from a fleet's
+	// page stays on that fleet.
+	if err := w.Bind(reloadBindingName, reloadBinding(w.Dispatch, func(string) {
 		scr.reopen()
-		log.Printf("fleetdeck-window: asked for the panel's page again, as the page asked")
-		w.Navigate(u)
+		log.Printf("fleetdeck-window: asked for the panel's page again at %s, as the page asked", scr.target())
+		w.Navigate(scr.target())
 	}, *url)); err != nil {
 		log.Printf("fleetdeck-window: the page will not be able to reload itself: %v", err)
 	}
-	if err := w.Bind(pageLoadedBindingName, func(state string) {
+	if err := w.Bind(pageLoadedBindingName, func(state, href string) {
 		w.Dispatch(func() {
 			if scr.asked {
-				log.Printf("fleetdeck-window: the panel's page says %q, %s after it was asked for", state, time.Since(scr.askedAt).Round(time.Millisecond))
+				log.Printf("fleetdeck-window: the panel's page says %q at %s, %s after it was asked for", state, href, time.Since(scr.askedAt).Round(time.Millisecond))
 			} else {
-				log.Printf("fleetdeck-window: the panel's page says %q", state)
+				log.Printf("fleetdeck-window: the panel's page says %q at %s", state, href)
 			}
-			scr.pageSays(state)
+			scr.pageSays(state, href)
 		})
 	}); err != nil {
 		log.Printf("fleetdeck-window: the window will not know whether the panel's page loaded: %v", err)
@@ -367,6 +371,12 @@ func main() {
 			// (docs/engineering/window-and-panel.md).
 			Registry: supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
 			LockPath: updateLockPath(*toldCanonical),
+			// The old window started this one, so it is this process's parent
+			// until it exits, and then this process is handed to launchd: the
+			// parent changing is the old window gone, with no PID to be reused.
+			// Works with an old window of any version, which says nothing of
+			// itself in the handover.
+			OldWindowGone: func() bool { return os.Getppid() != oldWindow },
 			Done: func() {
 				w.Dispatch(func() {
 					log.Printf("fleetdeck-window: the handover is done")

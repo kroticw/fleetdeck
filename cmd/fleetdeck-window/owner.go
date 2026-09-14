@@ -128,6 +128,10 @@ type screen struct {
 	// loading: the navigation asked for has reached its document, which is
 	// still loading.
 	loading bool
+	// href is where the panel's page last said it was; left, that the page
+	// went away to an address the window does not know yet.
+	href string
+	left bool
 	// answering: a panel answers, as the keeper last reported.
 	answering bool
 	// startingUp: the starting page is on screen.
@@ -248,7 +252,7 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 // ask is a navigation to the panel, counted. It has not begun until the page
 // says so.
 func (s *screen) ask() bool {
-	s.showingPanel, s.startingUp, s.loading = false, false, false
+	s.showingPanel, s.startingUp, s.loading, s.left = false, false, false, false
 	s.asked, s.askedAt = true, s.time()
 	s.tries++
 	return true
@@ -264,7 +268,7 @@ func (s *screen) time() time.Time {
 
 // cover is one of the window's own pages going up.
 func (s *screen) cover() {
-	s.showingPanel, s.asked, s.startingUp = false, false, false
+	s.showingPanel, s.asked, s.startingUp, s.left = false, false, false, false
 }
 
 // reopen is a navigation to the panel asked for by a person or by the page
@@ -274,26 +278,52 @@ func (s *screen) reopen() {
 	s.ask()
 }
 
-// pageSays takes the panel's page's word about itself.
-func (s *screen) pageSays(state string) {
+// pageSays takes the panel's page's word about itself, and the address it
+// said it from.
+func (s *screen) pageSays(state, href string) {
 	switch state {
 	case pagePanel:
-		s.showingPanel, s.asked, s.tries = true, false, 0
+		s.showingPanel, s.asked, s.tries, s.loading, s.left = true, false, 0, false, false
+		if href != "" {
+			s.href = href
+		}
 	case pageLoading:
 		// The document has begun: given pageLoadingWait, not cut off at
-		// pageLoadWait.
-		if s.asked {
-			s.loading = true
+		// pageLoadWait, and asked for again, if it has to be, where it began.
+		if !s.asked {
+			return
+		}
+		s.loading = true
+		if href != "" {
+			s.href = href
+		}
+		if s.left {
+			// The page the person went to: counted from here, as a first try.
+			s.left, s.askedAt, s.tries = false, s.time(), 1
 		}
 	case pageBroken:
 		// Not the panel: left asked, so time asks for it again.
 		s.showingPanel, s.loading = false, false
 	case pageLeaving:
 		if s.showingPanel {
-			s.showingPanel = false
-			s.asked, s.askedAt, s.tries = true, s.time(), 1
+			// Gone to an address the window does not know until the next page
+			// begins -- a fleet chosen on the start page, a reload. The window
+			// waits for that page and does not navigate for it: its own URL is
+			// the start page, and asking for it would lose where the person
+			// went. Should the next page never begin, it says so.
+			s.showingPanel, s.loading = false, false
+			s.asked, s.askedAt, s.tries, s.left = true, s.time(), pageLoadTries, true
 		}
 	}
+}
+
+// target is the address the window asks for: where the panel's page last
+// said it was, and the window's own URL until it has said.
+func (s *screen) target() string {
+	if s.href != "" {
+		return s.href
+	}
+	return s.url
 }
 
 // handedOver is the handover this window was started for being done. It says
@@ -314,8 +344,10 @@ func (s *screen) handedOver() bool {
 // whose document has begun is left to load for pageLoadingWait, since asking
 // again would cut it off and start it over.
 func (s *screen) tick() (navigate bool, page string) {
+	// A page that left waits as long as one that has begun: it went somewhere
+	// on purpose, and the window cannot ask for it again.
 	wait := pageLoadWait
-	if s.loading {
+	if s.loading || s.left {
 		wait = pageLoadingWait
 	}
 	if !s.asked || s.time().Sub(s.askedAt) < wait {
@@ -324,8 +356,9 @@ func (s *screen) tick() (navigate bool, page string) {
 	if s.tries < pageLoadTries {
 		return s.ask(), ""
 	}
+	target := s.target()
 	s.cover()
-	return false, pageFailedPage(s.url, s.tries)
+	return false, pageFailedPage(target, wait)
 }
 
 // pageLoadScript is put into every page the window loads. On the panel's own
@@ -340,8 +373,10 @@ func pageLoadScript(panelURL string) string {
 	quoted, _ := json.Marshal(origin)
 	return `(() => {
   if (location.origin !== ` + string(quoted) + `) return;
+  // With the address it says it from: a page the person went to is asked for
+  // again there, not at the window's own URL.
   const say = (state) => {
-    if (typeof window.` + pageLoadedBindingName + ` === "function") window.` + pageLoadedBindingName + `(state);
+    if (typeof window.` + pageLoadedBindingName + ` === "function") window.` + pageLoadedBindingName + `(state, location.href);
   };
   // This script runs as the document starts: the navigation has reached it.
   say("` + pageLoading + `");
@@ -426,9 +461,9 @@ func startingPage(url string, takingOver bool) string {
 </html>`, pageStyle, heading, text, waitShownAfter.Milliseconds())
 }
 
-// pageFailedPage says the panel answers but its page never loaded, and offers
-// to ask for it again.
-func pageFailedPage(panelURL string, tries int) string {
+// pageFailedPage says the panel answers but its page at pageURL never loaded,
+// after the last wait, and offers to ask for it again.
+func pageFailedPage(pageURL string, wait time.Duration) string {
 	return fmt.Sprintf(`<!doctype html>
 <html>
 <head>
@@ -439,7 +474,7 @@ func pageFailedPage(panelURL string, tries int) string {
 <body>
 <main>
   <h1>Страница панели не загрузилась</h1>
-  <p>Панель отвечала на <code>%s</code>, но её страница так и не загрузилась целиком: окно просило её %d раз, каждый раз ждало %s.</p>
+  <p>Панель отвечает, но её страница <code>%s</code> так и не загрузилась целиком: окно ждало её %s после последней попытки.</p>
   <button id="again">Открыть снова</button>
 </main>
 <script>
@@ -451,7 +486,7 @@ func pageFailedPage(panelURL string, tries int) string {
   });
 </script>
 </body>
-</html>`, pageStyle, html.EscapeString(panelURL), tries, pageLoadWait, reloadBindingName)
+</html>`, pageStyle, html.EscapeString(pageURL), wait, reloadBindingName)
 }
 
 // replacingPage is shown while a panel is being stopped for the window to

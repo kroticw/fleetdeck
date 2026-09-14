@@ -97,7 +97,7 @@ func TestTheScreenOpensThePanelOnceItAnswers(t *testing.T) {
 	}
 	// Once the page says it has loaded, a second Answering -- the keeper taking
 	// a panel after a restart -- does not reload the page under the person.
-	s.pageSays(pagePanel)
+	s.pageSays(pagePanel, testURL)
 	if navigate, html := s.on(supervisor.Event{State: supervisor.Answering, Ours: true}); navigate || html != "" {
 		t.Fatalf("second on(Answering) = %v, %q; want nothing", navigate, html)
 	}
@@ -117,7 +117,7 @@ func TestTheScreenSaysThePanelIsStartingWhenNothingShowsYet(t *testing.T) {
 func TestTheScreenLeavesThePanelsPageAloneDuringARestart(t *testing.T) {
 	s := &screen{url: testURL, logPath: "/log"}
 	s.on(supervisor.Event{State: supervisor.Answering})
-	s.pageSays(pagePanel)
+	s.pageSays(pagePanel, testURL)
 	if navigate, html := s.on(supervisor.Event{State: supervisor.Starting, PID: 43}); navigate || html != "" {
 		t.Fatalf("on(Starting) over the panel = %v, %q; want nothing", navigate, html)
 	}
