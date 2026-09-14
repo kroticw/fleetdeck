@@ -3636,6 +3636,10 @@ body.is-resizing {
   padding-right: var(--gap-lg);
   padding-bottom: 12px;
   gap: var(--gap-lg);
+  /* Either one other than auto makes WebKit ignore ::-webkit-scrollbar, and
+     macOS 26 then draws its own thin bar, 13 px tall. */
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 
 /* Thin, and never hidden: it is the one sign that the board scrolls. */

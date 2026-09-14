@@ -564,8 +564,14 @@ test("on the board the box still scrolls sideways under a trackpad or a wheel", 
 });
 
 // A thin bar, and a visible one: hiding it would take away the one sign that
-// the board scrolls at all.
+// the board scrolls at all. A scrollbar-width or scrollbar-color other than
+// auto makes WebKit, like Chrome, ignore ::-webkit-scrollbar altogether: the
+// macOS 26 stand drew the base rule's thin bar 13 px tall with an 8px height
+// asked for. The surface puts both back to auto for its height to count.
 test("on the board the scrollbar is thin and never hidden", () => {
+  const board = ruleBody(':root[data-surface="board"] #board');
+  assert.match(board, /scrollbar-width:\s*auto/);
+  assert.match(board, /scrollbar-color:\s*auto/);
   assert.match(ruleBody(':root[data-surface="board"] #board::-webkit-scrollbar'), /height:\s*8px/);
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /scrollbar-width:\s*none/);
 });
