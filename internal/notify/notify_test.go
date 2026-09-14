@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -37,9 +38,9 @@ func TestEscapeAppleScriptString(t *testing.T) {
 
 func TestFireSendsOncePerKey(t *testing.T) {
 	sent := 0
-	n := New(func(_, _ string) error { sent++; return nil })
+	n := New(func(_ context.Context, _, _ string) error { sent++; return nil })
 	for i := 0; i < 3; i++ {
-		if err := n.Fire("session:abc:waiting", "t", "x"); err != nil {
+		if err := n.Fire(context.Background(), "session:abc:waiting", "t", "x"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -50,10 +51,10 @@ func TestFireSendsOncePerKey(t *testing.T) {
 
 func TestFireAgainAfterClear(t *testing.T) {
 	sent := 0
-	n := New(func(_, _ string) error { sent++; return nil })
-	n.Fire("k", "t", "x")
+	n := New(func(_ context.Context, _, _ string) error { sent++; return nil })
+	n.Fire(context.Background(), "k", "t", "x")
 	n.Clear("k")
-	n.Fire("k", "t", "x")
+	n.Fire(context.Background(), "k", "t", "x")
 	if sent != 2 {
 		t.Fatalf("a state that went away and came back is a new event, got %d", sent)
 	}
@@ -62,21 +63,21 @@ func TestFireAgainAfterClear(t *testing.T) {
 func TestSendFailureIsReportedAndNotRemembered(t *testing.T) {
 	fail := true
 	sendCount := 0
-	n := New(func(_, _ string) error {
+	n := New(func(_ context.Context, _, _ string) error {
 		sendCount++
 		if fail {
 			return errors.New("osascript missing")
 		}
 		return nil
 	})
-	if err := n.Fire("k", "t", "x"); err == nil {
+	if err := n.Fire(context.Background(), "k", "t", "x"); err == nil {
 		t.Fatal("a failed banner must be reported")
 	}
 	if sendCount != 1 {
 		t.Fatalf("first Fire must call send exactly once, got %d", sendCount)
 	}
 	fail = false
-	if err := n.Fire("k", "t", "x"); err != nil {
+	if err := n.Fire(context.Background(), "k", "t", "x"); err != nil {
 		t.Fatal("a key whose banner failed must be retried, not marked as delivered")
 	}
 	if sendCount != 2 {
@@ -86,7 +87,7 @@ func TestSendFailureIsReportedAndNotRemembered(t *testing.T) {
 
 func TestFireConcurrentSameSendsOnce(t *testing.T) {
 	sendCount := int64(0)
-	n := New(func(_, _ string) error {
+	n := New(func(_ context.Context, _, _ string) error {
 		atomic.AddInt64(&sendCount, 1)
 		// Simulate osascript latency to expose race condition without proper locking
 		time.Sleep(5 * time.Millisecond)
@@ -100,7 +101,7 @@ func TestFireConcurrentSameSendsOnce(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			defer wg.Done()
-			if err := n.Fire("same-key", "title", "text"); err != nil {
+			if err := n.Fire(context.Background(), "same-key", "title", "text"); err != nil {
 				t.Error(err)
 			}
 		}()

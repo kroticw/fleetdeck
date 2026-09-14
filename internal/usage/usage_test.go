@@ -23,7 +23,7 @@ func TestLimitsParsesBothWindows(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	got, err := f.Limits(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestLimitsCachesWithinTTL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	for i := 0; i < 3; i++ {
 		if _, err := f.Limits(context.Background()); err != nil {
 			t.Fatal(err)
@@ -61,7 +61,7 @@ func TestExpiredTokenIsAnErrorNotZeroes(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	_, err := f.Limits(context.Background())
 	if err == nil {
 		t.Fatal("an auth error must be reported; zero gauges would look like a healthy account")
@@ -83,7 +83,7 @@ func TestAnHTTP401IsErrUnauthorizedEvenWithAnUnnamedErrorType(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	if _, err := f.Limits(context.Background()); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("HTTP 401 must be ErrUnauthorized regardless of error.type, got %v", err)
 	}
@@ -101,7 +101,7 @@ func TestRateLimitErrorIsDistinguishedFromAuthFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	_, err := f.Limits(context.Background())
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("want ErrRateLimited, got %v", err)
@@ -121,7 +121,7 @@ func TestAnUnclassifiedErrorTypeIsNeitherSentinel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	_, err := f.Limits(context.Background())
 	if err == nil {
 		t.Fatal("an error body must still be reported as an error")
@@ -132,7 +132,7 @@ func TestAnUnclassifiedErrorTypeIsNeitherSentinel(t *testing.T) {
 }
 
 func TestMissingTokenIsTypedError(t *testing.T) {
-	f := NewFetcher(func() (string, error) { return "", ErrNoToken }, "http://127.0.0.1:1", time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "", ErrNoToken }, "http://127.0.0.1:1", time.Minute)
 	if _, err := f.Limits(context.Background()); !errors.Is(err, ErrNoToken) {
 		t.Fatalf("want ErrNoToken, got %v", err)
 	}
@@ -144,7 +144,7 @@ func TestEmptyBodyIsNotSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	if _, err := f.Limits(context.Background()); err == nil {
 		t.Fatal("a response without windows must fail; nothing to read is not a healthy zero")
 	}
@@ -156,7 +156,7 @@ func TestMalformedResetsAtIsAnErrorNotZero(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	if _, err := f.Limits(context.Background()); err == nil {
 		t.Fatal("a response with malformed resets_at must fail; zero timestamps would look like no reset pending")
 	}
@@ -182,7 +182,7 @@ func TestARefreshFailureReturnsTheLastGoodValueAlongsideTheError(t *testing.T) {
 
 	// A short TTL so the second call below is forced to attempt a real refresh
 	// rather than serving the first call's cache hit unconditionally.
-	f := NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, 10*time.Millisecond)
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, 10*time.Millisecond)
 
 	good, err := f.Limits(context.Background())
 	if err != nil {
@@ -204,7 +204,7 @@ func TestARefreshFailureReturnsTheLastGoodValueAlongsideTheError(t *testing.T) {
 // the very first fetch has nothing to fall back to, and must say so honestly (a zero
 // Limits) rather than fabricate a value or fail to compile a nil case.
 func TestNoCacheYetIsAZeroLimitsNotAPanic(t *testing.T) {
-	f := NewFetcher(func() (string, error) { return "", ErrNoToken }, "http://127.0.0.1:1", time.Minute)
+	f := NewFetcher(func(context.Context) (string, error) { return "", ErrNoToken }, "http://127.0.0.1:1", time.Minute)
 	got, err := f.Limits(context.Background())
 	if err == nil {
 		t.Fatal("a missing token must still be reported as an error")

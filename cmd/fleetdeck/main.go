@@ -111,7 +111,7 @@ func (p *panel) refresh(ctx context.Context) {
 	p.snapMu.Unlock()
 
 	fire, cleared := state.Diff(prev, next, p.notifyCfg.SilenceAfter)
-	deliver(p.banners, p.notifyCfg, fire, cleared, p.onNotifyFail)
+	deliver(ctx, p.banners, p.notifyCfg, fire, cleared, p.onNotifyFail)
 }
 
 // snapshot is what server.Deps.Snapshot hands out: the last cycle's result, already
