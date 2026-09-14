@@ -251,6 +251,7 @@ func (t *Takeover) Run(ctx context.Context) error {
 	if err := Swap(t.Staged, t.Canonical); err != nil {
 		return fail(err)
 	}
+	t.phase.swapped.Store(true)
 	// LaunchServices moves before swapped is said. The old window may give up on
 	// the handover at any moment after that (T-060), and one given up on between
 	// the swap and this would leave the staged path, which holds the old bundle
@@ -303,6 +304,15 @@ func (t *Takeover) reregister() {
 		t.logf("LaunchServices was not told of the installed bundle at %s: %v", t.Canonical, err)
 	}
 }
+
+// Swapped says whether this takeover has swapped the staged bundle into the
+// canonical path.
+func (t *Takeover) Swapped() bool { return t.phase.swapped.Load() }
+
+// Reregister has LaunchServices forget the staged path and take the canonical
+// one, as the takeover did after the swap: for a window whose own check-in with
+// LaunchServices may have come after that, and put the staged path back.
+func (t *Takeover) Reregister() { t.reregister() }
 
 // retireWait bounds how long the new window waits for the old one to quit and
 // let go of the update lock before the bundle swapped out is removed. The old

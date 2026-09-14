@@ -54,6 +54,12 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// A stand-in panel for the takeover tests, started as a panel is
+	// (handoverstart_test.go): no AppKit, no tests.
+	if addr := os.Getenv(testPanelEnv); addr != "" {
+		runTestPanel(addr)
+		return
+	}
 	runtime.LockOSThread()
 
 	installMenu()
