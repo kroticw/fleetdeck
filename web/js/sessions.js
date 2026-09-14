@@ -508,7 +508,22 @@ export function foldedStripHtml(sessions, stalledNow) {
 // own header comment), so a test drives the fold/unfold the buttons would
 // otherwise trigger by calling resize.width.fold()/.unfold() directly, the
 // same call a click makes in a real browser.
-export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = {}) {
+export function renderSessions(
+  root,
+  onSelect,
+  onOpenCard,
+  { now = Date.now, switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }) } = {},
+) {
+  // Another fleet's line switches to it. Delegated and attached once, like the
+  // header's menu, rather than on each line after every render: the column's
+  // markup is replaced whole on every snapshot. options.switchFleet replaces the
+  // switch; the fleetdeck window passes its own, since a switch there changes
+  // all three of its web views.
+  root.addEventListener("click", (event) => {
+    const line = event.target?.closest?.(".fleet-other");
+    if (line) goFleet(line.dataset.fleet);
+  });
+
   // Set while one row's name is being edited in place. This column, unlike
   // the orchestrator's, rebuilds its whole innerHTML on every snapshot — so
   // the only way an <input> mid-edit survives a push arriving under the
@@ -719,9 +734,6 @@ export function renderSessions(root, onSelect, onOpenCard, { now = Date.now } = 
 
     for (const el of root.querySelectorAll(".srow")) {
       el.addEventListener("click", () => onSelect(el.dataset.short));
-    }
-    for (const el of root.querySelectorAll(".fleet-other")) {
-      el.addEventListener("click", () => switchFleet(el.dataset.fleet, { storage: pageStorage() }));
     }
     for (const el of root.querySelectorAll(".scard")) {
       el.addEventListener("click", (event) => {

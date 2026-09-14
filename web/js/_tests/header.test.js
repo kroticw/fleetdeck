@@ -35,6 +35,7 @@ import {
   RATE_LIMITS_AGE_WORTH_SHOWING_MS,
   fleetMenuHTML,
   nextMenuState,
+  menuGo,
   headerCounts,
   unknownMarkHTML,
 } from "../header.js";
@@ -754,4 +755,18 @@ test("the counter admits it is a floor when some session did not report", () => 
   assert.ok(html.includes("counter-unknown"));
   assert.ok(html.includes("+?"), "the mark is a qualifier, not a second count of people waiting");
   assert.ok(!html.includes(">3<"), "the number of unreported sessions is not a number of people waiting");
+});
+
+// The fleetdeck window switches fleet for all three of its web views, so a pick
+// of another fleet goes to the switcher the header was given; the start page and
+// a new fleet are still addresses.
+test("the fleet menu switches fleet through the given switcher and goes elsewhere by address", () => {
+  const went = [];
+  const assigned = [];
+  const deps = { switchFleet: (name) => went.push(name), assign: (path) => assigned.push(path) };
+  menuGo({ fleet: "B" }, deps);
+  menuGo({ path: "/" }, deps);
+  menuGo({ path: "/#new" }, deps);
+  assert.deepEqual(went, ["B"]);
+  assert.deepEqual(assigned, ["/", "/#new"]);
 });
