@@ -55,6 +55,9 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) {
 		cstr(m.NewCard.Label), cstr(m.Theme.Label), &limitLabels[0], &limitTexts[0], &values[0], &rgb[0], C.int(n))
 }
 
+// clearCapsules empties the capsule row. Main thread.
+func clearCapsules(container unsafe.Pointer) { C.fd_capsules_clear(container) }
+
 // capsuleEvents is where a press in the capsule row goes: effects.go hands it to
 // the controller's capsuleAction. Until it is set a press does nothing.
 var capsuleEvents = struct {

@@ -168,6 +168,14 @@ func main() {
 	}
 
 	scr := &screen{url: *url, logPath: logPath, takingOver: *handover != "", now: time.Now}
+	// The glass frame over the board (glasswindow.go): the panels with their
+	// web views and the capsules, up while the board's page is a panel page.
+	// Its bindings are bound here, before the first navigation.
+	glass := newGlassWindow(w, *url, func() {
+		scr.reopen()
+		log.Printf("fleetdeck-window: asked for the panel's page again at %s, with every web view", scr.target())
+		w.Navigate(scr.target())
+	})
 	// show does what the screen says, on the UI thread.
 	show := func(navigate bool, page string) {
 		switch {
@@ -175,6 +183,8 @@ func main() {
 			log.Printf("fleetdeck-window: asked for the panel's page at %s (try %d)", scr.target(), scr.tries)
 			w.Navigate(scr.target())
 		case page != "":
+			// A page of the window's own is no panel page: the frame goes.
+			glass.boardShowsOwnPage()
 			w.SetHtml(page)
 		}
 	}
@@ -232,9 +242,15 @@ func main() {
 		scr.reopen()
 		log.Printf("fleetdeck-window: asked for the panel's page again at %s, as the page asked", scr.target())
 		w.Navigate(scr.target())
+		glass.reloadSurfaces()
 	}, *url)); err != nil {
 		log.Printf("fleetdeck-window: the page will not be able to reload itself: %v", err)
 	}
+	// From a surface the same reload takes all three web views.
+	glass.share(reloadBindingName, func() (any, error) {
+		w.Dispatch(func() { glass.run(glass.ctl.reload()) })
+		return nil, nil
+	})
 	if err := w.Bind(pageLoadedBindingName, func(state, href string) {
 		w.Dispatch(func() {
 			if scr.asked {
@@ -281,7 +297,9 @@ func main() {
 		log.Printf("fleetdeck-window: the notice's button will not replace the panel: %v", err)
 	}
 	// After the bindings, so the script finds them; before the first
-	// navigation, so it runs in the first page too.
+	// navigation, so it runs in the first page too. The host object tells the
+	// board's page it is the board of the glass window (web/js/host.js).
+	w.Init(hostScript("board", glass.mode, nil))
 	w.Init(noticeScript)
 	w.Init(pageLoadScript(*url))
 	// The update button is on screen only while there is something to update
@@ -309,23 +327,24 @@ func main() {
 				source:   how.Source,
 				running:  how.Running,
 				markPath: markPath,
-				tell:     func(r report) { tell(w, r) },
+				tell:     func(r report) { tell(glass.view(), r) },
 				now:      time.Now,
 			}
 		}
 	}
 	// A page asks this as it loads -- the first time, and again after every
 	// reload -- because it misses every report sent before it was there.
-	if err := w.Bind(knownBindingName, func() report {
+	known := func() report {
 		if watch == nil {
 			return report{Step: "none"}
 		}
 		return watch.known()
-	}); err != nil {
+	}
+	if err := w.Bind(knownBindingName, known); err != nil {
 		log.Printf("fleetdeck-window: a page that loads will not learn of a newer version until the window next finds one: %v", err)
 	}
 	var updating atomic.Bool
-	if err := w.Bind(updateBindingName, func() {
+	update := func() {
 		// The page takes no second press either, and the update itself holds
 		// a lock for a second window or a terminal; this is the third guard,
 		// for this window's own binding.
@@ -335,14 +354,21 @@ func main() {
 		go func() {
 			defer updating.Store(false)
 			if how.Refusal != "" {
-				tell(w, refusalProgress(how.Refusal))
+				tell(glass.view(), refusalProgress(how.Refusal))
 				return
 			}
-			runUpdate(w, *url, canonical, how.Source, kept)
+			runUpdate(glass.view(), *url, canonical, how.Source, kept)
 		}()
-	}); err != nil {
+	}
+	if err := w.Bind(updateBindingName, update); err != nil {
 		log.Printf("fleetdeck-window: the update button will not work: %v", err)
 	}
+	// The update button lives in the orchestrator's surface.
+	glass.share(knownBindingName, func() (any, error) { return known(), nil })
+	glass.share(updateBindingName, func() (any, error) {
+		update()
+		return nil, nil
+	})
 	// Looking for a newer version runs beside the window for as long as it is
 	// open, silent unless what it knows changes. A window started by a
 	// handover looks too: it stays open as long as the one it replaced would
