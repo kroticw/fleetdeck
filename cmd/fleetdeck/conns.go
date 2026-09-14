@@ -14,8 +14,13 @@ import (
 // an update stand of 2026-09-14 (T-060) such a connection -- opened by a probe
 // of the new window's and never used -- held the panel being replaced for
 // 2113 ms, past the old window's deadline for the whole handover. A panel told
-// to stop closes those at once, and any accepted after; a connection with a
-// request in work is still waited on, for shutdownTimeout.
+// to stop closes those at once, and any accepted after; a request the server
+// has already read is still answered, for up to shutdownTimeout.
+//
+// "Asked for nothing" is as the server sees it: a connection stays new until
+// the server has read a whole request from it. One whose request has arrived
+// but not been read yet is closed with the rest, and its client sees the
+// connection closed, as it would with any panel going away.
 type quietConns struct {
 	mu       sync.Mutex
 	conns    map[net.Conn]struct{}

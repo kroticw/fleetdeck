@@ -74,8 +74,9 @@ func TestAPanelToldToStopDuringAKeychainLookupGoesAtOnce(t *testing.T) {
 // On an update stand run of 2026-09-14 (T-060) the panel being replaced took
 // 2113 ms to close its server, waiting on one connection that had sent no
 // request -- a probe of the new window's -- until the old window's deadline
-// killed the new window and the connection with it. A connection with a request
-// in work is waited on; one that has asked for nothing is closed.
+// killed the new window and the connection with it. A request the server has
+// already read is answered (conns_test.go); a connection it has read no request
+// from is closed.
 func TestAPanelToldToStopDoesNotWaitOnAConnectionThatAskedForNothing(t *testing.T) {
 	r := newPanelRig(t)
 	panel := exec.Command(r.bin, "--config", r.cfg, "--stand-socket", r.noDaemon)
