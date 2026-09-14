@@ -109,6 +109,9 @@ The remaining rules:
   - a control: a plain `a` must arrive in xterm as input.
 
   One thing such a probe cannot see: when the page declines a key, WebKit re-sends it to `NSApp`, and a probe whose window is never key sees nothing of that path.
+- **Decided: on macOS 26 the window holds three web views** (`docs/engineering/window-and-panel.md`, "The glass frame"): the board from webview_go, and the orchestrator and sessions surfaces the window makes itself. The surfaces share the board's process pool and data store, so the font sizes and the theme in `localStorage` are one. They are given the preferences webview_go gives the board (`javaScriptCanAccessClipboard`, `DOMPasteAllowed`, `fullScreenEnabled`); without them paste into the orchestrator's terminal fails.
+- **Decided: each web view has its own terminal socket.** The orchestrator's terminal lives in its surface; a session opened from the sessions surface opens as a sheet in the board, with the board's socket. The pinned orchestrator session is never opened as a sheet as well: opening it focuses its panel. Two attaches to one session would fight over its size (section 2).
+- **Read, not measured:** a key the page declines in a surface goes the same way as in the board, through that surface's web view to `NSApp` and the menu. Nobody has pressed a key in a surface yet.
 
 ## 8. The panel under the window
 
