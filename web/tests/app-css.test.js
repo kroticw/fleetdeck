@@ -534,6 +534,9 @@ test("on the board the new card form opens between the panels at a width of its 
   assert.match(form, /left:\s*0/);
   assert.match(form, /right:\s*auto/);
   assert.match(form, /width:\s*min\(28rem,\s*calc\(100vw - var\(--host-inset-left[^)]*\) - var\(--host-inset-content-right/);
+  // Not --host-inset-right: that is 0, the board running on under the sessions
+  // glass, and a form that kept clear of it would open under the sessions panel.
+  assert.doesNotMatch(form, /--host-inset-right\b/);
   assert.match(ruleBody(':root[data-surface="board"] #tabs'), /left:\s*var\(--host-inset-left/);
 });
 
