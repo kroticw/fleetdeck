@@ -75,6 +75,28 @@ func TestANavigationThatFailsBeforeItCommitsIsAskedForAgainAfterAPause(t *testin
 	}
 }
 
+// On GitHub's macos-15 runner (PR #166, window-on-oldest-macos, 2026-09-14)
+// the board's first document said it was the panel 952 ms after WebKit
+// committed it. pageLoadingWait, 840 ms then, ran out first: the window asked
+// for the page again and cut off a document that was loading.
+func TestADocumentThatTakesNearlyASecondFromCommitToPanelIsNotAskedForAgain(t *testing.T) {
+	s, c := asked(t)
+	s.navSays(navEvent{kind: navStarted, href: testURL})
+	committed := c.t
+	s.navSays(navEvent{kind: navCommitted, href: testURL})
+	s.pageSays(pageLoading, testURL)
+	for c.t.Sub(committed) < 950*time.Millisecond {
+		c.t = c.t.Add(pageLoadTick)
+		if navigate, html := s.tick(); navigate || html != "" {
+			t.Fatalf("tick %s after the commit = %v, %q; want the document left to load", c.t.Sub(committed), navigate, html)
+		}
+	}
+	s.pageSays(pagePanel, testURL)
+	if !s.showingPanel || s.asked {
+		t.Fatalf("the document's word 950 ms after its commit left showing = %v, asked = %v; want the panel shown", s.showingPanel, s.asked)
+	}
+}
+
 // The reviewer's probe: WebKit confirms the navigation 1.2 s after it was asked
 // for -- the runner took up to 1.69 s -- and the document gets pageLoadingWait
 // from there, not from the ask.
