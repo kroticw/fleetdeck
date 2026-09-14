@@ -29,6 +29,14 @@ test("the band ends where something begins, anywhere across the page", () => {
   assert.equal(freeTopHeight(at, 1440), 56);
 });
 
+// The new card form drops under the capsules, from the board's top inset less
+// 8 pt (app.css, #tabs on the board): its top is where the band ends.
+test("the open new card form under the capsules ends the band at its top", () => {
+  const form = el("DIV");
+  const at = (x, y) => (y >= TOP_BAND_MAX - 8 && x >= 394 && x < 842 ? form : BOARD);
+  assert.equal(freeTopHeight(at, 1512), TOP_BAND_MAX - 8);
+});
+
 test("a dimmed board, a sheet or cards at the top leave no band at all", () => {
   const scrim = el("DIV");
   assert.equal(freeTopHeight(() => scrim, 1440), 0);

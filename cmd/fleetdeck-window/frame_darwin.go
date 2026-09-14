@@ -235,6 +235,8 @@ type bandProbe struct {
 	bandTakesTheTop, boardBelowTheBand, surfaceOverTheBand, capsuleOverTheBand bool
 	// On a 20 pt band and on none.
 	boardBelowAShortBand, bandAboveAShortBand, boardWithNoBand bool
+	// On the band the open new card form leaves.
+	cancelOnTheOpenFormReachesTheBoard bool
 	// Counts of drag, zoom, fill, minimize.
 	press       [4]int
 	doubleClick map[string][4]int
@@ -281,6 +283,12 @@ func probeBandForTest(g geometry) bandProbe {
 	C.fd_test_press_band(f.p, 2)
 	out.fullScreen = windowCalls()
 	C.fd_test_set_full_screen(0)
+
+	// The new card form open under the capsules: the page ends the band at the
+	// form's top, and a press on its Cancel, a row down, is the board's.
+	formTop := boardInsetTop - 8
+	f.setDragBand(formTop)
+	out.cancelOnTheOpenFormReachesTheBoard = within(g.Board.Left+60, formTop+50, f.board())
 
 	f.setDragBand(20)
 	out.boardBelowAShortBand = within(boardX, 30, f.board())

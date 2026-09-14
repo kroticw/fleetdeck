@@ -58,6 +58,14 @@ func TestTheBandIsOnlyAsTallAsThePageSays(t *testing.T) {
 	}
 }
 
+// v0.10.0's new card form could not be put away; nothing native may stand over
+// its Cancel once the page has ended the band at the form's top.
+func TestAPressOnTheOpenNewCardFormsCancelReachesTheBoard(t *testing.T) {
+	if !bandResult.cancelOnTheOpenFormReachesTheBoard {
+		t.Fatal("a press on Cancel of the open new card form lands on a native view, not the board")
+	}
+}
+
 func TestADoubleClickOnTheBandDoesWhatTheSystemSettingSays(t *testing.T) {
 	// Before macOS 15 there is no Fill, and the setting cannot say it.
 	fills := [4]int{zoom: 1}
