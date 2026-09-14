@@ -48,11 +48,13 @@ type options struct {
 //   - retireWait: the new window removing the bundle swapped out, which it does
 //     within a look at the update lock once its parent has gone;
 //   - launchServicesWait: LaunchServices holding what the new window told it,
-//     which the window does from a goroutine and says nothing more about.
+//     which the window does from a goroutine and says nothing more about. One
+//     `lsregister -dump` took 8 s on a macos-26 runner, so this leaves room for
+//     several looks.
 const (
 	windowReadyWait    = 30 * time.Second
 	retireWait         = 30 * time.Second
-	launchServicesWait = 15 * time.Second
+	launchServicesWait = 60 * time.Second
 )
 
 // windowDoneLine is what the new window logs once the handover is done and its
