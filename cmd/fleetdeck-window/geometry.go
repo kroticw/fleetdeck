@@ -84,7 +84,7 @@ func layoutFor(width, height float64, w panelWidths) geometry {
 		Sessions:     s,
 		// Between the panels, or nothing when a narrow window leaves no room.
 		Capsules: rect{X: capX, Y: capsuleTop, W: math.Max(0, s.X-capsuleGapRight-capX), H: capsuleHeight},
-		Board:        insets{Top: boardInsetTop, Left: o.X + o.W + boardGapLeft, Right: 0, ContentRight: width - s.X},
+		Board:    insets{Top: boardInsetTop, Left: o.X + o.W + boardGapLeft, Right: 0, ContentRight: width - s.X},
 
 		OrchestratorResizable: !w.OrchestratorFolded,
 		SessionsResizable:     !w.SessionsFolded,
