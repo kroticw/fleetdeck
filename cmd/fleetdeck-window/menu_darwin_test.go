@@ -71,6 +71,7 @@ func TestMain(m *testing.M) {
 	}
 
 	collectFrameResults()
+	collectSurfaceResults()
 
 	os.Exit(m.Run())
 }
