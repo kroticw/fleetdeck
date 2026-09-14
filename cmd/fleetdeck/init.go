@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/workspace"
@@ -491,6 +492,29 @@ func notYetWritten(path string) (string, error) {
 	return "", fmt.Errorf("%s: more than %d symlinks deep", path, maxSymlinkHops)
 }
 
+// settingsLeftoverAge is how old a settings temp file is before it is taken for
+// one a killed write left behind. Writing the settings takes milliseconds.
+const settingsLeftoverAge = time.Minute
+
+// clearSettingsLeftovers removes from dir the temp files of writes of the
+// settings at target that a kill cut off (T-060), once settingsLeftoverAge old.
+// A younger one may belong to a write still in progress, and stays.
+func clearSettingsLeftovers(dir, target string) {
+	prefix := "." + filepath.Base(target) + ".tmp-"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), prefix) || !e.Type().IsRegular() {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) >= settingsLeftoverAge {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
 // settingsWritten is called once the new settings are written and before they
 // take the place of the old ones: a test's look at that moment.
 var settingsWritten = func(_ string) {}
@@ -534,6 +558,7 @@ func saveSettings(settingsPath string, settings map[string]any) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create settings dir: %w", err)
 	}
+	clearSettingsLeftovers(dir, target)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(target)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("write settings: %w", err)

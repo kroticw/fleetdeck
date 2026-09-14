@@ -132,6 +132,7 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 // by an exclusive create at its name. Never over a card there either, but not
 // whole-or-nothing: that file system gives no way to be.
 func placeCard(cardsDir, path, content string) (bool, error) {
+	clearLeftovers(cardsDir)
 	tmp, err := os.CreateTemp(cardsDir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return false, fmt.Errorf("create card: %w", err)
@@ -176,6 +177,29 @@ func createCardInPlace(cardsDir, path, content string) (bool, error) {
 	}
 	syncDir(cardsDir)
 	return true, nil
+}
+
+// leftoverAge is how old a card's temp file is before it is taken for one a
+// killed write left behind. Writing a card takes milliseconds.
+const leftoverAge = time.Minute
+
+// clearLeftovers removes the temp files of card writes a kill cut off (T-060):
+// hidden, named for a card, and leftoverAge old. A younger one may belong to a
+// write still in progress, and stays.
+func clearLeftovers(cardsDir string) {
+	entries, err := os.ReadDir(cardsDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, ".") || !strings.Contains(name, ".md.tmp-") || !e.Type().IsRegular() {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) >= leftoverAge {
+			_ = os.Remove(filepath.Join(cardsDir, name))
+		}
+	}
 }
 
 // syncDir makes a name just added to dir durable, as far as dir lets it.

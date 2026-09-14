@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // ~/.claude/settings.json is Claude Code's own, shared by every session on the
@@ -108,6 +109,35 @@ func TestSavingSettingsThatDidNotExistMakesThemOwnerOnly(t *testing.T) {
 	info, err := os.Stat(p)
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("new settings mode: %v (%v), want 0600", info.Mode().Perm(), err)
+	}
+}
+
+// A panel killed while it writes the settings leaves their temp file beside
+// them. The next save clears what such a write left; a temp file a write in
+// progress may still own, one less than a minute old, stays.
+func TestSavingSettingsClearsWhatAKilledWriteLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "settings.json")
+	stale := filepath.Join(dir, ".settings.json.tmp-1234")
+	fresh := filepath.Join(dir, ".settings.json.tmp-5678")
+	for _, f := range []string{stale, fresh} {
+		if err := os.WriteFile(f, []byte("{\n  \"mod"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := saveSettings(p, map[string]any{"model": "sonnet"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(stale); err == nil {
+		t.Fatal("the temp file a killed write left two minutes ago is still beside the settings")
+	}
+	if _, err := os.Lstat(fresh); err != nil {
+		t.Fatalf("a temp file a write in progress may still own was removed: %v", err)
 	}
 }
 
