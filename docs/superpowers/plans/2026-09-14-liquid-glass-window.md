@@ -110,7 +110,7 @@
 - Consumes: смерженные T-057 и T-058, выпуск v0.9.2.
 - Produces: план, в котором места файлов, имена и сигнатуры совпадают с master, — для задач 1–17.
 
-- [ ] **Step 1:** Ветка части Б — `feat/liquid-glass-window` от свежего `origin/master`; спека и план переносятся в неё первым коммитом из ветки `docs/liquid-glass-window`:
+- [x] **Step 1:** Ветка части Б — `feat/liquid-glass-window` от свежего `origin/master`; спека и план переносятся в неё первым коммитом из ветки `docs/liquid-glass-window`:
 
 ```bash
 git fetch origin
@@ -118,13 +118,13 @@ git switch --create feat/liquid-glass-window origin/master
 git checkout origin/docs/liquid-glass-window -- docs/superpowers/specs/2026-09-14-liquid-glass-window-design.md docs/superpowers/specs/2026-09-14-liquid-glass-window docs/superpowers/plans/2026-09-14-liquid-glass-window.md
 ```
 
-- [ ] **Step 2:** Выписать, что изменилось с основы плана:
+- [x] **Step 2:** Выписать, что изменилось с основы плана:
 
 ```bash
 git diff --stat c0ea864 origin/master -- cmd/fleetdeck-window web internal/server internal/supervisor Makefile scripts .github
 ```
 
-- [ ] **Step 3:** Сверить с master каждое место, на которое опирается план, и поправить текст задач:
+- [x] **Step 3:** Сверить с master каждое место, на которое опирается план, и поправить текст задач:
   - `pageLoadScript`, `fleetdeckPageLoaded` (`pageLoadedBindingName`), `pageLoadWait`, `pageLoadTries`, метка `data-fleetdeck-page`, страница отказа загрузки (`pageFailedPage`), поля `takingOver` и `handed` в `screen` — T-057, `cmd/fleetdeck-window/owner.go`;
   - передача `FLEETDECK_STAND_SOCKET` панелям, строка `daemon discovery disabled`, где окно пишет лог панели, переменная `BUNDLE_ID` и путь бандла после `make window-app` — T-057;
   - нижняя версия macOS окна и проверка `minos` — T-058, `Makefile`, `scripts/build-dist-app.sh`;
@@ -132,8 +132,8 @@ git diff --stat c0ea864 origin/master -- cmd/fleetdeck-window web internal/serve
   - `push` и `fleetView` — `internal/server/ws.go`, `internal/server/api.go`;
   - путь вывода панелей (`$HOME/Library/Logs/fleetdeck.log`), флаг `--stand-socket`, `supervisor.StandBundleID`, процедура `cmd/fleetdeck-window/stand_test.go` — для задач 16 и 17;
   - закреплённые версии `actions/checkout`, `actions/setup-go` (`ci.yaml`) и `actions/upload-artifact` (`release.yaml`) — для задачи 17.
-- [ ] **Step 4:** Каждое расхождение — правка текста задачи, а не пометка «сверить потом». Если механизм T-057 устроен иначе, чем описано в спеке (разделы 6.6, 8, 10.1), — правка спеки в том же коммите.
-- [ ] **Step 5: Commit**
+- [x] **Step 4:** Каждое расхождение — правка текста задачи, а не пометка «сверить потом». Если механизм T-057 устроен иначе, чем описано в спеке (разделы 6.6, 8, 10.1), — правка спеки в том же коммите.
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/superpowers
@@ -158,7 +158,7 @@ git commit --signoff --message "docs(window): re-anchor the Liquid Glass plan on
   - `callHost(win, name: string, payload?: any): Promise<any> | null` — `null`, если привязки нет; для задач 2, 5, 6, 7;
   - `onHostMessage(win, handler: (message: { type: string }) => void): () => void` — для задачи 5.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 // web/js/_tests/host.test.js
@@ -211,13 +211,13 @@ test("a message from the window reaches the handler; a malformed one does not", 
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test web/js/_tests/host.test.js`
 
 Expected: FAIL — `Cannot find module '../host.js'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```js
 // web/js/host.js — the window around the page, when there is one.
@@ -257,13 +257,13 @@ export function onHostMessage(win, handler) {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test web/js/_tests/host.test.js`
 
 Expected: PASS, 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/js/host.js web/js/_tests/host.test.js
@@ -288,7 +288,7 @@ git commit --signoff --message "feat(web): read the window's host object and tal
   - `layoutReport(host, snapshot): { version: 1, mode: "panel", fleet: string } | null` — вызов `fleetdeckLayout` для задачи 11;
   - атрибуты `data-surface` и `data-glass` на `<html>` при наличии хоста — для задачи 3.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 // web/js/_tests/surfaces.test.js
@@ -323,13 +323,13 @@ test("only the board reports the panel layout, and only once it knows its fleet"
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test web/js/_tests/surfaces.test.js`
 
 Expected: FAIL — `Cannot find module '../surfaces.js'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```js
 // web/js/surfaces.js — which part of the panel a web view is.
@@ -355,13 +355,13 @@ export function layoutReport(host, snapshot) {
 
 В `main.js`: в начале прочитать `const host = readHost(window)`; при хосте поставить `document.documentElement.dataset.surface = host.surface` и `dataset.glass = host.glass`; каждый вызов `renderSessions`, `renderHeader`, `renderOrchestrator`, `renderBoard`, `createSections` и панелей обернуть проверкой `regions.has(...)`; в подписке на снимок один раз вызвать `callHost(window, "fleetdeckLayout", layoutReport(host, snapshot))`, когда отчёт не `null`. Элементы невыбранных регионов удаляются из DOM (`remove()`), а не прячутся.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `node --test web/js/_tests/surfaces.test.js && make test-web`
 
 Expected: PASS; существующие тесты модулей не меняются.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/js/surfaces.js web/js/_tests/surfaces.test.js web/js/main.js
@@ -384,7 +384,7 @@ git commit --signoff --message "feat(web): mount only the window surface a web v
 
 Значения токенов — с канваса этапа 1 (генератор канваса, `TOKENS_LIGHT` и `TOKENS_DARK`). Светлая: `--on-glass-muted: #434a54`, `--surface-on-glass: rgb(255 255 255 / 80%)`, `--glass-control: rgb(255 255 255 / 52%)`, `--glass-control-edge: rgb(20 22 26 / 11%)`, `--island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%)`. Тёмная: `--on-glass-muted: #c1c7cf`, `--surface-on-glass: rgb(27 30 36 / 80%)`, `--glass-control: rgb(255 255 255 / 9%)`, `--glass-control-edge: rgb(255 255 255 / 15%)`, `--island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%)`. Каждое — в трёх блоках палитры, как требует шапка `app.css`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 // web/tests/app-css.test.js — добавить в конец; ruleBody и countDefinitions — помощники из шага ниже
@@ -434,23 +434,23 @@ function countDefinitions(token) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test web/tests/app-css.test.js`
 
 Expected: FAIL — правила не найдены.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 В конец `web/app.css` добавить блок `/* --- the fleetdeck window: E layout --- */` с правилами из теста, токенами в трёх блоках палитры и стилями островов, листа и доков по значениям канваса. Карточка: `border-radius: 10px`, полоса зоны — `box-shadow: inset 3px 0 0` цветом зоны. Лист: `position: absolute; top: calc(var(--host-inset-top) - 4px); left: var(--host-inset-left); right: calc(var(--host-inset-right) + 16px); bottom: 16px; border-radius: var(--radius-xl); background: var(--surface-raised)`. Затемнение: `rgb(20 22 26 / 22%)` в светлой, `rgb(0 0 0 / 48%)` в тёмной. Капсулы в листе: `border-radius: 999px; background: var(--surface-hover); box-shadow: inset 0 0 0 1px var(--border)`. Все правила — под `:root[data-surface]`, чтобы раскладка без хоста не менялась.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make test-web`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/app.css web/tests/app-css.test.js
@@ -471,7 +471,7 @@ git commit --signoff --message "feat(web): add the E layout styles for the windo
 - Consumes: классы и токены задачи 3.
 - Produces: `<div id="sheet-scrim" hidden>` в `#center`; разметка закрытия и островов, которую проверяет задача 16 на стенде.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Тесты пользуются помощниками своих файлов: `open(snap, path, options)` в `web/tests/card.test.js` (возвращает `root`), `mount()` в `web/tests/session.test.js` (возвращает `root`), `stubFetch`, `ok`, `DOCS` и `root` в `web/tests/docs.test.js`. `fake-dom.js` понимает только одиночный класс, тег и атрибут в селекторах, поэтому составные классы проверяются через `classList`.
 
@@ -505,25 +505,25 @@ test("the list and the document are two islands", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `node --test web/tests/card.test.js web/tests/session.test.js web/tests/docs.test.js`
 
 Expected: FAIL на тестах карточки и доков. Тест порядка шапки сессии проходит сразу: он закрепляет нынешний порядок, который лист S1 обязан сохранить.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `card.js` и `reader.js`: кнопка закрытия получает `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3 L9 9 M9 3 L3 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"></path></svg>` вместо текста `✕`; `aria-label` не меняется.
 - `docs.js`: `nav.docs-list` получает класс `docs-island`, `div.docs-main` — `doc-island`.
 - `index.html`: в `#center` добавить `<div id="sheet-scrim" hidden></div>`; `main.js` показывает его вместе с любой из трёх панелей и прячет при закрытии.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make test-web`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/js/card.js web/js/session.js web/js/reader.js web/js/docs.js web/index.html web/js/main.js web/tests/card.test.js web/tests/session.test.js web/tests/docs.test.js
@@ -547,7 +547,7 @@ git commit --signoff --message "feat(web): open cards, sessions and documents as
 
 Какие `type` принимает каждая поверхность — строго по таблице спеки 6.2: доска — `open`, `show`, `newCard`, `cycleTheme`, `insets`, `glass`; оркестратор — `theme`, `glass`, `folded`, `focusTerminal`, `fullscreen`; сессии — `theme`, `glass`, `folded`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 // web/js/_tests/hostactions.test.js
@@ -605,13 +605,13 @@ test("an unknown message is skipped", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test web/js/_tests/hostactions.test.js`
 
 Expected: FAIL — модуль не найден.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```js
 // web/js/hostactions.js — what the window asks of a page.
@@ -667,13 +667,13 @@ export function wireHostActions(win, host, targets) {
 
 В `main.js` при хосте вызвать `wireHostActions(window, host, targets)` синхронно, на верхнем уровне модуля, до первого `await`: состояние `panel` от `pageLoadScript` должно означать, что приём сообщений уже подключён (спека 6.6). Параметры: `setInsets` ставит `--host-inset-top/left/right` на `<html>` в пикселях, `setGlass` меняет `data-glass`, `setFolded` — `data-folded` на колонке поверхности, `setFullscreen` — `data-fullscreen` на `<html>` (верхняя строка оркестратора убирает место под светофоры), `applyTheme` — установка темы из `theme.js` без записи в `localStorage`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make test-web`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/js/hostactions.js web/js/_tests/hostactions.test.js web/js/main.js
@@ -700,7 +700,7 @@ git commit --signoff --message "feat(web): act on what the window asks of each s
 
 Смена флота на странице сегодня происходит в трёх местах: стартовая страница (`start.js`), меню флота в шапке и кнопка другого флота в колонке сессий. Стартовая страница живёт одним видом и не меняется. Шапка и колонка сессий получают `switchFleet` из `main.js`, иначе смена флота из строки бренда и из колонки сессий пошла бы мимо окна.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 // web/js/_tests/hostroutes.test.js
@@ -783,13 +783,13 @@ test("the fleet menu switches fleet through the given switcher and goes elsewher
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `node --test web/js/_tests/hostroutes.test.js web/js/_tests/sessions.test.js web/js/_tests/header.test.js`
 
 Expected: FAIL — нет `hostroutes.js` и `menuGo`; колонка сессий зовёт `switchFleet` из `fleet.js`, а не переданный.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```js
 // web/js/hostroutes.js — where an action from one surface goes.
@@ -822,13 +822,13 @@ export function menuGo(go, { switchFleet: goFleet, assign }) {
 - `sessions.js`: `renderSessions(root, onSelect, onOpenCard, { now = Date.now, switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }) } = {})`; обработчик `.fleet-other` зовёт `goFleet(el.dataset.fleet)`.
 - `main.js`: собрать `local` из нынешних замыканий (`cardPanel.open`, `reader.open`, `openSession`, свёртывание из `columnresize.js`, `switchFleet` с `pageStorage()`), построить `routes = routesFor(window, host, local)` и передать `routes.*` в `renderSessions` (`onSelect`, `onOpenCard`, `switchFleet`), `renderHeader` (`switchFleet`), `renderOrchestrator` (`terminalLinks.open`) и `card.js` (`onOpenSession`). Доска перед открытием сессии сверяет `short` с `snapshot.orchestratorSession`; совпало — `routes.openOrchestrator()` вместо листа (спека 6.3).
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make test-web`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/js/hostroutes.js web/js/_tests/hostroutes.test.js web/js/main.js web/js/header.js web/js/_tests/header.test.js web/js/sessions.js web/js/_tests/sessions.test.js web/js/columnresize.js
@@ -855,7 +855,7 @@ git commit --signoff --message "feat(web): route opening, fleet switching and fo
   - `reloadNow(storage, own, reload, fleet = "", { delegate = false } = {})` — при `delegate` только вызывает `reload()` и ничего не пишет в `sessionStorage` своего вида;
   - `renderBuildBanner(root, subscribe, { doc, storage, reload, hostReload, delegate })` — третий аргумент уже объект параметров; к нему добавляется `delegate` и передаётся в `reloadNow`. `main.js` передаёт `delegate: true` в поверхностях оркестратора и сессий (спека 6.4).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 // web/js/_tests/capsules.test.js
@@ -899,13 +899,13 @@ test("a delegated reload asks the window and leaves this web view's storage alon
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `node --test web/js/_tests/capsules.test.js web/tests/buildcheck.test.js`
 
 Expected: FAIL — нет `capsules.js`; `reloadNow` записывает, откуда уходит страница, и при `delegate`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```js
 // web/js/capsules.js — what the window draws in its capsules, in the page's words.
@@ -952,13 +952,13 @@ export function reloadNow(storage, own, reload, fleet = "", { delegate = false }
 - `header.js`: `limitsOf(snapshot)` — то, что сегодня внутри отрисовки лимитов, в виде данных `{ label, pct, level }`; `renderHeader` рисует лимиты из `limitsOf`. `renderBrandRow(root, deps)` рисует бренд, меню флота и кнопку обновления внутри `<header id="header">`; `renderCounters(root, deps)` — счётчики «ждут ответа» и «остановились».
 - Доска: `colors` из `getComputedStyle(document.documentElement)` — `cool` → `--ok`, `warm` → `--attn`, `hot` → `--danger`, `stale` → `--text-muted`, `off` → `--text-faint`; `callHost(window, "fleetdeckCapsules", model)` при первом снимке и когда модель изменилась (сравнение `JSON.stringify`).
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make test-web`
 
 Expected: PASS; существующие тесты шапки и `buildcheck` проходят без изменения ожиданий.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/js/capsules.js web/js/_tests/capsules.test.js web/js/header.js web/js/buildcheck.js web/tests/buildcheck.test.js web/js/main.js
@@ -982,7 +982,7 @@ git commit --signoff --message "feat(web): describe the capsules and split the h
   - `newBridge() *bridge`, `(*bridge).handle(name string, h bridgeHandler)`, `(*bridge).names() []string` (по алфавиту), `(*bridge).call(surface, name string, args json.RawMessage) (any, error)`;
   - `errUnknownBinding` — для задач 10 (обработчик сообщений поверхностей) и 12 (регистрация всех привязок).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 //go:build darwin
@@ -1031,13 +1031,13 @@ func TestBindingNamesAreSortedSoTheInjectedScriptIsStable(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'Binding' -count=1`
 
 Expected: FAIL — `undefined: newBridge`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 //go:build darwin
@@ -1096,13 +1096,13 @@ func (b *bridge) call(surface, name string, args json.RawMessage) (any, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `go test ./cmd/fleetdeck-window -run 'Binding' -count=1 -race`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/fleetdeck-window/bridge.go cmd/fleetdeck-window/bridge_test.go
@@ -1129,7 +1129,7 @@ git commit --signoff --message "feat(window): keep every binding in one registry
   - C: `void *fd_frame_install(void *window)`, `void fd_frame_set_mode(void *frame, const char *mode)`, `void fd_frame_layout(void *frame, fd_rect orchestrator, fd_rect sessions, fd_rect capsules)`, `void *fd_frame_panel_content(void *frame, int side)`, `void *fd_frame_capsules(void *frame)`, `void *fd_frame_board(void *frame)`, `int fd_glass_available(void)`, `int fd_reduce_transparency(void)`;
   - Go: `installFrame(window unsafe.Pointer) *frame`, `(*frame).setMode(glassMode)`, `(*frame).layout(geometry)`, `(*frame).panelContent(side string) unsafe.Pointer`, `(*frame).capsules() unsafe.Pointer`, `(*frame).board() unsafe.Pointer`, `currentGlassMode() glassMode` — для задач 10, 12, 13.
 
-- [ ] **Step 1: Write the failing geometry test**
+- [x] **Step 1: Write the failing geometry test**
 
 ```go
 //go:build darwin
@@ -1172,13 +1172,13 @@ func TestAPanelNeverGoesBelowItsReadableWidthOrAboveSixtyPercent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'DefaultLayout|FoldedSessions|ReadableWidth' -count=1`
 
 Expected: FAIL — `undefined: layoutFor`.
 
-- [ ] **Step 3: Implement `geometry.go`**
+- [x] **Step 3: Implement `geometry.go`**
 
 ```go
 //go:build darwin
@@ -1249,13 +1249,13 @@ func layoutFor(width, height float64, w panelWidths) geometry {
 }
 ```
 
-- [ ] **Step 4: Run geometry tests**
+- [x] **Step 4: Run geometry tests**
 
 Run: `go test ./cmd/fleetdeck-window -run 'DefaultLayout|FoldedSessions|ReadableWidth' -count=1`
 
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing frame test**
+- [x] **Step 5: Write the failing frame test**
 
 В `testsupport_darwin.go` добавить помощники над скрытым окном из `t_create_hidden_window`, возвращающие: имя класса панели (`object_getClassName`), `style` и `cornerRadius` стекла, `blendingMode` и `material` у `NSVisualEffectView`, первый ли подвид корня — веб-вид доски, лежат ли панели выше него в `subviews`. В `frame_darwin_test.go` все нативные вызовы — в `TestMain`, результаты — в переменной `frameResult`, как `menu_darwin_test.go`:
 
@@ -1296,13 +1296,13 @@ func TestOpaqueModeLeavesNoMaterialBehindTheSurfaces(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Run to verify it fails**
+- [x] **Step 6: Run to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'PanelsAre|BoardStays|Vibrancy|OpaqueMode' -count=1`
 
 Expected: FAIL — нет помощников и нативных функций.
 
-- [ ] **Step 7: Implement `frame_darwin.c`**
+- [x] **Step 7: Implement `frame_darwin.c`**
 
 Порядок в `fd_frame_install`, всё на главном потоке:
 
@@ -1318,13 +1318,13 @@ Expected: FAIL — нет помощников и нативных функци�
 7. `fd_frame_set_mode` пересоздаёт обёртки, перенося в новые те же виды содержимого (`removeFromSuperview`, затем `setContentView:` или `addSubview:`), и не трогает веб-виды внутри.
 8. `fd_glass_available` — `objc_getClass("NSGlassEffectView") != NULL`. `fd_reduce_transparency` — `[[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceTransparency]`. `currentGlassMode()` в Go: прозрачность уменьшена — `opaque`; стекла нет — `vibrancy`; иначе `glass`.
 
-- [ ] **Step 8: Run tests**
+- [x] **Step 8: Run tests**
 
 Run: `go test ./cmd/fleetdeck-window -count=1 -race`
 
 Expected: PASS; на системе без стекла `TestPanelsAreRegularGlassWithTheDesignRadius` пропускается, остальные проходят.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add cmd/fleetdeck-window/geometry.go cmd/fleetdeck-window/geometry_test.go cmd/fleetdeck-window/frame_darwin.c cmd/fleetdeck-window/frame_darwin.h cmd/fleetdeck-window/frame_darwin.go cmd/fleetdeck-window/frame_darwin_test.go cmd/fleetdeck-window/testsupport_darwin.go
@@ -1351,7 +1351,7 @@ git commit --signoff --message "feat(window): put glass panels over the board we
   - Go: `surfaceScripts(kind, panelURL string, glass glassMode, b *bridge) []string` — скрипты поверхности по порядку: `hostScript(kind, glass, b.names())`, `pageLoadScript(panelURL)`; задача 14 добавляет к ним `noticeScriptFor(kind)`;
   - Go: `newSurface(board, container unsafe.Pointer, kind, panelURL string, glass glassMode, b *bridge) *surface`, `(*surface).load(url string)`, `(*surface).send(message map[string]any)`, `(*surface).reload()`, `(*surface).focus()`, `(*surface).close()` — для задачи 12.
 
-- [ ] **Step 1: Write the failing hostscript test**
+- [x] **Step 1: Write the failing hostscript test**
 
 ```go
 //go:build darwin
@@ -1397,13 +1397,13 @@ func TestTheHostScriptRefusesAnUnknownSurface(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'HostScript' -count=1`
 
 Expected: FAIL — `undefined: hostScript`.
 
-- [ ] **Step 3: Implement `hostscript.go`**
+- [x] **Step 3: Implement `hostscript.go`**
 
 ```go
 //go:build darwin
@@ -1440,13 +1440,13 @@ func hostScript(surface string, glass glassMode, bindings []string) string {
 }
 ```
 
-- [ ] **Step 4: Run hostscript tests**
+- [x] **Step 4: Run hostscript tests**
 
 Run: `go test ./cmd/fleetdeck-window -run 'HostScript' -count=1`
 
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing navigation test**
+- [x] **Step 5: Write the failing navigation test**
 
 ```go
 //go:build darwin
@@ -1481,13 +1481,13 @@ func TestASurfaceStaysOnItsOwnPage(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Run to verify it fails**
+- [x] **Step 6: Run to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'StaysOnItsOwnPage' -count=1`
 
 Expected: FAIL — `undefined: navigationDecision`.
 
-- [ ] **Step 7: Implement `navigation.go`**
+- [x] **Step 7: Implement `navigation.go`**
 
 ```go
 //go:build darwin
@@ -1525,13 +1525,13 @@ func navigationDecision(panelURL, pageURL, target string) navDecision {
 }
 ```
 
-- [ ] **Step 8: Run navigation tests**
+- [x] **Step 8: Run navigation tests**
 
 Run: `go test ./cmd/fleetdeck-window -run 'StaysOnItsOwnPage' -count=1`
 
 Expected: PASS.
 
-- [ ] **Step 9: Write the failing surface tests**
+- [x] **Step 9: Write the failing surface tests**
 
 Помощники в `testsupport_darwin.go` над скрытым окном и рамой задачи 9 собирают в `TestMain` для поверхности `sessions`: `drawsBackground` веб-вида поверхности (`valueForKey:@"drawsBackground"`); совпадают ли `processPool` и `websiteDataStore` с доской; число `userScripts`; число регистраций обработчика `fleetdeck` (счётчик ведёт класс обработчика); затем 20 кругов `fd_surface_create` и `fd_surface_destroy` на обеих панелях, после которых — `fd_surface_live_handlers()`, число подвидов в контейнерах панелей и сколько раз зарегистрирован класс обработчика.
 
@@ -1563,13 +1563,13 @@ func TestSurfacesCreatedAndDestroyedManyTimesLeaveNothingBehind(t *testing.T) {
 }
 ```
 
-- [ ] **Step 10: Run to verify they fail**
+- [x] **Step 10: Run to verify they fail**
 
 Run: `go test ./cmd/fleetdeck-window -run 'ASurfaceIs|CreatedAndDestroyed' -count=1`
 
 Expected: FAIL.
 
-- [ ] **Step 11: Implement `surface_darwin.c`**
+- [x] **Step 11: Implement `surface_darwin.c`**
 
 Создание (`fd_surface_create`):
 
@@ -1585,13 +1585,13 @@ Expected: FAIL.
 
 Остальное: `fd_surface_eval` — `evaluateJavaScript:completionHandler:` с `NULL`; `fd_surface_focus` — `[[webview window] makeFirstResponder:webview]`; `fd_surface_live_handlers` — счётчик из п. 3. Go: `fleetdeckSurfaceMessage` разбирает `{id, name, args}`, в горутине зовёт `bridge.call(surface, name, args)` и через `w.Dispatch` отвечает `window.fleetdeckHost._reply(id, ok, value)` в тот же веб-вид.
 
-- [ ] **Step 12: Run tests**
+- [x] **Step 12: Run tests**
 
 Run: `go test ./cmd/fleetdeck-window -count=1 -race`
 
 Expected: PASS.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add cmd/fleetdeck-window/hostscript.go cmd/fleetdeck-window/hostscript_test.go cmd/fleetdeck-window/navigation.go cmd/fleetdeck-window/navigation_test.go cmd/fleetdeck-window/surface_darwin.c cmd/fleetdeck-window/surface_darwin.h cmd/fleetdeck-window/surface_darwin.go cmd/fleetdeck-window/surface_darwin_test.go cmd/fleetdeck-window/testsupport_darwin.go
@@ -1622,7 +1622,7 @@ git commit --signoff --message "feat(window): give the orchestrator and sessions
 - до `pageLoaded(surface, "panel")` поверхности не уходит ни одного `sendTo`; после — её полное текущее состояние (спека 6.6); `leaving` снимает готовность; `broken` — `reloadSurface`, после `pageLoadTries` попыток — `destroySurfaces` и `showFailedPage`;
 - переход из поверхности — по `navigationDecision`: на другую страницу панели — `destroySurfaces` и `navigateBoard`; на чужой адрес — `openExternal` (спека 6.7).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 //go:build darwin
@@ -1860,13 +1860,13 @@ func TestFullScreenTellsTheOrchestratorSurfaceToDropTheButtonsRoom(t *testing.T)
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'Page|Surface|Takeover|OwnPage|Opening|Pinned|Switching|Link|Folding|Theme|Reduced|CapsulePress|FullScreen' -count=1`
 
 Expected: FAIL — `undefined: newController`.
 
-- [ ] **Step 3: Implement `controller.go`**
+- [x] **Step 3: Implement `controller.go`**
 
 Контроллер хранит: `baseURL`; `panel bool`; `fleet`; `widths`; `width`, `height`, `fullscreen`; `glass`; `theme` (пустая строка, пока доска не сообщила); `ready map[string]bool` и `tries map[string]int` для поверхностей. Поведение — ровно то, что закрепляют тесты:
 
@@ -1880,13 +1880,13 @@ Expected: FAIL — `undefined: newController`.
 - `glassChanged` отдаёт `setFrameMode` всегда, сообщения `glass` — только при раме и готовности;
 - `capsules(model)` отдаёт `setCapsules{Model}` без разбора; `reload` — `reloadAll{}`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `go test ./cmd/fleetdeck-window -count=1 -race`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/fleetdeck-window/controller.go cmd/fleetdeck-window/controller_test.go
@@ -1910,7 +1910,7 @@ git commit --signoff --message "feat(window): decide the frame from what the pag
   - `type natives interface { createSurface(kind, url string, glass glassMode); destroySurfaces(); send(surface string, msg map[string]any); focus(surface string); navigateBoard(url string); openExternal(url string); reloadSurface(surface string); showFailedPage(); setAppearance(choice string); applyGeometry(g geometry); saveWidths(w panelWidths); setCapsules(model json.RawMessage); setFrameMode(m glassMode); reloadAll() }` и `runEffects(n natives, effects []effect)` — для задач 13 (`setCapsules`) и 14 (`reloadAll`);
   - привязки в реестре: `fleetdeckLayout`, `fleetdeckOpen`, `fleetdeckSwitchFleet`, `fleetdeckCapsules`, `fleetdeckTheme`, `fleetdeckPanel`; `fleetdeckPageLoaded` из поверхности уходит в `controller.pageLoaded(surface, state)`, из доски — в обработчик T-057 без изменений; восемь существующих привязок переносятся в реестр — для задачи 16 (стенд).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 //go:build darwin
@@ -1964,13 +1964,13 @@ func TestEffectsRunInTheOrderTheControllerGaveThem(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'CreatingSurfaces|EffectsRun' -count=1`
 
 Expected: FAIL — `undefined: runEffects`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `effects.go`: `runEffects` — `switch` по типу эффекта с вызовом метода `natives`. Реальная реализация `natives` держит `*frame`, две `*surface` и `webview.WebView`; нативные вызовы — через `w.Dispatch`. `openExternal` — `[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:]]`; `showFailedPage` — `w.SetHtml(pageFailedPage(url, pageLoadingWait))` в доску; `navigateBoard` — `w.Navigate(url)`: `screen` пойдёт за доской по её `leaving` и `loading` с новым `href`; `reloadSurface` — `(*surface).reload()`.
 - `main.go`, сразу после `webview.New`: `installFrame(w.Window())` — до первой навигации; `w.Init(hostScript("board", currentGlassMode(), nil))` рядом с `w.Init(noticeScript)` и `w.Init(pageLoadScript(*url))`; реестр привязок; каждая привязка регистрируется в реестре и через `w.Bind` для доски с адаптером `func(args json.RawMessage) (any, error) { return reg.call("board", name, args) }`; существующие обработчики заворачиваются в `bridgeHandler` без изменения поведения.
@@ -1980,13 +1980,13 @@ Expected: FAIL — `undefined: runEffects`.
 - `main.go`: в `show` ветка `page != ""` (своя страница окна через `w.SetHtml`) вызывает `controller.boardShowsOwnPage()` и исполняет эффекты; обработчик `fleetdeckPageLoaded` доски остаётся `scr.pageSays(state, href)`. Навигацию доски и подтверждение её загрузки `screen` ведёт как в T-057, без изменений.
 - Ширины панелей читаются и пишутся в `NSUserDefaults` приложения под ключами `glassOrchestratorWidth`, `glassSessionsWidth`, `glassOrchestratorFolded`, `glassSessionsFolded`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make test`
 
 Expected: PASS, включая `reload_test.go`, `pageload_test.go` и соседние тесты контрактов имён.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/fleetdeck-window/effects.go cmd/fleetdeck-window/effects_test.go cmd/fleetdeck-window/main.go cmd/fleetdeck-window/owner.go cmd/fleetdeck-window/frame_darwin.c cmd/fleetdeck-window/frame_darwin.go cmd/fleetdeck-window/surface_darwin.go
@@ -2008,7 +2008,7 @@ git commit --signoff --message "feat(window): run the frame from the board's rep
 - Consumes: модель `fleetdeckCapsules` (задача 7), эффект `setCapsules` (задачи 11, 12), `(*frame).capsules()` и `glassMode` (задача 9), `controller.capsuleAction` (задача 11).
 - Produces: `type capsuleModel struct` с полями модели задачи 7; `parseCapsuleModel(raw json.RawMessage) (capsuleModel, error)` с отказом при `version != 1`; `drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode)`; экспортируемый Go `fleetdeckCapsulePressed(action *C.char)` — проверяется на стенде задачи 16.
 
-- [ ] **Step 1: Write the failing model test**
+- [x] **Step 1: Write the failing model test**
 
 ```go
 //go:build darwin
@@ -2037,19 +2037,19 @@ func TestACapsuleModelKeepsThePagesWordsAndColours(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `go test ./cmd/fleetdeck-window -run 'CapsuleModel' -count=1`
 
 Expected: FAIL — `undefined: parseCapsuleModel`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `capsulemodel.go`: структуры с тегами JSON по модели задачи 7 и `parseCapsuleModel`.
 - `capsules_darwin.c`: в контейнере капсул — ряд обёрток той же природы, что панели: `glass` — `NSGlassEffectView` Regular, радиус 16; `vibrancy` — `NSVisualEffectView` с материалом `popover` (6), withinWindow; `opaque` — `NSView` со слоем цвета `--surface-raised` (страница добавляет его в модель полем `surface`). Внутри: `NSSegmentedControl` (`segmentedControlWithLabels:trackingMode:target:action:`, `trackingMode` 0 — selectOne); `NSButton` для «+ карточка» и темы (`buttonWithTitle:target:action:`, `setBordered:NO`); для каждого лимита — `NSTextField` подписи, `NSLevelIndicator` (`setLevelIndicatorStyle:1`, `setMaxValue:100`, `setFillColor:` из `color`) и `NSTextField` текста. Цель действий — объект класса `FleetdeckCapsuleTarget` с методом `pressed:`, который по `tag` контрола зовёт `fleetdeckCapsulePressed`.
 - Порядок ряда слева направо: вкладки, «+ карточка», зазор, тема, лимиты по одному в капсуле — по макету «Выбрано».
 
-- [ ] **Step 4: Write the native test**
+- [x] **Step 4: Write the native test**
 
 ```go
 func TestCapsulesDrawThePagesModel(t *testing.T) {
@@ -2069,13 +2069,13 @@ func TestCapsulesDrawThePagesModel(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `make test`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/fleetdeck-window/capsulemodel.go cmd/fleetdeck-window/capsulemodel_test.go cmd/fleetdeck-window/capsules_darwin.c cmd/fleetdeck-window/capsules_darwin.h cmd/fleetdeck-window/capsules_darwin.go cmd/fleetdeck-window/capsules_darwin_test.go cmd/fleetdeck-window/testsupport_darwin.go
@@ -2096,7 +2096,7 @@ git commit --signoff --message "feat(window): draw tabs, theme and limits as nat
 - Consumes: `reloadAll` (задача 12); строка бренда внутри `<header id="header">` в поверхности оркестратора (задача 7).
 - Produces: пункт меню «Reload» с действием `fleetdeckReloadAll:` и целью класса `FleetdeckMenuTarget`, вызывающей экспортируемый Go `fleetdeckMenuReload()`; `noticeScriptFor(surface string) string` — `surfaceScripts` (задача 10) добавляет его третьим скриптом, когда он не пустой; доска получает нынешний `noticeScript` через `w.Init`, как сейчас. Тест поверхности задачи 10 строит `sessions`, у которой скрипта метки нет, и остаётся с двумя скриптами.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```go
 // menu_darwin_test.go — добавить; значения собираются в TestMain
@@ -2125,24 +2125,24 @@ func TestTheBuildMarkFollowsTheBrandIntoTheOrchestratorSurface(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `go test ./cmd/fleetdeck-window -run 'ReloadReloads|BuildMark' -count=1`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `menu_darwin.c`: пункт «Reload» получает `setAction:sel_registerName("fleetdeckReloadAll:")` и `setTarget:` объекта рантайм-класса `FleetdeckMenuTarget` с этим методом; метод зовёт `fleetdeckMenuReload`. Пункты правки не меняются — они идут по цепочке респондеров.
 - `foreign.go`: `noticeScriptFor("board")` возвращает нынешний `noticeScript`; для `"orchestrator"` — скрипт, который ставит в `<head>` элемент `<style>` только с правилом `#header .build-rev::before`; для `"sessions"` — пустую строку.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make test`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/fleetdeck-window/menu_darwin.c cmd/fleetdeck-window/menu_darwin.go cmd/fleetdeck-window/menu_darwin_test.go cmd/fleetdeck-window/foreign.go cmd/fleetdeck-window/foreign_test.go cmd/fleetdeck-window/surface_darwin.go cmd/fleetdeck-window/testsupport_darwin.go
@@ -2163,13 +2163,13 @@ git commit --signoff --message "fix(window): reload every web view and mark the 
 - Consumes: всё, что сделано в задачах 1–14.
 - Produces: раздел «The glass frame» в `window-and-panel.md` и раздел о трёх веб-видах в `live-terminal.md` — задача 16 проверяет стенд по ним.
 
-- [ ] **Step 1:** В `window-and-panel.md` добавить раздел «The glass frame»: слои (спека 5.1), кто что создаёт, режимы `glass`, `vibrancy`, `opaque` и когда какой, когда рамы нет (спека 5.5), мост и новые привязки (спека 6.2), что измерено на стенде задачи 16. В `live-terminal.md` §7 — что `WKWebView` теперь три, как они делят процесс и хранилище, и почему лист S1 не открывается для закреплённой сессии оркестратора (спека 6.3).
-- [ ] **Step 2:** Обновить пользовательские страницы `docs/en` и `docs/ru` одним коммитом, если они описывают раскладку окна.
-- [ ] **Step 3:** Запустить команду задачи `docs-parity` из `.github/workflows/ci.yaml` локально.
+- [x] **Step 1:** В `window-and-panel.md` добавить раздел «The glass frame»: слои (спека 5.1), кто что создаёт, режимы `glass`, `vibrancy`, `opaque` и когда какой, когда рамы нет (спека 5.5), мост и новые привязки (спека 6.2), что измерено на стенде задачи 16. В `live-terminal.md` §7 — что `WKWebView` теперь три, как они делят процесс и хранилище, и почему лист S1 не открывается для закреплённой сессии оркестратора (спека 6.3).
+- [x] **Step 2:** Обновить пользовательские страницы `docs/en` и `docs/ru` одним коммитом, если они описывают раскладку окна.
+- [x] **Step 3:** Запустить команду задачи `docs-parity` из `.github/workflows/ci.yaml` локально.
 
 Expected: без расхождений.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/engineering/window-and-panel.md docs/engineering/live-terminal.md docs/en docs/ru
@@ -2237,17 +2237,17 @@ git commit --signoff --message "test(window): add a stand for the glass window"
 - Consumes: скрипт стенда T-058 и то, чего он ждёт в логе окна (подтверждение страницы `panel` доски); `pageLoaded` поверхностей (задачи 11, 12).
 - Produces: строка лога `surfacePageSays(surface, "panel")` — `the <surface> surface's page says "panel"` — для каждой поверхности, для скрипта T-058 и для задачи 16; `ci-window-stand.sh <app> <port> <out-dir> <exec|open> [page|frame]`; снимок окна с рамой (`window.png`) в артефакте `window-on-oldest-macos`.
 
-- [ ] **Step 1:** После rebase на master с T-058 прочитать `scripts/ci-window-stand.sh`: какую строку лога он ждёт, сколько ждёт, как называет артефакт.
-- [ ] **Step 2: Write the failing test** — `TestTheWindowStandWaitsForEachSurfacesLineAsTheWindowLogsIt`: скрипт стенда содержит строку `surfacePageSays(surface, "panel")` для `orchestrator` и `sessions` в том виде, в каком она стоит в двойных кавычках shell.
-- [ ] **Step 3:** `glasswindow.go` пишет `surfacePageSays(surface, state)` в `pageLoaded` на каждое слово поверхности.
-- [ ] **Step 4:** `scripts/ci-window-stand.sh` после строки доски ждёт строки обеих поверхностей тем же способом и тем же сроком; снимок делается после них. Нет строки поверхности — скрипт падает с именем поверхности, которой нет.
-- [ ] **Step 5: Run**
+- [x] **Step 1:** После rebase на master с T-058 прочитать `scripts/ci-window-stand.sh`: какую строку лога он ждёт, сколько ждёт, как называет артефакт.
+- [x] **Step 2: Write the failing test** — `TestTheWindowStandWaitsForEachSurfacesLineAsTheWindowLogsIt`: скрипт стенда содержит строку `surfacePageSays(surface, "panel")` для `orchestrator` и `sessions` в том виде, в каком она стоит в двойных кавычках shell.
+- [x] **Step 3:** `glasswindow.go` пишет `surfacePageSays(surface, state)` в `pageLoaded` на каждое слово поверхности.
+- [x] **Step 4:** `scripts/ci-window-stand.sh` после строки доски ждёт строки обеих поверхностей тем же способом и тем же сроком; снимок делается после них. Нет строки поверхности — скрипт падает с именем поверхности, которой нет.
+- [x] **Step 5: Run**
 
 Run: `go test ./cmd/fleetdeck-window -run 'TheWindowStandWaits|WindowOpenedOnAFleetsPage' -count=1`, `sh -n scripts/ci-window-stand.sh`, `shellcheck scripts/ci-window-stand.sh`, затем pull request с веткой.
 
 Expected: тест PASS; `window-on-oldest-macos` зелёная, в её логе есть строки доски и обеих поверхностей, на снимке — окно с рамой на `NSVisualEffectView`. Красная задача — находка для оркестратора, а не повод её выключить.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/ci-window-stand.sh cmd/fleetdeck-window/glasswindow.go cmd/fleetdeck-window/glasswindow_test.go
