@@ -475,3 +475,47 @@ test("the workspace row's buttons are drawn, at the field's size, with the accen
   assert.match(create, /border:\s*1px solid var\(--accent-strong\)/, "the button that writes has no accent edge");
   assert.doesNotMatch(choose, /background:\s*var\(--accent/, "the choose button wears the accent that belongs to the button that writes");
 });
+
+// The declarations of the rule whose selector list contains selector.
+function ruleBody(selector) {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  let from = 0;
+  for (;;) {
+    const at = stripped.indexOf(selector, from);
+    if (at < 0) throw new Error(`web/app.css has no rule for ${selector}`);
+    const open = stripped.indexOf("{", at);
+    const tail = stripped.slice(at + selector.length, open).trim();
+    if (tail === "" || tail.startsWith(",")) return stripped.slice(open + 1, stripped.indexOf("}", open));
+    from = at + selector.length;
+  }
+}
+
+// How many times a custom property is defined: the light palette and both dark ones.
+function countDefinitions(token) {
+  return (css.match(new RegExp(`${token}\\s*:`, "g")) ?? []).length;
+}
+
+// In the fleetdeck window the orchestrator and sessions columns are web views
+// over glass. A background of their own would cover the glass with a flat
+// panel; with reduced transparency there is no glass, and they must paint one.
+test("a web view on glass or vibrancy paints no background of its own", () => {
+  assert.match(ruleBody(':root[data-glass="glass"] body'), /background:\s*transparent/);
+  assert.match(ruleBody(':root[data-glass="vibrancy"] body'), /background:\s*transparent/);
+});
+
+test("with reduced transparency a side surface paints its own panel", () => {
+  const body = ruleBody(':root[data-glass="opaque"]:not([data-surface="board"]) body');
+  assert.match(body, /background:\s*var\(--surface\)/);
+});
+
+test("the board keeps clear of the panels by the insets the window sends", () => {
+  const board = ruleBody(':root[data-surface="board"] #board');
+  assert.match(board, /padding-top:\s*var\(--host-inset-top/);
+  assert.match(board, /padding-left:\s*var\(--host-inset-left/);
+});
+
+test("every glass token has a light and both dark definitions", () => {
+  for (const token of ["--on-glass-muted", "--surface-on-glass", "--glass-control", "--island-shadow"]) {
+    assert.equal(countDefinitions(token), 3, token);
+  }
+});
