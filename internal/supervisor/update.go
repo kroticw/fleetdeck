@@ -413,7 +413,7 @@ func panelRevision(ctx context.Context, panelURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
+	resp, err := panelClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("ask the new panel for its build: %w", err)
 	}

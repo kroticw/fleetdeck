@@ -484,6 +484,23 @@ func (k *Keeper) emit(e Event) {
 // is not there to be found.
 const answerTimeout = 500 * time.Millisecond
 
+// panelClient is how a window asks a panel anything: whether it answers, what
+// build it is, which revision. Keep-alives are off. A pooled connection is one
+// the panel may wait on when it stops, and a handover stops the installed panel
+// -- the version being replaced, v0.9.2 for the update to v0.9.3, which waits up
+// to five seconds on a connection even when it has asked for nothing -- inside
+// the old window's 2.436 s for the whole handover (T-060). Without keep-alives
+// each connection is closed once its answer is read, and one the transport
+// dialed for a probe that another connection served is closed rather than
+// kept. Closing idle connections after each probe instead would close other
+// callers' connections in the shared transport and miss one a concurrent probe
+// is still using. A connection to a panel on this machine's loopback costs
+// next to nothing to make again.
+var panelClient = &http.Client{
+	Timeout:   answerTimeout,
+	Transport: &http.Transport{DisableKeepAlives: true},
+}
+
 // answers reports whether anything answers HTTP at url right now, whatever
 // the status.
 func answers(ctx context.Context, url string) bool {
@@ -491,7 +508,7 @@ func answers(ctx context.Context, url string) bool {
 	if err != nil {
 		return false
 	}
-	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
+	resp, err := panelClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -568,7 +585,7 @@ func holderBuild(ctx context.Context, panelURL string) (PanelBuild, bool) {
 	if err != nil {
 		return PanelBuild{}, false
 	}
-	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
+	resp, err := panelClient.Do(req)
 	if err != nil {
 		return PanelBuild{}, false
 	}
