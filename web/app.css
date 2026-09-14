@@ -3631,11 +3631,21 @@ body.is-resizing {
 
 /* K1, S1, D1: the card, the session and the document open as a sheet over the
    board, between the panels, with the board dimmed under it. */
+#sheet-scrim {
+  display: none;
+}
+
 :root[data-surface="board"] #sheet-scrim {
   position: absolute;
   inset: 0;
   z-index: 1;
   background: var(--sheet-scrim);
+}
+
+/* Shown from the overlays' own hidden attribute, so no module keeps a second
+   piece of state in step with three panels. */
+:root[data-surface="board"] #center:has(#card-panel:not([hidden]), #reader-panel:not([hidden]), #session-panel:not([hidden])) > #sheet-scrim {
+  display: block;
 }
 
 :root[data-surface="board"] #card-panel,

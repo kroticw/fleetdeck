@@ -25,6 +25,7 @@ import { cardPathForLink } from "./card.js";
 import { cardsLinkingTo, docForLink, docTitle, noteName } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
 import { t } from "./i18n.js";
+import { closeCrossHTML } from "./icon.js";
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -65,7 +66,8 @@ export function renderReader(root, path, onClose, options = {}) {
   let disposed = false;
 
   const title = el("h3", "reader-title");
-  const close = el("button", "reader-close", "✕");
+  const close = el("button", "reader-close");
+  close.innerHTML = closeCrossHTML;
   close.setAttribute("type", "button");
   close.setAttribute("aria-label", t("reader_close"));
   close.addEventListener("click", onClose);

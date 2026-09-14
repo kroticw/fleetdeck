@@ -25,6 +25,7 @@ import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
 import { listDocs as serverDocs } from "./docs.js";
 import { brokenLinksOf, docForLink, docTitle, documentsOf, noteName } from "./docnames.js";
+import { closeCrossHTML } from "./icon.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
 // Progress is a list of strings because that is what the write route takes and
@@ -185,7 +186,8 @@ export function renderCard(root, path, onClose, options = {}) {
   const head = (title) => {
     const box = el("div", "card-head");
     box.append(el("h3", "card-title", title));
-    const close = el("button", "card-close", "✕");
+    const close = el("button", "card-close");
+    close.innerHTML = closeCrossHTML;
     close.setAttribute("type", "button");
     close.setAttribute("aria-label", t("card_close"));
     close.addEventListener("click", onClose);

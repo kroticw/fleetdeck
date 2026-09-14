@@ -310,3 +310,13 @@ test("a document no card links shows no cards row", async () => {
   assert.equal(root.querySelectorAll(".doc-card").length, 0);
   assert.ok(!root.textContent.includes(t("doc_cards")));
 });
+
+// E layout, D1: the list and the open document are two opaque islands over the
+// board, and the stylesheet finds them by these classes.
+test("the list and the document are two islands", async () => {
+  stubFetch([["/api/docs", ok(DOCS)]]);
+  renderDocs(root, { subscribe: storeOf({ cards: [] }) });
+  await settle();
+  assert.ok(root.querySelector(".docs-island")?.classList.contains("docs-list"));
+  assert.ok(root.querySelector(".doc-island")?.classList.contains("docs-main"));
+});
