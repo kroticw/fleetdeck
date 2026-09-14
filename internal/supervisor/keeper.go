@@ -20,7 +20,8 @@ type State int
 
 const (
 	// Answering: something answers at the URL. Event.Ours says whether it is
-	// the panel this keeper started.
+	// the panel this keeper started; Event.Holder, for one it did not, what
+	// that panel says of its build.
 	Answering State = iota + 1
 	// Starting: nothing answered, and the keeper has started its panel.
 	Starting
@@ -28,7 +29,8 @@ const (
 	// answered, never answered, or died too soon after it started. The keeper
 	// does nothing more until Retry.
 	Failed
-	// Replacing: a panel a window left behind answers at the URL; the keeper
+	// Replacing: a panel a window left behind answers at the URL, or a person
+	// asked for the panel answering there to be replaced (Replace); the keeper
 	// is stopping it to start its own. Event.Detail says whose it was.
 	Replacing
 )
@@ -61,6 +63,22 @@ type Event struct {
 	LogTail string
 	// Detail says whose panel is being replaced, for Replacing.
 	Detail string
+	// Holder is what a panel the keeper did not start says of its build, for
+	// Answering; nil when what answers is not a fleetdeck panel.
+	Holder *PanelBuild
+	// Asked: a person asked for this replacement (Replace), for Replacing.
+	Asked bool
+}
+
+// PanelBuild is what a fleetdeck panel says of its build in its snapshot
+// (internal/buildinfo's Fingerprint): as much of it as tells one build, and
+// one panel, from another.
+type PanelBuild struct {
+	Version    string `json:"version"`
+	Revision   string `json:"revision"`
+	Modified   bool   `json:"modified"`
+	Executable string `json:"executable"`
+	Owner      int    `json:"owner"`
 }
 
 // stopGrace is how long a panel the keeper gives up on has to leave after
@@ -82,6 +100,12 @@ const stopGrace = 6 * time.Second
 // until it goes and then starting its own: a panel from a terminal is
 // somebody's on purpose, and neither a panel of a live window nor anything
 // that is not a fleetdeck panel is this window's to decide about.
+//
+// Used as it is, but not in silence: the keeper reports what such a panel
+// says of its build (Event.Holder), so the window can say when it is not the
+// window's own -- on 2026-09-14 a v0.9.0 window showed a panel built three
+// days earlier, kept on the port by a launch agent, and nothing said so. And a
+// person who sees that may have the keeper replace it (Replace).
 //
 // The keeper's own panel is started again when it dies, unless it dies within
 // MinUptime of starting: then the keeper stops, reports Failed with the end of
@@ -108,7 +132,7 @@ type Keeper struct {
 
 	// Owner is the PID of the window this keeper runs in, which its panels are
 	// started to report as their owner (in Args). Zero for a keeper that is not
-	// a window's: it replaces nothing.
+	// a window's: it replaces nothing by itself.
 	Owner int
 
 	// OnEvent is called from Run's goroutine.
@@ -116,6 +140,7 @@ type Keeper struct {
 
 	once      sync.Once
 	retry     chan struct{}
+	replace   chan struct{}
 	restartTo chan string
 	binMu     sync.Mutex
 }
@@ -123,6 +148,7 @@ type Keeper struct {
 func (k *Keeper) init() {
 	k.once.Do(func() {
 		k.retry = make(chan struct{}, 1)
+		k.replace = make(chan struct{}, 1)
 		k.restartTo = make(chan string, 1)
 	})
 }
@@ -169,18 +195,45 @@ func (k *Keeper) Retry() {
 	}
 }
 
+// Replace asks the keeper to stop the panel it did not start and is using as
+// it is, and to start its own. It takes effect only while the keeper is using
+// such a panel: a request made before one answered is forgotten when one
+// does, so that a press meant for a panel already gone never stops the next.
+//
+// A person's decision, never the keeper's own: its caller is the window's
+// notice about a panel of another build, and only for a panel nothing would
+// start again at once -- a launch agent's KeepAlive would, and replacing that
+// panel would only fight launchd for the port.
+func (k *Keeper) Replace() {
+	k.init()
+	select {
+	case k.replace <- struct{}{}:
+	default:
+	}
+}
+
+func (k *Keeper) forgetReplace() {
+	select {
+	case <-k.replace:
+	default:
+	}
+}
+
 // Run keeps a panel answering at URL until ctx ends.
 func (k *Keeper) Run(ctx context.Context) {
 	k.init()
 	for ctx.Err() == nil {
 		if answers(ctx, k.URL) {
-			why, replace := k.replaceable(ctx)
+			holder, why, replace := k.replaceable(ctx)
 			if !replace {
-				k.emit(Event{State: Answering})
-				k.waitUntilGone(ctx)
-				continue
+				k.forgetReplace()
+				k.emit(Event{State: Answering, Holder: holder})
+				if !k.waitUntilGone(ctx) {
+					continue
+				}
+				why = fmt.Sprintf("the panel at %s, which this window did not start, is replaced at a person's request", k.URL)
 			}
-			k.emit(Event{State: Replacing, Detail: why})
+			k.emit(Event{State: Replacing, Detail: why, Asked: !replace})
 			err := StopHolder(ctx, k.URL, stopGrace)
 			if err == nil {
 				continue
@@ -198,8 +251,10 @@ func (k *Keeper) Run(ctx context.Context) {
 }
 
 // waitUntilGone returns when the panel at URL has failed to answer twice in a
-// row: one missed answer is a panel busy for a moment, not a panel gone.
-func (k *Keeper) waitUntilGone(ctx context.Context) {
+// row -- one missed answer is a panel busy for a moment, not a panel gone --
+// or when ctx ends, reporting false; or when a person asks for the panel to be
+// replaced, reporting true.
+func (k *Keeper) waitUntilGone(ctx context.Context) (replace bool) {
 	poll := k.Poll
 	if poll <= 0 {
 		poll = 2 * time.Second
@@ -209,7 +264,9 @@ func (k *Keeper) waitUntilGone(ctx context.Context) {
 	for misses := 0; misses < 2; {
 		select {
 		case <-ctx.Done():
-			return
+			return false
+		case <-k.replace:
+			return true
 		case <-tick.C:
 		}
 		if answers(ctx, k.URL) {
@@ -218,6 +275,7 @@ func (k *Keeper) waitUntilGone(ctx context.Context) {
 			misses++
 		}
 	}
+	return false
 }
 
 // runOwn starts the keeper's panel and stays with it until it exits. It
@@ -336,17 +394,17 @@ func LogTail(path string, n int) string {
 	return tail(string(data), n)
 }
 
-// replaceable says whether the panel answering at URL is one a window left
+// replaceable says what the panel answering at URL says of its build -- nil
+// when it is not a fleetdeck panel -- and whether it is one a window left
 // behind, and whose it was.
-func (k *Keeper) replaceable(ctx context.Context) (string, bool) {
-	if k.Owner == 0 {
-		return "", false
-	}
+func (k *Keeper) replaceable(ctx context.Context) (*PanelBuild, string, bool) {
 	b, ok := holderBuild(ctx, k.URL)
 	if !ok {
-		return "", false // not a fleetdeck panel: not this window's to decide about
+		return nil, "", false // not a fleetdeck panel: not this window's to decide about
 	}
 	switch {
+	case k.Owner == 0:
+		return &b, "", false
 	case b.Owner != 0:
 		// This window's own panel is left alone by the same test: its window,
 		// this process, is there. A window that exits takes its panel with it
@@ -355,9 +413,9 @@ func (k *Keeper) replaceable(ctx context.Context) (string, bool) {
 		// here: a PID taken by some other process since only means a panel
 		// that is going anyway is used for those moments.
 		if errors.Is(syscall.Kill(b.Owner, 0), syscall.ESRCH) {
-			return fmt.Sprintf("the panel at %s belongs to a window (pid %d) that is gone", k.URL, b.Owner), true
+			return &b, fmt.Sprintf("the panel at %s belongs to a window (pid %d) that is gone", k.URL, b.Owner), true
 		}
-		return "", false
+		return &b, "", false
 	case strings.Contains(b.Executable, ".app/Contents/MacOS/"):
 		// TEMPORARY, for the change-over only. A panel started by a window from
 		// before panels reported their owner runs from inside an app bundle and
@@ -366,41 +424,34 @@ func (k *Keeper) replaceable(ctx context.Context) (string, bool) {
 		// running: when every fleetdeck panel answering anywhere reports its
 		// owner. Left in past that, it would stop a debugging run started from
 		// inside a bundle by hand.
-		return fmt.Sprintf("the panel at %s runs from an app bundle (%s) but reports no window: it was left by a window from before panels reported their owner", k.URL, b.Executable), true
+		return &b, fmt.Sprintf("the panel at %s runs from an app bundle (%s) but reports no window: it was left by a window from before panels reported their owner", k.URL, b.Executable), true
 	default:
-		return "", false // started some other way: somebody's on purpose
+		return &b, "", false // started some other way: somebody's on purpose
 	}
-}
-
-// holderInfo is what a panel's build fingerprint says about which panel it
-// is.
-type holderInfo struct {
-	Owner      int    `json:"owner"`
-	Executable string `json:"executable"`
 }
 
 // holderBuild is what the panel at panelURL says about itself, or false when
 // what answers is not a fleetdeck panel: no build fingerprint in a snapshot.
-func holderBuild(ctx context.Context, panelURL string) (holderInfo, bool) {
+func holderBuild(ctx context.Context, panelURL string) (PanelBuild, bool) {
 	u, err := url.Parse(panelURL)
 	if err != nil {
-		return holderInfo{}, false
+		return PanelBuild{}, false
 	}
 	u.Path = "/api/snapshot"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return holderInfo{}, false
+		return PanelBuild{}, false
 	}
 	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
 	if err != nil {
-		return holderInfo{}, false
+		return PanelBuild{}, false
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var snap struct {
-		Build *holderInfo `json:"build"`
+		Build *PanelBuild `json:"build"`
 	}
 	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&snap) != nil || snap.Build == nil {
-		return holderInfo{}, false
+		return PanelBuild{}, false
 	}
 	return *snap.Build, true
 }
