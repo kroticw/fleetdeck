@@ -320,11 +320,25 @@ jobs:
         run: |
           sw_vers
           system_profiler SPDisplaysDataType | grep --extended-regexp 'Resolution|UI Looks like' || true
+      # DIAGNOSTIC (T-056, v0.10.1), to be settled before merge. Twice on this
+      # runner, after go test, the window's panel did not answer in 330 ms and
+      # logged nothing (runs 34847472609, 34848990753), while a panel started
+      # from a script on fresh macos-26 runners answered in 32-48 ms. The stand
+      # runs here twice before the tests, to tell a first GUI start on a fresh
+      # machine from load; the cold start script runs after the tests, to see
+      # the panel under the tests' load without a window. Neither run may fail
+      # the job until the cause is known.
+      - name: This build's window, started directly, first time on this machine
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/new-exec-first exec frame || echo "=== first stand did not reach the panel's page in its frame"
+      - name: This build's window, started directly, second time
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/new-exec-second exec frame || echo "=== second stand did not reach the panel's page in its frame"
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
       - name: The window's tests on macOS 26
         run: go test -count=1 ./cmd/fleetdeck-window/
+      - name: The panel's start right after the tests, without a window
+        run: python3 scripts/ci-panel-cold-start.py new/fleetdeck-v0.0.0-ci-macos.zip out/cold-after-tests 7796
       - name: This build's window, started directly, shows the panel's page in its frame
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/new-exec exec frame
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7798 out/new-exec exec frame
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

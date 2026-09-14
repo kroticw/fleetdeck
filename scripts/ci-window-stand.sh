@@ -149,5 +149,19 @@ echo "--- window log ($how)"
 cat "$out/window.log" 2>/dev/null || echo "(none)"
 echo "--- panel log"
 cat "$out/panel.log"
+# What the system did with the panel the window started, when its page never
+# came: the process launch is what a panel that logs nothing in its start's time
+# leaves to look at. GitHub Actions only: elsewhere it is a person's system log.
+if [ "$loaded" = no ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+	panel_pid=$(sed -n 's/.*panel starting (pid \([0-9]*\).*/\1/p' "$out/window.log" | head -n 1)
+	started_at=$(sed -n 's/^\([0-9/]* [0-9:]*\)\.[0-9]* fleetdeck-window: panel starting (pid.*/\1/p' "$out/window.log" | head -n 1 | tr / -)
+	if [ -n "$panel_pid" ] && [ -n "$started_at" ]; then
+		log show --style compact --info --debug --start "$started_at" \
+			--predicate "processID == $panel_pid OR ((process IN {\"runningboardd\", \"amfid\", \"syspolicyd\", \"tccd\", \"launchservicesd\", \"kernel\"}) AND (eventMessage CONTAINS \"$panel_pid\" OR eventMessage CONTAINS[c] \"fleetdeck\"))" \
+			>"$out/system-around-panel.log" 2>&1 || true
+		echo "--- system log around the panel (pid $panel_pid, from $started_at): $(wc -l <"$out/system-around-panel.log") lines in $out/system-around-panel.log"
+	fi
+fi
+
 echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery"
 [ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ]
