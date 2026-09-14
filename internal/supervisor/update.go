@@ -237,8 +237,15 @@ func (t *Takeover) Run(ctx context.Context) error {
 	if err := Swap(t.Staged, t.Canonical); err != nil {
 		return fail(err)
 	}
-	report(StepSwapped, t.Canonical)
+	// LaunchServices moves before swapped is said. The old window may give up on
+	// the handover at any moment after that (T-060), and one given up on between
+	// the swap and this would leave the staged path, which holds the old bundle
+	// now, the one path LaunchServices knows for the app; the next update removes
+	// that directory but never has LaunchServices forget it. Measured on
+	// 2026-09-14: forgetting and registering together took 19-30 ms, inside a
+	// handover whose worst stand run was 1144 ms against the old window's 2436.
 	t.reregister()
+	report(StepSwapped, t.Canonical)
 
 	t.Keeper.Restart(PanelIn(t.Canonical))
 	if err := t.waitOwnAnswer(ctx); err != nil {

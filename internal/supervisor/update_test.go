@@ -508,7 +508,10 @@ func TestASecondPressWhileAnUpdateRunsIsRefused(t *testing.T) {
 // kept that path for the app's identifier, and after the swap the staged path
 // held the old bundle. So once the swap is done the new window has
 // LaunchServices forget the staged path and take the canonical one -- before
-// it says done, while the old window can still be told if anything fails.
+// it reports swapped. The old window may give up on the handover at any moment
+// after that report (T-060), and a handover given up on between the swap and
+// this would leave the staged path, holding the old bundle, the one path
+// LaunchServices knows; nothing afterwards makes it forget that path.
 func TestTheNewWindowHasLaunchServicesForgetTheBundleSwappedOut(t *testing.T) {
 	r := newUpdateRig(t)
 	if err := r.update("old").Run(context.Background()); err != nil {
@@ -517,8 +520,8 @@ func TestTheNewWindowHasLaunchServicesForgetTheBundleSwappedOut(t *testing.T) {
 	waitClosed(t, r.done, "the new window's Done")
 	staged := filepath.Join(StagingDir(r.canonical), BundleName)
 	want := []registryCall{
-		{op: "forget", bundle: staged, steps: "alive,panel,swapped"},
-		{op: "register", bundle: r.canonical, steps: "alive,panel,swapped"},
+		{op: "forget", bundle: staged, steps: "alive,panel"},
+		{op: "register", bundle: r.canonical, steps: "alive,panel"},
 	}
 	got := r.registry.told()
 	if len(got) != len(want) {
