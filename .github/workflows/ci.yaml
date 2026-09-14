@@ -469,7 +469,7 @@ jobs:
       # dev.fleetdeck.stand and dev.fleetdeck.window open. On the operator's machine that
       # moment lasts a fraction of a second, since their v0.10.0 window quits as soon as
       # it reads done; here this program stretches it. LaunchServices registers the
-      # staged path again about half a second after the new window tells it where the
+      # staged path again within about a second of the new window telling it where the
       # app is (run 34867562033), so nothing is required of that moment, and a window
       # that does not tell LaunchServices again once it is ready is no longer caught by
       # this job: TestAWindowStartedByAnUpdateTakesThePanelOverBeforeItsWindowIsMade

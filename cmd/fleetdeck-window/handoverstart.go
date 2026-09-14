@@ -25,9 +25,10 @@ import (
 // window is made ends the process there, with no window shown: the window that
 // started this one says why, and starts its panel again.
 //
-// LaunchServices: a Cocoa app checks in with LaunchServices as it starts
-// (docs/engineering/window-and-panel.md), and this window starts from the
-// staged path. With the takeover ahead of the window, the check-in may come
+// LaunchServices: this window starts by exec from the staged path, and that
+// path is registered by the time the window is ready; when in the process's
+// start it is registered is not measured (docs/engineering/window-and-panel.md,
+// on taking the panel over before the window is made). With the takeover ahead of the window, the check-in may come
 // after the takeover has had LaunchServices forget that path, and put it back.
 // So once the window runs -- its check-in behind it, whether that is made when
 // the application object is created or when it finishes launching -- a
