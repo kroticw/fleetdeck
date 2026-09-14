@@ -496,10 +496,14 @@ func TestAPanelWhoseWindowIsGoneIsReplaced(t *testing.T) {
 	}
 }
 
-// A panel started by a window from before panels reported their owner runs
-// from inside an app bundle and reports none. See Keeper.replaceable.
-func TestAPanelFromABundleThatReportsNoOwnerIsReplaced(t *testing.T) {
-	needLsof(t) // replacing stops the holder, found by lsof
+// A panel that runs from inside an app bundle and reports no owner is used as
+// it is, like any panel a window did not start. It was once replaced, for the
+// change-over to panels reporting their owner (#108, v0.2.0) -- which also
+// stopped a stand's -stand-socket panel run from a bundle, on 2026-09-14, and
+// had the window start one that could reach the real fleet daemon. A panel of
+// another build is named over its page instead, with a button to replace it
+// (foreign.go).
+func TestAPanelFromABundleThatReportsNoOwnerIsUsedAsItIs(t *testing.T) {
 	addr := freeAddr(t)
 	bundled := filepath.Join(t.TempDir(), "fleetdeck.app", "Contents", "MacOS", "fleetdeck")
 	self, err := os.ReadFile(os.Args[0])
@@ -512,16 +516,15 @@ func TestAPanelFromABundleThatReportsNoOwnerIsReplaced(t *testing.T) {
 	if err := os.WriteFile(bundled, self, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	orphan := foreignPanel(t, addr, bundled, 0)
+	panel := foreignPanel(t, addr, bundled, 0)
 	r := run(t, windowKeeper(t, addr))
 
-	r.expect(t, Replacing, 5*time.Second)
-	r.expect(t, Starting, 10*time.Second)
-	if up := r.expect(t, Answering, 10*time.Second); !up.Ours {
-		t.Fatalf("Answering %+v, want the keeper's own panel", up)
+	if up := r.expect(t, Answering, 5*time.Second); up.Ours {
+		t.Fatalf("Answering %+v, want the bundle's panel used as it is", up)
 	}
-	if alive(orphan.Process.Pid) {
-		t.Fatal("the bundle's ownerless panel is still running")
+	r.quiet(t, time.Second)
+	if !alive(panel.Process.Pid) {
+		t.Fatal("the window stopped a panel it did not start")
 	}
 }
 

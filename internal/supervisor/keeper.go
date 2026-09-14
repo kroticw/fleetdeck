@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -533,16 +532,13 @@ func (k *Keeper) replaceable(ctx context.Context) (*PanelBuild, string, bool) {
 			return &b, fmt.Sprintf("the panel at %s belongs to a window (pid %d) that is gone", k.URL, b.Owner), true
 		}
 		return &b, "", false
-	case strings.Contains(b.Executable, ".app/Contents/MacOS/"):
-		// TEMPORARY, for the change-over only. A panel started by a window from
-		// before panels reported their owner runs from inside an app bundle and
-		// reports none -- the case that showed an old build to a new window on
-		// 2026-09-11. Remove this case once no machine can have such a panel
-		// running: when every fleetdeck panel answering anywhere reports its
-		// owner. Left in past that, it would stop a debugging run started from
-		// inside a bundle by hand.
-		return &b, fmt.Sprintf("the panel at %s runs from an app bundle (%s) but reports no window: it was left by a window from before panels reported their owner", k.URL, b.Executable), true
 	default:
+		// Started some other way, including from inside an app bundle by hand.
+		// Such a panel was once replaced, for the change-over to panels
+		// reporting their owner (#108, v0.2.0); on 2026-09-14 that stopped a
+		// stand's -stand-socket panel and had the window start one that could
+		// reach the real fleet daemon. A panel of another build is named over
+		// its page, with a button to replace it (the window's foreign.go).
 		return &b, "", false // started some other way: somebody's on purpose
 	}
 }
