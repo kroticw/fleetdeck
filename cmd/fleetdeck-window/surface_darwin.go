@@ -20,6 +20,9 @@ type surface struct {
 	p    unsafe.Pointer
 	kind string
 	url  string
+	// calls is the page's binding calls, answered in order (callQueue); nil
+	// until glasswindow.go gives the surface one.
+	calls *callQueue
 }
 
 // surfaceScripts is what a surface's pages get at the start of every document,
@@ -78,6 +81,9 @@ func (s *surface) focus() { C.fd_surface_focus(s.p) }
 
 // close takes the web view down and releases it; s is not used after.
 func (s *surface) close() {
+	if s.calls != nil {
+		s.calls.close()
+	}
 	C.fd_surface_destroy(s.p)
 	s.p = nil
 }

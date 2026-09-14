@@ -178,18 +178,29 @@ func (g *glassWindow) reloadSurfaces() { g.run(g.ctl.reloadSurfaces()) }
 // tick is time going by for the surfaces' pages asked for (main.go's ticker).
 func (g *glassWindow) tick() { g.run(g.ctl.tick()) }
 
+// surfaceMessage is a surface's page calling a binding, on the main thread: it
+// joins that web view's queue (callQueue), answered in order off the main
+// thread.
 func (g *glassWindow) surfaceMessage(surface, message string) {
-	go func() {
-		reply := answerSurfaceCall(g.bridge, surface, message)
+	if s := g.surfaces[surface]; s != nil && s.calls != nil {
+		s.calls.push(message)
+	}
+}
+
+// answerCalls is what a surface's queue does with each call: answers it, and
+// settles its promise in that same web view, if it is still the one shown.
+func (g *glassWindow) answerCalls(kind string, s *surface) func(message string) {
+	return func(message string) {
+		reply := answerSurfaceCall(g.bridge, kind, message)
 		if reply == "" {
 			return
 		}
 		g.w.Dispatch(func() {
-			if s := g.surfaces[surface]; s != nil {
+			if replyGoesTo(g.surfaces, kind, s) {
 				s.eval(reply)
 			}
 		})
-	}()
+	}
 }
 
 func (g *glassWindow) surfaceNavigation(_, target string) bool {
@@ -256,6 +267,7 @@ func (g *glassWindow) createSurface(kind, url string, glass glassMode) {
 		old.close()
 	}
 	s := newSurface(g.frame.board(), g.frame.panelContent(kind), kind, g.panelURL, glass, g.bridge)
+	s.calls = newCallQueue(g.answerCalls(kind, s))
 	g.surfaces[kind] = s
 	g.framed = true
 	s.load(url)
