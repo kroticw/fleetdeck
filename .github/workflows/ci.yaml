@@ -268,34 +268,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  panel-cold-start:
-    # TEMPORARY (T-056, v0.10.1), removed before merge: how long a freshly unpacked
-    # panel takes to answer on its first start, on each macOS the window is checked
-    # on. A fresh runner per matrix entry, so each entry's first start is cold.
-    needs: oldest-macos-app
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-26, macos-15]
-        run: [1, 2, 3]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: oldest-macos-app
-          path: new
-      - name: Measure the panel's first start
-        run: python3 scripts/ci-panel-cold-start.py new/fleetdeck-v0.0.0-ci-macos.zip out 7796
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: panel-cold-start-${{ matrix.os }}-${{ matrix.run }}
-          path: out
-          if-no-files-found: ignore
-          retention-days: 7
-
   window-on-macos-26:
     # Opens the same app on the macOS its glass is for. v0.10.0 went out with its
     # window seen whole only on macOS 15, where the frame is NSVisualEffectView; on
@@ -320,25 +292,45 @@ jobs:
         run: |
           sw_vers
           system_profiler SPDisplaysDataType | grep --extended-regexp 'Resolution|UI Looks like' || true
-      # DIAGNOSTIC (T-056, v0.10.1), to be settled before merge. Twice on this
-      # runner, after go test, the window's panel did not answer in 330 ms and
-      # logged nothing (runs 34847472609, 34848990753), while a panel started
-      # from a script on fresh macos-26 runners answered in 32-48 ms. The stand
-      # runs here twice before the tests, to tell a first GUI start on a fresh
-      # machine from load; the cold start script runs after the tests, to see
-      # the panel under the tests' load without a window. Neither run may fail
-      # the job until the cause is known.
-      - name: This build's window, started directly, first time on this machine
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/new-exec-first exec frame || echo "=== first stand did not reach the panel's page in its frame"
-      - name: This build's window, started directly, second time
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/new-exec-second exec frame || echo "=== second stand did not reach the panel's page in its frame"
+      # The window's gate, before the tests. After them, on this runner, the
+      # panel the window started did not answer in 330 ms in 3 runs of 3, while
+      # before them it did in 2 of 2, and a panel started without a window
+      # right after them answered in 53 ms (run 34850302115). The window is
+      # sized to the runner's 1024x768 screen, so both panels are in the
+      # screenshot, and drawn light and then dark: the operator uses dark.
+      - name: This build's window in its frame, light
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/light exec frame
+      - name: This build's window in its frame, dark
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec frame
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
       - name: The window's tests on macOS 26
-        run: go test -count=1 ./cmd/fleetdeck-window/
-      - name: The panel's start right after the tests, without a window
-        run: python3 scripts/ci-panel-cold-start.py new/fleetdeck-v0.0.0-ci-macos.zip out/cold-after-tests 7796
-      - name: This build's window, started directly, shows the panel's page in its frame
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7798 out/new-exec exec frame
+        run: |
+          go test -count=1 ./cmd/fleetdeck-window/
+          date +%s > "$RUNNER_TEMP/tests-ended"
+      # MEASUREMENT (T-056, v0.10.1), removed before merge: how long the panel the
+      # window starts takes to answer under the tests' load, given 10 s, in
+      # turns -- the order of today, then the panel started before the window's
+      # web views -- so neither order runs only on a machine that has cooled.
+      - name: The panel's start under the tests' load, eight stands in turn
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_PANEL_START_TIMEOUT: 10s
+        run: |
+          ended=$(cat "$RUNNER_TEMP/tests-ended")
+          for i in 1 2 3 4 5 6 7 8; do
+            first=$(( (i + 1) % 2 ))
+            export FLEETDECK_STAND_PANEL_FIRST=$first
+            echo "=== run $i: panel first $first, $(( $(date +%s) - ended ))s after the tests ended" | tee -a out/after-tests.txt
+            scripts/ci-window-stand.sh new/fleetdeck.app $(( 7800 + i )) "out/after-tests-$i" exec frame > "out/after-tests-$i.txt" 2>&1 ||
+              echo "=== run $i did not reach the panel's page in its frame" | tee -a out/after-tests.txt
+            grep --extended-regexp 'answered .* after it started|panel failed' "out/after-tests-$i/window.log" | tee -a out/after-tests.txt || true
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
