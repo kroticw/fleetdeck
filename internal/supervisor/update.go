@@ -415,9 +415,6 @@ func (t *Takeover) retireOnce() (removed, again bool, why error) {
 	if err := t.retirable(); err != nil {
 		return false, false, err
 	}
-	if err := os.RemoveAll(t.Staged); err != nil {
-		return false, true, fmt.Errorf("removing it failed: %w", err)
-	}
 	return true, false, nil
 }
 
