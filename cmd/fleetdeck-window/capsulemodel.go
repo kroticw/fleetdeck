@@ -57,6 +57,33 @@ func limitValue(text string) float64 {
 	return v
 }
 
+// compactLimits is every limit as one capsule of text, for a capsule row with
+// no room for their indicators: Text in the row, Tooltip on it, and Color the
+// worst limit's.
+type compactLimits struct {
+	Text, Tooltip, Color string
+}
+
+// limitSeverity orders the page's levels (web/js/header.js) from the least
+// telling to the worst: a limit with no number, an old number, then by use.
+var limitSeverity = map[string]int{"off": 1, "stale": 2, "cool": 3, "warm": 4, "hot": 5}
+
+func (m capsuleModel) compactLimits() compactLimits {
+	if len(m.Limits) == 0 {
+		return compactLimits{}
+	}
+	var parts, lines []string
+	worst := m.Limits[0]
+	for _, limit := range m.Limits {
+		parts = append(parts, limit.Label+" "+limit.Text)
+		lines = append(lines, limit.Label+": "+limit.Text)
+		if limitSeverity[limit.Level] > limitSeverity[worst.Level] {
+			worst = limit
+		}
+	}
+	return compactLimits{Text: strings.Join(parts, " · "), Tooltip: strings.Join(lines, "\n"), Color: worst.Color}
+}
+
 // hexColor reads #rrggbb, the form the page's colour tokens take (web/app.css).
 func hexColor(s string) (r, g, b uint8, ok bool) {
 	if len(s) != 7 || s[0] != '#' {
