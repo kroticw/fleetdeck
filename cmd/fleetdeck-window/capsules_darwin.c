@@ -15,6 +15,7 @@
 
 #include "_cgo_export.h"
 
+#include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CGGeometry.h>
 #include <objc/message.h>
 #include <objc/objc.h>
@@ -97,7 +98,14 @@ static int limitsDrawn;
 // capsulesDrawn: how many capsules the row shows.
 static int capsulesDrawn;
 
+// contentsOnGlass: what each capsule on glass holds, drawn in the system's mode.
+#define maxContents (2 + maxLimits + 1 + 2)
+static id contentsOnGlass[maxContents];
+static int contentsOnGlassDrawn;
+
 static void placeCapsules(double rowWidth);
+static id systemAppearance(void);
+static void drawInSystemMode(id content, id appearance);
 
 // --- the row: a container that lets clicks through its gaps ---------------------
 
@@ -190,6 +198,8 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
     sendVoidDouble(wrapper, sel("setCornerRadius:"), capsuleHeight / 2);
     sendVoidLong(holder, sel("setAutoresizingMask:"), 18);
     sendVoid1(wrapper, sel("setContentView:"), holder);
+    drawInSystemMode(holder, systemAppearance());
+    if (contentsOnGlassDrawn < maxContents) contentsOnGlass[contentsOnGlassDrawn++] = holder;
   } else {
     if (strcmp(mode, "opaque") == 0) {
       wrapper = initWithFrame(cls("NSView"), frame);
@@ -303,6 +313,84 @@ static void placeCapsules(double rowWidth) {
   put(theme, right - widthOf(theme), 1);
 }
 
+// --- the system's mode ----------------------------------------------------------
+
+// Read afresh: the defaults an app keeps may still hold the old mode when the
+// system says it changed.
+static int systemIsDarkNow(void) {
+  CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
+  CFPropertyListRef style = CFPreferencesCopyAppValue(CFSTR("AppleInterfaceStyle"), kCFPreferencesAnyApplication);
+  int dark = style && CFGetTypeID(style) == CFStringGetTypeID() &&
+             CFStringCompare((CFStringRef)style, CFSTR("Dark"), 0) == kCFCompareEqualTo;
+  if (style) CFRelease(style);
+  return dark;
+}
+
+// testSystemDark is the system's mode a test has set, or -1 for the system's own.
+static int testSystemDark = -1;
+
+static int systemIsDark(void) { return testSystemDark >= 0 ? testSystemDark : systemIsDarkNow(); }
+
+// themeCenterLocal: the system's mode is heard of in this process's own
+// notification centre, for the tests.
+static int themeCenterLocal;
+
+static const char *const systemThemeChanged = "AppleInterfaceThemeChangedNotification";
+
+// The system says its mode changed in the distributed notification centre.
+static id themeCenter(int local) {
+  return local ? send0(cls("NSNotificationCenter"), sel("defaultCenter"))
+               : send0(cls("NSDistributedNotificationCenter"), sel("defaultCenter"));
+}
+
+// themeSubscribedName: what the capsules listen for, "" until they do.
+static const char *themeSubscribedName = "";
+
+// On macOS 26 a capsule's glass takes the system's mode, whatever the app's
+// appearance, the glass's tint or its own appearance say, while a control takes
+// the app's: a theme other than the system's drew white text on white glass,
+// or dark on dark (stands in runs 34863293838 and 34864709919). So what a
+// capsule on glass holds is drawn in the system's mode, the one its glass is in.
+static char systemModeSaid[40];
+
+static id systemAppearance(void) {
+  return send1(cls("NSAppearance"), sel("appearanceNamed:"),
+               nsstring(systemIsDark() ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua"));
+}
+
+static void drawInSystemMode(id content, id appearance) {
+  sendVoid1(content, sel("setAppearance:"), appearance);
+  // The window's log says the mode once each time it changes: a stand checks
+  // the capsules by it.
+  const char *name = cstring(send0(appearance, sel("name")));
+  if (strcmp(name, systemModeSaid) != 0) {
+    strncpy(systemModeSaid, name, sizeof systemModeSaid - 1);
+    fprintf(stderr, "fleetdeck-window: the capsules on glass are drawn in %s, the system's mode\n", name);
+  }
+}
+
+static void systemModeChanged(id self, SEL _cmd, id notification) {
+  (void)self, (void)_cmd, (void)notification;
+  void *pool = objc_autoreleasePoolPush();
+  id appearance = systemAppearance();
+  for (int i = 0; i < contentsOnGlassDrawn; i++) drawInSystemMode(contentsOnGlass[i], appearance);
+  objc_autoreleasePoolPop(pool);
+}
+
+// listenForSystemMode subscribes once, for the life of the process, to the
+// system saying its mode changed.
+static void listenForSystemMode(void) {
+  static id observer;
+  if (observer) return;
+  Class klass = objc_allocateClassPair((Class)objc_getClass("NSObject"), "FleetdeckSystemModeObserver", 0);
+  class_addMethod(klass, sel("systemModeChanged:"), (IMP)systemModeChanged, "v@:@");
+  objc_registerClassPair(klass);
+  observer = send0((id)klass, sel("new"));  ((void (*)(id, SEL, id, SEL, id, id))objc_msgSend)(themeCenter(themeCenterLocal),
+                                                     sel("addObserver:selector:name:object:"), observer,
+                                                     sel("systemModeChanged:"), nsstring(systemThemeChanged), (id)0);
+  themeSubscribedName = systemThemeChanged;
+}
+
 static void setMinContentWidth(id window, double width) {
   if (!window) return;
   CGSize min = sendSize0(window, sel("contentMinSize"));
@@ -343,6 +431,8 @@ void fd_capsules_clear(void *container) {
   tabsCapsule = newCardCapsule = compactCapsule = themeCapsule = themeIconCapsule = (id)0;
   for (int i = 0; i < maxLimits; i++) limitCapsules[i] = levelsDrawn[i] = (id)0;
   limitsDrawn = 0;
+  for (int i = 0; i < maxContents; i++) contentsOnGlass[i] = (id)0;
+  contentsOnGlassDrawn = 0;
   capsulesDrawn = 0;
   // No row, nothing for the window to keep room for.
   setMinContentWidth(send0((id)container, sel("window")), 0);
@@ -357,6 +447,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   void *pool = objc_autoreleasePoolPush();
   id parent = (id)container;
   fd_capsules_clear(container);
+  listenForSystemMode();
 
   CGRect bounds = sendRect0(parent, sel("bounds"));
   id rowView = initWithFrame((id)rowClass(), bounds);
@@ -532,6 +623,45 @@ void fd_test_press_segment(int i) {
 }
 
 void fd_test_press_new_card(void) { sendAction(newCardDrawn); }
+
+void fd_test_set_system_dark(int dark) { testSystemDark = dark; }
+
+void fd_test_observe_system_theme_locally(void) { themeCenterLocal = 1; }
+
+void fd_test_post_system_theme_changed(const char *name) {
+  ((void (*)(id, SEL, id, id))objc_msgSend)(send0(cls("NSNotificationCenter"), sel("defaultCenter")),
+                                            sel("postNotificationName:object:"), nsstring(name), (id)0);
+}
+
+int fd_test_product_theme_center_is_distributed(void) {
+  return ((signed char (*)(id, SEL, id))objc_msgSend)(themeCenter(0), sel("isKindOfClass:"),
+                                                      cls("NSDistributedNotificationCenter")) != 0;
+}
+
+const char *fd_test_system_theme_subscribed_name(void) { return themeSubscribedName; }
+
+static const char *appearanceName(id appearance) {
+  return appearance ? cstring(send0(appearance, sel("name"))) : "";
+}
+
+const char *fd_test_capsule_slot_appearance(int i) {
+  id wrapper = slot(i, NULL);
+  if (!wrapper) return "";
+  id content = respondsTo(wrapper, "contentView")
+                   ? send0(wrapper, sel("contentView"))
+                   : ((id (*)(id, SEL, unsigned long))objc_msgSend)(send0(wrapper, sel("subviews")),
+                                                                    sel("objectAtIndex:"), 0);
+  return appearanceName(send0(content, sel("appearance")));
+}
+
+const char *fd_test_app_appearance(void) {
+  return appearanceName(send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("appearance")));
+}
+
+void fd_test_set_app_appearance(const char *name) {
+  id appearance = name && *name ? send1(cls("NSAppearance"), sel("appearanceNamed:"), nsstring(name)) : (id)0;
+  sendVoid1(send0(cls("NSApplication"), sel("sharedApplication")), sel("setAppearance:"), appearance);
+}
 void fd_test_press_theme_icon(void) { sendAction(themeIconDrawn); }
 
 // Whether a capsule's control is drawn inside its glass: a descendant of the

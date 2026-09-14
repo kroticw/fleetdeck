@@ -12,15 +12,84 @@ import (
 	"testing"
 )
 
-var capsulesResult capsulesProbe
+var (
+	capsulesResult capsulesProbe
+	themeResult    capsuleThemeProbe
+)
 
 func collectCapsuleResults() {
 	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[{"id":"board","label":"Доска","selected":true},{"id":"docs","label":"Доки","selected":false}],"newCard":{"label":"+ карточка"},"theme":{"label":"тема: авто"},"limits":[{"label":"5ч","text":"37%","level":"cool","color":"#2f9e44"}]}`))
 	if err != nil {
 		panic(err)
 	}
+	observeSystemThemeLocallyForTest()
 	capsulesResult = probeCapsulesForTest(m)
 	collectCapsuleLayoutResults()
+	themeResult = probeCapsuleThemeForTest(m)
+}
+
+// --- the capsules' controls and the system's mode --------------------------------
+
+// On macOS 26 a capsule's glass takes the system's mode whatever the app's
+// appearance, its tint or its own appearance say, and a control takes the
+// app's: a theme other than the system's drew white text on white glass or
+// dark on dark (stands in runs 34863293838 and 34864709919). The controls on
+// glass are drawn in the system's mode instead, which those stands read in
+// both directions.
+
+func everyContentIs(t *testing.T, when string, got []string, want string) {
+	t.Helper()
+	if len(got) == 0 {
+		t.Fatalf("%s: no capsules drawn", when)
+	}
+	for i, name := range got {
+		if name != want {
+			t.Errorf("%s: capsule %d's content in %q, want %q (all: %v)", when, i, name, want, got)
+		}
+	}
+}
+
+func TestCapsulesOnGlassDrawTheirControlsInTheSystemsModeFromTheFirstDraw(t *testing.T) {
+	if !themeResult.glass {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	everyContentIs(t, "drawn in a dark system", themeResult.firstDrawInDarkSystem, "NSAppearanceNameDarkAqua")
+}
+
+func TestTheSystemsModeChangingRedrawsTheCapsulesControlsInIt(t *testing.T) {
+	if !themeResult.glass {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	everyContentIs(t, "after the system turned light", themeResult.afterSystemTurnedLight, "NSAppearanceNameAqua")
+}
+
+// The tests hear of the system's mode in the process's own centre; the window
+// listens where the system says it, and for the name it says.
+func TestTheCapsulesListenWhereTheSystemSaysItsModeChanged(t *testing.T) {
+	if !themeResult.productCenterDistributed {
+		t.Error("outside the tests the capsules listen in a centre other than the distributed one")
+	}
+	if themeResult.subscribedName != "AppleInterfaceThemeChangedNotification" {
+		t.Errorf("the capsules listen for %q", themeResult.subscribedName)
+	}
+}
+
+func TestTheAppsThemeDoesNotDecideTheCapsulesControlsOnGlass(t *testing.T) {
+	if !themeResult.glass {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	everyContentIs(t, "the app dark in a light system", themeResult.afterAppTurnedDark, "NSAppearanceNameAqua")
+}
+
+// Vibrancy and the opaque capsules take the app's mode, as the panels do.
+func TestCapsulesOffGlassKeepTheAppsMode(t *testing.T) {
+	everyContentIs(t, "in vibrancy", themeResult.inVibrancy, "")
+}
+
+func TestTheThemeProbeLeavesTheAppsAppearanceAsItFoundIt(t *testing.T) {
+	if themeResult.appAppearanceAt != themeResult.appAppearanceBefore {
+		t.Fatalf("app appearance %q after the probe, %q before", themeResult.appAppearanceAt, themeResult.appAppearanceBefore)
+	}
 }
 
 func TestCapsulesDrawThePagesModel(t *testing.T) {

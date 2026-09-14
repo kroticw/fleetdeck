@@ -54,4 +54,23 @@ void fd_test_press_theme_icon(void);
 int fd_test_click_reaches_capsule(int which);
 int fd_test_capsule_inside_glass(int which);
 
+// The system's mode as the capsules read it: 1 dark, 0 light, -1 the system's
+// own again. The window's tests never write the system's setting.
+void fd_test_set_system_dark(int dark);
+// The capsules hear of the system's mode changing in this process's own
+// notification centre instead of the distributed one: a test posts there, and
+// no other app on the machine hears it. Before the first draw.
+void fd_test_observe_system_theme_locally(void);
+void fd_test_post_system_theme_changed(const char *name);
+// Where the window listens outside the tests: 1 when that centre is the
+// distributed one. And the name the capsules listen for, once they listen.
+int fd_test_product_theme_center_is_distributed(void);
+const char *fd_test_system_theme_subscribed_name(void);
+// The appearance of a capsule's content -- its control or label -- by the
+// capsule's order as fd_test_capsule_slot_name has it; "" for none of its own.
+const char *fd_test_capsule_slot_appearance(int i);
+// The app's own appearance by name, "" for the system's.
+const char *fd_test_app_appearance(void);
+void fd_test_set_app_appearance(const char *name);
+
 #endif
