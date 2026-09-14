@@ -147,22 +147,21 @@ const (
 	pageLoading = "loading"
 )
 
-// How long a page whose document has begun has to finish loading before it is
-// asked for again: the slowest load seen to finish, three times over.
+// How long a document WebKit has committed has, from the commit, to say it is
+// the panel before it is asked for again: the slowest seen, three times over.
 //
-// Measured on 2026-09-14 on the operator's machine, on isolated stands. The
-// first run of the update stand, whose window could not yet tell a document
-// begun from one never reached, asked for the start page three times after
-// done; the third load finished 280 ms after it was asked for, and the first
-// two were cut off by the next ask, so how long they would have taken is not
-// known. Nothing measured since came near it: five freshly built binaries,
-// each run once on a warm HOME, reached the document in 53-74 ms and finished
-// in 67-88 ms; five windows in HOMEs no web view had run in, 56-70 and
-// 69-84 ms; the second update stand, 13 and 29 ms. What made the first run
-// slow was not found.
+// It was 840 ms: one load of 280 ms on an update stand, timed from the ask
+// before the window could tell the ask from the commit. On GitHub's macos-15
+// runner, in PR #166's window-on-oldest-macos run of 2026-09-14, the board's
+// first document said it was the panel 952 ms after its commit, and the wait
+// cut it off. Every window log the runner kept that day -- PR #166, T-058's
+// three runs, T-059's two diagnostic runs -- timed from commit to panel: 28
+// documents nothing cut off took 34-740 ms, and the one that was cut off 952 ms.
+// A committed document that fails, or loses its web content process, is not
+// waited on (navscreen.go); this bound is for one that goes quiet.
 const (
-	measuredWorstColdLoad = 280 * time.Millisecond
-	pageLoadingWait       = measuredWorstColdLoad * pageLoadMargin
+	measuredWorstCommitToPanel = 952 * time.Millisecond
+	pageLoadingWait            = measuredWorstCommitToPanel * pageLoadMargin
 )
 
 const (
