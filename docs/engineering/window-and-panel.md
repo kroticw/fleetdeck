@@ -168,6 +168,26 @@ The handover timeout was measured on 2026-09-11 on the operator's machine, with 
 
 The ten were measured before #108. The new window runs the same steps, plus the panel checking its parent and registering one kernel watch at start. Neither should move the number, but it was not taken again.
 
+### Stopping the staged panel
+
+The old window's deadline is its own. `handoverTimeout` is written into the version already installed, and the version replacing it cannot change it: an update from v0.9.2 runs on v0.9.2's 2436 ms however long the new version would like. Everything from the handover to `done` has to fit in it, including stopping the panel the new window started from the staging directory a moment earlier.
+
+On 2026-09-14 (T-060) one update stand run in three missed it after `swapped`: the new window asked its keeper to restart the panel from the canonical path, and `done` never came before the old window killed it. A panel told to stop waits for the collect cycle it is in before it closes its server, and that cycle asked the keychain for the usage token through `security`, which nothing could cut short. Measured on a stand with a HOME at the operator's scale (a clone of the board, transcripts of the sizes the operator's are, 42 live sessions from a stand-in daemon) and a `security` that took 1 s: a SIGTERM 50 ms after the panel started waited 1022 ms, one at 150 ms waited 935 ms. With `security` answering at once the same panel went 2–5 ms after SIGTERM. The transcripts are read from their tail and cost nothing like that.
+
+Now:
+
+- **A panel told to stop does not wait on anything outside it.** The collect cycle runs under the context SIGTERM cancels, and so do the two programs it can start: `security` for the usage token and `osascript` for a banner. The cycle's other sources are files and the daemon socket, all already bounded by that context or their own deadlines; git is run only for a request, never by the cycle or the board watcher.
+- **A panel told to stop does not wait on a connection that has asked for nothing.** The failed stand run itself was this, measured with the keeper's and the takeover's steps timed: the staged panel's collect cycle and board watcher stopped at once, and its server took 2113 ms to close, waiting on one connection accepted just before the stop that never sent a request. It closed when the old window's deadline killed the new window: the new window's own probes had opened it. An HTTP server counts such a connection as work for up to five seconds. The panel now closes connections that have asked for nothing when it stops, and any accepted after (`cmd/fleetdeck/conns.go`); a connection with a request in work is still waited on, up to `shutdownTimeout`.
+- **A restart does not wait out the ordinary stop grace.** `Keeper.Restart` is only ever an update's. It gives the panel it replaces `handoverStopGrace`, 300 ms, to go on SIGTERM, then kills it. An ordinary stop still gives `stopGrace`, 6 s.
+
+SIGKILL is safe for that panel, and the reason is an inventory, not an assumption. What the panel writes to disk:
+
+- **Without a request, nothing.** The collect cycle and the board watcher only read: the board's cards, Claude Code's job store and transcripts, the keychain through `security`. They may start `osascript` for a banner, which writes nothing of the panel's. The shutdown path writes nothing. `~/Library/Logs/fleetdeck.log` is opened by the window, and the panel only appends to the descriptor it inherits. The rate-limit file is written by `fleetdeck-status`, not by the panel.
+- **For a request, only whole writes.** A card's field (`internal/board/write.go`), every write to `config.yaml` (`internal/config/write.go`) and the orchestrator brief (`internal/orchestrator/brief.go`) go to a temp file, synced and renamed into place. A commit to the board is git's own.
+- **The two that were not whole are whole now.** Creating a card wrote the new file in place. It is written beside the card now, under a hidden name no scan takes for a card, and linked into place, and a link fails on a taken name exactly as the exclusive create did. `~/.claude/settings.json`, written when the panel is set up and when a fleet is added, was written over in place. It is written beside the file and renamed over it now, through a symlink to where the link points, keeping the file's permissions.
+
+Nothing asks the staged panel for anything during a handover on purpose — the new window's page is not opened until `done` — but a browser tab or the old window's page can reach the port in that half second, so whole writes are what make SIGKILL safe, not the absence of requests. The panel's writes to `settings.json` still read the file, change it and write it back while Claude Code may be writing the same file; that race is older than this and is not closed here.
+
 ## Test stands on a machine with a live fleet
 
 Everything above is tested on the operator's own machine, next to the fleet he works with. Four things matter there:

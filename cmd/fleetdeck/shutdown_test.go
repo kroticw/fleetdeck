@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +65,48 @@ func TestAPanelToldToStopDuringAKeychainLookupGoesAtOnce(t *testing.T) {
 	case <-exited:
 		if took := time.Since(termed); took > time.Second {
 			t.Fatalf("the panel went %s after SIGTERM; want it gone at once, not after the keychain lookup", took.Round(time.Millisecond))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the panel was still running 10 s after SIGTERM")
+	}
+}
+
+// On an update stand run of 2026-09-14 (T-060) the panel being replaced took
+// 2113 ms to close its server, waiting on one connection that had sent no
+// request -- a probe of the new window's -- until the old window's deadline
+// killed the new window and the connection with it. A connection with a request
+// in work is waited on; one that has asked for nothing is closed.
+func TestAPanelToldToStopDoesNotWaitOnAConnectionThatAskedForNothing(t *testing.T) {
+	r := newPanelRig(t)
+	panel := exec.Command(r.bin, "--config", r.cfg, "--stand-socket", r.noDaemon)
+	panel.Env = append(os.Environ(), "HOME="+r.home)
+	if err := panel.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(panel.Process.Pid, syscall.SIGKILL) })
+	exited := make(chan struct{})
+	go func() {
+		_ = panel.Wait()
+		close(exited)
+	}()
+	if !r.waitAnswer(true, 10*time.Second) {
+		t.Fatal("the panel never answered")
+	}
+
+	held, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", r.port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	// Accepted by the panel, not only by the kernel.
+	time.Sleep(200 * time.Millisecond)
+
+	termed := time.Now()
+	_ = panel.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-exited:
+		if took := time.Since(termed); took > time.Second {
+			t.Fatalf("the panel went %s after SIGTERM with a connection that asked for nothing; want it gone at once", took.Round(time.Millisecond))
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the panel was still running 10 s after SIGTERM")

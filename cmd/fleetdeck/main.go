@@ -436,10 +436,12 @@ func serve(parent context.Context, o runOpts) error {
 	}
 
 	var handler switchHandler
+	quiet := &quietConns{}
 	srv := &http.Server{
 		Handler:           &handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
+		ConnState:         quiet.track,
 	}
 	serveErr := make(chan error, 1)
 	startServing := func(what string) {
@@ -458,10 +460,10 @@ func serve(parent context.Context, o runOpts) error {
 		case err := <-serveErr:
 			return err
 		case <-ctx.Done():
-			return shutdown(srv)
+			return shutdown(srv, quiet)
 		}
 		if cfg, err = config.Load(o.configPath); err != nil {
-			_ = shutdown(srv)
+			_ = shutdown(srv, quiet)
 			return err
 		}
 		log.Printf("fleetdeck: set up with the board at %s", cfg.BoardPath)
@@ -528,7 +530,7 @@ func serve(parent context.Context, o runOpts) error {
 	// the server is draining.
 	stop()
 	wg.Wait()
-	return shutdown(srv)
+	return shutdown(srv, quiet)
 }
 
 // servingLine is the log line a panel starts serving with. It names the binary
@@ -544,7 +546,9 @@ func servingLine(ver, what, addr, exe string) string {
 	return line
 }
 
-func shutdown(srv *http.Server) error {
+func shutdown(srv *http.Server, quiet *quietConns) error {
+	// A connection that has asked for nothing is not work to wait for (conns.go).
+	quiet.closeAll()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
