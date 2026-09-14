@@ -225,6 +225,15 @@ if [ "$expect" = content ]; then
 	if [ -z "$width" ] || [ "$width" -gt 8 ]; then
 		scrollbar=no
 	fi
+	# And down the orchestrator's terminal, at rest: no native bar under xterm's
+	# viewport, and xterm's own bar out of sight.
+	terminal=$(grep 'the orchestrator surface reports its scrolling' "$out/window.log" | tail -n 1)
+	native=$(printf '%s\n' "$terminal" | sed -n 's/.*"viewportScrollbarWidth":\([0-9]*\).*/\1/p')
+	own=$(printf '%s\n' "$terminal" | sed -n 's/.*"ownBarOpacity":\([0-9.]*\).*/\1/p')
+	echo "--- the orchestrator's terminal at rest: native bar ${native:-not reported} px, xterm's own bar opacity ${own:-not reported}"
+	if [ "$native" != 0 ] || [ "$own" != 0 ]; then
+		scrollbar=no
+	fi
 fi
 
 # The appearance the stand asked for, as AppKit reports the window drawn
@@ -235,5 +244,5 @@ case ${FLEETDECK_STAND_APPEARANCE:-} in
 	light) grep -q 'the window is drawn in NSAppearanceNameAqua ' "$out/window.log" || appearance=no ;;
 esac
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, sessions scrollbar thin: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance"
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance"
 [ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$appearance" = yes ]
