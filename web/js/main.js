@@ -1,6 +1,6 @@
 import { connect, subscribe, get } from "./store.js";
 import { renderSessions } from "./sessions.js";
-import { renderHeader } from "./header.js";
+import { renderHeader, HEADER_PARTS, limitsOf, themeLabelText } from "./header.js";
 import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
@@ -16,7 +16,8 @@ import { readHost, callHost } from "./host.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
-import { applyTheme, cycleTheme } from "./theme.js";
+import { applyTheme, cycleTheme, initTheme } from "./theme.js";
+import { capsuleModel } from "./capsules.js";
 
 // In the fleetdeck window this page is one of three web views, and mounts only
 // its own part of the panel (surfaces.js). The side surfaces keep the centre
@@ -29,7 +30,7 @@ if (host) {
 }
 const center = regions.has("center");
 const kept = {
-  header: regions.has("header") || regions.has("brand"),
+  header: regions.has("header") || regions.has("brand") || regions.has("counters"),
   orchestrator: regions.has("orchestrator"),
   sessions: regions.has("sessions"),
   tabs: center,
@@ -172,8 +173,19 @@ function showSession(short) {
 if (regions.has("sessions")) {
   renderSessions(document.getElementById("sessions"), showSession, routes.openCard, { switchFleet: routes.switchFleet });
 }
-if (regions.has("header")) renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet });
-renderBuildBanner(document.getElementById("build-banner"), subscribe);
+// The orchestrator surface draws the header's brand row (with the update button
+// beside it), the sessions surface its counters, the board none of it.
+const headerParts = regions.has("header")
+  ? HEADER_PARTS
+  : HEADER_PARTS.filter((part) => regions.has(part === "update" ? "brand" : part));
+if (headerParts.length > 0) {
+  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts });
+} else {
+  initTheme();
+}
+// One web view checks the build: in the window, the board. Its reload is the
+// window's, which reloads all three, and its reload ceiling stays in one place.
+if (center) renderBuildBanner(document.getElementById("build-banner"), subscribe);
 if (regions.has("center")) renderBoard(document.getElementById("board"), cardPanel.open);
 if (regions.has("orchestrator")) {
   renderOrchestrator(document.getElementById("orchestrator"), { links: { resolve: terminalLinks.resolve, open: routes.openCard } });
@@ -209,6 +221,23 @@ if (regions.has("center")) {
   newCard = createNewCard(document.getElementById("tabs"));
 }
 
+// The window's capsules (web/js/capsules.js), handed over by the board whenever
+// what they show changes: the section, the theme, the limits.
+let section = "board";
+let capsulesSent = "";
+function publishCapsules() {
+  if (host?.surface !== "board") return;
+  const style = getComputedStyle(document.documentElement);
+  const token = (name) => style.getPropertyValue(name).trim();
+  const colors = { cool: token("--ok"), warm: token("--attn"), hot: token("--danger"), stale: token("--text-muted"), off: token("--text-faint") };
+  const model = capsuleModel({ section, themeLabel: themeLabelText(), limits: limitsOf(get() ?? {}, Date.now()), t, colors });
+  const json = JSON.stringify(model);
+  if (json === capsulesSent) return;
+  capsulesSent = json;
+  callHost(window, "fleetdeckCapsules", model);
+}
+subscribe(publishCapsules);
+
 // What the fleetdeck window asks of this surface (web/js/hostactions.js). Wired
 // while the module runs, before the page's load event: the window sends nothing
 // until that event says the page is up, and by then this is listening.
@@ -234,9 +263,17 @@ if (host) {
       reader.open(path);
     },
     openSession: showSession,
-    showSection: (id) => sections?.show(id),
+    showSection: (id) => {
+      sections?.show(id);
+      section = id;
+      publishCapsules();
+    },
     openNewCard: () => newCard?.open(),
-    cycleTheme: () => cycleTheme() ?? "auto",
+    cycleTheme: () => {
+      const choice = cycleTheme() ?? "auto";
+      publishCapsules();
+      return choice;
+    },
     applyTheme,
     setInsets: (insets) => {
       for (const side of ["top", "left", "right"]) page.style.setProperty(`--host-inset-${side}`, `${insets[side]}px`);

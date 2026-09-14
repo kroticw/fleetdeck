@@ -3584,6 +3584,19 @@ body.is-resizing {
   background: transparent;
 }
 
+/* The build banner is the board's (only the board checks the build), and the
+   capsules sit where it would be: it drops in under them, between the panels. */
+:root[data-surface="board"] #build-banner {
+  position: absolute;
+  top: calc(var(--host-inset-top, 64px) - 8px);
+  left: var(--host-inset-left, 394px);
+  right: calc(var(--host-inset-right, 356px) + 16px);
+  z-index: 4;
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--island-shadow);
+}
+
 :root[data-surface="board"] #tabs .tab,
 :root[data-surface="board"] #tabs .newcard-open {
   display: none;

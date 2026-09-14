@@ -280,13 +280,44 @@ export function gauge(label, window_, stale, fetchedAt) {
         ${pct}% · ${age}
       </span>`;
   }
-  const level = pct >= 90 ? "hot" : pct >= 60 ? "warm" : "cool";
+  const level = gaugeLevel(pct);
   return `
     <span class="gauge gauge-${level}" title="${t("resets_in")} ${humanDuration(window_.resetsAt)}">
       ${label}
       <meter class="gauge-track" min="0" max="100" value="${pct}"></meter>
       ${pct}%
     </span>`;
+}
+
+function gaugeLevel(pct) {
+  return pct >= 90 ? "hot" : pct >= 60 ? "warm" : "cool";
+}
+
+// limitsOf is the two limits as data rather than markup — what the gauges above
+// show — for the fleetdeck window, which draws them as capsules of its own
+// (web/js/capsules.js). pct is null where the gauge shows a dash.
+export function limitsOf(snap, nowMs) {
+  const stale = isUsageStale(snap, nowMs);
+  return [
+    [t("limit_5h"), snap.limits?.fiveHour],
+    [t("limit_7d"), snap.limits?.sevenDay],
+  ].map(([label, window_]) => {
+    if (!window_) return { label, pct: null, level: "off" };
+    const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
+    return { label, pct, level: stale ? "stale" : gaugeLevel(pct) };
+  });
+}
+
+// The header's parts, in the order the header draws them. A browser tab draws
+// all of them; in the fleetdeck window the orchestrator surface draws the brand
+// row and the sessions surface the counters, and the board draws none — its
+// tabs, theme and limits are the window's capsules.
+export const HEADER_PARTS = ["brand", "theme", "update", "limits", "counters"];
+
+export function joinHeaderParts(parts, html) {
+  return HEADER_PARTS.filter((part) => parts.includes(part))
+    .map((part) => html[part])
+    .join("");
 }
 
 // stalledList renders the "M stalled" counter's reason rows: up to
@@ -347,6 +378,11 @@ export function stalledList(stalledSessions) {
 // case here, the auto state genuinely has its own label and button state.
 function themeLabelKey(theme) {
   return theme === "light" ? "theme_light" : theme === "dark" ? "theme_dark" : "theme_auto";
+}
+
+// The theme button's words for the current choice, for the window's theme capsule.
+export function themeLabelText() {
+  return t(themeLabelKey(currentTheme()));
 }
 
 function themeButtonHTML() {
@@ -489,7 +525,11 @@ export function menuGo(go, { switchFleet: goFleet, assign }) {
 
 // options.switchFleet replaces the fleet switch. The fleetdeck window passes its
 // own, because a switch there changes all three of its web views, not this one.
-export function renderHeader(root, { switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }) } = {}) {
+// options.parts is which of HEADER_PARTS to draw.
+export function renderHeader(
+  root,
+  { switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }), parts = HEADER_PARTS } = {},
+) {
   initTheme();
 
   // One tracker per renderHeader() call, outside subscribe: both hold state
@@ -601,21 +641,27 @@ export function renderHeader(root, { switchFleet: goFleet = (name) => switchFlee
     const usageSeverity = usageTracker.update(!!snap.usageError, nowMs);
     const usageStale = isUsageStale(snap, nowMs);
 
-    root.innerHTML = `
+    root.innerHTML = joinHeaderParts(parts, {
+      brand: `
       ${brandHTML(snap.build)}
-      ${fleetMenuHTML(fleetEntries(snap, isWaiting), menuOpen)}
-      ${themeButtonHTML()}
-      ${hostUpdate ? updateHTML(update, nowMs) : ""}
+      ${fleetMenuHTML(fleetEntries(snap, isWaiting), menuOpen)}`,
+      theme: `
+      ${themeButtonHTML()}`,
+      update: `
+      ${hostUpdate ? updateHTML(update, nowMs) : ""}`,
+      limits: `
       <div class="limits">
         ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour, usageStale, snap.limits.fetchedAt) : gauge(t("limit_5h"), null)}
         ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay, usageStale, snap.limits.fetchedAt) : gauge(t("limit_7d"), null)}
-      </div>
+      </div>`,
+      counters: `
       <div class="counters">
         ${alarmHTML(connected, snap)}
         ${usageProblemHTML(usageSeverity, snap.usageErrorKind)}
         <span class="counter counter-waiting ${waitingCount > 0 ? "counter-on" : ""}">${waitingCount} ${t("waiting_count")}${unknownMarkHTML(counts.unknown.length)}</span>
         <span class="counter counter-stalled ${stalledCount > 0 ? "counter-on" : ""}">${stalledCount} ${t("stalled_count")} ${stalledList(stalledSessions)}</span>
-      </div>`;
+      </div>`,
+    });
   };
 
   subscribe((rawSnap, connected) => {
