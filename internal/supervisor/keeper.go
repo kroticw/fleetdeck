@@ -68,6 +68,9 @@ type Event struct {
 	Holder *PanelBuild
 	// Asked: a person asked for this replacement (Replace), for Replacing.
 	Asked bool
+	// Took is how long the panel this keeper started took to answer, from its
+	// start, for Answering with Ours; 0 otherwise.
+	Took time.Duration
 }
 
 // PanelBuild is what a fleetdeck panel says of its build in its snapshot
@@ -441,7 +444,7 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 		}
 	}
 
-	k.emit(Event{State: Answering, Ours: true, PID: p.PID})
+	k.emit(Event{State: Answering, Ours: true, PID: p.PID, Took: time.Since(started)})
 	select {
 	case <-ctx.Done():
 		return true

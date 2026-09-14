@@ -8,16 +8,28 @@ package main
 import "C"
 
 import (
+	"log"
 	"sync"
 	"unsafe"
 )
 
+// standAppearance is a stand's appearance (standAppearanceEnv), "light" or
+// "dark" in place of the system's; "" off a stand.
+var standAppearance string
+
 // applyAppearance sets the window's light or dark look to the page's theme:
-// "light", "dark", or "auto" for the system's.
+// "light", "dark", or "auto" for the system's -- a stand's, on a stand. The
+// log says what the app is drawn in after it, as AppKit reports it: a
+// screenshot said to be dark is taken on that word, not on what was asked.
 func applyAppearance(choice string) {
+	asked := choice
+	if choice != "light" && choice != "dark" && standAppearance != "" {
+		choice = standAppearance
+	}
 	c := C.CString(choice)
 	defer C.free(unsafe.Pointer(c))
 	C.fd_window_set_appearance(c)
+	log.Printf("fleetdeck-window: the window is drawn in %s (theme %q)", C.GoString(C.fd_window_effective_appearance()), asked)
 }
 
 func openExternalURL(url string) {

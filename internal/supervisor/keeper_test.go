@@ -356,6 +356,11 @@ func TestTheKeeperWaitsForASlowPanelUpToItsCeiling(t *testing.T) {
 	if !up.Ours || up.PID != starting.PID {
 		t.Fatalf("Answering %+v, want the slow panel started first (pid %d), not another start", up, starting.PID)
 	}
+	// What the window logs, so a start's real length is known and not only
+	// whether it made the ceiling.
+	if up.Took < slowListen || up.Took > k.StartTimeout {
+		t.Fatalf("Answering took %v, want between the stand-in's %v and the ceiling %v", up.Took, slowListen, k.StartTimeout)
+	}
 }
 
 // The ceiling is for a panel still running. One that is gone is reported when

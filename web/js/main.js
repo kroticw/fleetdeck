@@ -7,6 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
+import { watchBoardScroll } from "./standreport.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -255,6 +256,9 @@ subscribe(publishCapsules);
 if (host) {
   const page = document.documentElement;
   const column = document.getElementById(host.surface);
+  // On a CI stand only: the board's scrolling, in the window's log.
+  const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
+  const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
   // The window's panel folds with the column: a fold the column makes itself
   // (its own button) is passed on, and one the window sends is not passed back.
   let panelFolded = column?.dataset.folded === "1";
@@ -289,6 +293,7 @@ if (host) {
     setInsets: (insets) => {
       const names = { top: "top", left: "left", right: "right", contentRight: "content-right" };
       for (const [key, name] of Object.entries(names)) page.style.setProperty(`--host-inset-${name}`, `${insets[key]}px`);
+      reportBoardScroll?.();
     },
     setGlass: (glass) => {
       page.dataset.glass = glass;

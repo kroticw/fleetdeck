@@ -152,10 +152,56 @@ func main() {
 		where.action = runRefused
 	}
 
+	// What a stand sets and a person's window never has (standsettings.go).
+	stand, err := standSettingsFrom(standSocket, os.LookupEnv)
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+	width, height := stand.size()
+	if stand != (standSettings{}) {
+		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q, panel started first: %v",
+			stand.startTimeout(), width, height, stand.appearance, stand.panelFirst)
+	}
+
+	// The keeper's word waits in keeperEvents until the window can act on it:
+	// a panel started before the window's web views (standPanelFirstEnv) says
+	// it is starting before there is anything to show that in.
+	keeperEvents := make(chan supervisor.Event, 64)
+	keeper := &supervisor.Keeper{
+		URL:  *url,
+		Bin:  panelBinary(exe),
+		Args: panelArgs(os.Getpid(), standSocket),
+		// This window: its panels report it as their owner and go when it
+		// goes, and a panel whose window is gone is replaced.
+		Owner:        os.Getpid(),
+		Env:          os.Environ(),
+		LogPath:      logPath,
+		StartTimeout: stand.startTimeout(),
+		MinUptime:    launchdThrottle,
+		Poll:         takenPanelPoll,
+		OnEvent:      func(e supervisor.Event) { keeperEvents <- e },
+	}
+	// A panel this window did not start, of another build than the window's,
+	// is used as it is and named over its page (foreign.go).
+	own := ownBuild()
+	// Asked again at a press, about the panel on the port by then.
+	keeper.MayReplace = mayReplace(own, *url, home)
+	kept := &keeperRun{k: keeper}
+	panelFirst := stand.panelFirst && *handover == "" && where.action != runRefused
+	if panelFirst {
+		log.Printf("fleetdeck-window: starting the panel before the window's web views, as this stand asks (%s)", standPanelFirstEnv)
+		kept.start()
+	}
+
 	w := webview.New(false)
 	defer w.Destroy()
 	w.SetTitle("fleetdeck")
-	w.SetSize(1440, 900, webview.HintNone)
+	w.SetSize(width, height, webview.HintNone)
+	hostOnStand = standSocket != ""
+	if stand.appearance != "" {
+		standAppearance = stand.appearance
+		applyAppearance("auto")
+	}
 
 	// Both calls need the native window, which is already valid here --
 	// confirmed by timing, not assumed: SetTitle/SetSize above already rely
@@ -220,28 +266,10 @@ func main() {
 	if !glass.frame.boardObserved() {
 		log.Printf("fleetdeck-window: the board is not a WKWebView: WebKit will say nothing of its navigations, and the panel's page is asked for again only every %s", navSilentWait)
 	}
-	keeper := &supervisor.Keeper{
-		URL:  *url,
-		Bin:  panelBinary(exe),
-		Args: panelArgs(os.Getpid(), standSocket),
-		// This window: its panels report it as their owner and go when it
-		// goes, and a panel whose window is gone is replaced.
-		Owner:        os.Getpid(),
-		Env:          os.Environ(),
-		LogPath:      logPath,
-		StartTimeout: panelStartTimeout,
-		MinUptime:    launchdThrottle,
-		Poll:         takenPanelPoll,
-	}
-	// A panel this window did not start, of another build than the window's,
-	// is used as it is and named over its page (foreign.go).
-	own := ownBuild()
 	notices := &panelNotice{}
-	// Asked again at a press, about the panel on the port by then.
-	keeper.MayReplace = mayReplace(own, *url, home)
 	// A takeover watches the keeper's events too, while it runs.
 	var takeoverEvents atomic.Pointer[chan supervisor.Event]
-	keeper.OnEvent = func(e supervisor.Event) {
+	handleKeeperEvent := func(e supervisor.Event) {
 		log.Printf("fleetdeck-window: panel %s", describeEvent(e))
 		if ch := takeoverEvents.Load(); ch != nil {
 			select {
@@ -264,7 +292,12 @@ func main() {
 			show(scr.on(e))
 		})
 	}
-	kept := &keeperRun{k: keeper}
+	// The keeper's word, in order, now that the window can act on it.
+	go func() {
+		for e := range keeperEvents {
+			handleKeeperEvent(e)
+		}
+	}()
 
 	// Bound before the first navigation, so the page finds them from its very
 	// first load. A reload the page or a person asks for is a navigation the
@@ -295,6 +328,14 @@ func main() {
 		})
 	}); err != nil {
 		log.Printf("fleetdeck-window: the window will not know whether the panel's page loaded: %v", err)
+	}
+	// On a stand the board says what a screenshot cannot (web/js/standreport.js).
+	if hostOnStand {
+		if err := w.Bind("fleetdeckStandReport", func(report map[string]any) {
+			log.Printf("fleetdeck-window: the board reports its scrolling: %v", report)
+		}); err != nil {
+			log.Printf("fleetdeck-window: the board will not report its scrolling: %v", err)
+		}
 	}
 	if err := w.Bind(startBindingName, keeper.Retry); err != nil {
 		log.Printf("fleetdeck-window: the failure page will not be able to start the panel again: %v", err)
@@ -460,7 +501,7 @@ func main() {
 				w.Dispatch(w.Terminate)
 			}
 		}()
-	} else {
+	} else if !panelFirst {
 		kept.start()
 	}
 
@@ -601,6 +642,8 @@ func describeEvent(e supervisor.Event) string {
 		return fmt.Sprintf("%s: %v", e.State, e.Err)
 	case e.Detail != "":
 		return fmt.Sprintf("%s: %s", e.State, e.Detail)
+	case e.PID != 0 && e.Took > 0:
+		return fmt.Sprintf("%s (pid %d, started by this window, answered %s after it started)", e.State, e.PID, e.Took.Round(time.Millisecond))
 	case e.PID != 0:
 		return fmt.Sprintf("%s (pid %d, started by this window)", e.State, e.PID)
 	default:
