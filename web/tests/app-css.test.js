@@ -509,17 +509,81 @@ test("with reduced transparency a side surface paints its own panel, with a colu
   assert.match(body, /box-shadow:\s*inset 0 0 0 1px var\(--border\)/);
 });
 
-test("the board keeps clear of the panels by the insets the window sends", () => {
-  const board = ruleBody(':root[data-surface="board"] #board');
-  assert.match(board, /padding-top:\s*var\(--host-inset-top/);
-  assert.match(board, /padding-left:\s*var\(--host-inset-left/);
+// Every rule for a selector, in file order: #board has more than one.
+function ruleBodies(selector) {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const bodies = [];
+  for (let from = 0; ; ) {
+    const at = stripped.indexOf(selector, from);
+    if (at < 0) return bodies;
+    const open = stripped.indexOf("{", at);
+    const tail = stripped.slice(at + selector.length, open).trim();
+    const head = stripped.lastIndexOf("}", at) + 1;
+    const before = stripped.slice(head, at).trim();
+    if ((tail === "" || tail.startsWith(",")) && (before === "" || before.endsWith(","))) {
+      bodies.push(stripped.slice(open + 1, stripped.indexOf("}", open)));
+    }
+    from = at + selector.length;
+  }
+}
+
+test("the board keeps clear of the capsules by the inset the window sends", () => {
+  assert.match(ruleBody(':root[data-surface="board"] #board'), /padding-top:\s*var\(--host-inset-top/);
 });
 
-// E puts the board under the sessions glass: that is what the glass samples.
+// v0.10.0 made #board as wide as the window and kept its columns clear of the
+// orchestrator panel with padding, so its scrollbar ran the full width, under
+// both panels, and showed as a grey strip along the bottom of the window. With
+// no room kept on the right, the last column could not be scrolled out from
+// under the sessions panel either. The box that scrolls is now the open room
+// between the panels, and only its margins come from the insets: the columns
+// no longer run on under the sessions glass, since a scrolling box clips what
+// is past its edge.
+test("on the board the box that scrolls is the room between the panels", () => {
+  const board = ruleBody(':root[data-surface="board"] #board');
+  // The first column stays where the capsules and the sheets begin, with room
+  // for the cards' shadow inside the box.
+  assert.match(board, /margin-left:\s*calc\(var\(--host-inset-left[^)]*\)\s*-\s*var\(--gap-lg\)\)/);
+  assert.match(board, /padding-left:\s*var\(--gap-lg\)/);
+  assert.doesNotMatch(board, /padding-left:\s*var\(--host-inset-left/);
+  // Its right edge is the sessions panel's left edge, folded or not, so at the
+  // end of the scroll the last column is in the open, where a sheet ends.
+  assert.match(board, /margin-right:\s*var\(--host-inset-content-right/);
+  assert.match(board, /padding-right:\s*var\(--gap-lg\)/);
+  assert.doesNotMatch(board, /--host-inset-right\b/);
+});
+
+// A trackpad or a wheel over the open room scrolls the board sideways as it
+// did: the surface leaves the base rule's overflow-x alone and takes no input
+// away from the box.
+test("on the board the box still scrolls sideways under a trackpad or a wheel", () => {
+  const board = ruleBody(':root[data-surface="board"] #board');
+  assert.doesNotMatch(board, /overflow/);
+  assert.doesNotMatch(board, /pointer-events/);
+  assert.doesNotMatch(board, /touch-action/);
+});
+
+// A thin bar, and a visible one: hiding it would take away the one sign that
+// the board scrolls at all.
+test("on the board the scrollbar is thin and never hidden", () => {
+  assert.match(ruleBody(':root[data-surface="board"] #board::-webkit-scrollbar'), /height:\s*8px/);
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /scrollbar-width:\s*none/);
+});
+
+// Everything above is the window's: a browser tab keeps the board it had.
+test("in a browser tab the board scrolls as it did", () => {
+  const board = ruleBodies("#board").find((body) => /overflow-x/.test(body));
+  assert.ok(board, "web/app.css has no base #board rule with overflow-x");
+  assert.match(board, /overflow-x:\s*auto/);
+  assert.match(board, /padding:\s*var\(--gap\);/);
+  assert.match(board, /scrollbar-width:\s*thin/);
+  assert.doesNotMatch(board, /margin/);
+  assert.match(ruleBody("#board::-webkit-scrollbar"), /height:\s*10px/);
+});
+
 // What opens over the board -- a card, a session, a document -- keeps clear of
-// that panel instead, by an inset of its own.
-test("the board runs on under the sessions glass; a sheet and the documents keep clear of it", () => {
-  assert.match(ruleBody(':root[data-surface="board"] #board'), /padding-right:\s*var\(--host-inset-right,\s*0px\)/);
+// the sessions panel by the same inset, and a little more.
+test("a sheet and the documents keep clear of the sessions panel", () => {
   assert.match(ruleBody(':root[data-surface="board"] #card-panel'), /right:\s*calc\(var\(--host-inset-content-right/);
   assert.match(ruleBody(':root[data-surface="board"] .docs'), /--host-inset-content-right/);
 });

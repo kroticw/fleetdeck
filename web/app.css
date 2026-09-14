@@ -3621,12 +3621,26 @@ body.is-resizing {
   width: min(28rem, calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px) - 2 * var(--gap-lg)));
 }
 
+/* The box that scrolls is the open room between the panels, so its scrollbar is
+   too: as wide as the window, it ran under both panels as a grey strip, and the
+   last column could not be scrolled out from under the sessions panel. Its right
+   edge is that panel's left edge, folded or not; the padding keeps the first
+   column where the capsules and the sheets begin, the last where a sheet ends,
+   and the cards' shadows inside the box. A scrolling box clips what is past its
+   edge, so the columns no longer run on under the sessions glass. */
 :root[data-surface="board"] #board {
+  margin-left: calc(var(--host-inset-left, 394px) - var(--gap-lg));
+  margin-right: var(--host-inset-content-right, 356px);
   padding-top: var(--host-inset-top, 64px);
-  padding-left: var(--host-inset-left, 394px);
-  padding-right: var(--host-inset-right, 0px);
+  padding-left: var(--gap-lg);
+  padding-right: var(--gap-lg);
   padding-bottom: 12px;
   gap: var(--gap-lg);
+}
+
+/* Thin, and never hidden: it is the one sign that the board scrolls. */
+:root[data-surface="board"] #board::-webkit-scrollbar {
+  height: 8px;
 }
 
 :root[data-surface="board"] .kcol {
