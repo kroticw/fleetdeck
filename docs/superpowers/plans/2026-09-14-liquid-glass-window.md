@@ -32,13 +32,24 @@
 Сверено с `origin/master` 659f50d. Имена T-057, на которые опираются задачи 10–12, 16 и 17:
 
 - `pageLoadScript(panelURL string) string` (`owner.go`) сообщает `fleetdeckPageLoaded(state, href)` — два аргумента. Состояний четыре: `loading` (документ начался), `panel`, `broken`, `leaving`; константы `pageLoading`, `pagePanel`, `pageBroken`, `pageLeaving`.
-- Ожидание два: `pageLoadWait` (531 мс) — пока документ не начался, `pageLoadingWait` (840 мс) — после `loading`; `pageLoadTries = 3`, `pageLoadTick = 100 мс`.
+- Ожидание два: `pageLoadWait` (531 мс) — пока документ не начался, `pageLoadingWait` (840 мс) — после `loading`; `pageLoadTries = 3`, `pageLoadTick = 100 мс`. После T-059 `pageLoadWait` нет: его место заняли `navSilentWait` и `navFailedRetryPause` (раздел «Сверка с master после T-058 и T-059»).
 - `pageFailedPage(pageURL string, wait time.Duration) string` — страница «страница панели не загрузилась».
 - `screen` ведёт адрес, на котором страница себя назвала: `href`, `left`, `target()`; навигация доски в `main.go` — `w.Navigate(scr.target())`. Страница, ушедшая сама (`leaving`), ждёт следующую, и окно её не переспрашивает. Поля `takingOver`, `handed` и метод `handedOver()` — как в спеке 8.
 - Стенд: `standSocketEnv = "FLEETDECK_STAND_SOCKET"`, `panelArgs(window int, standSocket string)` передаёт `--stand-socket`; лог панелей — `$HOME/Library/Logs/fleetdeck.log`; строка `daemon discovery disabled` — в `cmd/fleetdeck/main.go`. `supervisor.StandBundleID = "dev.fleetdeck.stand"`; `scripts/verify-dist-app.sh` принимает идентификатор седьмым аргументом, подписанный бандл обязан нести собственный идентификатор приложения.
 - `Takeover.retire` (`internal/supervisor/update.go`) удаляет подменённый бандл после ухода старого окна; окна часть Б это не меняет.
 
 Что это меняет в задачах: задача 11 — `pageLoaded` принимает `loading` и ничего на него не отдаёт; задача 12 — таймер поверхности по двум ожиданиям и `pageFailedPage(url, pageLoadingWait)`; `navigateBoard` — `w.Navigate(url)` без правки `screen`: доска скажет `leaving`, затем `loading` с новым `href`, и `screen` пойдёт за ней сам.
+
+## Сверка с master после T-058 и T-059 (задача 0, второй проход)
+
+Сверено с `origin/master` 2603fde.
+
+- T-059 (853809b): `navscreen.go` и `nav_darwin.{c,h,go}` — делегат навигации WebKit у доски; ожидание `navSilentWait` (1,69 с × 3) до коммита навигации, `pageLoadingWait` от коммита, `navFailedRetryPause` 250 мс после провала, −999 и 102 — не провал, одна перезагрузка после потери процесса WebContent в пределах 30 с. Лог окна — с миллисекундами (`log.Lmicroseconds`). Как это переняли поверхности — в разделе ниже.
+- T-058 (2603fde): нижняя версия — `LSMinimumSystemVersion` 13.0 в `cmd/fleetdeck-window/Info.plist`; `Makefile` читает её в `MACOS_MIN_VERSION` и собирает окно и панель с `DARWIN_CGO_ENV` (`-mmacosx-version-min` в `CGO_CFLAGS`, `CGO_CXXFLAGS`, `CGO_LDFLAGS`) в `dist-app` и `window-app`.
+- Проверка `minos` — `app_runs_on_its_minimum_macos` в `scripts/dist-app-checks.sh`; `scripts/verify-dist-app.sh` и `verify-dist-dmg.sh` принимают нижнюю версию восьмым аргументом.
+- `ci.yaml`: задача `oldest-macos-app` (`macos-latest`, `make dist-app … SIGN_IDENTITY= BUNDLE_ID=dev.fleetdeck.stand`, артефакт `oldest-macos-app`) и `window-on-oldest-macos` (`macos-15`): окно этой сборки запускается `scripts/ci-window-stand.sh new/fleetdeck.app 7791 out/new-exec exec`, v0.9.1 и запуск через LaunchServices снимаются как есть, артефакт `window-on-oldest-macos` — каталог `out`.
+- `scripts/ci-window-stand.sh <app> <port> <out-dir> <exec|open>`: свой `HOME` с `server.port`, `FLEETDECK_STAND_SOCKET`, до 60 с ждёт в логе окна строку `the panel's page says "panel"`, через 3 с снимает экран в `window.png`, выходит с 0, только если страница сказала `panel`, окно живо и в логе панели есть `daemon discovery disabled`.
+- Окно ветки, собранное с `-mmacosx-version-min=13.0`, проверено `nm -m -u`: символов AppKit и WebKit не импортирует вовсе (классы ищутся строкой), `std::bad_function_call` нет, weak — `__availability_version_check` и `_dispatch_once_f`. `NSGlassEffectView` и `NSGlassEffectContainerView` проверяются по классу, ряд капсул без контейнера стекла наследует `NSView` (спека 7.1).
 
 ### Что изменилось при исполнении задач 1–9
 
@@ -2215,22 +2226,24 @@ git commit --signoff --message "test(window): add a stand for the glass window"
 
 **Files:**
 
-- Modify: `scripts/ci-window-stand.sh`; `.github/workflows/ci.yaml` — только если T-058 передаёт ожидания задаче через переменные или шаги (сверяется при rebase)
-- Modify: `cmd/fleetdeck-window/glasswindow.go` (строка лога о готовности поверхности)
-- Test: `cmd/fleetdeck-window/glasswindow_test.go`; задача `window-on-oldest-macos` на pull request
+- Modify: `scripts/ci-window-stand.sh` (пятый аргумент `frame`); `.github/workflows/ci.yaml` (шаги окна этой сборки передают `frame`)
+- Modify: `cmd/fleetdeck-window/glasswindow.go` (`surfacePageSays`), `cmd/fleetdeck-window/controller.go` (базовый адрес без query)
+- Test: `cmd/fleetdeck-window/glasswindow_test.go`, `controller_test.go`; задача `window-on-oldest-macos` на pull request
+
+Сверено при исполнении: `/` панели — всегда стартовая страница, раскладку `panel` сообщает только страница флота. Поэтому в режиме `frame` стенд пишет в конфиг флот `stand` с пустой доской (`cards/`) и открывает окно на `/?fleet=stand`; контроллер строит адрес поверхностей на адресе окна без query (`TestAWindowOpenedOnAFleetsPageGivesItsSurfacesTheirOwnAddress`). Проверено без окна: панель стенда с этим конфигом отвечает на `/?fleet=stand` 200 и пишет `daemon discovery disabled`. Окно v0.9.1 скрипт по-прежнему запускает без `frame`.
 
 **Interfaces:**
 
 - Consumes: скрипт стенда T-058 и то, чего он ждёт в логе окна (подтверждение страницы `panel` доски); `pageLoaded` поверхностей (задачи 11, 12).
-- Produces: строка лога `the <surface> surface's page says "panel"` для каждой поверхности — для скрипта T-058 и для задачи 16; снимок окна с рамой в артефакте задачи T-058.
+- Produces: строка лога `surfacePageSays(surface, "panel")` — `the <surface> surface's page says "panel"` — для каждой поверхности, для скрипта T-058 и для задачи 16; `ci-window-stand.sh <app> <port> <out-dir> <exec|open> [page|frame]`; снимок окна с рамой (`window.png`) в артефакте `window-on-oldest-macos`.
 
 - [ ] **Step 1:** После rebase на master с T-058 прочитать `scripts/ci-window-stand.sh`: какую строку лога он ждёт, сколько ждёт, как называет артефакт.
-- [ ] **Step 2: Write the failing test** — `surfaceLoadedLine(surface, state string) string` отдаёт ровно ту строку, которую ждёт скрипт, для `orchestrator` и `sessions`, и ничего для других состояний.
-- [ ] **Step 3:** `glasswindow.go` пишет эту строку в `pageLoaded`, когда поверхность сказала `panel`.
+- [ ] **Step 2: Write the failing test** — `TestTheWindowStandWaitsForEachSurfacesLineAsTheWindowLogsIt`: скрипт стенда содержит строку `surfacePageSays(surface, "panel")` для `orchestrator` и `sessions` в том виде, в каком она стоит в двойных кавычках shell.
+- [ ] **Step 3:** `glasswindow.go` пишет `surfacePageSays(surface, state)` в `pageLoaded` на каждое слово поверхности.
 - [ ] **Step 4:** `scripts/ci-window-stand.sh` после строки доски ждёт строки обеих поверхностей тем же способом и тем же сроком; снимок делается после них. Нет строки поверхности — скрипт падает с именем поверхности, которой нет.
 - [ ] **Step 5: Run**
 
-Run: `go test ./cmd/fleetdeck-window -run 'SurfaceLoadedLine' -count=1`, затем pull request с веткой.
+Run: `go test ./cmd/fleetdeck-window -run 'TheWindowStandWaits|WindowOpenedOnAFleetsPage' -count=1`, `sh -n scripts/ci-window-stand.sh`, `shellcheck scripts/ci-window-stand.sh`, затем pull request с веткой.
 
 Expected: тест PASS; `window-on-oldest-macos` зелёная, в её логе есть строки доски и обеих поверхностей, на снимке — окно с рамой на `NSVisualEffectView`. Красная задача — находка для оркестратора, а не повод её выключить.
 
