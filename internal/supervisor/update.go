@@ -177,6 +177,12 @@ type Takeover struct {
 	Canonical string
 	Revision  string // the build this window is; its panel must report the same
 	Keeper    *Keeper
+	// Deadline is when the old window gives up on this takeover and stops this
+	// window; zero is none. Run holds the keeper's starts inside it
+	// (StartTimeout) and makes no swap without room left in it to start the
+	// panel again.
+	Deadline time.Time
+	phase    takeoverPhase
 	// StartKeeper runs Keeper, from the moment the old panel is stopped.
 	StartKeeper func()
 	// Events are the keeper's events.
@@ -215,6 +221,7 @@ func (t *Takeover) Run(ctx context.Context) error {
 		report(StepFailed, err.Error())
 		return err
 	}
+	defer t.phase.v.Store(takeoverEnded)
 	report(StepAlive, "")
 
 	if err := StopHolder(ctx, t.URL, stopGrace); err != nil {
@@ -234,6 +241,13 @@ func (t *Takeover) Run(ctx context.Context) error {
 	}
 	report(StepPanel, rev)
 
+	// A failure after the swap leaves the installed bundle changed, so the swap
+	// is made only with room left in the old window's deadline to start the
+	// panel again and say how that went.
+	if err := t.roomToSwap(time.Now()); err != nil {
+		return fail(err)
+	}
+	t.phase.v.Store(afterSwap)
 	if err := Swap(t.Staged, t.Canonical); err != nil {
 		return fail(err)
 	}
@@ -256,6 +270,9 @@ func (t *Takeover) Run(ctx context.Context) error {
 		return err
 	}
 	report(StepDone, "")
+	// The deadline is behind: from here the keeper's starts, a panel dying while
+	// the bundle swapped out waits to be removed, get the window's own ceiling.
+	t.phase.v.Store(takeoverEnded)
 	if t.Done != nil {
 		t.Done()
 	}

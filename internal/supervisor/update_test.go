@@ -39,6 +39,9 @@ type updateRig struct {
 	progress  []Progress
 	mu        sync.Mutex
 	newKind   string // the stand-in kind the new window's panel runs as
+	// running is the update under way: the new window keeps to its
+	// HandoverTimeout, as a real one keeps to the old window's.
+	running *Update
 	// viaKeeperEvents: the new window hears its keeper as the window binary
 	// does, through KeeperEvents and Take, with the window's own route never
 	// read.
@@ -186,6 +189,7 @@ func (r *updateRig) resumeOld() {
 
 // launch plays the new window: a Takeover with a keeper of its own.
 func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
+	launched := time.Now()
 	rev, err := os.ReadFile(filepath.Join(filepath.Dir(PanelIn(staged)), "revision"))
 	if err != nil {
 		return nil, err
@@ -243,6 +247,12 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 			}
 		},
 	}
+	// As the window does: every start of its keeper held inside the old
+	// window's deadline, counted from before the old window starts its clock.
+	if r.running != nil {
+		tk.Deadline = launched.Add(r.running.HandoverTimeout)
+	}
+	k.StartTimeoutNow = func() time.Duration { return tk.StartTimeout(k.StartTimeout) }
 	r.takeoverDone = done
 	go func() {
 		var err error
@@ -301,7 +311,7 @@ func goBin() string {
 
 func (r *updateRig) update(running string) *Update {
 	makeBin, _ := exec.LookPath("make")
-	return &Update{
+	u := &Update{
 		Source: &TreeSource{
 			Dir:      r.f.tree,
 			Remote:   "origin",
@@ -322,6 +332,8 @@ func (r *updateRig) update(running string) *Update {
 			r.mu.Unlock()
 		},
 	}
+	r.running = u
+	return u
 }
 
 func (r *updateRig) steps() []string {
