@@ -47,6 +47,7 @@ func startHandover(events *supervisor.KeeperEvents, tk *supervisor.Takeover, gat
 	gate.onUI(func(windowUI) {
 		if tk.Swapped() {
 			log.Printf("fleetdeck-window: the window has checked in with LaunchServices; telling it again that the app is at %s, not %s", tk.Canonical, tk.Staged)
+			go tk.Reregister()
 		}
 	})
 	ended := make(chan struct{})
