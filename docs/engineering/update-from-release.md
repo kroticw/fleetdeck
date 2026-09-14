@@ -178,6 +178,8 @@ Each mutant was a temporary commit on the branch, reverted after its run:
 
 **Measured, from that mutant:** the new window, started as v0.10.0 starts it, checks in with LaunchServices from the staged path when its window is made, and the record stays while the bundle is on disk. Removing the bundle swapped out took the record with it, which is why a LaunchServices check made only after that removal could not tell a window that registers again from one that does not.
 
+**Observed, from the mutant that drops the takeover's own registration before swapped (run 34866996904):** the first look held only the staged path, as record `0x1ae4`; every later look held `/Applications/fleetdeck.app` as `0x1ae8` and the staged path again, as a new record `0x1aec`. The window's registration after it is made took the first staged record away, and something registered the staged path again straight after it.
+
 ## 9. Not verified
 
 - **The button, the download and the seal, in CI's update from v0.10.0.** `update-from-v0-10-0` replaces exactly three things: the source — this branch's app is unpacked from a local archive, where v0.10.0 downloads a release; `Seal.Verify` — not asked, since this branch's app is sealed ad hoc on a runner with no certificate; and the press — `Update.Run` is called directly. A green job means v0.10.0's handover reaches done with this branch's window on a runner. It does not mean the button, the download or the signature check were tried.
