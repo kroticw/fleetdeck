@@ -93,7 +93,67 @@ func TestAClickInTheGapBetweenCapsulesReachesTheBoard(t *testing.T) {
 // pt, the tabs and the new card button alone about 190, and the capsules from
 // the right edge ran over them -- white empty pills in the dark.
 
+// v0.10.1's first stand, 1000 by 700 with both panels unfolded: the board's
+// layout gave the frame its geometry after the surfaces were created, and so
+// after the row was drawn and had the panels narrowed for it -- the geometry
+// computed before, with no row, put the panels back and the row at 246 pt.
+// Read after the layout, as the stand's screenshot is, and again after a
+// resize, which would have hidden it.
+func TestOnAStandsPathThePanelsNarrowAndNoCapsuleOverlaps(t *testing.T) {
+	for _, s := range []struct {
+		when string
+		f    standFrame
+	}{
+		{"after the board's layout", standResult.afterLayout},
+		{"after the window's resize", standResult.afterResize},
+		{"after the frame came up again", standResult.afterReframe},
+		{"after longer labels", standResult.afterLongerLabels},
+	} {
+		if s.f.rowMin <= 0 {
+			t.Errorf("%s: the controller has no row minimum", s.when)
+			continue
+		}
+		if s.f.orchestrator >= 368 || s.f.sessions >= 348 {
+			t.Errorf("%s: panels %v and %v, want both narrowed for the row", s.when, s.f.orchestrator, s.f.sessions)
+		}
+		if s.f.row < s.f.rowMin-0.01 {
+			t.Errorf("%s: row %v, want its minimum %v", s.when, s.f.row, s.f.rowMin)
+		}
+		for _, problem := range overlapping(s.f.capsules, s.f.row) {
+			t.Errorf("%s: %s", s.when, problem)
+		}
+	}
+	if longer, before := standResult.afterLongerLabels.rowMin, standResult.afterReframe.rowMin; longer <= before {
+		t.Errorf("row minimum %v after longer labels, %v before: want the row measured again", longer, before)
+	}
+}
+
+// overlapping says which shown capsules lie outside a row rowWidth wide or over
+// one another.
+func overlapping(capsules []drawnCapsule, rowWidth float64) []string {
+	const slack = 0.01
+	var shown []drawnCapsule
+	for _, c := range capsules {
+		if c.visible {
+			shown = append(shown, c)
+		}
+	}
+	var out []string
+	for i, a := range shown {
+		if a.x < -slack || a.x+a.w > rowWidth+slack {
+			out = append(out, fmt.Sprintf("%s at %v..%v is outside the row %v", a.name, a.x, a.x+a.w, rowWidth))
+		}
+		for _, b := range shown[i+1:] {
+			if a.x < b.x+b.w-slack && b.x < a.x+a.w-slack {
+				out = append(out, fmt.Sprintf("%s at %v..%v overlaps %s at %v..%v", a.name, a.x, a.x+a.w, b.name, b.x, b.x+b.w))
+			}
+		}
+	}
+	return out
+}
+
 var (
+	standResult   capsuleStandProbe
 	layoutModel   capsuleModel
 	layoutResults []capsuleLayoutProbe
 	// resizedResult: drawn at 1440, then the window made 1000 with both panels
@@ -113,6 +173,7 @@ func collectCapsuleLayoutResults() {
 		}
 	}
 	resizedResult = probeCapsuleLayoutForTest(m, 1000, 1440, false)
+	standResult = probeCapsuleStandForTest(m)
 }
 
 func allLayouts() []capsuleLayoutProbe {
@@ -184,27 +245,13 @@ func TestAWindowNarrowerThanItsMinimumGrowsToIt(t *testing.T) {
 }
 
 func TestNoTwoCapsulesInTheRowOverlapAndAllAreInsideIt(t *testing.T) {
-	const slack = 0.01
 	for _, p := range allLayouts() {
 		if p.laidWidth < p.minContentWidth {
 			t.Logf("%v: a screen narrower than the window's minimum %v", p, p.minContentWidth)
 			continue
 		}
-		var shown []drawnCapsule
-		for _, c := range p.capsules {
-			if c.visible {
-				shown = append(shown, c)
-			}
-		}
-		for i, a := range shown {
-			if a.x < -slack || a.x+a.w > p.rowWidth+slack {
-				t.Errorf("%v: %s at %v..%v is outside the row", p, a.name, a.x, a.x+a.w)
-			}
-			for _, b := range shown[i+1:] {
-				if a.x < b.x+b.w-slack && b.x < a.x+a.w-slack {
-					t.Errorf("%v: %s at %v..%v overlaps %s at %v..%v", p, a.name, a.x, a.x+a.w, b.name, b.x, b.x+b.w)
-				}
-			}
+		for _, problem := range overlapping(p.capsules, p.rowWidth) {
+			t.Errorf("%v: %s", p, problem)
 		}
 	}
 }

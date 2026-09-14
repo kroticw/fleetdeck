@@ -375,6 +375,23 @@ func (c *controller) draggedBesideRow(width, other float64, otherFolded bool) fl
 	return math.Min(width, rowRoomFor(c.width, clampPanel(other, c.width, otherFolded), c.rowMin))
 }
 
+// laidOut is the frame laid out as g. A geometry decided before the capsule row
+// gave its minimum -- effects run in order, and a row is drawn in the middle of
+// them -- is not the frame for the window as it is now; that frame is laid out
+// again, whatever order the effects came in.
+func (c *controller) laidOut(g geometry) []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.framed {
+		return nil
+	}
+	now := c.geometry()
+	if g == now {
+		return nil
+	}
+	return append([]effect{applyGeometry{G: now}}, c.insets(now)...)
+}
+
 func (c *controller) capsuleAction(action string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()

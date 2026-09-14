@@ -591,6 +591,30 @@ func TestANarrowWindowNarrowsThePanelsOnlyOnScreen(t *testing.T) {
 	}
 }
 
+// The board's layout decides the frame before the surfaces draw the capsule
+// row; laid out after the row gave its minimum, that geometry is stale, and the
+// frame as it is now follows it whatever order the effects ran in.
+func TestAFrameLaidOutBeforeTheRowGaveItsMinimumIsLaidOutAgain(t *testing.T) {
+	c := started()
+	c.resized(1000, 700, false)
+	effects := c.layout(1, "panel", "work")
+	stale := geometryOf(t, effects)
+	c.capsuleRow(360)
+	c.pageLoaded("orchestrator", "panel")
+	now := layoutWithRow(1000, 700, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
+	want := append([]effect{applyGeometry{G: now}}, c.insets(now)...)
+	if got := c.laidOut(stale); !reflect.DeepEqual(got, want) {
+		t.Fatalf("after the stale geometry: %#v\nwant %#v", got, want)
+	}
+	if got := c.laidOut(now); len(got) != 0 {
+		t.Fatalf("after the frame as it is: %#v, want none", got)
+	}
+	c.boardShowsOwnPage()
+	if got := c.laidOut(stale); len(got) != 0 {
+		t.Fatalf("with no frame: %#v, want none", got)
+	}
+}
+
 func TestDraggingAPanelInANarrowWindowStopsWhereTheRowNeedsItsMinimum(t *testing.T) {
 	c := loadedFrame()
 	c.capsuleRow(360)

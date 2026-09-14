@@ -332,8 +332,11 @@ func (g *glassWindow) reloadSurface(surface string) {
 func (g *glassWindow) showWindowPage(page string) { g.putUp(page) }
 
 func (g *glassWindow) setAppearance(choice string) { applyAppearance(choice) }
-func (g *glassWindow) applyGeometry(geo geometry)  { g.frame.layout(geo) }
-func (g *glassWindow) saveWidths(w panelWidths)    { storePanelWidths(w) }
+func (g *glassWindow) applyGeometry(geo geometry) {
+	g.frame.layout(geo)
+	g.run(g.ctl.laidOut(geo))
+}
+func (g *glassWindow) saveWidths(w panelWidths) { storePanelWidths(w) }
 
 func (g *glassWindow) setCapsules(model json.RawMessage) {
 	g.model = model
@@ -354,12 +357,19 @@ func (g *glassWindow) redrawCapsules() {
 	if !g.framed || g.model == nil {
 		return
 	}
-	m, err := parseCapsuleModel(g.model)
+	drawCapsuleRow(g.frame, g.model, g.mode, g.ctl, g.run)
+}
+
+// drawCapsuleRow draws the board's capsule model into the frame's row and gives
+// the controller the row's minimum, whose effects run carries out. The window's
+// stand probe (capsulestand_darwin.go) draws the row the same way.
+func drawCapsuleRow(f *frame, model json.RawMessage, mode glassMode, ctl *controller, run func([]effect)) {
+	m, err := parseCapsuleModel(model)
 	if err != nil {
 		log.Printf("fleetdeck-window: the capsules are not drawn: %v", err)
 		return
 	}
-	g.run(g.ctl.capsuleRow(drawCapsules(g.frame.capsules(), m, g.mode)))
+	run(ctl.capsuleRow(drawCapsules(f.capsules(), m, mode)))
 }
 
 // broadcast is the board's web view with Eval reaching the surfaces too: the
