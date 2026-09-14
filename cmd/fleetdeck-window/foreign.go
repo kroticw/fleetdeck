@@ -56,7 +56,8 @@ const (
 	// writes it to its log -- the one record, short of a person looking, that
 	// the notice reached the screen.
 	noticeShownBindingName = "fleetdeckPanelNoticeShown"
-	// replaceBindingName is what the notice's button calls.
+	// replaceBindingName is what the notice's button calls, with the PID the
+	// notice names.
 	replaceBindingName = "fleetdeckReplacePanel"
 	// noticeRepaintFunction is what the window calls when the notice changes
 	// under a page already loaded.
@@ -143,7 +144,8 @@ type launchAgent struct {
 	// read as a property list.
 	Program string
 	// Holds: Program is the panel answering. launchd starts it at login, and
-	// again whenever it stops (KeepAlive).
+	// again whenever it stops (KeepAlive). Known to miss an agent that starts
+	// the panel through a wrapper: the paths must be the same file.
 	Holds bool
 }
 
@@ -194,6 +196,9 @@ type notice struct {
 	URL    string
 	Panel  string // the panel's build, as buildLabel names it
 	Window string // this window's build
+	// Holder is the panel as the keeper reported it, PID included: what a
+	// press on the notice's button asks to replace.
+	Holder *supervisor.PanelBuild
 	// Executable is where the panel's binary is.
 	Executable string
 	// NotAPanel: what answers is not a fleetdeck panel at all.
@@ -202,8 +207,9 @@ type notice struct {
 	OtherWindow int
 	Agent       *launchAgent
 	// CanReplace: the notice offers to replace the panel with the window's
-	// own. Not for another window's panel, and not for one a launch agent
-	// would start again at once.
+	// own. Not for another window's panel, not for one a launch agent would
+	// start again at once, and not for one whose process was not found, since
+	// a press could not be checked against the port.
 	CanReplace bool
 }
 
@@ -218,34 +224,56 @@ func noticeFor(own build, url string, e supervisor.Event, home string) *notice {
 		n.NotAPanel = true
 		return n
 	}
-	h := e.Holder
-	if sameBuild(own, *h) {
+	h := *e.Holder
+	if sameBuild(own, h) {
 		return nil
 	}
+	n.Holder = &h
 	n.Panel = buildLabel(h.Version, h.Revision, h.Modified)
 	n.Executable = h.Executable
 	n.OtherWindow = h.Owner
 	n.Agent = findLaunchAgent(home, h.Executable)
-	n.CanReplace = n.OtherWindow == 0 && (n.Agent == nil || !n.Agent.Holds)
+	n.CanReplace = h.PID != 0 && n.OtherWindow == 0 && (n.Agent == nil || !n.Agent.Holds)
 	return n
 }
 
+// replaceRequest is what a press naming pid asks the keeper to replace, and
+// whether it is taken: only for the notice shown now, only where that notice
+// offers a replacement, and only for the process it names.
+func replaceRequest(n *notice, pid int) (supervisor.PanelBuild, bool) {
+	if n == nil || !n.CanReplace || n.Holder == nil || n.Holder.PID != pid {
+		return supervisor.PanelBuild{}, false
+	}
+	return *n.Holder, true
+}
+
+// mayReplace is the keeper's MayReplace: whether the panel on the port at a
+// press is one the notice would offer to replace.
+func mayReplace(own build, url, home string) func(supervisor.PanelBuild) bool {
+	return func(b supervisor.PanelBuild) bool {
+		n := noticeFor(own, url, supervisor.Event{State: supervisor.Answering, Holder: &b}, home)
+		return n != nil && n.CanReplace
+	}
+}
+
+// String is the notice as the window's log says it. What the panel says of
+// itself is quoted: a line break in it would forge lines of the log.
 func (n *notice) String() string {
 	if n == nil {
 		return ""
 	}
 	if n.NotAPanel {
-		return fmt.Sprintf("what answers at %s is not a fleetdeck panel; it is shown as it is", n.URL)
+		return fmt.Sprintf("what answers at %q is not a fleetdeck panel; it is shown as it is", n.URL)
 	}
-	s := fmt.Sprintf("the panel at %s is not this app's build: panel %s (%s), app %s", n.URL, orUnknown(n.Panel), n.Executable, orUnknown(n.Window))
+	s := fmt.Sprintf("the panel at %q is not this app's build: panel %q (%q), app %q", n.URL, orUnknown(n.Panel), n.Executable, orUnknown(n.Window))
 	switch {
 	case n.OtherWindow != 0:
 		s += fmt.Sprintf("; it is the panel of another window, pid %d, still open", n.OtherWindow)
 	case n.Agent != nil && n.Agent.Holds:
-		s += fmt.Sprintf("; launch agent %s (%s) keeps it running", launchAgentLabel, n.Agent.Path)
+		s += fmt.Sprintf("; launch agent %s (%q) keeps it running", launchAgentLabel, n.Agent.Path)
 	}
 	if n.Agent != nil && !n.Agent.Holds {
-		s += fmt.Sprintf("; launch agent %s (%s) starts %s at login", launchAgentLabel, n.Agent.Path, orUnknown(n.Agent.Program))
+		s += fmt.Sprintf("; launch agent %s (%q) starts %q at login", launchAgentLabel, n.Agent.Path, orUnknown(n.Agent.Program))
 	}
 	return s
 }
@@ -255,6 +283,12 @@ func orUnknown(s string) string {
 		return "unknown"
 	}
 	return s
+}
+
+// shellQuote quotes s for a POSIX shell: a command in the notice is copied
+// into a terminal as it is.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 const (
@@ -285,8 +319,10 @@ func noticeHTML(n *notice) string {
 		}
 		return "<b>" + html.EscapeString(s) + "</b>"
 	}
+	// Quoted for the shell first, and the result escaped for the page: the
+	// person copies what the page shows.
 	removeAgent := func(a *launchAgent) string {
-		return `<pre style="` + noticePreStyle + `">launchctl bootout gui/$(id -u)/` + launchAgentLabel + "\nrm '" + html.EscapeString(a.Path) + `'</pre>`
+		return `<pre style="` + noticePreStyle + `">` + html.EscapeString("launchctl bootout gui/$(id -u)/"+launchAgentLabel+"\nrm "+shellQuote(a.Path)) + `</pre>`
 	}
 
 	var b strings.Builder
@@ -311,15 +347,17 @@ func noticeHTML(n *notice) string {
 		b.WriteString(para("Панель держит launch agent " + code(launchAgentLabel) + " — его записал прежний " + code("fleetdeck init") + ". Он запускает её при входе в систему и снова, как только она остановится, поэтому окно её не заменяет. Снимите агента в Терминале:"))
 		b.WriteString(removeAgent(n.Agent))
 		b.WriteString(para("Панель остановится, и окно запустит свою."))
-	default:
+	case n.CanReplace:
 		b.WriteString(para("Её запустило не окно — например, Терминал. Остановите её, и окно запустит свою, или замените её сейчас:"))
+	default:
+		b.WriteString(para("Её запустило не окно — например, Терминал. Остановите её, и окно запустит свою."))
 	}
 	if n.Agent != nil && !n.Agent.Holds {
 		b.WriteString(para("Кроме того, есть launch agent " + code(launchAgentLabel) + " от прежнего " + code("fleetdeck init") + ": при каждом входе в систему он запускает " + code(orUnknown(n.Agent.Program)) + " раньше приложения. Снять его:"))
 		b.WriteString(removeAgent(n.Agent))
 	}
 	if n.CanReplace {
-		b.WriteString(`<button type="button" style="` + noticeBtnStyle + `" data-fleetdeck-call="` + replaceBindingName + `">Заменить панелью приложения</button>`)
+		fmt.Fprintf(&b, `<button type="button" style="%s" data-fleetdeck-call="%s" data-fleetdeck-arg="%d">Заменить панелью приложения</button>`, noticeBtnStyle, replaceBindingName, n.Holder.PID)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -328,7 +366,9 @@ func noticeHTML(n *notice) string {
 // noticeScript is put into every page the window loads. It asks the window
 // for the notice and paints it, takes it down when there is none, and wires
 // the notice's button: an inline handler would be refused by the panel's
-// Content-Security-Policy, a listener added from here is not.
+// Content-Security-Policy, a listener added from here is not. The button
+// hands back the PID the notice names, for the window to check the press
+// against the notice it shows now.
 const noticeScript = `(() => {
   const repaint = () => {
     if (typeof window.` + noticeBindingName + ` !== "function" || !document.body) return;
@@ -350,7 +390,7 @@ const noticeScript = `(() => {
         button.addEventListener("click", () => {
           button.disabled = true;
           const call = window[button.dataset.fleetdeckCall];
-          if (typeof call === "function") call();
+          if (typeof call === "function") call(Number(button.dataset.fleetdeckArg));
         });
       });
       window.` + noticeShownBindingName + `(next.innerText);
@@ -362,9 +402,10 @@ const noticeScript = `(() => {
 })();`
 
 // panelNotice is the notice the window shows now, shared between the keeper's
-// events and the page's questions.
+// events, the page's questions and the button's press.
 type panelNotice struct {
 	mu     sync.Mutex
+	shown  *notice
 	markup string
 }
 
@@ -374,7 +415,7 @@ func (p *panelNotice) set(n *notice) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	changed := markup != p.markup
-	p.markup = markup
+	p.shown, p.markup = n, markup
 	return changed
 }
 
@@ -382,4 +423,10 @@ func (p *panelNotice) page() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.markup
+}
+
+func (p *panelNotice) current() *notice {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.shown
 }

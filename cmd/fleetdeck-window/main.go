@@ -154,6 +154,8 @@ func main() {
 	// is used as it is and named over its page (foreign.go).
 	own := ownBuild()
 	notices := &panelNotice{}
+	// Asked again at a press, about the panel on the port by then.
+	keeper.MayReplace = mayReplace(own, *url, home)
 	// A takeover watches the keeper's events too, while it runs.
 	var takeoverEvents atomic.Pointer[chan supervisor.Event]
 	keeper.OnEvent = func(e supervisor.Event) {
@@ -209,9 +211,18 @@ func main() {
 	}); err != nil {
 		log.Printf("fleetdeck-window: the log will not say whether the notice reached the page: %v", err)
 	}
-	if err := w.Bind(replaceBindingName, func() {
-		log.Printf("fleetdeck-window: replacing the panel at %s, as asked from the notice", *url)
-		keeper.Replace()
+	// The press names the panel it was shown -- by the PID on the port when the
+	// notice was drawn -- and is taken only for the notice shown now. The page
+	// belongs to the panel, and its own script can call this as well as the
+	// button can; the keeper checks the port again before anything is stopped.
+	if err := w.Bind(replaceBindingName, func(pid int) {
+		want, ok := replaceRequest(notices.current(), pid)
+		if !ok {
+			log.Printf("fleetdeck-window: a press to replace the panel at %s (pid %d) is not for the notice shown now; ignored", *url, pid)
+			return
+		}
+		log.Printf("fleetdeck-window: replacing the panel at %s (pid %d), as asked from the notice", *url, pid)
+		keeper.Replace(want)
 	}); err != nil {
 		log.Printf("fleetdeck-window: the notice's button will not replace the panel: %v", err)
 	}

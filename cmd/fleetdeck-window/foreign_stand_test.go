@@ -49,7 +49,7 @@ func TestAStandWindowNamesAPanelOfAnotherBuildAndIsQuietOverItsOwn(t *testing.T)
 		w.waitFor(t, "is not this app's build")
 		w.waitFor(t, "the page shows the notice about the panel")
 		log := w.text()
-		for _, want := range []string{other, launchAgentLabel + " (" + agent + ") keeps it running", "launchctl bootout gui/$(id -u)/" + launchAgentLabel} {
+		for _, want := range []string{other, launchAgentLabel + ` ("` + agent + `") keeps it running`, "launchctl bootout gui/$(id -u)/" + launchAgentLabel} {
 			if !strings.Contains(log, want) {
 				t.Errorf("the window's log lacks %q", want)
 			}
