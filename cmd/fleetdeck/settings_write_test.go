@@ -141,6 +141,41 @@ func TestSavingSettingsClearsWhatAKilledWriteLeftBehind(t *testing.T) {
 	}
 }
 
+// Clearing is by the settings' own temp name as well as by age: files beside
+// the settings that are not their temp files stay however old they are.
+func TestSavingSettingsClearsNothingButWhatAKilledWriteLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "settings.json")
+	stale := filepath.Join(dir, ".settings.json.tmp-1234")
+	kept := []string{
+		filepath.Join(dir, "settings.local.json"),
+		filepath.Join(dir, "settings.json.bak"),
+		filepath.Join(dir, ".credentials.json"),
+		filepath.Join(dir, ".other.json.tmp-1234"),
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	for _, f := range append([]string{stale}, kept...) {
+		if err := os.WriteFile(f, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(f, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := saveSettings(p, map[string]any{"model": "sonnet"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(stale); err == nil {
+		t.Fatal("the temp file a killed write left is still beside the settings")
+	}
+	for _, f := range kept {
+		if _, err := os.Lstat(f); err != nil {
+			t.Errorf("saving the settings removed %s, which no settings write left behind: %v", filepath.Base(f), err)
+		}
+	}
+}
+
 // A dotfiles symlink can point at settings that do not exist yet -- a fresh
 // clone, a machine being set up -- and, as dotfiles links usually do, by a path
 // relative to the link. Saving writes the settings where the link points and
