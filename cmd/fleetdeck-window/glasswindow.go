@@ -335,7 +335,12 @@ func (g *glassWindow) reloadSurface(surface string) {
 
 func (g *glassWindow) showWindowPage(page string) { g.putUp(page) }
 
-func (g *glassWindow) setAppearance(choice string) { applyAppearance(choice) }
+// setAppearance is the app's theme changing: the capsules are drawn again in it,
+// whether or not the board's page has sent their model again first.
+func (g *glassWindow) setAppearance(choice string) {
+	applyAppearance(choice)
+	g.redrawCapsules()
+}
 func (g *glassWindow) applyGeometry(geo geometry) {
 	g.frame.layout(geo)
 	g.run(g.ctl.laidOut(geo))

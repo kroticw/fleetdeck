@@ -15,11 +15,12 @@
 
 #include "_cgo_export.h"
 
-#include <CoreFoundation/CoreFoundation.h>
+#include <CoreGraphics/CGColor.h>
 #include <CoreGraphics/CGGeometry.h>
 #include <objc/message.h>
 #include <objc/objc.h>
 #include <objc/runtime.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -98,14 +99,8 @@ static int limitsDrawn;
 // capsulesDrawn: how many capsules the row shows.
 static int capsulesDrawn;
 
-// contentsOnGlass: what each capsule on glass holds, drawn in the system's mode.
-#define maxContents (2 + maxLimits + 1 + 2)
-static id contentsOnGlass[maxContents];
-static int contentsOnGlassDrawn;
-
 static void placeCapsules(double rowWidth);
-static id systemAppearance(void);
-static void drawInSystemMode(id content, id appearance);
+static id appAppearance(void);
 
 // --- the row: a container that lets clicks through its gaps ---------------------
 
@@ -198,8 +193,6 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
     sendVoidDouble(wrapper, sel("setCornerRadius:"), capsuleHeight / 2);
     sendVoidLong(holder, sel("setAutoresizingMask:"), 18);
     sendVoid1(wrapper, sel("setContentView:"), holder);
-    drawInSystemMode(holder, systemAppearance());
-    if (contentsOnGlassDrawn < maxContents) contentsOnGlass[contentsOnGlassDrawn++] = holder;
   } else {
     if (strcmp(mode, "opaque") == 0) {
       wrapper = initWithFrame(cls("NSView"), frame);
@@ -213,9 +206,21 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
     id layer = send0(wrapper, sel("layer"));
     sendVoidDouble(layer, sel("setCornerRadius:"), capsuleHeight / 2);
     if (strcmp(mode, "opaque") == 0) {
-      id colour = send0(cls("NSColor"), sel("controlBackgroundColor"));
-      ((void (*)(id, SEL, void *))objc_msgSend)(layer, sel("setBackgroundColor:"),
-                                                ((void *(*)(id, SEL))objc_msgSend)(colour, sel("CGColor")));
+      // Resolved in the app's appearance, as the capsule's controls are drawn:
+      // a CGColor taken outside it is resolved in the system's, and was white
+      // under white text with the app dark and the system light (runs
+      // 34863293838 and 34864709919).
+      void (^resolve)(void) = ^{
+        id colour = send0(cls("NSColor"), sel("controlBackgroundColor"));
+        ((void (*)(id, SEL, void *))objc_msgSend)(layer, sel("setBackgroundColor:"),
+                                                  ((void *(*)(id, SEL))objc_msgSend)(colour, sel("CGColor")));
+      };
+      id appearance = appAppearance();
+      if (appearance && respondsTo(appearance, "performAsCurrentDrawingAppearance:")) {
+        ((void (*)(id, SEL, void (^)(void)))objc_msgSend)(appearance, sel("performAsCurrentDrawingAppearance:"), resolve);
+      } else {
+        resolve();
+      }
     }
     sendVoid1(wrapper, sel("addSubview:"), holder);
   }
@@ -313,82 +318,19 @@ static void placeCapsules(double rowWidth) {
   put(theme, right - widthOf(theme), 1);
 }
 
-// --- the system's mode ----------------------------------------------------------
+// --- the app's appearance -------------------------------------------------------
 
-// Read afresh: the defaults an app keeps may still hold the old mode when the
-// system says it changed.
-static int systemIsDarkNow(void) {
-  CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
-  CFPropertyListRef style = CFPreferencesCopyAppValue(CFSTR("AppleInterfaceStyle"), kCFPreferencesAnyApplication);
-  int dark = style && CFGetTypeID(style) == CFStringGetTypeID() &&
-             CFStringCompare((CFStringRef)style, CFSTR("Dark"), 0) == kCFCompareEqualTo;
-  if (style) CFRelease(style);
-  return dark;
+// Every capsule takes the theme chosen in fleetdeck, whatever the system's: its
+// controls inherit the app's appearance, and an opaque capsule's background is
+// resolved in it. On the macOS 26 stand with real glass (run 34868250061) a
+// capsule's glass took its tint from the board under it, so controls drawn in
+// the system's mode were dark on dark glass or light on light.
+static id appAppearance(void) {
+  return send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("effectiveAppearance"));
 }
 
-// testSystemDark is the system's mode a test has set, or -1 for the system's own.
-static int testSystemDark = -1;
-
-static int systemIsDark(void) { return testSystemDark >= 0 ? testSystemDark : systemIsDarkNow(); }
-
-// themeCenterLocal: the system's mode is heard of in this process's own
-// notification centre, for the tests.
-static int themeCenterLocal;
-
-static const char *const systemThemeChanged = "AppleInterfaceThemeChangedNotification";
-
-// The system says its mode changed in the distributed notification centre.
-static id themeCenter(int local) {
-  return local ? send0(cls("NSNotificationCenter"), sel("defaultCenter"))
-               : send0(cls("NSDistributedNotificationCenter"), sel("defaultCenter"));
-}
-
-// themeSubscribedName: what the capsules listen for, "" until they do.
-static const char *themeSubscribedName = "";
-
-// On macOS 26 a capsule's glass takes the system's mode, whatever the app's
-// appearance, the glass's tint or its own appearance say, while a control takes
-// the app's: a theme other than the system's drew white text on white glass,
-// or dark on dark (stands in runs 34863293838 and 34864709919). So what a
-// capsule on glass holds is drawn in the system's mode, the one its glass is in.
-static char systemModeSaid[40];
-
-static id systemAppearance(void) {
-  return send1(cls("NSAppearance"), sel("appearanceNamed:"),
-               nsstring(systemIsDark() ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua"));
-}
-
-static void drawInSystemMode(id content, id appearance) {
-  sendVoid1(content, sel("setAppearance:"), appearance);
-  // The window's log says the mode once each time it changes: a stand checks
-  // the capsules by it.
-  const char *name = cstring(send0(appearance, sel("name")));
-  if (strcmp(name, systemModeSaid) != 0) {
-    strncpy(systemModeSaid, name, sizeof systemModeSaid - 1);
-    fprintf(stderr, "fleetdeck-window: the capsules on glass are drawn in %s, the system's mode\n", name);
-  }
-}
-
-static void systemModeChanged(id self, SEL _cmd, id notification) {
-  (void)self, (void)_cmd, (void)notification;
-  void *pool = objc_autoreleasePoolPush();
-  id appearance = systemAppearance();
-  for (int i = 0; i < contentsOnGlassDrawn; i++) drawInSystemMode(contentsOnGlass[i], appearance);
-  objc_autoreleasePoolPop(pool);
-}
-
-// listenForSystemMode subscribes once, for the life of the process, to the
-// system saying its mode changed.
-static void listenForSystemMode(void) {
-  static id observer;
-  if (observer) return;
-  Class klass = objc_allocateClassPair((Class)objc_getClass("NSObject"), "FleetdeckSystemModeObserver", 0);
-  class_addMethod(klass, sel("systemModeChanged:"), (IMP)systemModeChanged, "v@:@");
-  objc_registerClassPair(klass);
-  observer = send0((id)klass, sel("new"));  ((void (*)(id, SEL, id, SEL, id, id))objc_msgSend)(themeCenter(themeCenterLocal),
-                                                     sel("addObserver:selector:name:object:"), observer,
-                                                     sel("systemModeChanged:"), nsstring(systemThemeChanged), (id)0);
-  themeSubscribedName = systemThemeChanged;
+static const char *appearanceName(id appearance) {
+  return appearance ? cstring(send0(appearance, sel("name"))) : "";
 }
 
 static void setMinContentWidth(id window, double width) {
@@ -431,8 +373,6 @@ void fd_capsules_clear(void *container) {
   tabsCapsule = newCardCapsule = compactCapsule = themeCapsule = themeIconCapsule = (id)0;
   for (int i = 0; i < maxLimits; i++) limitCapsules[i] = levelsDrawn[i] = (id)0;
   limitsDrawn = 0;
-  for (int i = 0; i < maxContents; i++) contentsOnGlass[i] = (id)0;
-  contentsOnGlassDrawn = 0;
   capsulesDrawn = 0;
   // No row, nothing for the window to keep room for.
   setMinContentWidth(send0((id)container, sel("window")), 0);
@@ -447,14 +387,17 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   void *pool = objc_autoreleasePoolPush();
   id parent = (id)container;
   fd_capsules_clear(container);
-  listenForSystemMode();
-  // The window's log says the capsules' material once each time it changes:
-  // glass, vibrancy or opaque decide what a capsule takes its colours from, and
-  // a stand's screenshot cannot tell the three apart.
-  static char modeSaid[16];
-  if (strcmp(mode, modeSaid) != 0) {
-    strncpy(modeSaid, mode, sizeof modeSaid - 1);
-    fprintf(stderr, "fleetdeck-window: the capsules are drawn in %s\n", mode);
+  // The window's log says the capsules' material and the appearance they are
+  // drawn in, once each time either changes: glass, vibrancy and opaque take
+  // their colours from different places, and a stand's screenshot cannot tell
+  // them apart. A stand checks this wiring by it; whether the capsules can be
+  // read is for its screenshot.
+  static char said[96];
+  char now[96];
+  snprintf(now, sizeof now, "%s, in %s", mode, appearanceName(appAppearance()));
+  if (strcmp(now, said) != 0) {
+    strncpy(said, now, sizeof said - 1);
+    fprintf(stderr, "fleetdeck-window: the capsules are drawn in %s\n", now);
   }
 
   CGRect bounds = sendRect0(parent, sel("bounds"));
@@ -632,26 +575,6 @@ void fd_test_press_segment(int i) {
 
 void fd_test_press_new_card(void) { sendAction(newCardDrawn); }
 
-void fd_test_set_system_dark(int dark) { testSystemDark = dark; }
-
-void fd_test_observe_system_theme_locally(void) { themeCenterLocal = 1; }
-
-void fd_test_post_system_theme_changed(const char *name) {
-  ((void (*)(id, SEL, id, id))objc_msgSend)(send0(cls("NSNotificationCenter"), sel("defaultCenter")),
-                                            sel("postNotificationName:object:"), nsstring(name), (id)0);
-}
-
-int fd_test_product_theme_center_is_distributed(void) {
-  return ((signed char (*)(id, SEL, id))objc_msgSend)(themeCenter(0), sel("isKindOfClass:"),
-                                                      cls("NSDistributedNotificationCenter")) != 0;
-}
-
-const char *fd_test_system_theme_subscribed_name(void) { return themeSubscribedName; }
-
-static const char *appearanceName(id appearance) {
-  return appearance ? cstring(send0(appearance, sel("name"))) : "";
-}
-
 const char *fd_test_capsule_slot_appearance(int i) {
   id wrapper = slot(i, NULL);
   if (!wrapper) return "";
@@ -671,6 +594,16 @@ void fd_test_set_app_appearance(const char *name) {
   sendVoid1(send0(cls("NSApplication"), sel("sharedApplication")), sel("setAppearance:"), appearance);
 }
 void fd_test_press_theme_icon(void) { sendAction(themeIconDrawn); }
+
+double fd_test_capsule_slot_background_brightness(int i) {
+  id wrapper = slot(i, NULL);
+  if (!wrapper) return -1;
+  CGColorRef colour = ((CGColorRef(*)(id, SEL))objc_msgSend)(send0(wrapper, sel("layer")), sel("backgroundColor"));
+  if (!colour) return -1;
+  size_t n = CGColorGetNumberOfComponents(colour);
+  const CGFloat *c = CGColorGetComponents(colour);
+  return n >= 3 ? (c[0] + c[1] + c[2]) / 3 : n >= 1 ? c[0] : -1;
+}
 
 // Whether a capsule's control is drawn inside its glass: a descendant of the
 // contentView of the nearest NSGlassEffectView above it. which is as below.

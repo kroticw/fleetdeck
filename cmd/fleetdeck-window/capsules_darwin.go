@@ -213,24 +213,15 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 	return out
 }
 
-// observeSystemThemeLocallyForTest has the capsules hear of the system's mode in
-// this process's own notification centre. Before the first draw.
-func observeSystemThemeLocallyForTest() { C.fd_test_observe_system_theme_locally() }
-
-// capsuleThemeProbe is the appearance of every capsule's content, as
-// fd_test_capsule_slot_appearance names it, drawn on glass in a dark system;
-// after the system turned light; after the app turned dark and the row was
-// drawn again; and drawn in vibrancy.
+// capsuleThemeProbe is the capsules drawn with the app dark, then light: the
+// appearance each capsule's content has of its own on glass, as
+// fd_test_capsule_slot_appearance names it, and how light each opaque capsule's
+// background is.
 type capsuleThemeProbe struct {
 	glass                                bool
-	firstDrawInDarkSystem                []string
-	afterSystemTurnedLight               []string
-	afterAppTurnedDark                   []string
-	inVibrancy                           []string
+	onGlassInDarkApp                     []string
+	opaqueInDarkApp, opaqueInLightApp    []float64
 	appAppearanceBefore, appAppearanceAt string
-	// Where the window listens outside the tests, and the name it listens for.
-	productCenterDistributed bool
-	subscribedName           string
 }
 
 func capsuleContentAppearances() []string {
@@ -241,39 +232,40 @@ func capsuleContentAppearances() []string {
 	return out
 }
 
+func capsuleBackgroundBrightness() []float64 {
+	var out []float64
+	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {
+		out = append(out, float64(C.fd_test_capsule_slot_background_brightness(C.int(i))))
+	}
+	return out
+}
+
+func setAppAppearanceForTest(name string) {
+	c := C.CString(name)
+	defer C.free(unsafe.Pointer(c))
+	C.fd_test_set_app_appearance(c)
+}
+
 func probeCapsuleThemeForTest(m capsuleModel) capsuleThemeProbe {
 	out := capsuleThemeProbe{glass: C.fd_glass_available() != 0}
 	window := C.fd_test_window(1512, 982)
 	f := installFrame(window)
 	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}))
-	f.setMode(glassModeGlass)
 	out.appAppearanceBefore = C.GoString(C.fd_test_app_appearance())
 
-	C.fd_test_set_system_dark(1)
+	setAppAppearanceForTest("NSAppearanceNameDarkAqua")
+	f.setMode(glassModeGlass)
 	drawCapsules(f.capsules(), m, glassModeGlass)
-	out.firstDrawInDarkSystem = capsuleContentAppearances()
+	out.onGlassInDarkApp = capsuleContentAppearances()
+	f.setMode(glassModeOpaque)
+	drawCapsules(f.capsules(), m, glassModeOpaque)
+	out.opaqueInDarkApp = capsuleBackgroundBrightness()
 
-	C.fd_test_set_system_dark(0)
-	name := C.CString("AppleInterfaceThemeChangedNotification")
-	C.fd_test_post_system_theme_changed(name)
-	C.free(unsafe.Pointer(name))
-	out.afterSystemTurnedLight = capsuleContentAppearances()
-	out.productCenterDistributed = C.fd_test_product_theme_center_is_distributed() != 0
-	out.subscribedName = C.GoString(C.fd_test_system_theme_subscribed_name())
+	setAppAppearanceForTest("NSAppearanceNameAqua")
+	drawCapsules(f.capsules(), m, glassModeOpaque)
+	out.opaqueInLightApp = capsuleBackgroundBrightness()
 
-	dark := C.CString("NSAppearanceNameDarkAqua")
-	C.fd_test_set_app_appearance(dark)
-	C.free(unsafe.Pointer(dark))
-	drawCapsules(f.capsules(), m, glassModeGlass)
-	out.afterAppTurnedDark = capsuleContentAppearances()
-
-	drawCapsules(f.capsules(), m, glassModeVibrancy)
-	out.inVibrancy = capsuleContentAppearances()
-
-	before := C.CString(out.appAppearanceBefore)
-	C.fd_test_set_app_appearance(before)
-	C.free(unsafe.Pointer(before))
-	C.fd_test_set_system_dark(-1)
+	setAppAppearanceForTest(out.appAppearanceBefore)
 	clearCapsules(f.capsules())
 	out.appAppearanceAt = C.GoString(C.fd_test_app_appearance())
 	return out
