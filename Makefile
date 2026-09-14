@@ -210,8 +210,15 @@ verify-dist:
 # It runs after `dist` into the same directory and removes only zips of its own
 # making, so `make dist dist-app` leaves the whole release there. macOS only: the
 # window needs cgo against WebKit, and the bundle needs lipo, codesign and ditto.
+#
+# BUNDLE_ID is the bundle identifier the app is built under, for this target and
+# window-app alike. A release keeps the app's own. Every test and every stand builds
+# under dev.fleetdeck.stand instead (supervisor.StandBundleID): macOS keeps each
+# bundle it is shown under its identifier, and a stand under the app's own can open
+# as the app (docs/engineering/window-and-panel.md, "Test stands").
+BUNDLE_ID ?= dev.fleetdeck.window
 dist-app:
-	@scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(SIGN_IDENTITY)"
+	@scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(SIGN_IDENTITY)" "$(BUNDLE_ID)"
 	@$(MAKE) --no-print-directory verify-dist-app
 
 # verify-dist-app interrogates the zip dist-app wrote, the way it reaches a person:
@@ -317,6 +324,7 @@ window-app:
 	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/MacOS"
 	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/Resources"
 	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
+	@plutil -replace CFBundleIdentifier -string "$(BUNDLE_ID)" "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
 	@cp cmd/fleetdeck-window/icon.icns "$(BINDIR)/fleetdeck.app/Contents/Resources/icon.icns"
 	go build -ldflags "$(WINDOW_LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
 	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
