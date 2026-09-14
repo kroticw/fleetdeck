@@ -270,6 +270,7 @@ func (t *Takeover) Run(ctx context.Context) error {
 		report(StepFailed, err.Error())
 		return err
 	}
+	report(StepDone, "")
 	// The deadline is behind: from here the keeper's starts, a panel dying while
 	// the bundle swapped out waits to be removed, get the window's own ceiling.
 	t.phase.v.Store(takeoverEnded)
