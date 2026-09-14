@@ -166,7 +166,7 @@ func main() {
 	// The keeper's word waits in keeperEvents until the window can act on it:
 	// a panel started before the window's web views (standPanelFirstEnv) says
 	// it is starting before there is anything to show that in.
-	keeperEvents := make(chan supervisor.Event, 64)
+	keeperEvents := newKeeperQueue()
 	keeper := &supervisor.Keeper{
 		URL:  *url,
 		Bin:  panelBinary(exe),
@@ -179,7 +179,7 @@ func main() {
 		StartTimeout: stand.startTimeout(),
 		MinUptime:    launchdThrottle,
 		Poll:         takenPanelPoll,
-		OnEvent:      func(e supervisor.Event) { keeperEvents <- e },
+		OnEvent:      keeperEvents.push,
 	}
 	// A panel this window did not start, of another build than the window's,
 	// is used as it is and named over its page (foreign.go).
@@ -187,7 +187,7 @@ func main() {
 	// Asked again at a press, about the panel on the port by then.
 	keeper.MayReplace = mayReplace(own, *url, home)
 	kept := &keeperRun{k: keeper}
-	panelFirst := stand.panelFirst && *handover == "" && where.action != runRefused
+	panelFirst := startsPanelFirst(stand, *handover, where.action)
 	if panelFirst {
 		log.Printf("fleetdeck-window: starting the panel before the window's web views, as this stand asks (%s)", standPanelFirstEnv)
 		kept.start()
@@ -293,11 +293,7 @@ func main() {
 		})
 	}
 	// The keeper's word, in order, now that the window can act on it.
-	go func() {
-		for e := range keeperEvents {
-			handleKeeperEvent(e)
-		}
-	}()
+	go keeperEvents.run(context.Background(), handleKeeperEvent)
 
 	// Bound before the first navigation, so the page finds them from its very
 	// first load. A reload the page or a person asks for is a navigation the
