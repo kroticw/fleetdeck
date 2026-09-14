@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/daemon/daemontest"
+	"github.com/kroticw/fleetdeck/internal/orchestrator"
 )
 
 // orchestratorShort is the session the stand's fleet names as its
@@ -36,6 +37,10 @@ const stoppedShort = "5e55a0ff"
 
 type session struct {
 	Short, Name, State, Tempo, Needs, Detail string
+	// Unreported: the record carries no needs at all, a source that never
+	// says whether anyone waits. The row's badge then takes the room its
+	// name would have.
+	Unreported bool
 }
 
 // sessions is what the daemon lists: more than the sessions panel shows at
@@ -46,7 +51,7 @@ var sessions = []session{
 	{Short: "5e55a002", Name: "cruises: full review of the booking branch before the release candidate goes out", State: "idle", Tempo: "blocked",
 		Needs: "answer: merge the migration first or after the API change? (first · after)", Detail: "merge the migration first or after the API change?"},
 	{Short: "5e55a003", Name: "BS-27572: rewrite the payment reconciliation job so that it survives a restart halfway", State: "working"},
-	{Short: "5e55a004", Name: "a parser for a municipal site whose pagination nobody ever documented", State: "idle", Tempo: "active"},
+	{Short: "5e55a004", Name: "a parser for a municipal site whose pagination nobody ever documented", State: "idle", Tempo: "active", Unreported: true},
 	{Short: "5e55a005", Name: "yandex-cloud-toolkit: move into a repository of its own and keep the whole history", State: "working"},
 	{Short: "5e55a006", Name: "home network: check the router, the tunnel and the DNS after last night's outage", State: "working"},
 	{Short: "5e55a007", Name: "docs: translate the engineering notes on the window and keep the headings in step", State: "idle", Tempo: "active"},
@@ -82,6 +87,24 @@ func layout(home, board string) error {
 			return err
 		}
 	}
+	// The orchestrator's working order, as its wizard writes it, and the
+	// daemon's control key, both only in the stand's own HOME and board: the
+	// orchestrator panel shows neither the missing brief's warning nor a
+	// read-only terminal, which the operator's panel does not.
+	brief, err := orchestrator.Brief("en", orchestrator.Paths{Board: board})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(orchestrator.BriefPath(orchestrator.Paths{Board: board}), brief, 0o644); err != nil {
+		return err
+	}
+	keyDir := filepath.Join(home, ".claude", "daemon")
+	if err := os.MkdirAll(keyDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "control.key"), []byte("stand-control-key\n"), 0o600); err != nil {
+		return err
+	}
 	stopped := filepath.Join(home, ".claude", "jobs", stoppedShort)
 	if err := os.MkdirAll(stopped, 0o700); err != nil {
 		return err
@@ -105,7 +128,7 @@ func layout(home, board string) error {
 func listRecords(cwd string) (string, error) {
 	records := make([]string, 0, len(sessions))
 	for i, s := range sessions {
-		r, err := json.Marshal(map[string]any{
+		record := map[string]any{
 			"short":     s.Short,
 			"sessionId": fmt.Sprintf("%s-0000-4000-8000-%012d", s.Short, i),
 			"name":      s.Name,
@@ -115,7 +138,11 @@ func listRecords(cwd string) (string, error) {
 			"detail":    s.Detail,
 			"cwd":       cwd,
 			"source":    "shell",
-		})
+		}
+		if s.Unreported {
+			delete(record, "needs")
+		}
+		r, err := json.Marshal(record)
 		if err != nil {
 			return "", err
 		}

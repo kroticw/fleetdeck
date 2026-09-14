@@ -15,6 +15,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/daemon/daemontest"
 	"github.com/kroticw/fleetdeck/internal/jobs"
+	"github.com/kroticw/fleetdeck/internal/orchestrator"
 )
 
 func TestTheStandsBoardHasALongTitledCardInEveryStage(t *testing.T) {
@@ -41,6 +42,24 @@ func TestTheStandsBoardHasALongTitledCardInEveryStage(t *testing.T) {
 		if !stages[stage] {
 			t.Errorf("no card in %s", stage)
 		}
+	}
+}
+
+// The orchestrator panel on a stand has to look as it does for the operator:
+// with its working order on disk and a terminal it can type into, it shows
+// neither the missing brief's warning nor the read-only notice above the
+// terminal.
+func TestTheStandsOrchestratorHasItsBriefAndItsTerminalAKey(t *testing.T) {
+	home, boardDir := t.TempDir(), t.TempDir()
+	if err := layout(home, boardDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := orchestrator.ReadBriefState(orchestrator.BriefPath(orchestrator.Paths{Board: boardDir})); got != orchestrator.BriefOurs {
+		t.Fatalf("the brief on the stand's board reads as %v, want the wizard's own", got)
+	}
+	t.Setenv("HOME", home)
+	if _, err := daemon.ControlKey(); err != nil {
+		t.Fatalf("the stand's control key: %v", err)
 	}
 }
 
@@ -75,18 +94,23 @@ func TestTheStandsDaemonListsMoreLongNamedSessionsThanFitWithOneWaiting(t *testi
 	if len(listed) < 8 {
 		t.Fatalf("%d sessions listed, want at least 8 so the list scrolls", len(listed))
 	}
-	waiting, long, orchestrator := 0, 0, false
+	waiting, unknown, long, orchestrator := 0, 0, 0, false
 	for _, s := range listed {
-		if s.Waiting() == daemon.Yes {
+		switch s.Waiting() {
+		case daemon.Yes:
 			waiting++
+		case daemon.Unknown:
+			// A source that never said whether anyone waits: the row's widest
+			// badge, the one that left a long name "fl…" for the operator.
+			unknown++
 		}
 		if len(s.Name) > 60 {
 			long++
 		}
 		orchestrator = orchestrator || s.Short == orchestratorShort
 	}
-	if waiting != 1 || long < 5 || !orchestrator {
-		t.Fatalf("waiting %d, long names %d, orchestrator listed %v; want 1, at least 5, true", waiting, long, orchestrator)
+	if waiting != 1 || unknown < 1 || long < 5 || !orchestrator {
+		t.Fatalf("waiting %d, not reported %d, long names %d, orchestrator listed %v; want 1, at least 1, at least 5, true", waiting, unknown, long, orchestrator)
 	}
 }
 
