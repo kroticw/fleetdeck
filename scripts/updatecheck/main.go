@@ -208,19 +208,24 @@ func checkLaunchServices(o options) error {
 		return err
 	}
 	swappedOut := filepath.Join(supervisor.StagingDir(o.canonical), supervisor.BundleName)
-	if err := waitFor("the new window removing the bundle swapped out at "+swappedOut, retireWait, 100*time.Millisecond, func() (bool, error) {
+	// A bundle that was not removed fails the step, but the looks are taken
+	// all the same: what LaunchServices opens while that bundle is still there
+	// is what a person would get, and it is said before the step fails.
+	retireErr := waitFor("the new window removing the bundle swapped out at "+swappedOut, retireWait, 100*time.Millisecond, func() (bool, error) {
 		_, err := os.Lstat(swappedOut)
 		return errors.Is(err, os.ErrNotExist), nil
-	}); err != nil {
-		return err
+	})
+	if retireErr != nil {
+		log.Printf("updatecheck: FAILED, looking at LaunchServices all the same: %v", retireErr)
+	} else {
+		log.Printf("updatecheck: pass: the new window removed the bundle swapped out at %s", swappedOut)
 	}
-	log.Printf("updatecheck: pass: the new window removed the bundle swapped out at %s", swappedOut)
 
 	for n := 1; n <= gateLooks; n++ {
 		started := time.Now()
 		l, err := takeLook(o.canonical, n)
 		if err != nil {
-			return err
+			return errors.Join(retireErr, err)
 		}
 		l.print("after-retire")
 		if n == 1 {
@@ -228,7 +233,7 @@ func checkLaunchServices(o options) error {
 		}
 		if err := l.gate(o.canonical); err != nil {
 			keepDump(o.out, "after-retire-last", l)
-			return fmt.Errorf("after-retire, look %d: %w", n, err)
+			return errors.Join(retireErr, fmt.Errorf("after-retire, look %d: %w", n, err))
 		}
 		if n == gateLooks {
 			keepDump(o.out, "after-retire-last", l)
@@ -237,6 +242,9 @@ func checkLaunchServices(o options) error {
 		if wait := gateSpacing - time.Since(started); wait > 0 {
 			time.Sleep(wait)
 		}
+	}
+	if retireErr != nil {
+		return retireErr
 	}
 	log.Printf("updatecheck: pass: in %d looks, %s opened %s, %s opened nothing in %s, and LaunchServices held nothing on disk there",
 		gateLooks, installedBundleID, o.canonical, replacedBundleID, supervisor.StagingDir(o.canonical))
