@@ -309,28 +309,29 @@ jobs:
           FLEETDECK_STAND_APPEARANCE: dark
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec frame
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
-      - name: The window's tests on macOS 26
-        run: |
-          go test -count=1 ./cmd/fleetdeck-window/
-          date +%s > "$RUNNER_TEMP/tests-ended"
-      # MEASUREMENT (T-056, v0.10.1), removed before merge: how long the panel the
-      # window starts takes to answer under the tests' load, given 10 s, in
-      # turns -- the order of today, then the panel started before the window's
-      # web views -- so neither order runs only on a machine that has cooled.
-      - name: The panel's start under the tests' load, eight stands in turn
+      # MEASUREMENT (T-056, v0.10.1), removed before merge: while the tests run,
+      # four stands one after another, the panel given 10 s, each logging how
+      # long its panel took to answer. Run 34852671968 measured the start only
+      # after the tests had ended (254 ms at 0 s, then 103-106 ms) and never
+      # caught the load under which 3 stands of 3 missed 330 ms.
+      - name: The window's tests on macOS 26, with the panel's start measured under them
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_PANEL_START_TIMEOUT: 10s
         run: |
-          ended=$(cat "$RUNNER_TEMP/tests-ended")
-          for i in 1 2 3 4 5 6 7 8; do
-            first=$(( (i + 1) % 2 ))
-            export FLEETDECK_STAND_PANEL_FIRST=$first
-            echo "=== run $i: panel first $first, $(( $(date +%s) - ended ))s after the tests ended" | tee -a out/after-tests.txt
-            scripts/ci-window-stand.sh new/fleetdeck.app $(( 7800 + i )) "out/after-tests-$i" exec frame > "out/after-tests-$i.txt" 2>&1 ||
-              echo "=== run $i did not reach the panel's page in its frame" | tee -a out/after-tests.txt
-            grep --extended-regexp 'answered .* after it started|panel failed' "out/after-tests-$i/window.log" | tee -a out/after-tests.txt || true
+          go test -count=1 ./cmd/fleetdeck-window/ > out/window-tests.txt 2>&1 &
+          tests=$!
+          started=$(date +%s)
+          for i in 1 2 3 4; do
+            echo "=== run $i: $(( $(date +%s) - started ))s into the tests, tests still running: $(kill -0 "$tests" 2>/dev/null && echo yes || echo no)" | tee -a out/under-tests.txt
+            scripts/ci-window-stand.sh new/fleetdeck.app $(( 7800 + i )) "out/under-tests-$i" exec frame > "out/under-tests-$i.txt" 2>&1 ||
+              echo "=== run $i did not reach the panel's page in its frame" | tee -a out/under-tests.txt
+            grep --extended-regexp 'answered .* after it started|panel failed' "out/under-tests-$i/window.log" | tee -a out/under-tests.txt || true
           done
+          status=0
+          wait "$tests" || status=$?
+          cat out/window-tests.txt
+          exit "$status"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
