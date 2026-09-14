@@ -11,7 +11,10 @@
 # What stays here is everything about the zip -- that there is exactly one of it, and
 # that it holds exactly the app and nothing else.
 #
-# Usage: verify-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id>
+# Usage: verify-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id> <min-macos>
+#
+# <min-macos> is the oldest macOS the app is built for: what Info.plist must
+# promise and every slice must name (app_runs_on_its_minimum_macos).
 #
 # <bundle-id> is the CFBundleIdentifier the app must carry: the app's own for a
 # release, dev.fleetdeck.stand for a test's build. A signed app must carry the
@@ -32,8 +35,8 @@
 # unsigned release is exactly the one that must never reach a person.
 set -eu
 
-if [ "$#" -ne 7 ]; then
-	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id>" >&2
+if [ "$#" -ne 8 ]; then
+	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id> <min-macos>" >&2
 	exit 2
 fi
 
@@ -44,6 +47,7 @@ binaries=$4
 ldflags=$5
 expect_seal=$6
 bundle_id=$7
+min_macos=$8
 
 work=
 # shellcheck disable=SC2034  # read by scripts/dist-app-checks.sh
@@ -117,6 +121,7 @@ app="$work/fleetdeck.app"
 
 app_carries_the_identifier "$app" "$bundle_id" "$expect_seal"
 app_is_the_release "$app" "$version" "$arches" "$binaries" "$ldflags"
+app_runs_on_its_minimum_macos "$app" "$arches" "$binaries" "$min_macos"
 app_carries_the_seal "$app" "$binaries" "$expect_seal"
 
 want_archs=$(for arch in $arches; do lipo_arch "$arch"; done | sort | tr '\n' ' ')

@@ -105,6 +105,12 @@ jobs:
       # SIGN_IDENTITY is what turns the ad-hoc seal every other build gets into a real
       # one. If the secret is missing or misspelt the build stops before it compiles
       # anything, rather than producing an app Gatekeeper would refuse.
+      #
+      # macos-latest is a newer macOS than the app's minimum, and clang builds for the
+      # macOS it runs on unless told otherwise. make dist-app tells it: the minimum is
+      # LSMinimumSystemVersion in cmd/fleetdeck-window/Info.plist, and the gate refuses
+      # a slice built for anything else. v0.9.1 was built before that, and its window
+      # was built for macOS 26 under a plist promising 11.0. See docs/engineering/release-app.md, "The oldest macOS".
       - name: Build the release app
         run: make dist-app VERSION="$RELEASE_VERSION" BUNDLE_ID=dev.fleetdeck.window
         env:

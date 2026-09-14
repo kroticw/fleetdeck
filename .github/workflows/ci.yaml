@@ -154,3 +154,114 @@ jobs:
           done
 
           exit "$mismatch"
+
+  oldest-macos-app:
+    # Builds the app the way the release does, on the release's own runner, for
+    # window-on-oldest-macos to open on an older macOS. It is built here and not
+    # there: clang builds for the macOS it runs on unless told otherwise, so a bundle
+    # built on the older runner opens on it whether or not the build names the
+    # minimum, and that run would pass for a release that still breaks. macOS runners
+    # cost roughly ten times what Linux does; nothing cheaper can see this defect.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      # Unsigned and under the stand identifier: nothing built here is published, and
+      # nothing opened from it may pass for the app.
+      - name: Build the app the way the release does
+        run: make dist-app VERSION=v0.0.0-ci DISTDIR=dist SIGN_IDENTITY= BUNDLE_ID=dev.fleetdeck.stand
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oldest-macos-app
+          path: dist/fleetdeck-v0.0.0-ci-macos.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  window-on-oldest-macos:
+    # Opens that app on the oldest macOS GitHub still runs, 15, next to v0.9.1's,
+    # whose window was built for macOS 26. macOS 13's runners were retired in
+    # December 2025 and macOS 14's are being retired (brownouts from 2026-07-06, gone
+    # on 2026-11-02), so neither can hold a check that has to stay green. Below 15
+    # nothing is measured: docs/engineering/release-app.md, "The oldest macOS".
+    #
+    # Only this build decides the job. v0.9.1 is measured beside it and recorded as
+    # it comes: a first run of this job found its window loads on macOS 15.7.9, so
+    # nothing here may assume it fails. Its stand never reports "panel" either way:
+    # v0.9.1's window logs no page state, and knows nothing of FLEETDECK_STAND_SOCKET,
+    # which is harmless on a runner with no fleet daemon and nowhere else.
+    needs: oldest-macos-app
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oldest-macos-app
+          path: new
+      - name: Unpack this build and v0.9.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ditto -x -k new/fleetdeck-v0.0.0-ci-macos.zip new
+          gh release download v0.9.1 --repo "$GITHUB_REPOSITORY" --pattern fleetdeck-v0.9.1-macos.zip --dir old
+          ditto -x -k old/fleetdeck-v0.9.1-macos.zip old
+      - name: Show the macOS and what each build was built for
+        run: |
+          sw_vers
+          for app in new/fleetdeck.app old/fleetdeck.app; do
+            echo "=== $app, LSMinimumSystemVersion $(plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist")"
+            for b in fleetdeck fleetdeck-status fleetdeck-window; do
+              xcrun vtool -show-build "$app/Contents/MacOS/$b"
+            done
+            # What a newer build target links that an older macOS may not have:
+            # libc++'s std::bad_function_call, marked in the SDK as introduced in
+            # macOS 15.4, imported by a window built for 26.
+            echo "--- $app window, libc++ bad_function_call imports:"
+            nm -m -u "$app/Contents/MacOS/fleetdeck-window" | grep bad_function_call || echo "(none)"
+          done
+      # A window that gets as far as printing its flags has been loaded and has run
+      # its main.
+      - name: Each window loads
+        run: |
+          mkdir -p out
+          for app in new old; do
+            status=0
+            "$app/fleetdeck.app/Contents/MacOS/fleetdeck-window" -h > "out/$app-load.log" 2>&1 || status=$?
+            echo "=== $app: exit status $status"
+            cat "out/$app-load.log"
+          done
+          grep -q 'Usage of' out/new-load.log
+      - name: This build's window, started directly, shows the panel's page
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7791 out/new-exec exec
+      - name: v0.9.1's window, started directly, as it comes
+        run: scripts/ci-window-stand.sh old/fleetdeck.app 7792 out/old-exec exec || echo "=== v0.9.1, started directly, did not reach the panel's page"
+      # LaunchServices is what Finder goes through, and it reads LSMinimumSystemVersion.
+      # Measured, not asserted: whether a runner's LaunchServices opens a window at all
+      # is itself something to find out.
+      - name: Both windows, opened through LaunchServices, as they come
+        run: |
+          scripts/ci-window-stand.sh new/fleetdeck.app 7793 out/new-open open || echo "=== this build, opened, did not reach the panel's page"
+          scripts/ci-window-stand.sh old/fleetdeck.app 7794 out/old-open open || echo "=== v0.9.1, opened, did not reach the panel's page"
+      - name: What LaunchServices does with a bundle that asks for macOS 26
+        run: |
+          mkdir -p gate out/gate
+          ditto new/fleetdeck.app gate/fleetdeck.app
+          plutil -replace LSMinimumSystemVersion -string 26.0 gate/fleetdeck.app/Contents/Info.plist
+          codesign --force --deep --sign - gate/fleetdeck.app
+          status=0
+          open -n -g --stderr "$PWD/out/gate/window.log" gate/fleetdeck.app --args -h > out/gate/open.log 2>&1 || status=$?
+          sleep 5
+          echo "open exit status: $status"
+          cat out/gate/open.log
+          echo "--- window output"
+          cat out/gate/window.log 2>/dev/null || echo "(none: the window did not run)"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: window-on-oldest-macos
+          path: out
+          if-no-files-found: ignore
+          retention-days: 7

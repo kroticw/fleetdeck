@@ -7,6 +7,7 @@ import (
 	"debug/buildinfo"
 	"debug/macho"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -184,6 +185,13 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 				}
 				if s.ldflags != wantReleaseLdflags {
 					t.Errorf("%s (%s) was built with %s, want %s", filepath.Base(bin), cpu, s.ldflags, wantReleaseLdflags)
+				}
+				// Built on a runner with a newer macOS, clang targets that
+				// macOS unless told otherwise: the slice then links what only
+				// that macOS may have and compiles out the checks for it,
+				// while the plist, which Finder reads, promises the minimum.
+				if s.minos != wantMinimumMacOS {
+					t.Errorf("%s (%s) is built for macOS %s, want %s: it assumes a macOS the plist does not ask for", filepath.Base(bin), cpu, s.minos, wantMinimumMacOS)
 				}
 				// The window is WebKit or it is nothing; the panel must not be a
 				// second copy of it. Checked per slice: a cross-built slice is
@@ -411,10 +419,35 @@ func plistKeys(t *testing.T, path string) map[string]any {
 	return m
 }
 
+// wantMinimumMacOS is the oldest macOS the app runs on. The build takes it from
+// one place, LSMinimumSystemVersion in cmd/fleetdeck-window/Info.plist, and
+// hands it to clang for every binary; this pins the number itself, so moving it
+// is a decision someone makes on purpose. 13.0 because the Go 1.27 linker
+// writes 13.0 into every binary it links on its own -- the panel and the status
+// reporter -- and nothing the window calls needs a newer macOS without asking
+// first. See docs/engineering/release-app.md, "The oldest macOS".
+const wantMinimumMacOS = "13.0"
+
+// loadCmdBuildVersion is LC_BUILD_VERSION, the load command that records the
+// macOS a binary was built for. debug/macho has no type for it and hands it
+// over raw.
+const loadCmdBuildVersion = 0x32
+
+// TestTheAppPromisesTheMacOSItIsBuiltFor holds the one place the build takes
+// the minimum macOS from to the version decided. A plist that promises less
+// than the binaries assume is an app Finder offers to a Mac it may fail on.
+func TestTheAppPromisesTheMacOSItIsBuiltFor(t *testing.T) {
+	if got := plistKeys(t, "Info.plist")["LSMinimumSystemVersion"]; got != wantMinimumMacOS {
+		t.Errorf("Info.plist LSMinimumSystemVersion = %v, want %s", got, wantMinimumMacOS)
+	}
+}
+
 type slice struct {
 	goarch  string
 	ldflags string
 	webkit  bool
+	// minos is the macOS the slice's LC_BUILD_VERSION says it was built for.
+	minos string
 }
 
 // fatSlices reads every architecture slice of a universal binary on its own.
@@ -454,6 +487,15 @@ func fatSlices(t *testing.T, path string) map[string]slice {
 		for _, l := range arch.Loads {
 			if d, ok := l.(*macho.Dylib); ok && strings.Contains(d.Name, "WebKit.framework") {
 				s.webkit = true
+			}
+			// build_version_command: cmd, cmdsize, platform, minos, sdk, ntools.
+			// minos is a packed xxxx.yy.zz, the way vtool -show-build prints it.
+			if raw, ok := l.(macho.LoadBytes); ok && len(raw) >= 16 && arch.ByteOrder.Uint32(raw) == loadCmdBuildVersion {
+				v := arch.ByteOrder.Uint32(raw[12:16])
+				s.minos = fmt.Sprintf("%d.%d", v>>16, (v>>8)&0xff)
+				if patch := v & 0xff; patch != 0 {
+					s.minos += fmt.Sprintf(".%d", patch)
+				}
 			}
 		}
 		slices[cpu] = s
