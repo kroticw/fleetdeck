@@ -109,6 +109,10 @@ func main() {
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	flag.Parse()
+	// Milliseconds in the window's log: a handover, the page asked for and its
+	// navigation all happen within one second, and whole seconds tell nothing
+	// of which came first or how long each took.
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	// For a window started by an update, the window that started it.
 	oldWindow := os.Getppid()
 
@@ -175,9 +179,24 @@ func main() {
 			log.Printf("fleetdeck-window: asked for the panel's page at %s (try %d)", scr.target(), scr.tries)
 			w.Navigate(scr.target())
 		case page != "":
+			// In the log by its title: a page of the window's put up over a
+			// web view that never draws it looks, from outside, like none.
+			log.Printf("fleetdeck-window: put up the window's page %q", pageHeading(page))
 			w.SetHtml(page)
 		}
 	}
+	// What WKWebView says of each navigation, in the log with the time since
+	// the page was asked for: the page's own word begins only with its
+	// document, and a navigation that is slow before that says nothing.
+	observeNavigation(w.Window(), func(e navEvent) {
+		if scr.asked {
+			log.Printf("fleetdeck-window: navigation %s, %s after the page was asked for", e, time.Since(scr.askedAt).Round(time.Millisecond))
+		} else {
+			log.Printf("fleetdeck-window: navigation %s", e)
+		}
+		// WebKit calls its delegate on the UI thread, where the screen lives.
+		show(scr.navSays(e))
+	})
 	keeper := &supervisor.Keeper{
 		URL:  *url,
 		Bin:  panelBinary(exe),

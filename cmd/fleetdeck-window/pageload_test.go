@@ -113,23 +113,23 @@ func TestALoadedPageIsLeftAloneWhenThePanelRestarts(t *testing.T) {
 func TestAPageThatDoesNotLoadIsAskedForAgainAndThenSaidToHaveFailed(t *testing.T) {
 	s, c := newScreen(false)
 	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 1})
-	c.t = c.t.Add(pageLoadWait - time.Millisecond)
+	c.t = c.t.Add(navSilentWait - time.Millisecond)
 	if navigate, html := s.tick(); navigate || html != "" {
 		t.Fatalf("tick before the wait is over = %v, %q; want nothing", navigate, html)
 	}
 	for try := 2; try <= pageLoadTries; try++ {
-		c.t = c.t.Add(pageLoadWait)
+		c.t = c.t.Add(navSilentWait)
 		if navigate, html := s.tick(); !navigate || html != "" {
 			t.Fatalf("try %d: tick after the wait = %v, %q; want the page asked for again", try, navigate, html)
 		}
 	}
-	c.t = c.t.Add(pageLoadWait)
+	c.t = c.t.Add(navSilentWait)
 	navigate, html := s.tick()
 	if navigate || !strings.Contains(html, "Страница панели не загрузилась") || !strings.Contains(html, testURL) {
 		t.Fatalf("after %d tries, tick = %v, %q; want a page saying the panel's page did not load", pageLoadTries, navigate, html)
 	}
 	// Said once, not again at every tick.
-	c.t = c.t.Add(pageLoadWait)
+	c.t = c.t.Add(navSilentWait)
 	if navigate, html := s.tick(); navigate || html != "" {
 		t.Fatalf("tick after the failure was shown = %v, %q; want nothing", navigate, html)
 	}
@@ -146,7 +146,7 @@ func TestAPageThatLoadedWithoutItsStylesOrScriptsIsNotThePanel(t *testing.T) {
 	s, c := newScreen(false)
 	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 1})
 	s.pageSays(pageBroken, testURL)
-	c.t = c.t.Add(pageLoadWait)
+	c.t = c.t.Add(pageLoadTick)
 	if navigate, _ := s.tick(); !navigate {
 		t.Fatal("a page that loaded broken is not asked for again")
 	}
@@ -156,18 +156,16 @@ func TestAPageThatLoadedWithoutItsStylesOrScriptsIsNotThePanel(t *testing.T) {
 // would cut it off and start it over. On the first run of the T-057 update
 // stand the new window asked twice before a load finished; neither a fresh
 // binary nor a fresh HOME made it happen again, and why it did was not found.
-// Such a page gets pageLoadingWait; only a
-// navigation that never reached its document is asked for again at
-// pageLoadWait.
-func TestAPageThatHasBegunLoadingIsGivenLongerBeforeItIsAskedForAgain(t *testing.T) {
+// Such a page gets pageLoadingWait.
+func TestAPageThatHasBegunLoadingIsLeftToLoadForPageLoadingWait(t *testing.T) {
 	s, c := newScreen(false)
 	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 1})
 	s.pageSays(pageLoading, testURL)
-	c.t = c.t.Add(pageLoadWait)
+	c.t = c.t.Add(pageLoadingWait - pageLoadTick)
 	if navigate, html := s.tick(); navigate || html != "" {
-		t.Fatalf("tick at pageLoadWait over a page that has begun = %v, %q; want it left to load", navigate, html)
+		t.Fatalf("tick short of pageLoadingWait over a page that has begun = %v, %q; want it left to load", navigate, html)
 	}
-	c.t = c.t.Add(pageLoadingWait - pageLoadWait)
+	c.t = s.askedAt.Add(pageLoadingWait)
 	if navigate, _ := s.tick(); !navigate {
 		t.Fatal("a page that began and never finished within pageLoadingWait is not asked for again")
 	}
@@ -189,7 +187,7 @@ func TestALoadedPageIsNotAskedForAgainByTime(t *testing.T) {
 	s, c := newScreen(false)
 	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 1})
 	s.pageSays(pagePanel, testURL)
-	c.t = c.t.Add(10 * pageLoadWait)
+	c.t = c.t.Add(10 * navSilentWait)
 	if navigate, html := s.tick(); navigate || html != "" {
 		t.Fatalf("tick over a loaded page = %v, %q; want nothing", navigate, html)
 	}
@@ -256,7 +254,7 @@ func TestAPageLeftForAnotherIsNotAskedForAtTheWindowsOwnURL(t *testing.T) {
 	s.pageSays(pagePanel, testURL)
 	s.pageSays(pageLeaving, testURL)
 	for i := 0; i < 3*pageLoadTries; i++ {
-		c.t = c.t.Add(pageLoadWait)
+		c.t = c.t.Add(navSilentWait)
 		if navigate, html := s.tick(); navigate {
 			t.Fatalf("tick %d after the page left navigated to %q; want no navigation", i, s.target())
 		} else if html != "" {
@@ -295,11 +293,48 @@ func TestThePageFailurePageNamesTheWaitThatRanOut(t *testing.T) {
 		s.pageSays(pageLoading, testURL)
 		c.t = c.t.Add(pageLoadingWait)
 		if _, html := s.tick(); html != "" {
-			if !strings.Contains(html, pageLoadingWait.String()) || strings.Contains(html, pageLoadWait.String()) {
+			if !strings.Contains(html, pageLoadingWait.String()) || strings.Contains(html, navSilentWait.String()) {
 				t.Fatalf("the failure page after a page that began names the wrong wait:\n%s", html)
 			}
 			return
 		}
 	}
 	t.Fatal("no failure page after pageLoadTries stalled loads")
+}
+
+// What the panel's page said as the window covered it is about a page no
+// longer there. On the runner the failure page went up as a navigation had
+// just committed; that page then said "loading", "panel" and, replaced,
+// "leaving", and the window took the three for its own page: it put the failure
+// page up a second time, 0.95 s later, and, had a panel answered in between,
+// would have let it go by as already showing.
+func TestWhatAPageSaysAfterTheWindowCoveredItIsIgnored(t *testing.T) {
+	s, c := newScreen(false)
+	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 1})
+	s.cover()
+	for _, state := range []string{pageLoading, pagePanel, pageLeaving} {
+		s.pageSays(state, testURL)
+	}
+	if s.showingPanel || s.asked {
+		t.Fatalf("after the window covered its page, that page's word left showing = %v, asked = %v", s.showingPanel, s.asked)
+	}
+	c.t = c.t.Add(10 * navSilentWait)
+	if navigate, html := s.tick(); navigate || html != "" {
+		t.Fatalf("tick after a covered page spoke = %v, %q; want nothing", navigate, html)
+	}
+	if navigate, _ := s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 2}); !navigate {
+		t.Fatal("a panel answering after the covered page spoke is not opened")
+	}
+}
+
+// A page of the window's is named in the log by its heading: on a runner a
+// window asked three times for the panel's page and then showed nothing for a
+// minute, and whether the failure page had been put up the log could not say.
+func TestTheWindowsOwnPagesAreNamedByTheirHeading(t *testing.T) {
+	if got := pageHeading(pageFailedPage(testURL, navSilentWait)); got != "Страница панели не загрузилась" {
+		t.Fatalf("pageHeading(the failure page) = %q", got)
+	}
+	if got := pageHeading(blankPage); got != "" {
+		t.Fatalf("pageHeading(a page with no heading) = %q, want empty", got)
+	}
 }
