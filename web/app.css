@@ -3530,6 +3530,12 @@ body.is-resizing {
   display: none;
 }
 
+/* The window drags a panel's width at the panel's own edge, natively; the
+   page's strip would drag a column that already fills its web view. */
+:root[data-surface] .col-grip {
+  display: none;
+}
+
 :root[data-surface="orchestrator"] .o-screen {
   padding: 0 10px 10px;
 }

@@ -31,6 +31,16 @@ func TestASurfaceIsATransparentWebViewSharingTheBoardsProcess(t *testing.T) {
 	}
 }
 
+func TestAClickInThePanelReachesItsSurfaceAndOnlyTheEdgeIsTheStrips(t *testing.T) {
+	if !surfaceResult.clickInPanelReachesSurface {
+		t.Fatalf("a click in the middle of the sessions panel does not reach its web view: it lands on %s; the web view's frame is %+v",
+			surfaceResult.clickInPanelLandsOn, surfaceResult.surfaceFrame)
+	}
+	if !surfaceResult.clickOnEdgeReachesStrip {
+		t.Fatal("a click on the sessions panel's edge does not reach the width strip")
+	}
+}
+
 func TestSurfacesCreatedAndDestroyedManyTimesLeaveNothingBehind(t *testing.T) {
 	r := surfaceResult
 	if r.liveAfterChurn != 0 {

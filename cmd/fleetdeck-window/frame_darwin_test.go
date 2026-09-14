@@ -69,6 +69,37 @@ func TestOpaqueModeLeavesNoMaterialBehindTheSurfaces(t *testing.T) {
 	}
 }
 
+func TestTheViewASurfaceGoesIntoFillsItsPanelAndFollowsItsWidth(t *testing.T) {
+	if !frameResult.contentFitsPanel {
+		t.Fatal("the panel's content view is not the panel's size: a surface web view made in it has the wrong size")
+	}
+	if !frameResult.contentFollowsDrag {
+		t.Fatal("the panel's content view kept its width when the panel's edge was dragged")
+	}
+}
+
+func TestAnUnfoldedPanelHasAnEdgeToDragAndAFoldedOneHasNone(t *testing.T) {
+	if !frameResult.stripShown {
+		t.Fatal("the orchestrator panel has no strip at its edge to drag its width")
+	}
+	if !frameResult.stripOfFoldedHidden {
+		t.Fatal("the folded sessions panel shows a strip to drag a width it does not have")
+	}
+}
+
+func TestDraggingThePanelsEdgeChangesItsWidthWithinLimits(t *testing.T) {
+	r := frameResult
+	if r.draggedWidth != 418 {
+		t.Fatalf("after a 50 pt drag right: width = %v, want 418", r.draggedWidth)
+	}
+	if r.clampedWidth != 220 {
+		t.Fatalf("after a drag far past the floor: width = %v, want 220", r.clampedWidth)
+	}
+	if len(r.savedWidths) != 2 || r.savedWidths[0].Orchestrator != 418 || r.savedWidths[1].Orchestrator != 220 {
+		t.Fatalf("widths kept on release = %+v, want 418 then 220", r.savedWidths)
+	}
+}
+
 func TestChangingTheMaterialKeepsWhatIsInsideThePanel(t *testing.T) {
 	if !frameResult.contentKept {
 		t.Fatal("the panel's content view was replaced with its wrapper: the surface web view inside would be lost")

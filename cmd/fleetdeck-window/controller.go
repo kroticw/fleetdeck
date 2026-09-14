@@ -64,6 +64,8 @@ type controller struct {
 	// a surface that has not. tries counts its failed loads in a row.
 	ready map[string]bool
 	tries map[string]int
+	// dragging is the panel whose edge is being dragged, "" when none.
+	dragging string
 }
 
 func newController(baseURL string, widths panelWidths, glass glassMode) *controller {
@@ -221,6 +223,52 @@ func (c *controller) panel(side string, folded bool) []effect {
 	out = append(out, applyGeometry{G: g})
 	out = append(out, c.insets(g)...)
 	return append(out, c.to(side, map[string]any{"type": "folded", "folded": folded})...)
+}
+
+// resizeStart is a press on a panel's edge: the width the drag starts from, or
+// false for a panel with no edge to drag.
+func (c *controller) resizeStart(side string) (float64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.framed || (side != "orchestrator" && side != "sessions") || c.folded(side) {
+		return 0, false
+	}
+	c.dragging = side
+	if side == "sessions" {
+		return c.widths.Sessions, true
+	}
+	return c.widths.Orchestrator, true
+}
+
+// resizeTo is the edge dragged dx points from where it was pressed. The frame
+// follows the pointer; the board is told its insets once, on release: each is a
+// layout of the whole board in its web view, and the glass shows the board
+// under the panel meanwhile.
+func (c *controller) resizeTo(side string, start, dx float64) []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.framed || c.dragging != side {
+		return nil
+	}
+	width := draggedWidth(side, start, dx, c.width)
+	if side == "sessions" {
+		c.widths.Sessions = width
+	} else {
+		c.widths.Orchestrator = width
+	}
+	return []effect{applyGeometry{G: layoutFor(c.width, c.height, c.widths)}}
+}
+
+// resizeEnd is the edge let go: the width is kept, and the board learns it.
+func (c *controller) resizeEnd() []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.dragging == "" {
+		return nil
+	}
+	c.dragging = ""
+	out := []effect{saveWidths{W: c.widths}}
+	return append(out, c.insets(layoutFor(c.width, c.height, c.widths))...)
 }
 
 // theme is the board reporting the theme it cycled to.

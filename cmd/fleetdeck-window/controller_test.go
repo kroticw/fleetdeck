@@ -205,6 +205,41 @@ func TestFoldingSavesTheWidthsAndTellsTheSurface(t *testing.T) {
 	}
 }
 
+func TestDraggingAPanelsEdgeMovesTheFrameAndGivesTheBoardItsInsetsOnRelease(t *testing.T) {
+	c := shown()
+	start, ok := c.resizeStart("orchestrator")
+	if !ok || start != 368 {
+		t.Fatalf("resizeStart = %v, %v; want the panel's width", start, ok)
+	}
+	w := panelWidths{Orchestrator: 408, Sessions: 348}
+	got := c.resizeTo("orchestrator", start, 40)
+	if !reflect.DeepEqual(got, []effect{applyGeometry{G: layoutFor(1512, 982, w)}}) {
+		t.Fatalf("during the drag: %#v; want only the frame laid out again", got)
+	}
+	got = c.resizeEnd()
+	want := []effect{
+		saveWidths{W: w},
+		sendTo{Surface: "board", Message: map[string]any{"type": "insets", "top": 64.0, "left": 434.0, "right": 0.0, "contentRight": 356.0}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("on release: %#v", got)
+	}
+	if got := c.resizeEnd(); len(got) != 0 {
+		t.Fatalf("a release with no drag: %#v, want none", got)
+	}
+}
+
+func TestAFoldedPanelHasNoEdgeToDrag(t *testing.T) {
+	c := shown()
+	c.panel("sessions", true)
+	if _, ok := c.resizeStart("sessions"); ok {
+		t.Fatal("a folded panel is the strip of marks and has no width to drag")
+	}
+	if got := c.resizeTo("sessions", 348, -40); len(got) != 0 {
+		t.Fatalf("a drag on a folded panel: %#v, want none", got)
+	}
+}
+
 func TestAThemeReportedByTheBoardReachesTheOthersAndTheWindow(t *testing.T) {
 	got := shown().theme("dark")
 	want := []effect{
