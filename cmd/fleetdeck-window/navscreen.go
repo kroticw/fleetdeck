@@ -2,7 +2,11 @@
 
 package main
 
-import "time"
+import (
+	"fmt"
+	"html"
+	"time"
+)
 
 // The screen taking WebKit's word about navigations (nav_darwin.go).
 //
@@ -62,18 +66,26 @@ const (
 	// document came -- a panel not listening for a moment -- it is asked for
 	// again: long enough that three tries are not spent within milliseconds.
 	navFailedRetryPause = 250 * time.Millisecond
+
+	// maxProcessLossReloads and processLossReset are WebKit's own bound on
+	// reloading a page whose web content process went away, which setting a
+	// navigation delegate hands to the window (WebPageProxy::
+	// tryReloadAfterProcessTermination): maximumWebProcessRelaunchAttempts, one
+	// reload, and resetRecentCrashCountDelay, the 30 s after a finished load
+	// that clear the count.
+	maxProcessLossReloads = 1
+	processLossReset      = 30 * time.Second
 )
 
 // navSays takes WebKit's word about a navigation. It says whether to ask for
 // the page again now, or the failure page to put up.
 func (s *screen) navSays(e navEvent) (navigate bool, page string) {
 	s.navSeen = true
+	if e.kind == navFinished && e.href != "about:blank" {
+		s.finishedAt = s.time()
+	}
 	if e.kind == navProcessGone && s.showingPanel {
-		// With a navigation delegate set, WebKit leaves the page blank rather
-		// than reload it: NavigationState::NavigationClient::processDidTerminate
-		// reports the termination handled.
-		s.reopen()
-		return true, ""
+		return s.processLost()
 	}
 	if !s.asked {
 		return false, ""
@@ -94,6 +106,57 @@ func (s *screen) navSays(e navEvent) (navigate bool, page string) {
 		return s.failed()
 	}
 	return false, ""
+}
+
+// processLost is the web content process gone under the shown panel. With a
+// navigation delegate set, WebKit leaves the page blank rather than reload it
+// (NavigationState::NavigationClient::processDidTerminate reports the
+// termination handled), so the window asks for the page again -- once, as
+// WebKit would: a second loss within processLossReset of the last finished
+// load puts up a page saying so, rather than reloading a page that takes its
+// process down every time it is shown.
+func (s *screen) processLost() (navigate bool, page string) {
+	if !s.finishedAt.IsZero() && s.time().Sub(s.finishedAt) >= processLossReset {
+		s.processLosses = 0
+	}
+	s.processLosses++
+	if s.processLosses > maxProcessLossReloads {
+		target := s.target()
+		// The button asks afresh, with a reload allowed again.
+		s.processLosses = 0
+		s.cover()
+		return false, processLostPage(target)
+	}
+	s.reopen()
+	return true, ""
+}
+
+// processLostPage says the panel's page at pageURL took its web content process
+// down again right after it was reloaded, and offers to ask for it again.
+func processLostPage(pageURL string) string {
+	return fmt.Sprintf(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fleetdeck</title>
+%s
+</head>
+<body>
+<main>
+  <h1>Страница панели падает</h1>
+  <p>Процесс, который показывает страницу <code>%s</code>, завершился снова вскоре после того, как окно открыло её заново. Окно больше не открывает её само.</p>
+  <button id="again">Открыть снова</button>
+</main>
+<script>
+  const again = document.getElementById("again");
+  again.addEventListener("click", () => {
+    again.disabled = true;
+    again.textContent = "Открываю…";
+    window.%s();
+  });
+</script>
+</body>
+</html>`, pageStyle, html.EscapeString(pageURL), reloadBindingName)
 }
 
 // replaced is a navigation that failed because another took its place -- a page

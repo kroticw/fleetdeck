@@ -56,12 +56,14 @@ func TestANavigationThatFailsBeforeItCommitsIsAskedForAgainAfterAPause(t *testin
 		if navigate, html := s.navSays(refused); navigate || html != "" {
 			t.Fatalf("try %d failed before it committed: navSays = %v, %q; want nothing yet", try, navigate, html)
 		}
+		// Fixed times, not ones worked out from navFailedRetryPause: a test
+		// that derives them passes with no pause at all.
 		failedAt := c.t
-		c.t = failedAt.Add(navFailedRetryPause - pageLoadTick)
+		c.t = failedAt.Add(100 * time.Millisecond)
 		if navigate, html := s.tick(); navigate || html != "" {
-			t.Fatalf("try %d: tick short of the pause = %v, %q; want nothing", try, navigate, html)
+			t.Fatalf("try %d: tick 100 ms after the failure = %v, %q; want nothing yet", try, navigate, html)
 		}
-		c.t = failedAt.Add(navFailedRetryPause)
+		c.t = failedAt.Add(300 * time.Millisecond)
 		if navigate, html := s.tick(); !navigate || html != "" {
 			t.Fatalf("try %d: tick after the pause = %v, %q; want the page asked for again", try, navigate, html)
 		}
@@ -141,6 +143,57 @@ func TestAWebContentProcessGoneUnderAShownPanelAsksForItAgain(t *testing.T) {
 	}
 	if !s.asked || s.tries != 1 {
 		t.Fatalf("after asking again, asked = %v, tries = %d; want a first try", s.asked, s.tries)
+	}
+}
+
+// shown is the panel's page loaded and shown, as WebKit and the page say it.
+func shown(t *testing.T, s *screen) {
+	t.Helper()
+	s.navSays(navEvent{kind: navStarted, href: testURL})
+	s.navSays(navEvent{kind: navCommitted, href: testURL})
+	s.navSays(navEvent{kind: navFinished, href: testURL})
+	s.pageSays(pagePanel, testURL)
+	if !s.showingPanel {
+		t.Fatal("the panel's page is not taken as shown")
+	}
+}
+
+// WebKit reloads a page whose web content process went away once, and gives up
+// on a second loss within 30 s of the last finished load (WebPageProxy::
+// tryReloadAfterProcessTermination, maximumWebProcessRelaunchAttempts,
+// resetRecentCrashCountDelay). The window, which does the reloading now, stops
+// at the same point and says so, rather than reloading a page that takes its
+// process down every time it is shown.
+func TestAWebContentProcessLostAgainSoonAfterAReloadPutsUpTheFailurePage(t *testing.T) {
+	s, c := asked(t)
+	shown(t, s)
+	if navigate, _ := s.navSays(navEvent{kind: navProcessGone}); !navigate {
+		t.Fatal("the first loss of the web content process is not reloaded")
+	}
+	c.t = c.t.Add(time.Second)
+	shown(t, s)
+	c.t = c.t.Add(time.Second)
+	navigate, html := s.navSays(navEvent{kind: navProcessGone})
+	if navigate || pageHeading(html) != "Страница панели падает" {
+		t.Fatalf("a second loss 1 s after the reloaded page loaded: navSays = %v, %q; want the page saying the panel's page keeps going down", navigate, pageHeading(html))
+	}
+	for i := 0; i < 5; i++ {
+		if navigate, html := s.navSays(navEvent{kind: navProcessGone}); navigate || html != "" {
+			t.Fatalf("a further loss with the failure page up: navSays = %v, %q; want nothing", navigate, html)
+		}
+	}
+}
+
+// A loss long after the last one is reloaded again, as WebKit would: its count
+// is reset 30 s after a load finishes.
+func TestAWebContentProcessLostLongAfterTheLastLossIsReloadedAgain(t *testing.T) {
+	s, c := asked(t)
+	shown(t, s)
+	s.navSays(navEvent{kind: navProcessGone})
+	shown(t, s)
+	c.t = c.t.Add(31 * time.Second)
+	if navigate, _ := s.navSays(navEvent{kind: navProcessGone}); !navigate {
+		t.Fatal("a loss 31 s after the reloaded page loaded is not reloaded")
 	}
 }
 

@@ -142,6 +142,10 @@ type screen struct {
 	// retrySoon: the page failed, or loaded broken, and is asked for again once
 	// navFailedRetryPause has gone by.
 	retrySoon bool
+	// processLosses counts the web content process going away under the shown
+	// panel; finishedAt is the last load WebKit finished (navscreen.go).
+	processLosses int
+	finishedAt    time.Time
 	// answering: a panel answers, as the keeper last reported.
 	answering bool
 	// startingUp: the starting page is on screen.
