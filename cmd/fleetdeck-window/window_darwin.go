@@ -3,6 +3,7 @@ package main
 /*
 #cgo LDFLAGS: -framework Cocoa
 #include <stdlib.h>
+#include "capsules_darwin.h"
 #include "window_darwin.h"
 */
 import "C"
@@ -26,10 +27,44 @@ func applyAppearance(choice string) {
 	if choice != "light" && choice != "dark" && standAppearance != "" {
 		choice = standAppearance
 	}
+	// The system's mode, said while the app still has no appearance of its own:
+	// once it has one, AppKit no longer says the system's. A stand checks its
+	// system dark or light by this line.
+	if system := C.GoString(C.fd_window_system_appearance()); system != "" {
+		log.Printf("fleetdeck-window: the system's appearance is %s", system)
+	}
 	c := C.CString(choice)
 	defer C.free(unsafe.Pointer(c))
 	C.fd_window_set_appearance(c)
 	log.Printf("fleetdeck-window: the window is drawn in %s (theme %q)", C.GoString(C.fd_window_effective_appearance()), asked)
+}
+
+// What systemappearance_darwin_test.go reads; Go test files cannot use cgo.
+type systemAppearanceProbe struct {
+	appBefore, appAfter string
+	// withoutOwn and effective are read with the app given no appearance of its
+	// own; withOwn with the app dark.
+	withoutOwn, effective, withOwn string
+}
+
+func probeSystemAppearanceForTest() systemAppearanceProbe {
+	out := systemAppearanceProbe{appBefore: C.GoString(C.fd_test_app_appearance())}
+	set := func(choice string) {
+		c := C.CString(choice)
+		defer C.free(unsafe.Pointer(c))
+		C.fd_window_set_appearance(c)
+	}
+	set("auto")
+	out.withoutOwn = C.GoString(C.fd_window_system_appearance())
+	out.effective = C.GoString(C.fd_window_effective_appearance())
+	set("dark")
+	out.withOwn = C.GoString(C.fd_window_system_appearance())
+
+	before := C.CString(out.appBefore)
+	C.fd_test_set_app_appearance(before)
+	C.free(unsafe.Pointer(before))
+	out.appAfter = C.GoString(C.fd_test_app_appearance())
+	return out
 }
 
 func openExternalURL(url string) {

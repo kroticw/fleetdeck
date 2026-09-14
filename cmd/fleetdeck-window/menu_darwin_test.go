@@ -90,6 +90,7 @@ func TestMain(m *testing.M) {
 	collectBandResults()
 	collectSurfaceResults()
 	collectCapsuleResults()
+	collectSystemAppearanceResults()
 
 	os.Exit(m.Run())
 }
