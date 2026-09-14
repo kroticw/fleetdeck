@@ -107,3 +107,16 @@ func TestAWindowInAStagingDirectoryDoesNotTakeItsOwnBundleForTheInstalledOne(t *
 		t.Fatalf("canonicalBundle with --canonical = %q", got)
 	}
 }
+
+// The new window of an update runs from the staging directory and is told the
+// installed bundle: it updates that, as the window it replaced did. Refusing
+// it -- as the first version of the staged refusal did, seen on the T-057
+// stand -- would take the update button away after every update until the
+// app was next started.
+func TestTheNewWindowOfAnUpdateCanUpdateTheBundleItWasToldOf(t *testing.T) {
+	exe := "/Applications/.fleetdeck-update/fleetdeck.app/Contents/MacOS/fleetdeck-window"
+	how := updateWay(config{exe: exe, version: "v0.9.2", teamID: "TEAM", canonical: "/Applications/fleetdeck.app"})
+	if how.Refusal != "" || how.Source == nil {
+		t.Fatalf("updateWay for the new window of an update = %+v; want a release source", how)
+	}
+}

@@ -287,10 +287,11 @@ func main() {
 	// should anything call it anyway.
 	canonical := canonicalBundle(exe, *toldCanonical)
 	how := updateWay(config{
-		tree:    treeDir,
-		exe:     exe,
-		version: version.String(),
-		teamID:  ownTeamID(exe),
+		tree:      treeDir,
+		exe:       exe,
+		version:   version.String(),
+		teamID:    ownTeamID(exe),
+		canonical: *toldCanonical,
 	})
 	if how.Refusal != "" {
 		log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
