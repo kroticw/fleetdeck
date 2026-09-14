@@ -114,6 +114,9 @@ func main() {
 	// navigation all happen within one second, and whole seconds tell nothing
 	// of which came first or how long each took.
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	// Each step of the start, timed from the process's own start (startupsteps.go).
+	startupStep := startupSteps()
+	startupStep("started")
 	// For a window started by an update, the window that started it.
 	oldWindow := os.Getppid()
 
@@ -190,6 +193,7 @@ func main() {
 	kept := &keeperRun{k: keeper}
 
 	w := webview.New(false)
+	startupStep("the web view is made")
 	defer w.Destroy()
 	w.SetTitle("fleetdeck")
 	w.SetSize(width, height, webview.HintNone)
@@ -232,6 +236,7 @@ func main() {
 		log.Printf("fleetdeck-window: put up the window's page %q for a side surface", pageHeading(page))
 		w.SetHtml(page)
 	})
+	startupStep("the glass frame is made")
 	// show does what the screen says, on the UI thread.
 	show := func(navigate bool, page string) {
 		switch {
@@ -377,6 +382,7 @@ func main() {
 		teamID:    ownTeamID(exe),
 		canonical: *toldCanonical,
 	})
+	startupStep("worked out how this build updates")
 	if how.Refusal != "" {
 		log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
 	}
