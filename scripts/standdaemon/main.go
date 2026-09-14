@@ -35,6 +35,11 @@ const orchestratorShort = "0c7e1a2b"
 // the panel shows it as stopped.
 const stoppedShort = "5e55a0ff"
 
+// silentShort is a session left unanswered inside AskUserQuestion: its
+// transcript's last word is that call, 17 minutes old, and the panel names it
+// in the row's badge, the widest a row gets.
+const silentShort = "5e55a001"
+
 type session struct {
 	Short, Name, State, Tempo, Needs, Detail string
 	// Unreported: the record carries no needs at all, a source that never
@@ -98,6 +103,9 @@ func layout(home, board string) error {
 	if err := os.WriteFile(orchestrator.BriefPath(orchestrator.Paths{Board: board}), brief, 0o644); err != nil {
 		return err
 	}
+	if err := writeSilentTranscript(home); err != nil {
+		return err
+	}
 	keyDir := filepath.Join(home, ".claude", "daemon")
 	if err := os.MkdirAll(keyDir, 0o700); err != nil {
 		return err
@@ -123,6 +131,39 @@ func layout(home, board string) error {
 	return os.WriteFile(filepath.Join(stopped, "state.json"), record, 0o600)
 }
 
+// sessionID is the i-th session's transcript UUID, the name its transcript is
+// found by.
+func sessionID(i int) string {
+	return fmt.Sprintf("%s-0000-4000-8000-%012d", sessions[i].Short, i)
+}
+
+// writeSilentTranscript writes, under home's projects, the transcript of the
+// session left unanswered: one call to AskUserQuestion that never came back.
+func writeSilentTranscript(home string) error {
+	for i, s := range sessions {
+		if s.Short != silentShort {
+			continue
+		}
+		line, err := json.Marshal(map[string]any{
+			"type":      "assistant",
+			"timestamp": time.Now().Add(-17 * time.Minute).UTC().Format(time.RFC3339),
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "tool_use", "id": "call-1", "name": "AskUserQuestion", "input": map[string]any{}}},
+			},
+		})
+		if err != nil {
+			return err
+		}
+		dir := filepath.Join(home, ".claude", "projects", "stand")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, sessionID(i)+".jsonl"), append(line, '\n'), 0o600)
+	}
+	return fmt.Errorf("no session %s to leave unanswered", silentShort)
+}
+
 // listRecords is the list reply's records (docs/protocol/daemon-control-socket.md,
 // section 4), cwd being where every session runs.
 func listRecords(cwd string) (string, error) {
@@ -130,7 +171,7 @@ func listRecords(cwd string) (string, error) {
 	for i, s := range sessions {
 		record := map[string]any{
 			"short":     s.Short,
-			"sessionId": fmt.Sprintf("%s-0000-4000-8000-%012d", s.Short, i),
+			"sessionId": sessionID(i),
 			"name":      s.Name,
 			"state":     s.State,
 			"tempo":     s.Tempo,

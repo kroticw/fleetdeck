@@ -16,6 +16,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/daemon/daemontest"
 	"github.com/kroticw/fleetdeck/internal/jobs"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
+	"github.com/kroticw/fleetdeck/internal/transcript"
 )
 
 func TestTheStandsBoardHasALongTitledCardInEveryStage(t *testing.T) {
@@ -60,6 +61,41 @@ func TestTheStandsOrchestratorHasItsBriefAndItsTerminalAKey(t *testing.T) {
 	t.Setenv("HOME", home)
 	if _, err := daemon.ControlKey(); err != nil {
 		t.Fatalf("the stand's control key: %v", err)
+	}
+}
+
+// A long-named session left unanswered inside AskUserQuestion: its row's badge,
+// "silent inside AskUserQuestion", is the widest a row gets, the one that cut
+// the operator's session names to "fl…". Read back through the panel's own
+// transcript reader, which finds the file by the session's id.
+func TestTheStandsSessionIsLeftUnansweredInsideAQuestion(t *testing.T) {
+	home := t.TempDir()
+	if err := layout(home, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	var silent *session
+	var id string
+	for i := range sessions {
+		if sessions[i].Short == silentShort {
+			silent, id = &sessions[i], sessionID(i)
+		}
+	}
+	if silent == nil || len(silent.Name) <= 60 || silent.Needs != "" || silent.Unreported {
+		t.Fatalf("the silent session %+v: want a name over 60 characters and an empty needs", silent)
+	}
+	path, err := transcript.Locate(filepath.Join(home, ".claude", "projects"), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voice, err := transcript.ReadVoice(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if voice.InCall == nil || voice.InCall.Tool != "AskUserQuestion" {
+		t.Fatalf("the transcript's open call: %+v, want AskUserQuestion", voice.InCall)
+	}
+	if since := time.Since(voice.Unanswered); since < 16*time.Minute {
+		t.Fatalf("unanswered for %v, want past the panel's 16 minutes", since)
 	}
 }
 
