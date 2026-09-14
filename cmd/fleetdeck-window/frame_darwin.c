@@ -16,6 +16,7 @@
 // and the frame's own views pass a click on to the board where they have no
 // subview under it.
 #include "frame_darwin.h"
+#include "nav_darwin.h"
 
 #include "_cgo_export.h"
 
@@ -178,12 +179,18 @@ struct fd_frame {
   id capsules;
   id strips[2];
   char mode[16];
+  // boardObserved: the board took the navigation delegate (nav_darwin.c).
+  int boardObserved;
 };
 
 void *fd_frame_install(void *window) {
   struct fd_frame *f = calloc(1, sizeof *f);
   f->window = (id)window;
   f->board = send0(f->window, sel("contentView"));
+  // WebKit's word about the board's navigations (T-059) is set up here, on the
+  // board itself, while it is known: once the root goes in, the window's
+  // content view is no longer the web view T-059's delegate was looked for in.
+  f->boardObserved = f->board ? fleetdeck_observe_navigation(f->board) : 0;
 
   // The content runs under the title bar, whose buttons float over the
   // orchestrator panel's top corner. Turning the full-size content view on
@@ -334,6 +341,8 @@ void *fd_test_window(double width, double height) {
   sendVoid1(w, sel("setContentView:"), initWithFrame("NSView", Nil, rect));
   return w;
 }
+
+int fd_frame_board_observed(void *frame) { return ((struct fd_frame *)frame)->boardObserved; }
 
 fd_rect fd_test_window_frame(void *window) {
   CGRect r = sendRect0((id)window, sel("frame"));

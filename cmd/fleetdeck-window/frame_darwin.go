@@ -76,6 +76,10 @@ func (f *frame) panelContent(side string) unsafe.Pointer {
 func (f *frame) capsules() unsafe.Pointer { return C.fd_frame_capsules(f.p) }
 func (f *frame) board() unsafe.Pointer    { return C.fd_frame_board(f.p) }
 
+// boardObserved says whether installing the frame set WebKit's navigation
+// delegate on the board; observeBoardNavigation says where its events go.
+func (f *frame) boardObserved() bool { return C.fd_frame_board_observed(f.p) != 0 }
+
 func fdRect(r rect) C.fd_rect {
 	return C.fd_rect{x: C.double(r.X), y: C.double(r.Y), w: C.double(r.W), h: C.double(r.H)}
 }

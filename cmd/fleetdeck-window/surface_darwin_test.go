@@ -33,7 +33,9 @@ func TestASurfaceIsATransparentWebViewSharingTheBoardsProcess(t *testing.T) {
 
 // The frame takes the board out of the window's content view, where T-059's
 // navigation delegate first looked for it: without WebKit's word the board's
-// page would be asked for again on the old short waits.
+// page would be asked for again on the old short waits. The delegate is set by
+// installFrame, the code main.go runs, so a delegate set on anything but the
+// board fails here.
 func TestTheBoardUnderTheFrameStillHasWebKitsWordOnItsNavigations(t *testing.T) {
 	if !surfaceResult.boardObserved {
 		t.Fatal("the board's web view under the glass frame takes no navigation delegate")

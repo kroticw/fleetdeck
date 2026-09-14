@@ -206,7 +206,7 @@ func main() {
 	// What WKWebView says of each navigation, in the log with the time since
 	// the page was asked for: the page's own word begins only with its
 	// document, and a navigation that is slow before that says nothing.
-	observed := observeNavigation(glass.frame.board(), func(e navEvent) {
+	observeBoardNavigation(func(e navEvent) {
 		if scr.asked {
 			log.Printf("fleetdeck-window: navigation %s, %s after the page was asked for", e, time.Since(scr.askedAt).Round(time.Millisecond))
 		} else {
@@ -215,7 +215,7 @@ func main() {
 		// WebKit calls its delegate on the UI thread, where the screen lives.
 		show(scr.navSays(e))
 	})
-	if !observed {
+	if !glass.frame.boardObserved() {
 		log.Printf("fleetdeck-window: the board is not a WKWebView: WebKit will say nothing of its navigations, and the panel's page is asked for again only every %s", navSilentWait)
 	}
 	keeper := &supervisor.Keeper{

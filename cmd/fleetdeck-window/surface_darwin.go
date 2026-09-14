@@ -144,8 +144,9 @@ func probeSurfacesForTest() surfaceProbe {
 	f := installFrame(window)
 	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}))
 	f.setMode(glassModeGlass)
-	// The board moved under the frame is still the web view WebKit reports on.
-	out.boardObserved = observeNavigation(f.board(), func(navEvent) {})
+	// The board moved under the frame is still the web view WebKit reports on:
+	// installing the frame, as the window does, set the delegate on it.
+	out.boardObserved = f.boardObserved()
 	b := newBridge()
 	setSurfaceEvents(func(string, string) {}, func(string, string) bool { return false })
 	surfaceEvents.Lock()

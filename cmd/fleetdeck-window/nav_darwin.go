@@ -9,10 +9,7 @@ package main
 */
 import "C"
 
-import (
-	"fmt"
-	"unsafe"
-)
+import "fmt"
 
 // What WKWebView says of a navigation (nav_darwin.c). The page's own word
 // (pageLoadScript) begins only once its document has, so it cannot tell a
@@ -98,12 +95,11 @@ func fleetdeckNavigationEvent(webView *C.char, kind C.int, id C.uintptr_t, href 
 	}
 }
 
-// observeNavigation has f told of every navigation event of webView, the
-// board's WKWebView (frame.board). It reports false, and nothing is told, when
-// webView is not a WKWebView.
-func observeNavigation(webView unsafe.Pointer, f func(navEvent)) bool {
+// observeBoardNavigation has f told of every navigation event of the board.
+// The delegate itself is set when the frame goes in (installFrame,
+// frame.boardObserved), on the board's web view: the one place that knows it.
+func observeBoardNavigation(f func(navEvent)) {
 	navigationObserver = f
-	return C.fleetdeck_observe_navigation(webView) != 0
 }
 
 // observeSurfaceNavigation has f told of every navigation event of the side

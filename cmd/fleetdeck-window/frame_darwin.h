@@ -31,6 +31,11 @@ void *fd_frame_panel_content(void *frame, int side);
 void *fd_frame_capsules(void *frame);
 void *fd_frame_board(void *frame);
 
+// fd_frame_board_observed says whether fd_frame_install set the navigation
+// delegate on the board (fleetdeck_observe_navigation): 0 when the window's
+// content view was not a WKWebView.
+int fd_frame_board_observed(void *frame);
+
 int fd_glass_available(void);
 int fd_reduce_transparency(void);
 int fd_increase_contrast(void);
