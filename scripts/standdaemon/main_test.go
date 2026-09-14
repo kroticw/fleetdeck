@@ -125,3 +125,18 @@ func TestTheOrchestratorsTerminalShowsLongLinesAndAStatusLine(t *testing.T) {
 		t.Fatalf("the longest line is %d bytes, too short to wrap in the orchestrator panel", longest)
 	}
 }
+
+// The stand with content (scripts/ci-window-stand.sh) starts this daemon and
+// pins, as its fleet's orchestrator, the session whose attach shows the
+// terminal: with any other pin the orchestrator panel says nothing is pinned.
+func TestTheWindowStandStartsThisDaemonAndPinsItsOrchestrator(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "ci-window-stand.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"go build -o \"$stand/standdaemon\" ./scripts/standdaemon", "\"$stand/standdaemon\" -socket", "session: " + orchestratorShort} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("scripts/ci-window-stand.sh lacks %q", want)
+		}
+	}
+}

@@ -19,10 +19,21 @@
 #                    cmd/fleetdeck-window/glasswindow.go). Only a fleet's page reports
 #                    the layout the frame follows; / is the start page, which does not.
 #                    A window from before the frame never says it.
+#             content  frame, on a fleet with something in it: the stand builds
+#                    scripts/standdaemon from this checkout and hands its socket to
+#                    the window, so the board has a card in every stage, the
+#                    sessions panel lists more long-named sessions than it shows,
+#                    one waiting and one stopped, and the orchestrator's terminal
+#                    has long lines and a status line. The panel's snapshot has to
+#                    list the daemon's sessions and the stopped card before the
+#                    screenshot is taken.
+#
+# FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
+# it is drawn in NSAppearanceNameDarkAqua for dark, NSAppearanceNameAqua for light.
 #
 # The stand is the documented one: its own HOME with a configuration naming <port>,
-# and FLEETDECK_STAND_SOCKET naming a socket nothing listens on, so the panel never
-# looks for the fleet daemon. "panel" is what the window's page script reports for a
+# and FLEETDECK_STAND_SOCKET naming the stand's socket -- nothing listens on it but
+# standdaemon, for content -- so the panel never looks for the fleet daemon. "panel" is what the window's page script reports for a
 # page that loaded with its styles and its scripts (pagePanel in
 # cmd/fleetdeck-window/owner.go); a window process that merely stays up is not that.
 #
@@ -38,7 +49,7 @@ set -eu
 . "$(dirname "$0")/stand-capture.sh"
 
 if [ "$#" -ne 4 ] && [ "$#" -ne 5 ]; then
-	echo "usage: $0 <app> <port> <out-dir> <exec|open> [page|frame]" >&2
+	echo "usage: $0 <app> <port> <out-dir> <exec|open> [page|frame|content]" >&2
 	exit 2
 fi
 
@@ -50,7 +61,7 @@ out=$3
 how=$4
 expect=${5:-page}
 case $expect in
-	page | frame) ;;
+	page | frame | content) ;;
 	*)
 		echo "unknown expectation: $expect" >&2
 		exit 2
@@ -60,16 +71,40 @@ esac
 mkdir -p "$out"
 stand=$(mktemp -d)
 mkdir -p "$stand/home/.config/fleetdeck"
-if [ "$expect" = frame ]; then
-	# An empty board is enough: the page reports its layout whatever the board holds.
-	mkdir -p "$stand/board/cards"
-	printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n' "$port" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
-	url="http://127.0.0.1:$port/?fleet=stand"
-else
-	printf 'server:\n  port: %s\n' "$port" >"$stand/home/.config/fleetdeck/config.yaml"
-	url="http://127.0.0.1:$port/"
-fi
 socket="$stand/no-daemon-here.sock"
+daemon=
+case $expect in
+	frame)
+		# An empty board is enough: the page reports its layout whatever the board holds.
+		mkdir -p "$stand/board/cards"
+		printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n' "$port" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
+		url="http://127.0.0.1:$port/?fleet=stand"
+		;;
+	content)
+		# The orchestrator pinned is standdaemon's orchestratorShort, the session
+		# whose attach shows a terminal.
+		mkdir -p "$stand/board"
+		printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n    orchestrator:\n      session: 0c7e1a2b\n' "$port" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
+		url="http://127.0.0.1:$port/?fleet=stand"
+		(cd "$(dirname "$0")/.." && go build -o "$stand/standdaemon" ./scripts/standdaemon)
+		socket="$stand/daemon.sock"
+		"$stand/standdaemon" -socket "$socket" -home "$stand/home" -board "$stand/board" >"$out/standdaemon.log" 2>&1 &
+		daemon=$!
+		for _ in $(seq 20); do
+			[ -S "$socket" ] && break
+			sleep 0.5
+		done
+		if [ ! -S "$socket" ]; then
+			echo "standdaemon did not listen on $socket:"
+			cat "$out/standdaemon.log"
+			exit 1
+		fi
+		;;
+	*)
+		printf 'server:\n  port: %s\n' "$port" >"$stand/home/.config/fleetdeck/config.yaml"
+		url="http://127.0.0.1:$port/"
+		;;
+esac
 window_bin="$app/Contents/MacOS/fleetdeck-window"
 
 case $how in
@@ -112,7 +147,7 @@ for _ in $(seq 60); do
 	kill -0 "$window" 2>/dev/null || break
 	missing=
 	grep -q "the panel's page says \"panel\"" "$out/window.log" 2>/dev/null || missing="the board"
-	if [ "$expect" = frame ]; then
+	if [ "$expect" != page ]; then
 		grep -q "the orchestrator surface's page says \"panel\"" "$out/window.log" 2>/dev/null ||
 			missing="${missing:+$missing, }the orchestrator surface"
 		grep -q "the sessions surface's page says \"panel\"" "$out/window.log" 2>/dev/null ||
@@ -124,6 +159,22 @@ for _ in $(seq 60); do
 	fi
 	sleep 1
 done
+# For content, the panel has to have read the stand's daemon, board and job store
+# before the screenshot: an empty panel in it would look like the defect it is
+# there to show.
+content_shown=yes
+if [ "$expect" = content ]; then
+	content_shown=no
+	for _ in $(seq 30); do
+		if curl --silent --fail --output "$out/snapshot.json" "http://127.0.0.1:$port/api/snapshot?fleet=stand" &&
+			[ "$(plutil -extract sessions raw -o - "$out/snapshot.json" 2>/dev/null || echo 0)" -ge 8 ] &&
+			[ "$(plutil -extract stoppedCards raw -o - "$out/snapshot.json" 2>/dev/null || echo 0)" -ge 1 ]; then
+			content_shown=yes
+			break
+		fi
+		sleep 1
+	done
+fi
 # The screenshot comes after every page said so: for frame, it is the frame's.
 sleep 3
 capture_screen "$out/window.png"
@@ -133,6 +184,7 @@ if kill -0 "$window" 2>/dev/null; then
 fi
 curl --silent --show-error --output /dev/null --write-out 'panel answered HTTP %{http_code}\n' "$url" || true
 kill "$window" 2>/dev/null || true
+[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 # A process open started is not this shell's child, so wait cannot reap it.
 for _ in $(seq 10); do
 	kill -0 "$window" 2>/dev/null || break
@@ -163,5 +215,13 @@ if [ "$loaded" = no ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
 	fi
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery"
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ]
+# The appearance the stand asked for, as AppKit reports the window drawn
+# (window_darwin.go).
+appearance=yes
+case ${FLEETDECK_STAND_APPEARANCE:-} in
+	dark) grep -q 'the window is drawn in NSAppearanceNameDarkAqua' "$out/window.log" || appearance=no ;;
+	light) grep -q 'the window is drawn in NSAppearanceNameAqua ' "$out/window.log" || appearance=no ;;
+esac
+
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance"
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$appearance" = yes ]
