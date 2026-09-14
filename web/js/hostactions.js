@@ -36,7 +36,10 @@ export function wireHostActions(win, host, targets) {
         targets.applyTheme(message.choice);
         return;
       case "insets":
-        targets.setInsets({ top: message.top, left: message.left, right: message.right });
+        // right is what the board scrolls clear of (nothing: it runs on under the
+        // sessions glass); contentRight is what a sheet or the documents keep
+        // clear of, the sessions panel itself.
+        targets.setInsets({ top: message.top, left: message.left, right: message.right, contentRight: message.contentRight });
         return;
       case "glass":
         targets.setGlass(message.glass);

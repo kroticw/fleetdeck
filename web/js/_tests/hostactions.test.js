@@ -52,10 +52,10 @@ test("the board cycles the theme and reports the result to the window", () => {
 
 test("the board keeps clear of the panels by the insets the window sends", () => {
   const { send, calls } = setup("board");
-  send({ type: "insets", top: 64, left: 394, right: 356 });
+  send({ type: "insets", top: 64, left: 394, right: 0, contentRight: 356 });
   send({ type: "show", section: "docs" });
   send({ type: "newCard" });
-  assert.deepEqual(calls, [["setInsets", { top: 64, left: 394, right: 356 }], ["showSection", "docs"], ["openNewCard"]]);
+  assert.deepEqual(calls, [["setInsets", { top: 64, left: 394, right: 0, contentRight: 356 }], ["showSection", "docs"], ["openNewCard"]]);
 });
 
 test("a side surface ignores what only the board handles", () => {

@@ -185,7 +185,7 @@ if (headerParts.length > 0) {
 }
 // One web view checks the build: in the window, the board. Its reload is the
 // window's, which reloads all three, and its reload ceiling stays in one place.
-if (center) renderBuildBanner(document.getElementById("build-banner"), subscribe);
+if (regions.has("build")) renderBuildBanner(document.getElementById("build-banner"), subscribe);
 if (regions.has("center")) renderBoard(document.getElementById("board"), cardPanel.open);
 if (regions.has("orchestrator")) {
   renderOrchestrator(document.getElementById("orchestrator"), { links: { resolve: terminalLinks.resolve, open: routes.openCard } });
@@ -276,7 +276,8 @@ if (host) {
     },
     applyTheme,
     setInsets: (insets) => {
-      for (const side of ["top", "left", "right"]) page.style.setProperty(`--host-inset-${side}`, `${insets[side]}px`);
+      const names = { top: "top", left: "left", right: "right", contentRight: "content-right" };
+      for (const [key, name] of Object.entries(names)) page.style.setProperty(`--host-inset-${name}`, `${insets[key]}px`);
     },
     setGlass: (glass) => {
       page.dataset.glass = glass;

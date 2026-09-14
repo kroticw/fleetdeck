@@ -7,11 +7,20 @@ import assert from "node:assert/strict";
 import { regionsFor, layoutReport } from "../surfaces.js";
 
 test("without a host every region is mounted, as in a browser tab", () => {
-  assert.deepEqual([...regionsFor(null)].sort(), ["center", "header", "orchestrator", "sessions"]);
+  assert.deepEqual([...regionsFor(null)].sort(), ["build", "center", "header", "orchestrator", "sessions"]);
 });
 
-test("the board surface mounts the centre column only", () => {
-  assert.deepEqual([...regionsFor({ surface: "board", glass: "glass" })], ["center"]);
+test("the board surface mounts the centre column and checks the build", () => {
+  assert.deepEqual([...regionsFor({ surface: "board", glass: "glass" })].sort(), ["build", "center"]);
+});
+
+// A side surface told the build changed must not reload on its own or count a
+// reload attempt in its storage: the board's reload is the window's, which
+// reloads all three, and the ceiling on attempts lives in the board's storage.
+test("a side surface does not check the build", () => {
+  for (const surface of ["orchestrator", "sessions"]) {
+    assert.equal(regionsFor({ surface, glass: "glass" }).has("build"), false, surface);
+  }
 });
 
 test("the orchestrator surface mounts its column and the brand row", () => {
