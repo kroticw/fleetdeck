@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The new window removes the bundle swapped out, beside the installed app --
@@ -116,4 +117,80 @@ func TestABundleSwappedOutThatIsASymlinkIsNotRemoved(t *testing.T) {
 	r.mustExist(r.staged)
 	r.mustExist(PanelIn(r.canonical))
 	r.mustHaveSaid("symlink")
+}
+
+// The old window gone is not the lock free: a second window or a terminal may
+// have started an update of the same app, into the same staging directory. The
+// bundle stays until the lock is free.
+func TestTheBundleSwappedOutWaitsForTheLockEvenOnceTheOldWindowHasQuit(t *testing.T) {
+	r := newRetireRig(t)
+	lock := filepath.Join(t.TempDir(), "update.lock")
+	release, err := Acquire(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	said := make(chan string, 16)
+	tk := &Takeover{
+		Staged:        r.staged,
+		Canonical:     r.canonical,
+		LockPath:      lock,
+		OldWindowGone: func() bool { return true },
+		RetireWait:    10 * time.Second,
+		Logf: func(format string, args ...any) {
+			select {
+			case said <- fmt.Sprintf(format, args...):
+			default:
+			}
+		},
+	}
+	done := make(chan struct{})
+	go func() { tk.retire(context.Background()); close(done) }()
+
+	for waiting := false; !waiting; {
+		select {
+		case line := <-said:
+			waiting = strings.Contains(line, "waiting")
+		case <-done:
+			t.Fatal("retire returned while another holder had the update lock")
+		case <-time.After(10 * time.Second):
+			t.Fatal("retire neither waited for the lock nor returned within 10s")
+		}
+	}
+	r.mustExist(r.staged)
+
+	release()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("retire did not end within 10s of the lock being let go")
+	}
+	if _, err := os.Stat(r.staged); !os.IsNotExist(err) {
+		t.Fatalf("the bundle swapped out is still there once the lock was free: %v", err)
+	}
+	r.mustExist(r.canonical)
+}
+
+// An installed app that is a symlink into its own staging directory resolves
+// to the very bundle in that directory, so the check that Staged is the bundle
+// in the installed app's staging directory passes. Only the check that Staged
+// is not the installed app refuses -- and without it the removal takes what
+// the installed app points at.
+func TestAnInstalledAppThatIsASymlinkIntoItsStagingDirectoryIsNotRemoved(t *testing.T) {
+	apps := t.TempDir()
+	canonical := filepath.Join(apps, BundleName)
+	staged := filepath.Join(StagingDir(canonical), BundleName)
+	if err := os.MkdirAll(filepath.Dir(PanelIn(staged)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(PanelIn(staged), []byte("the installed app, through its symlink"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(staged, canonical); err != nil {
+		t.Fatal(err)
+	}
+	r := &retireRig{t: t, canonical: canonical, staged: staged}
+	r.retire(staged, canonical)
+	r.mustExist(PanelIn(canonical))
+	r.mustHaveSaid("installed")
 }
