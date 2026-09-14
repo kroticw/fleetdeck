@@ -176,7 +176,10 @@ func main() {
 	// web views and the capsules, up while the board's page is a panel page.
 	// Its bindings are bound here, before the first navigation.
 	glass := newGlassWindow(w, *url, func() {
-		scr.reopen()
+		if !scr.reload() {
+			log.Printf("fleetdeck-window: a reload over the window's own page asks for nothing")
+			return
+		}
 		log.Printf("fleetdeck-window: asked for the panel's page again at %s, with every web view", scr.target())
 		w.Navigate(scr.target())
 	}, func(page string) {

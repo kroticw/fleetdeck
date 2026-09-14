@@ -260,6 +260,23 @@ func (s *screen) reopen() {
 	s.ask()
 }
 
+// reload is a person's reload of the board -- Cmd+R, Reload in the menu. It
+// says whether to navigate: the panel's page is asked for again, as a first
+// try, only where the screen would ask for it itself -- a panel answering and
+// no handover still restarting it. Over the window's own pages it does
+// nothing: the starting page is replaced when the panel answers, the handover
+// page when the handover is done, and the keeper's failure page has its own
+// button to start the panel, which a reload should not become a second way to
+// press. The page saying the panel's page did not load is shown with a panel
+// answering, and a reload asks again there, as its button does.
+func (s *screen) reload() bool {
+	if !s.answering || (s.takingOver && !s.handed) {
+		return false
+	}
+	s.reopen()
+	return true
+}
+
 // pageSays takes the panel's page's word about itself, and the address it
 // said it from.
 func (s *screen) pageSays(state, href string) {
