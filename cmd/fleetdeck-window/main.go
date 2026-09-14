@@ -179,6 +179,9 @@ func main() {
 			log.Printf("fleetdeck-window: asked for the panel's page at %s (try %d)", scr.target(), scr.tries)
 			w.Navigate(scr.target())
 		case page != "":
+			// In the log by its heading: a page of the window's put up over a
+			// web view that never draws it looks, from outside, like none.
+			log.Printf("fleetdeck-window: put up the window's page %q", pageHeading(page))
 			w.SetHtml(page)
 		}
 	}

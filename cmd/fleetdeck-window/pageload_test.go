@@ -303,3 +303,15 @@ func TestThePageFailurePageNamesTheWaitThatRanOut(t *testing.T) {
 	}
 	t.Fatal("no failure page after pageLoadTries stalled loads")
 }
+
+// A page of the window's is named in the log by its heading: on a runner a
+// window asked three times for the panel's page and then showed nothing for a
+// minute, and whether the failure page had been put up the log could not say.
+func TestTheWindowsOwnPagesAreNamedByTheirHeading(t *testing.T) {
+	if got := pageHeading(pageFailedPage(testURL, pageLoadWait)); got != "Страница панели не загрузилась" {
+		t.Fatalf("pageHeading(the failure page) = %q", got)
+	}
+	if got := pageHeading(blankPage); got != "" {
+		t.Fatalf("pageHeading(a page with no heading) = %q, want empty", got)
+	}
+}

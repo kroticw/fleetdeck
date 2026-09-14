@@ -401,6 +401,17 @@ func pageLoadScript(panelURL string) string {
 // white flash in between.
 const blankPage = `<!doctype html><html><head><meta charset="utf-8"><title>fleetdeck</title></head><body style="margin:0;background:#14161a"></body></html>`
 
+// pageHeading is what a page of the window's says first, as it is written in
+// the page, for the log; empty for a page with no heading.
+func pageHeading(page string) string {
+	_, rest, ok := strings.Cut(page, "<h1>")
+	if !ok {
+		return ""
+	}
+	heading, _, _ := strings.Cut(rest, "</h1>")
+	return heading
+}
+
 const pageStyle = `<style>
   html, body { height: 100%; margin: 0; }
   body {
