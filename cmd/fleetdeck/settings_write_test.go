@@ -110,3 +110,42 @@ func TestSavingSettingsThatDidNotExistMakesThemOwnerOnly(t *testing.T) {
 		t.Fatalf("new settings mode: %v (%v), want 0600", info.Mode().Perm(), err)
 	}
 }
+
+// A dotfiles symlink can point at settings that do not exist yet -- a fresh
+// clone, a machine being set up -- and, as dotfiles links usually do, by a path
+// relative to the link. Saving writes the settings where the link points and
+// keeps the link.
+func TestSavingSettingsThroughASymlinkToSettingsNotYetWrittenKeepsTheSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "dotfiles"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	claude := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claude, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(claude, "settings.json")
+	relative := filepath.Join("..", "dotfiles", "claude-settings.json")
+	if err := os.Symlink(relative, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := saveSettings(link, map[string]any{"model": "sonnet"}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings.json is no longer a symlink after saving (%v, %v)", info, err)
+	}
+	if got, _ := os.Readlink(link); got != relative {
+		t.Fatalf("the symlink points at %q, want %q", got, relative)
+	}
+	target := filepath.Join(dir, "dotfiles", "claude-settings.json")
+	raw, err := os.ReadFile(target)
+	if err != nil || string(raw) != "{\n  \"model\": \"sonnet\"\n}\n" {
+		t.Fatalf("the symlink's target holds %q (%v) after saving", raw, err)
+	}
+	if info, err := os.Stat(target); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("new settings mode through the symlink: %v (%v), want 0600", info, err)
+	}
+}

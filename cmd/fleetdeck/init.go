@@ -461,6 +461,36 @@ func loadSettings(settingsPath string) (settings map[string]any, reformatted boo
 	return settings, reformatted, nil
 }
 
+// maxSymlinkHops bounds following symlinks by hand, as the system bounds it.
+const maxSymlinkHops = 40
+
+// notYetWritten is where settings that do not exist yet are to be written:
+// path itself, or, when path is a symlink -- a chain of them -- the path the
+// last one points at, a relative target taken from its symlink's directory.
+func notYetWritten(path string) (string, error) {
+	for range maxSymlinkHops {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		dest, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(dest) {
+			dest = filepath.Join(filepath.Dir(path), dest)
+		}
+		path = dest
+	}
+	return "", fmt.Errorf("%s: more than %d symlinks deep", path, maxSymlinkHops)
+}
+
 // settingsWritten is called once the new settings are written and before they
 // take the place of the old ones: a test's look at that moment.
 var settingsWritten = func(_ string) {}
@@ -476,20 +506,28 @@ var settingsWritten = func(_ string) {}
 // A settings file kept in a dotfiles repository is a symlink to it, and a
 // rename over the symlink would replace it with a plain file, quietly cutting
 // the settings off from that repository. So the write goes to where the symlink
-// points, and the symlink stays. The file keeps its permissions; settings that
-// did not exist are created 0600, as they always were.
+// points, and the symlink stays -- a symlink to settings not written yet too.
+// The file keeps its permissions; settings that did not exist are created
+// 0600, as they always were.
 func saveSettings(settingsPath string, settings map[string]any) error {
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)
 	}
-	target, mode := settingsPath, os.FileMode(0o600)
-	if resolved, err := filepath.EvalSymlinks(settingsPath); err == nil {
+	var target string
+	mode := os.FileMode(0o600)
+	resolved, err := filepath.EvalSymlinks(settingsPath)
+	switch {
+	case err == nil:
 		target = resolved
 		if info, err := os.Stat(target); err == nil {
 			mode = info.Mode().Perm()
 		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	case errors.Is(err, fs.ErrNotExist):
+		if target, err = notYetWritten(settingsPath); err != nil {
+			return fmt.Errorf("resolve settings %s: %w", settingsPath, err)
+		}
+	default:
 		return fmt.Errorf("resolve settings %s: %w", settingsPath, err)
 	}
 	dir := filepath.Dir(target)
