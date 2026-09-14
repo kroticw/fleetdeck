@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/state"
 )
@@ -9,7 +11,7 @@ import (
 // so the filtering below is testable without macOS, which is the only thing the real
 // notifier can talk to.
 type banner interface {
-	Fire(key, title, text string) error
+	Fire(ctx context.Context, key, title, text string) error
 	Clear(key string)
 }
 
@@ -53,7 +55,7 @@ func ruleEnabled(n config.NotifyConfig, kind string) bool {
 // A failed banner is reported through onError and does not stop the ones after it:
 // osascript can fail for reasons that have nothing to do with the next banner, and
 // the panel's own counters are the reliable channel either way.
-func deliver(n banner, cfg config.NotifyConfig, fire []state.Event, cleared []string, onError func(error)) {
+func deliver(ctx context.Context, n banner, cfg config.NotifyConfig, fire []state.Event, cleared []string, onError func(error)) {
 	for _, key := range cleared {
 		n.Clear(key)
 	}
@@ -61,7 +63,7 @@ func deliver(n banner, cfg config.NotifyConfig, fire []state.Event, cleared []st
 		if !ruleEnabled(cfg, e.Kind) {
 			continue
 		}
-		if err := n.Fire(e.Key, e.Title, e.Text); err != nil {
+		if err := n.Fire(ctx, e.Key, e.Title, e.Text); err != nil {
 			onError(err)
 		}
 	}

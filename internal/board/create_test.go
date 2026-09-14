@@ -2,6 +2,7 @@ package board
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,47 @@ func TestCreateCardTransliteratesACyrillicTitleIntoTheFileName(t *testing.T) {
 	c, _ := ParseCard(path)
 	if c.Title != "fleetdeck: рабочая папка, доска и щётки" {
 		t.Fatalf("the title itself stays as written: %q", c.Title)
+	}
+}
+
+// A card being written is not on the board until it is whole. A panel can be
+// stopped at any moment -- an update stops the panel it replaces, with SIGKILL
+// if it does not go at once -- and a card cut off half-written would be a
+// broken card on the board, taken for one by everything that reads it.
+func TestACardIsNotOnTheBoardUntilItIsWhole(t *testing.T) {
+	dir := emptyBoard(t)
+	var early []string
+	beforeCardInPlace = func(path string) {
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			early = append(early, "at its name "+path)
+		}
+		if cards, err := Scan(dir); err == nil && len(cards) > 0 {
+			early = append(early, "to a scan of the board")
+		}
+	}
+	t.Cleanup(func() { beforeCardInPlace = func(string) {} })
+
+	path, err := CreateCard(dir, "Whole", "planned", createDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(early) > 0 {
+		t.Fatalf("the card was visible before it was whole: %v", early)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), "# Whole") {
+		t.Fatalf("the card at %s holds %q (%v)", path, raw, err)
+	}
+	entries, err := os.ReadDir(CardsDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("the cards directory holds %v; want the card alone, nothing left of its writing", names)
 	}
 }
 

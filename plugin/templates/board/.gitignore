@@ -5,3 +5,5 @@
 __pycache__/
 *.pyc
 .DS_Store
+# A card write cut off by a kill; the panel clears these at its next card.
+.*.tmp-*

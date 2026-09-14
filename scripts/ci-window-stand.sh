@@ -21,7 +21,13 @@
 # Everything it saw goes to <out-dir>. It exits 0 only when the page said "panel",
 # the window was still running when asked, and the panel's log says it looks for no
 # daemon.
+#
+# Its screenshot is the whole screen, so it is taken on GitHub Actions only
+# (scripts/stand-capture.sh): on a person's Mac it would be everything they have open.
 set -eu
+
+# shellcheck source=scripts/stand-capture.sh
+. "$(dirname "$0")/stand-capture.sh"
 
 if [ "$#" -ne 4 ]; then
 	echo "usage: $0 <app> <port> <out-dir> <exec|open>" >&2
@@ -86,7 +92,7 @@ for _ in $(seq 60); do
 	sleep 1
 done
 sleep 3
-screencapture -x "$out/window.png" || echo "no screenshot, status $?"
+capture_screen "$out/window.png"
 alive=no
 if kill -0 "$window" 2>/dev/null; then
 	alive=yes

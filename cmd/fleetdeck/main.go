@@ -96,6 +96,11 @@ func newPanel(collect func(context.Context) state.Snapshot, b banner, cfg config
 // a timer, so its callback can still fire while the process is shutting down, and a
 // cycle started then would be collecting from sources that are being torn down and
 // raising banners about a fleet nobody is watching any more.
+//
+// A cycle whose ctx ends while it collects publishes and delivers nothing
+// either: what it collected is half a fleet -- a keychain lookup cancelled
+// reads as a failed sign-in -- and a banner sent then would fail with osascript
+// cancelled too. The last whole snapshot stays.
 func (p *panel) refresh(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
@@ -104,6 +109,9 @@ func (p *panel) refresh(ctx context.Context) {
 	defer p.cycleMu.Unlock()
 
 	next := p.collect(ctx)
+	if ctx.Err() != nil {
+		return
+	}
 
 	p.snapMu.Lock()
 	prev := p.snap
@@ -111,7 +119,7 @@ func (p *panel) refresh(ctx context.Context) {
 	p.snapMu.Unlock()
 
 	fire, cleared := state.Diff(prev, next, p.notifyCfg.SilenceAfter)
-	deliver(p.banners, p.notifyCfg, fire, cleared, p.onNotifyFail)
+	deliver(ctx, p.banners, p.notifyCfg, fire, cleared, p.onNotifyFail)
 }
 
 // snapshot is what server.Deps.Snapshot hands out: the last cycle's result, already
@@ -436,10 +444,12 @@ func serve(parent context.Context, o runOpts) error {
 	}
 
 	var handler switchHandler
+	quiet := &quietConns{}
 	srv := &http.Server{
 		Handler:           &handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
+		ConnState:         quiet.track,
 	}
 	serveErr := make(chan error, 1)
 	startServing := func(what string) {
@@ -458,10 +468,10 @@ func serve(parent context.Context, o runOpts) error {
 		case err := <-serveErr:
 			return err
 		case <-ctx.Done():
-			return shutdown(srv)
+			return shutdown(srv, quiet)
 		}
 		if cfg, err = config.Load(o.configPath); err != nil {
-			_ = shutdown(srv)
+			_ = shutdown(srv, quiet)
 			return err
 		}
 		log.Printf("fleetdeck: set up with the board at %s", cfg.BoardPath)
@@ -528,7 +538,7 @@ func serve(parent context.Context, o runOpts) error {
 	// the server is draining.
 	stop()
 	wg.Wait()
-	return shutdown(srv)
+	return shutdown(srv, quiet)
 }
 
 // servingLine is the log line a panel starts serving with. It names the binary
@@ -544,7 +554,9 @@ func servingLine(ver, what, addr, exe string) string {
 	return line
 }
 
-func shutdown(srv *http.Server) error {
+func shutdown(srv *http.Server, quiet *quietConns) error {
+	// A connection that has asked for nothing is not work to wait for (conns.go).
+	quiet.closeAll()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

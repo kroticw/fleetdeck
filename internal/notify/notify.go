@@ -4,6 +4,7 @@
 package notify
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -11,25 +12,25 @@ import (
 )
 
 type Notifier struct {
-	send func(title, text string) error
+	send func(ctx context.Context, title, text string) error
 
 	mu   sync.Mutex
 	seen map[string]bool
 }
 
-func New(send func(title, text string) error) *Notifier {
+func New(send func(ctx context.Context, title, text string) error) *Notifier {
 	return &Notifier{send: send, seen: map[string]bool{}}
 }
 
 // Fire delivers a banner the first time a key appears. A key is an event, not a
 // state: while a session stands waiting, one banner is enough.
-func (n *Notifier) Fire(key, title, text string) error {
+func (n *Notifier) Fire(ctx context.Context, key, title, text string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.seen[key] {
 		return nil
 	}
-	if err := n.send(title, text); err != nil {
+	if err := n.send(ctx, title, text); err != nil {
 		return fmt.Errorf("send banner %s: %w", key, err)
 	}
 	n.seen[key] = true
@@ -59,9 +60,13 @@ func escapeAppleScriptString(s string) string {
 // mean reading an undocumented private database. Treat a nil error as "the
 // command did not fail", never as "the person saw it" — the panel's own
 // counters, which do not depend on any of this, are the reliable channel.
-func OSAScriptSend(title, text string) error {
+//
+// osascript ends when ctx does: a panel told to stop waits for the cycle that
+// raises its banners, and an update gives the panel it replaces no time to
+// wait (T-060).
+func OSAScriptSend(ctx context.Context, title, text string) error {
 	script := fmt.Sprintf(`display notification "%s" with title "%s"`, escapeAppleScriptString(text), escapeAppleScriptString(title))
-	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput(); err != nil {
 		return fmt.Errorf("osascript: %s", strings.TrimSpace(string(out)))
 	}
 	return nil

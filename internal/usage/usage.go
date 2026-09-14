@@ -45,7 +45,7 @@ type Limits struct {
 }
 
 type Fetcher struct {
-	token    func() (string, error)
+	token    func(context.Context) (string, error)
 	endpoint string
 	ttl      time.Duration
 
@@ -54,7 +54,7 @@ type Fetcher struct {
 	at     time.Time
 }
 
-func NewFetcher(token func() (string, error), endpoint string, ttl time.Duration) *Fetcher {
+func NewFetcher(token func(context.Context) (string, error), endpoint string, ttl time.Duration) *Fetcher {
 	return &Fetcher{token: token, endpoint: endpoint, ttl: ttl}
 }
 
@@ -77,7 +77,7 @@ func (f *Fetcher) Limits(ctx context.Context) (Limits, error) {
 	}
 	f.mu.Unlock()
 
-	tok, err := f.token()
+	tok, err := f.token(ctx)
 	if err != nil {
 		return f.staleCache(), err
 	}

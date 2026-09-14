@@ -124,6 +124,45 @@ func TestRefreshDoesNothingOnceTheContextIsDone(t *testing.T) {
 	}
 }
 
+// A cycle the panel is told to stop in the middle of has collected half a
+// fleet: its keychain lookup cancelled reads as a failed sign-in, and a banner
+// sent then fails because osascript is cancelled too. Such a cycle publishes
+// nothing and delivers nothing.
+func TestACycleCancelledWhileCollectingPublishesAndDeliversNothing(t *testing.T) {
+	first := state.Snapshot{At: time.Now()}
+	halfway := state.Snapshot{
+		At:       time.Now(),
+		Sessions: []state.SessionView{{Session: daemon.Session{Short: "a", State: "failed"}}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var collected int
+	var failures []error
+	rec := &recorder{}
+	p := newPanel(func(context.Context) state.Snapshot {
+		collected++
+		if collected == 1 {
+			return first
+		}
+		cancel()
+		return halfway
+	}, rec, config.Default().Notify, func(err error) { failures = append(failures, err) })
+
+	p.refresh(ctx)
+	p.refresh(ctx)
+
+	if collected != 2 {
+		t.Fatalf("%d cycles collected, want 2", collected)
+	}
+	if got := p.snapshot(); len(got.Sessions) != 0 {
+		t.Fatal("the panel published the snapshot of a cycle cancelled while collecting")
+	}
+	if len(rec.fired) != 0 || len(rec.cleared) != 0 || len(failures) != 0 {
+		t.Fatalf("a cycle cancelled while collecting delivered: fired %v, cleared %v, failures %v", rec.fired, rec.cleared, failures)
+	}
+}
+
 // TestPollCollectsBeforeTheFirstTick pins that the panel does not serve an empty
 // snapshot for a whole poll interval after startup. An empty snapshot with a zero At
 // is indistinguishable from an empty fleet to the browser.
