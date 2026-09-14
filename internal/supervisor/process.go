@@ -99,13 +99,12 @@ func (p *Panel) Stop(grace time.Duration) error {
 // WaitAnswer waits until something answers HTTP at url, whatever the status:
 // any answer means the panel is up and listening. It gives up when ctx does.
 func WaitAnswer(ctx context.Context, url string) error {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return err
 		}
-		if resp, err := client.Do(req); err == nil {
+		if resp, err := panelClient.Do(req); err == nil {
 			_ = resp.Body.Close()
 			return nil
 		}

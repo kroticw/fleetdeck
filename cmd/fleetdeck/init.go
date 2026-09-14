@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/workspace"
@@ -461,16 +462,122 @@ func loadSettings(settingsPath string) (settings map[string]any, reformatted boo
 	return settings, reformatted, nil
 }
 
+// maxSymlinkHops bounds following symlinks by hand, as the system bounds it.
+const maxSymlinkHops = 40
+
+// notYetWritten is where settings that do not exist yet are to be written:
+// path itself, or, when path is a symlink -- a chain of them -- the path the
+// last one points at, a relative target taken from its symlink's directory.
+func notYetWritten(path string) (string, error) {
+	for range maxSymlinkHops {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		dest, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(dest) {
+			dest = filepath.Join(filepath.Dir(path), dest)
+		}
+		path = dest
+	}
+	return "", fmt.Errorf("%s: more than %d symlinks deep", path, maxSymlinkHops)
+}
+
+// settingsLeftoverAge is how old a settings temp file is before it is taken for
+// one a killed write left behind. Writing the settings takes milliseconds.
+const settingsLeftoverAge = time.Minute
+
+// clearSettingsLeftovers removes from dir the temp files of writes of the
+// settings at target that a kill cut off (T-060), once settingsLeftoverAge old.
+// A younger one may belong to a write still in progress, and stays.
+func clearSettingsLeftovers(dir, target string) {
+	prefix := "." + filepath.Base(target) + ".tmp-"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), prefix) || !e.Type().IsRegular() {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) >= settingsLeftoverAge {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// settingsWritten is called once the new settings are written and before they
+// take the place of the old ones: a test's look at that moment.
+var settingsWritten = func(_ string) {}
+
+// saveSettings writes settings to settingsPath whole or not at all.
+//
+// The file is Claude Code's own, shared by every session on the machine, and a
+// panel can be stopped at any moment -- an update stops the panel it replaces,
+// with SIGKILL if it does not go at once (T-060) -- so the new settings are
+// written beside the file, synced, and renamed over it: until the rename the
+// old settings stay whole.
+//
+// A settings file kept in a dotfiles repository is a symlink to it, and a
+// rename over the symlink would replace it with a plain file, quietly cutting
+// the settings off from that repository. So the write goes to where the symlink
+// points, and the symlink stays -- a symlink to settings not written yet too.
+// The file keeps its permissions; settings that did not exist are created
+// 0600, as they always were.
 func saveSettings(settingsPath string, settings map[string]any) error {
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+	var target string
+	mode := os.FileMode(0o600)
+	resolved, err := filepath.EvalSymlinks(settingsPath)
+	switch {
+	case err == nil:
+		target = resolved
+		if info, err := os.Stat(target); err == nil {
+			mode = info.Mode().Perm()
+		}
+	case errors.Is(err, fs.ErrNotExist):
+		if target, err = notYetWritten(settingsPath); err != nil {
+			return fmt.Errorf("resolve settings %s: %w", settingsPath, err)
+		}
+	default:
+		return fmt.Errorf("resolve settings %s: %w", settingsPath, err)
+	}
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create settings dir: %w", err)
 	}
-	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o600); err != nil {
+	clearSettingsLeftovers(dir, target)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(target)+".tmp-*")
+	if err != nil {
 		return fmt.Errorf("write settings: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	_, werr := tmp.Write(append(out, '\n'))
+	merr := tmp.Chmod(mode)
+	serr := tmp.Sync()
+	cerr := tmp.Close()
+	if werr != nil || merr != nil || serr != nil || cerr != nil {
+		return fmt.Errorf("write settings: %w", errors.Join(werr, merr, serr, cerr))
+	}
+	settingsWritten(target)
+	if err := os.Rename(tmp.Name(), target); err != nil {
+		return fmt.Errorf("write settings: %w", err)
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 	return nil
 }

@@ -89,6 +89,19 @@ type PanelBuild struct {
 // cmd/fleetdeck, 5 s) and one second more.
 const stopGrace = 6 * time.Second
 
+// handoverStopGrace is how long the panel a restart replaces is given to go on
+// SIGTERM before it is killed. Restart is an update's: the panel it replaces is
+// the one the new window started from the staging directory a moment earlier,
+// and the old window gives the whole handover 2.436 s, a deadline written into
+// the version already installed that no new version can change (T-060). A
+// panel told to stop cancels its collect cycle and goes -- 2-5 ms after SIGTERM,
+// measured on a stand with a HOME at the operator's scale -- so 300 ms is far
+// more than it needs, and leaves the handover most of its deadline. SIGKILL is
+// safe there: a panel writes nothing without a request, and every write a
+// request makes is whole or not at all (docs/engineering/window-and-panel.md,
+// "Stopping the staged panel").
+const handoverStopGrace = 300 * time.Millisecond
+
 // Keeper makes sure a panel answers at URL, and when none does, starts the
 // panel at Bin. This is what the launch agent did before the window took the
 // panel over: it started the panel, and launchd's KeepAlive started it again
@@ -434,7 +447,7 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 		return true
 	case bin := <-k.restartTo:
 		k.setBin(bin)
-		_ = p.Stop(stopGrace)
+		_ = p.Stop(handoverStopGrace)
 		return true
 	case <-p.Exited():
 		return k.afterExit(ctx, p, started, true)
@@ -471,6 +484,23 @@ func (k *Keeper) emit(e Event) {
 // is not there to be found.
 const answerTimeout = 500 * time.Millisecond
 
+// panelClient is how a window asks a panel anything: whether it answers, what
+// build it is, which revision. Keep-alives are off. A pooled connection is one
+// the panel may wait on when it stops, and a handover stops the installed panel
+// -- the version being replaced, v0.9.2 for the update to v0.9.3, which waits up
+// to five seconds on a connection even when it has asked for nothing -- inside
+// the old window's 2.436 s for the whole handover (T-060). Without keep-alives
+// each connection is closed once its answer is read, and one the transport
+// dialed for a probe that another connection served is closed rather than
+// kept. Closing idle connections after each probe instead would close other
+// callers' connections in the shared transport and miss one a concurrent probe
+// is still using. A connection to a panel on this machine's loopback costs
+// next to nothing to make again.
+var panelClient = &http.Client{
+	Timeout:   answerTimeout,
+	Transport: &http.Transport{DisableKeepAlives: true},
+}
+
 // answers reports whether anything answers HTTP at url right now, whatever
 // the status.
 func answers(ctx context.Context, url string) bool {
@@ -478,7 +508,7 @@ func answers(ctx context.Context, url string) bool {
 	if err != nil {
 		return false
 	}
-	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
+	resp, err := panelClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -555,7 +585,7 @@ func holderBuild(ctx context.Context, panelURL string) (PanelBuild, bool) {
 	if err != nil {
 		return PanelBuild{}, false
 	}
-	resp, err := (&http.Client{Timeout: answerTimeout}).Do(req)
+	resp, err := panelClient.Do(req)
 	if err != nil {
 		return PanelBuild{}, false
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -16,7 +17,7 @@ type recorder struct {
 	err     error
 }
 
-func (r *recorder) Fire(key, _, _ string) error {
+func (r *recorder) Fire(_ context.Context, key, _, _ string) error {
 	r.fired = append(r.fired, key)
 	return r.err
 }
@@ -65,7 +66,7 @@ func TestEachToggleSilencesOnlyItsOwnRule(t *testing.T) {
 			tc.disable(&cfg)
 
 			rec := &recorder{}
-			deliver(rec, cfg, allRules(), nil, func(error) {})
+			deliver(context.Background(), rec, cfg, allRules(), nil, func(error) {})
 
 			if contains(rec.fired, tc.silent) {
 				t.Fatalf("%s is switched off and must not fire, got %v", tc.name, rec.fired)
@@ -79,7 +80,7 @@ func TestEachToggleSilencesOnlyItsOwnRule(t *testing.T) {
 
 func TestEveryRuleFiresWhenNoneIsDisabled(t *testing.T) {
 	rec := &recorder{}
-	deliver(rec, config.Default().Notify, allRules(), nil, func(error) {})
+	deliver(context.Background(), rec, config.Default().Notify, allRules(), nil, func(error) {})
 
 	if len(rec.fired) != 4 {
 		t.Fatalf("the defaults switch nothing off, want 4 banners, got %v", rec.fired)
@@ -94,7 +95,7 @@ func TestClearsAreNotFiltered(t *testing.T) {
 	cfg.Waiting = false
 
 	rec := &recorder{}
-	deliver(rec, cfg, nil, []string{"session:a:waiting", "card:d.md:review"}, func(error) {})
+	deliver(context.Background(), rec, cfg, nil, []string{"session:a:waiting", "card:d.md:review"}, func(error) {})
 
 	if len(rec.cleared) != 2 {
 		t.Fatalf("every key must be released regardless of toggles, got %v", rec.cleared)
@@ -107,7 +108,7 @@ func TestClearsAreNotFiltered(t *testing.T) {
 // quiet is caught by whoever adds it, in their own tests.
 func TestAnUnownedKindIsNotFired(t *testing.T) {
 	rec := &recorder{}
-	deliver(rec, config.Default().Notify, []state.Event{{Key: "session:a:stalled", Kind: "stalled"}}, nil, func(error) {})
+	deliver(context.Background(), rec, config.Default().Notify, []state.Event{{Key: "session:a:stalled", Kind: "stalled"}}, nil, func(error) {})
 
 	if len(rec.fired) != 0 {
 		t.Fatalf("a kind no toggle owns must not fire, got %v", rec.fired)
@@ -119,7 +120,7 @@ func TestAnUnownedKindIsNotFired(t *testing.T) {
 func TestADeliveryFailureIsReportedAndDoesNotStopTheRest(t *testing.T) {
 	rec := &recorder{err: errors.New("osascript exploded")}
 	var reported int
-	deliver(rec, config.Default().Notify, allRules(), nil, func(error) { reported++ })
+	deliver(context.Background(), rec, config.Default().Notify, allRules(), nil, func(error) { reported++ })
 
 	if len(rec.fired) != 4 {
 		t.Fatalf("a failed banner must not swallow the others, got %v", rec.fired)

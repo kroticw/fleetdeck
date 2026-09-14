@@ -107,7 +107,7 @@ func TestCollectSkipsUsageWhenDisabled(t *testing.T) {
 	cfg.UsageEnabled = false
 	cfg.BoardPath = ""
 
-	uf := usage.NewFetcher(func() (string, error) {
+	uf := usage.NewFetcher(func(context.Context) (string, error) {
 		t.Error("usage must not be fetched when disabled")
 		return "", nil
 	}, "", time.Minute)
@@ -648,7 +648,7 @@ func TestUsageErrorKindReachesTheSnapshot(t *testing.T) {
 
 			cfg := config.Default()
 			cfg.BoardPath = ""
-			uf := usage.NewFetcher(func() (string, error) { return "token", nil }, srv.URL, time.Minute)
+			uf := usage.NewFetcher(func(context.Context) (string, error) { return "token", nil }, srv.URL, time.Minute)
 			snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
 
 			if snap.UsageError == "" {
@@ -671,7 +671,7 @@ func TestUsageErrorKindIsAuthForAMissingToken(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.BoardPath = ""
-	uf := usage.NewFetcher(func() (string, error) { return "", usage.ErrNoToken }, "http://127.0.0.1:1", time.Minute)
+	uf := usage.NewFetcher(func(context.Context) (string, error) { return "", usage.ErrNoToken }, "http://127.0.0.1:1", time.Minute)
 	snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
 
 	if snap.UsageErrorKind != "auth" {
@@ -709,7 +709,7 @@ func TestLocalRateLimitsFileWinsOverTheNetwork(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.BoardPath = ""
-	uf := usage.NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	uf := usage.NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
 
 	if hits != 0 {
@@ -745,7 +745,7 @@ func TestNetworkIsTheFallbackWhenNoLocalFileExists(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.BoardPath = ""
-	uf := usage.NewFetcher(func() (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	uf := usage.NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
 	snap := NewCollector(cfg, nil, uf, t.TempDir()).Collect(context.Background())
 
 	if snap.Limits == nil {
@@ -775,7 +775,7 @@ func TestASlowUsageEndpointDoesNotStallTheCycle(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.BoardPath = ""
-	uf := usage.NewFetcher(func() (string, error) { return "token", nil }, srv.URL, time.Minute)
+	uf := usage.NewFetcher(func(context.Context) (string, error) { return "token", nil }, srv.URL, time.Minute)
 
 	done := make(chan state.Snapshot, 1)
 	go func() {
@@ -820,7 +820,7 @@ func TestATransientUsageFailureKeepsTheLastKnownLimits(t *testing.T) {
 	cfg.BoardPath = ""
 	// A short TTL so the second Collect below is forced to attempt a real
 	// refresh instead of serving the first call's cache hit unconditionally.
-	uf := usage.NewFetcher(func() (string, error) { return "token", nil }, srv.URL, 10*time.Millisecond)
+	uf := usage.NewFetcher(func(context.Context) (string, error) { return "token", nil }, srv.URL, 10*time.Millisecond)
 	c := NewCollector(cfg, nil, uf, t.TempDir())
 
 	first := c.Collect(context.Background())

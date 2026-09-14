@@ -281,6 +281,35 @@ func TestTheKeeperRestartsItsPanelFromANewPathWhenAsked(t *testing.T) {
 	}
 }
 
+// The restart is an update's, and the old window gives the whole handover
+// 2.436 s. A staged panel that does not go at once on SIGTERM is killed, not
+// waited on for the grace an ordinary stop gives.
+func TestARestartDoesNotWaitOutTheStopGraceForAPanelThatIgnoresTerm(t *testing.T) {
+	addr := freeAddr(t)
+	k := newKeeper(t, "ignore-term", addr)
+	k.MinUptime = time.Minute
+	r := run(t, k)
+	r.expect(t, Starting, 5*time.Second)
+	first := r.expect(t, Answering, 10*time.Second)
+
+	asked := time.Now()
+	k.Restart(os.Args[0])
+	again := r.expect(t, Starting, 15*time.Second)
+	if again.PID == first.PID {
+		t.Fatalf("Starting pid %d, the panel that was asked to restart", again.PID)
+	}
+	if up := r.expect(t, Answering, 15*time.Second); !up.Ours || up.PID != again.PID {
+		t.Fatalf("Answering %+v, want the restarted panel", up)
+	}
+	// A restart that waited out the ordinary grace would take stopGrace at
+	// least. Half of it tells the two apart with room for a loaded machine and
+	// -race; that the handover fits the old window's deadline is the update
+	// test's to show.
+	if took := time.Since(asked); took >= stopGrace/2 {
+		t.Fatalf("the restart took %s with a panel that ignores SIGTERM; want it well within the ordinary stop grace of %s", took.Round(time.Millisecond), stopGrace)
+	}
+}
+
 // ... and, again as launchd does, a panel that dies soon after starting is not
 // started over and over: the keeper stops, says why, and waits to be asked.
 func TestTheKeeperGivesUpOnAPanelThatDiesTooSoonAndWaitsToBeAsked(t *testing.T) {
