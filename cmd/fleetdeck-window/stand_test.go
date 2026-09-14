@@ -63,6 +63,11 @@ func TestAStandInstalledFromAReleaseUpdatesItself(t *testing.T) {
 	url := freeURL(t)
 	writeStandConfig(t, home, portOf(t, url))
 	canonical := filepath.Join(t.TempDir(), supervisor.BundleName)
+	// Both bundles the stand runs: the stand itself, and the release it
+	// downloads beside it, which carries the app's own identifier. Neither is
+	// left for LaunchServices to open as the app.
+	forgetBundle(t, canonical)
+	forgetBundle(t, filepath.Join(supervisor.StagingDir(canonical), supervisor.BundleName))
 	if out, err := exec.Command("/usr/bin/ditto", stand, canonical).CombinedOutput(); err != nil {
 		t.Fatalf("put the stand at a canonical path: %v\n%s", err, out)
 	}
@@ -86,7 +91,7 @@ func TestAStandInstalledFromAReleaseUpdatesItself(t *testing.T) {
 	keeper := &supervisor.Keeper{
 		URL:          url,
 		Bin:          supervisor.PanelIn(canonical),
-		Args:         panelArgs(os.Getpid()),
+		Args:         panelArgs(os.Getpid(), os.Getenv(standSocketEnv)),
 		Owner:        os.Getpid(),
 		Env:          env,
 		LogPath:      filepath.Join(home, "panel.log"),
@@ -269,6 +274,6 @@ func tail(home string) string {
 }
 
 func newWindowLog(canonical string) string {
-	data, _ := os.ReadFile(filepath.Join(supervisor.StagingDir(canonical), "new-window.log"))
+	data, _ := os.ReadFile(filepath.Join(supervisor.StagingDir(canonical), supervisor.NewWindowLog))
 	return string(data)
 }

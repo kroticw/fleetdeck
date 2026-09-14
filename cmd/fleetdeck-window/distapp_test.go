@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
 
 // releaseAppVersion is the tag the release app under test is built for. Not "dev":
@@ -78,7 +80,10 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 	// build every machine without a certificate makes -- a developer's, and CI's
 	// check job -- and it must measure that same build on the one machine that
 	// does have a certificate and may well have the variable exported.
-	cmd := exec.Command("make", "dist-app", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=")
+	//
+	// BUNDLE_ID likewise: a bundle this test builds, unpacks and mounts is never
+	// one LaunchServices could open as the app (supervisor.StandBundleID).
+	cmd := exec.Command("make", "dist-app", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=", "BUNDLE_ID="+supervisor.StandBundleID)
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -124,6 +129,7 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 		t.Fatalf("ditto -x -k %s: %v\n%s", zip, err, out)
 	}
 	app := filepath.Join(unpacked, "fleetdeck.app")
+	forgetBundle(t, app)
 	window := filepath.Join(app, "Contents", "MacOS", "fleetdeck-window")
 
 	t.Run("the plist carries the tag and is window-app's in every other key", func(t *testing.T) {
@@ -136,6 +142,12 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 			delete(got, key)
 			delete(want, key)
 		}
+		// Built as a stand, under the stand identifier; a release keeps the app's.
+		if got["CFBundleIdentifier"] != supervisor.StandBundleID {
+			t.Errorf("CFBundleIdentifier = %v, want %s: make dist-app was given BUNDLE_ID", got["CFBundleIdentifier"], supervisor.StandBundleID)
+		}
+		delete(got, "CFBundleIdentifier")
+		delete(want, "CFBundleIdentifier")
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("the release plist drifted from window-app's:\nrelease    %v\nwindow-app %v", got, want)
 		}
@@ -248,7 +260,9 @@ func diskImageBuiltFromTheZip(t *testing.T, root, distDir string) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("make", "dist-dmg", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=")
+	// The app in the image is the zip's, built under the stand identifier, and
+	// the image's gate is told so.
+	cmd := exec.Command("make", "dist-dmg", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=", "BUNDLE_ID="+supervisor.StandBundleID)
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -277,6 +291,8 @@ func diskImageBuiltFromTheZip(t *testing.T, root, distDir string) {
 	}
 
 	mounted := mountImage(t, dmg)
+	// Registered after the mount, so forgotten before the detach.
+	forgetBundle(t, filepath.Join(mounted, "fleetdeck.app"))
 
 	t.Run("the volume holds the app, the shortcut and the window and nothing else", func(t *testing.T) {
 		entries, err := os.ReadDir(mounted)

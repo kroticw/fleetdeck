@@ -109,6 +109,8 @@ func main() {
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	flag.Parse()
+	// For a window started by an update, the window that started it.
+	oldWindow := os.Getppid()
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -121,6 +123,28 @@ func main() {
 	// The same log the launch agent wrote the panel's output to, so a panel's
 	// history does not split in two at the day the window took over.
 	logPath := filepath.Join(home, "Library", "Logs", "fleetdeck.log")
+
+	// A stand's socket, when this window runs on a stand, handed to every panel
+	// it starts; a stand that names none is refused before anything starts.
+	standSocket, err := standIsolation(os.LookupEnv)
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+
+	// A window in an update's staging directory opens the installed app and
+	// goes, before it has a window to flash (staged.go).
+	where := whereToRun(exe, *handover, func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	})
+	if where.action == runElsewhere {
+		log.Printf("fleetdeck-window: started from %s, in an update's staging directory; opening the installed app at %s instead", where.staged, where.installed)
+		if where.err = goToInstalled(where); where.err == nil {
+			return
+		}
+		log.Printf("fleetdeck-window: %v", where.err)
+		where.action = runRefused
+	}
 
 	w := webview.New(false)
 	defer w.Destroy()
@@ -136,11 +160,28 @@ func main() {
 	installMenu()
 	installCloseToHide(w.Window())
 
-	scr := &screen{url: *url, logPath: logPath, takingOver: *handover != ""}
+	if where.action == runRefused {
+		log.Printf("fleetdeck-window: started from %s, in an update's staging directory, with no installed app to open at %s; starting no panel", where.staged, where.installed)
+		w.SetHtml(stagedPage(where))
+		w.Run()
+		return
+	}
+
+	scr := &screen{url: *url, logPath: logPath, takingOver: *handover != "", now: time.Now}
+	// show does what the screen says, on the UI thread.
+	show := func(navigate bool, page string) {
+		switch {
+		case navigate:
+			log.Printf("fleetdeck-window: asked for the panel's page at %s (try %d)", scr.target(), scr.tries)
+			w.Navigate(scr.target())
+		case page != "":
+			w.SetHtml(page)
+		}
+	}
 	keeper := &supervisor.Keeper{
 		URL:  *url,
 		Bin:  panelBinary(exe),
-		Args: panelArgs(os.Getpid()),
+		Args: panelArgs(os.Getpid(), standSocket),
 		// This window: its panels report it as their owner and go when it
 		// goes, and a panel whose window is gone is replaced.
 		Owner:        os.Getpid(),
@@ -177,21 +218,34 @@ func main() {
 				}
 				w.Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
 			}
-			navigate, page := scr.on(e)
-			switch {
-			case navigate:
-				w.Navigate(*url)
-			case page != "":
-				w.SetHtml(page)
-			}
+			show(scr.on(e))
 		})
 	}
 	kept := &keeperRun{k: keeper}
 
 	// Bound before the first navigation, so the page finds them from its very
-	// first load.
-	if err := w.Bind(reloadBindingName, reloadBinding(w.Dispatch, w.Navigate, *url)); err != nil {
+	// first load. A reload the page or a person asks for is a navigation the
+	// screen counts, like the keeper's.
+	// The page it was on, not the window's own URL: a reload from a fleet's
+	// page stays on that fleet.
+	if err := w.Bind(reloadBindingName, reloadBinding(w.Dispatch, func(string) {
+		scr.reopen()
+		log.Printf("fleetdeck-window: asked for the panel's page again at %s, as the page asked", scr.target())
+		w.Navigate(scr.target())
+	}, *url)); err != nil {
 		log.Printf("fleetdeck-window: the page will not be able to reload itself: %v", err)
+	}
+	if err := w.Bind(pageLoadedBindingName, func(state, href string) {
+		w.Dispatch(func() {
+			if scr.asked {
+				log.Printf("fleetdeck-window: the panel's page says %q at %s, %s after it was asked for", state, href, time.Since(scr.askedAt).Round(time.Millisecond))
+			} else {
+				log.Printf("fleetdeck-window: the panel's page says %q at %s", state, href)
+			}
+			scr.pageSays(state, href)
+		})
+	}); err != nil {
+		log.Printf("fleetdeck-window: the window will not know whether the panel's page loaded: %v", err)
 	}
 	if err := w.Bind(startBindingName, keeper.Retry); err != nil {
 		log.Printf("fleetdeck-window: the failure page will not be able to start the panel again: %v", err)
@@ -229,6 +283,7 @@ func main() {
 	// After the bindings, so the script finds them; before the first
 	// navigation, so it runs in the first page too.
 	w.Init(noticeScript)
+	w.Init(pageLoadScript(*url))
 	// The update button is on screen only while there is something to update
 	// to, and its appearing is the notice (watch.go). A build that cannot
 	// update itself never finds anything to update to, so it shows no button;
@@ -236,10 +291,11 @@ func main() {
 	// should anything call it anyway.
 	canonical := canonicalBundle(exe, *toldCanonical)
 	how := updateWay(config{
-		tree:    treeDir,
-		exe:     exe,
-		version: version.String(),
-		teamID:  ownTeamID(exe),
+		tree:      treeDir,
+		exe:       exe,
+		version:   version.String(),
+		teamID:    ownTeamID(exe),
+		canonical: *toldCanonical,
 	})
 	if how.Refusal != "" {
 		log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
@@ -310,6 +366,26 @@ func main() {
 			Keeper:      keeper,
 			StartKeeper: kept.start,
 			Events:      events,
+			// The bundle swapped out is forgotten by LaunchServices and then
+			// removed, once the old window's update has let go of the lock
+			// (docs/engineering/window-and-panel.md).
+			Registry: supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
+			LockPath: updateLockPath(*toldCanonical),
+			// The old window started this one, so it is this process's parent
+			// until it exits, and then this process is handed to launchd: the
+			// parent changing is the old window gone, with no PID to be reused.
+			// Works with an old window of any version, which says nothing of
+			// itself in the handover.
+			OldWindowGone: func() bool { return os.Getppid() != oldWindow },
+			Done: func() {
+				w.Dispatch(func() {
+					log.Printf("fleetdeck-window: the handover is done")
+					if scr.handedOver() {
+						show(true, "")
+					}
+				})
+			},
+			Logf: func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) },
 		}
 		go func() {
 			err := tk.Run(context.Background())
@@ -325,11 +401,45 @@ func main() {
 		kept.start()
 	}
 
+	// Time going by for a page asked for and not loaded (screen.tick).
+	ticking, stopTicking := context.WithCancel(context.Background())
+	ticked := make(chan struct{})
+	go func() {
+		defer close(ticked)
+		tick := time.NewTicker(pageLoadTick)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ticking.Done():
+				return
+			case <-tick.C:
+				w.Dispatch(func() { show(scr.tick()) })
+			}
+		}
+	}()
+
 	w.Run()
+	stopTicking()
+	<-ticked
 	// The keeper stops here; the panel goes by itself once this process has
 	// ended, having watched it. Waiting for the keeper keeps it from
 	// dispatching onto a window already destroyed.
 	kept.stop()
+}
+
+// updateLockPath is the update lock an update of canonical takes: beside the
+// source tree for a build that has one, and otherwise beside the installed
+// app, so that two windows of the same installed app cannot update it at once.
+func updateLockPath(canonical string) string {
+	root := treeDir
+	if root == "" {
+		root = canonical
+	}
+	path, err := supervisor.LockPath(root)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // tell hands one report to the page, from whatever goroutine is holding it.

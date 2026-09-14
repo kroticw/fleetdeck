@@ -19,15 +19,16 @@
 # background compared against packaging/dmg/ -- and a person looks at the window
 # once, when the layout changes.
 #
-# Usage: verify-dist-dmg.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal>
+# Usage: verify-dist-dmg.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id>
 #
 # <expect-seal> is the seal both the image and the app inside it are required to
 # carry -- adhoc, developer-id or notarized -- and it is told rather than
-# deduced, for the reason spelled out in scripts/verify-dist-app.sh.
+# deduced, for the reason spelled out in scripts/verify-dist-app.sh. <bundle-id>
+# is the identifier the app inside must carry, as in that script.
 set -eu
 
-if [ "$#" -ne 6 ]; then
-	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal>" >&2
+if [ "$#" -ne 7 ]; then
+	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id>" >&2
 	exit 2
 fi
 
@@ -37,6 +38,7 @@ arches=$3
 binaries=$4
 ldflags=$5
 expect_seal=$6
+bundle_id=$7
 
 work=
 mounted=
@@ -181,6 +183,7 @@ done
 # would drag it from.
 app="$mounted/fleetdeck.app"
 [ -d "$app" ] || fail "the volume holds no fleetdeck.app"
+app_carries_the_identifier "$app" "$bundle_id" "$expect_seal"
 app_is_the_release "$app" "$version" "$arches" "$binaries" "$ldflags"
 app_carries_the_seal "$app" "$binaries" "$expect_seal"
 

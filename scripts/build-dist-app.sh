@@ -55,17 +55,21 @@
 # on, and without resource forks, extended attributes or ACLs, so it holds the
 # bundle's files and nothing else.
 #
-# Usage: build-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <sign-identity>
+# Usage: build-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <sign-identity> <bundle-id>
 #
 # <sign-identity> is a codesign identity -- "Developer ID Application: ..." -- or
 # empty for an ad-hoc seal. It is an argument rather than something this script
 # looks up, so that what a build signs with is decided by the caller and visible
 # in the workflow, and so that a machine that happens to have a certificate in
 # its keychain does not quietly start signing every test build with it.
+#
+# <bundle-id> is the CFBundleIdentifier: the app's own for a release, and
+# dev.fleetdeck.stand for every test and stand build, which macOS must never be
+# able to open as the app (see the Makefile's BUNDLE_ID).
 set -eu
 
-if [ "$#" -ne 6 ]; then
-	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <sign-identity>" >&2
+if [ "$#" -ne 7 ]; then
+	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <sign-identity> <bundle-id>" >&2
 	exit 2
 fi
 
@@ -75,6 +79,7 @@ arches=$3
 binaries=$4
 ldflags=$5
 sign_identity=$6
+bundle_id=$7
 
 work=
 
@@ -112,6 +117,8 @@ cp "$src/icon.icns" "$app/Contents/Resources/icon.icns"
 plist_version=${version#v}
 plutil -replace CFBundleShortVersionString -string "$plist_version" "$app/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$plist_version" "$app/Contents/Info.plist"
+[ -n "$bundle_id" ] || fail "bundle identifier is empty"
+plutil -replace CFBundleIdentifier -string "$bundle_id" "$app/Contents/Info.plist"
 
 # Every slice is built with cgo, the way `make window-app` builds on its host: the
 # window cannot be built without it, and the other slices then differ from it in

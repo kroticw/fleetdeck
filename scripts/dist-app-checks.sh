@@ -92,6 +92,30 @@ developer_id_seal() {
   $src/entitlements.plist: $(cat "$work/want-entitlements.json")"
 }
 
+# app_carries_the_identifier checks the bundle's CFBundleIdentifier.
+#
+#   $1 the bundle
+#   $2 the identifier it was built under and must carry
+#   $3 the seal it is expected to carry
+#
+# A test's build carries dev.fleetdeck.stand, so that LaunchServices never opens
+# it as the app. A signed build is a release, and a release is the app: whatever
+# identifier it was told, it must carry the one cmd/fleetdeck-window/Info.plist
+# names, or a stand could be published.
+app_carries_the_identifier() {
+	_app=$1
+	_want=$2
+	_seal=$3
+	_got=$(plutil -extract CFBundleIdentifier raw "$_app/Contents/Info.plist" 2>/dev/null || echo "(missing)")
+	[ "$_got" = "$_want" ] ||
+		fail "Info.plist CFBundleIdentifier is '$_got', not '$_want'"
+	if [ "$_seal" != adhoc ]; then
+		_release=$(plutil -extract CFBundleIdentifier raw "$src/Info.plist")
+		[ "$_got" = "$_release" ] ||
+			fail "a $_seal app carries CFBundleIdentifier '$_got': a signed app is a release, and a release carries the app's own, '$_release'"
+	fi
+}
+
 # app_is_the_release checks that the bundle at $1 is the app this VERSION built:
 # the tag in its Info.plist, a plist and icon otherwise identical to the source
 # tree's, both architectures in every binary, every slice built for the
@@ -120,15 +144,17 @@ app_is_the_release() {
 	[ -x "$_app/Contents/MacOS/$_executable" ] ||
 		fail "Info.plist names $_executable as the app, and it is not in Contents/MacOS"
 
-	# In everything but the version, the release app is the app `make window-app`
-	# builds: the same plist keys and the same icon. Compared through plutil's
-	# JSON form, with the version keys taken out of both, so a comment or key
-	# order in the source does not count as a difference and a changed or added
-	# key does.
+	# In everything but the version and the identifier, the release app is the
+	# app `make window-app` builds: the same plist keys and the same icon.
+	# Compared through plutil's JSON form, with those keys taken out of both, so
+	# a comment or key order in the source does not count as a difference and a
+	# changed or added key does. The identifier is the gate's own question
+	# (app_carries_the_identifier): a stand builds under another one.
 	for _p in release:"$_plist" source:"$src/Info.plist"; do
 		cp "${_p#*:}" "$work/${_p%%:*}.plist"
 		plutil -remove CFBundleShortVersionString "$work/${_p%%:*}.plist" 2>/dev/null || true
 		plutil -remove CFBundleVersion "$work/${_p%%:*}.plist" 2>/dev/null || true
+		plutil -remove CFBundleIdentifier "$work/${_p%%:*}.plist" 2>/dev/null || true
 		plutil -convert json -o "$work/${_p%%:*}.json" "$work/${_p%%:*}.plist"
 	done
 	cmp -s "$work/release.json" "$work/source.json" ||

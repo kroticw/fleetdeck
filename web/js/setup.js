@@ -24,6 +24,13 @@ import { belongsTo, fleetFromSearch, withFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
 import { showSteps } from "./steplist.js";
 
+// This module and every one it imports have arrived. The window reads this
+// once the page has loaded, and a page loaded without it -- its scripts cut off
+// by a panel restarting under it -- is asked for again
+// (cmd/fleetdeck-window/owner.go, pageLoadScript).
+// Asked of globalThis: the tests import this module with no document at all.
+if (globalThis.document?.documentElement) document.documentElement.dataset.fleetdeckPage = "running";
+
 // What the panel names the workspace folder inside a directory the person
 // picked with the window's chooser.
 const WORKSPACE_NAME = "fleetdeck";

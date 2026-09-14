@@ -60,6 +60,9 @@ const (
 	// refusalNoVersion: signed like a release but reporting no release
 	// version, so there is nothing to compare with what is published.
 	refusalNoVersion = "no-version"
+	// refusalStaged: running from an update's staging directory, which holds
+	// a version being tried or one swapped out, never the installed app.
+	refusalStaged = "staged"
 )
 
 // Why an update that was tried did not happen.
@@ -86,6 +89,9 @@ type config struct {
 	// teamID is the Apple team this bundle is signed by, empty when it is not
 	// signed with a Developer ID.
 	teamID string
+	// canonical is the installed bundle an update's handover named for this
+	// window (--canonical), empty for a window no update started.
+	canonical string
 }
 
 // way is how this copy of the app updates itself, or why it cannot.
@@ -109,6 +115,13 @@ func updateWay(cfg config) way {
 	bundle := bundleOf(cfg.exe)
 	if bundle == "" {
 		return way{Refusal: refusalNotABundle}
+	}
+	// Before everything else: a copy in an update's staging directory is not
+	// the installed app, whichever way it would otherwise update (staged.go) --
+	// unless an update started it there and named the installed bundle, which
+	// is then the bundle it updates.
+	if _, staged := installedBeside(bundle); staged && cfg.canonical == "" {
+		return way{Refusal: refusalStaged}
 	}
 	// A build with a checkout written into it updates from that checkout, and
 	// nothing about the state of the machine changes which way it is.

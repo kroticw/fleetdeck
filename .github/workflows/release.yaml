@@ -106,7 +106,7 @@ jobs:
       # one. If the secret is missing or misspelt the build stops before it compiles
       # anything, rather than producing an app Gatekeeper would refuse.
       - name: Build the release app
-        run: make dist-app VERSION="$RELEASE_VERSION"
+        run: make dist-app VERSION="$RELEASE_VERSION" BUNDLE_ID=dev.fleetdeck.window
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
@@ -149,7 +149,7 @@ jobs:
       # the whole point of signing at all, and it is asked before the release exists
       # rather than after somebody downloads it.
       - name: Verify the app before anything is published
-        run: make verify-dist-app VERSION="$RELEASE_VERSION" EXPECT_SEAL=notarized
+        run: make verify-dist-app VERSION="$RELEASE_VERSION" BUNDLE_ID=dev.fleetdeck.window EXPECT_SEAL=notarized
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 
@@ -161,7 +161,7 @@ jobs:
       # update itself, by a name it builds rather than by looking at what a
       # release carries.
       - name: Build the release disk image
-        run: make dist-dmg VERSION="$RELEASE_VERSION"
+        run: make dist-dmg VERSION="$RELEASE_VERSION" BUNDLE_ID=dev.fleetdeck.window
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
@@ -188,7 +188,7 @@ jobs:
       # The app inside is then taken apart by the same code that took the zip's
       # app apart, in the place a person would drag it from.
       - name: Verify the disk image before anything is published
-        run: make verify-dist-dmg VERSION="$RELEASE_VERSION" EXPECT_SEAL=notarized
+        run: make verify-dist-dmg VERSION="$RELEASE_VERSION" BUNDLE_ID=dev.fleetdeck.window EXPECT_SEAL=notarized
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
 

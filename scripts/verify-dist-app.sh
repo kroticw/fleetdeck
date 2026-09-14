@@ -11,7 +11,11 @@
 # What stays here is everything about the zip -- that there is exactly one of it, and
 # that it holds exactly the app and nothing else.
 #
-# Usage: verify-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal>
+# Usage: verify-dist-app.sh <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id>
+#
+# <bundle-id> is the CFBundleIdentifier the app must carry: the app's own for a
+# release, dev.fleetdeck.stand for a test's build. A signed app must carry the
+# app's own whatever it is told (app_carries_the_identifier).
 #
 # <expect-seal> is the seal this zip is required to carry, and the gate demands
 # exactly it:
@@ -28,8 +32,8 @@
 # unsigned release is exactly the one that must never reach a person.
 set -eu
 
-if [ "$#" -ne 6 ]; then
-	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal>" >&2
+if [ "$#" -ne 7 ]; then
+	echo "usage: $0 <dist-dir> <version> <arches> <binaries> <ldflags> <expect-seal> <bundle-id>" >&2
 	exit 2
 fi
 
@@ -39,6 +43,7 @@ arches=$3
 binaries=$4
 ldflags=$5
 expect_seal=$6
+bundle_id=$7
 
 work=
 # shellcheck disable=SC2034  # read by scripts/dist-app-checks.sh
@@ -110,6 +115,7 @@ trap 'rm -rf "$work"; exit 1' INT TERM HUP
 ditto -x -k "$zip" "$work"
 app="$work/fleetdeck.app"
 
+app_carries_the_identifier "$app" "$bundle_id" "$expect_seal"
 app_is_the_release "$app" "$version" "$arches" "$binaries" "$ldflags"
 app_carries_the_seal "$app" "$binaries" "$expect_seal"
 

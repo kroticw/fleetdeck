@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,6 +45,54 @@ type updateRig struct {
 	takeover  error
 	oldStarts atomic.Int64 // panels the old window's keeper started
 	newFrom   []string     // the bundle each panel of the new window was started from
+	// registry stands in for LaunchServices, for the new window.
+	registry *fakeRegistry
+	// lockPath is the update lock both windows take.
+	lockPath string
+	// old is the window running the update, as the new one sees it; retireWait
+	// bounds the new window's wait on it (zero: the real bound).
+	old        *oldWindow
+	retireWait time.Duration
+	// done is closed by the new window's Done, said carries what it logs, and
+	// takeoverDone is closed when its Takeover.Run has returned.
+	done         chan struct{}
+	said         chan string
+	takeoverDone chan struct{}
+}
+
+// fakeRegistry is LaunchServices as the new window sees it: what it was told,
+// in order, with the handover file as it stood at each call.
+type fakeRegistry struct {
+	mu       sync.Mutex
+	handover string
+	calls    []registryCall
+}
+
+type registryCall struct {
+	op, bundle string
+	steps      string // the handover file's steps at the call
+}
+
+func (f *fakeRegistry) record(op, bundle string) error {
+	data, _ := os.ReadFile(f.handover)
+	var steps []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		name, _, _ := strings.Cut(line, "\t")
+		steps = append(steps, name)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, registryCall{op: op, bundle: bundle, steps: strings.Join(steps, ",")})
+	return nil
+}
+
+func (f *fakeRegistry) Forget(bundle string) error   { return f.record("forget", bundle) }
+func (f *fakeRegistry) Register(bundle string) error { return f.record("register", bundle) }
+
+func (f *fakeRegistry) told() []registryCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]registryCall(nil), f.calls...)
 }
 
 // startedFrom is where the new window's keeper started each of its panels, in
@@ -71,6 +120,11 @@ func newUpdateRig(t *testing.T) *updateRig {
 	r := &updateRig{t: t, f: f, addr: freeAddr(t), newKind: "listen"}
 	r.url = "http://" + r.addr + "/"
 	r.canonical = filepath.Join(t.TempDir(), "apps", "fleetdeck.app")
+	r.lockPath = filepath.Join(t.TempDir(), "update.lock")
+	r.registry = &fakeRegistry{handover: filepath.Join(StagingDir(r.canonical), "handover")}
+	r.old = &oldWindow{exited: make(chan struct{})}
+	r.done = make(chan struct{})
+	r.said = make(chan string, 64)
 	self, err := os.ReadFile(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
@@ -136,30 +190,48 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 		rev = []byte(r.expect)
 	}
 	events := make(chan Event, 16)
-	var k *Keeper
-	k = &Keeper{
+	k := &Keeper{
 		URL: r.url, Bin: PanelIn(staged),
 		Env:     helperEnvFor(r.newKind, r.addr),
 		LogPath: filepath.Join(r.t.TempDir(), "new.log"), StartTimeout: 5 * time.Second,
 		MinUptime: time.Minute, Poll: 100 * time.Millisecond,
-		OnEvent: func(e Event) {
-			// Where a panel came from, noted as it starts: the keeper starts
-			// by path, and the path is what an update moves.
-			if e.State == Starting {
-				r.mu.Lock()
-				r.newFrom = append(r.newFrom, k.bin())
-				r.mu.Unlock()
-			}
-			events <- e
-		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	// Where a panel came from, noted as it starts: the keeper starts by path,
+	// and the path is what an update moves. Sent without blocking once the
+	// takeover has stopped reading: the keeper may still report while the case
+	// tears down.
+	k.OnEvent = func(e Event) {
+		if e.State == Starting {
+			r.mu.Lock()
+			r.newFrom = append(r.newFrom, k.bin())
+			r.mu.Unlock()
+		}
+		select {
+		case events <- e:
+		case <-ctx.Done():
+		}
+	}
 	tk := &Takeover{
 		URL: r.url, Handover: Handover{Path: handover}, Staged: staged, Canonical: canonical,
 		Revision: strings.TrimSpace(string(rev)), Keeper: k, Events: events,
-		StartKeeper: func() { go k.Run(ctx) },
+		StartKeeper:   func() { go k.Run(ctx) },
+		Registry:      r.registry,
+		LockPath:      r.lockPath,
+		OldWindowGone: r.old.gone,
+		RetireWait:    r.retireWait,
+		Done:          func() { close(r.done) },
+		Logf: func(format string, args ...any) {
+			line := fmt.Sprintf(format, args...)
+			r.t.Logf("new window: %s", line)
+			select {
+			case r.said <- line:
+			default:
+			}
+		},
 	}
+	r.takeoverDone = done
 	go func() {
 		err := tk.Run(ctx)
 		r.mu.Lock()
@@ -167,7 +239,37 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 		r.mu.Unlock()
 		close(done)
 	}()
+	// However the case ends: the old window quits, and the takeover -- still
+	// waiting on it to remove the bundle swapped out -- is let finish before
+	// the case's directories go.
+	r.t.Cleanup(func() {
+		r.old.quit()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			r.t.Errorf("the new window's takeover had not ended 10s after the old window quit")
+		}
+		cancel()
+	})
 	return func() { cancel(); <-done }, nil
+}
+
+// oldWindow is the window that runs the update, as far as the new window can
+// tell it apart: there, until it quits.
+type oldWindow struct {
+	once   sync.Once
+	exited chan struct{}
+}
+
+func (o *oldWindow) quit() { o.once.Do(func() { close(o.exited) }) }
+
+func (o *oldWindow) gone() bool {
+	select {
+	case <-o.exited:
+		return true
+	default:
+		return false
+	}
 }
 
 // goBin is this machine's go, wherever it is. FindTools looks in the
@@ -192,7 +294,7 @@ func (r *updateRig) update(running string) *Update {
 			Running:  running,
 		},
 		Canonical:       r.canonical,
-		LockPath:        filepath.Join(r.t.TempDir(), "update.lock"),
+		LockPath:        r.lockPath,
 		HandoverTimeout: 30 * time.Second,
 		Launch:          r.launch,
 		Pause:           r.pauseOld,
@@ -273,9 +375,6 @@ func TestAnUpdateBuildsToTheSideAndTheNewWindowPutsItInPlace(t *testing.T) {
 	if got := revisionIn(t, r.canonical); got != head {
 		t.Fatalf("the canonical bundle is build %q, want the tree's head %q", got, head)
 	}
-	if got := revisionIn(t, filepath.Join(StagingDir(r.canonical), "fleetdeck.app")); got != "old" {
-		t.Fatalf("the bundle swapped out is %q, want the old one kept aside", got)
-	}
 	if !waitRevision(r.url, head, 5*time.Second) {
 		t.Fatal("the panel answering after the update is not the new build")
 	}
@@ -306,11 +405,6 @@ func TestTheNewWindowStartsItsPanelTwiceStagedThenCanonical(t *testing.T) {
 	want := []string{PanelIn(staged), PanelIn(r.canonical)}
 	if strings.Join(from, ",") != strings.Join(want, ",") {
 		t.Fatalf("the new window started panels from %v, want %v", from, want)
-	}
-	// And the second start is the one that leaves the keeper able to start
-	// the new build again, rather than the one that was swapped out.
-	if got := revisionIn(t, staged); got != "old" {
-		t.Fatalf("the staged path holds %q after the swap, want the bundle swapped out", got)
 	}
 }
 
@@ -387,5 +481,127 @@ func TestASecondPressWhileAnUpdateRunsIsRefused(t *testing.T) {
 	}
 	if len(r.steps()) != 0 {
 		t.Fatalf("a refused update went on: %v", r.steps())
+	}
+}
+
+// On 2026-09-14 the app opened from its name was the version an update had
+// just replaced: the new window had started from the staged path, macOS had
+// kept that path for the app's identifier, and after the swap the staged path
+// held the old bundle. So once the swap is done the new window has
+// LaunchServices forget the staged path and take the canonical one -- before
+// it says done, while the old window can still be told if anything fails.
+func TestTheNewWindowHasLaunchServicesForgetTheBundleSwappedOut(t *testing.T) {
+	r := newUpdateRig(t)
+	if err := r.update("old").Run(context.Background()); err != nil {
+		t.Fatalf("update: %v (steps %v)", err, r.steps())
+	}
+	waitClosed(t, r.done, "the new window's Done")
+	staged := filepath.Join(StagingDir(r.canonical), BundleName)
+	want := []registryCall{
+		{op: "forget", bundle: staged, steps: "alive,panel,swapped"},
+		{op: "register", bundle: r.canonical, steps: "alive,panel,swapped"},
+	}
+	got := r.registry.told()
+	if len(got) != len(want) {
+		t.Fatalf("LaunchServices was told %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("LaunchServices was told %+v, want %+v", got, want)
+		}
+	}
+}
+
+// The bundle swapped out is the old version under the app's own identifier,
+// and anything that walks LaunchServices again finds it. It does not outlive
+// a successful update: the new window removes it -- once the old window has
+// quit. The old window's update lets go of the lock as it returns, and the
+// window quits only after that, running out of this bundle until it has; so
+// the lock free is not enough. Done is said first: the window opens the
+// panel's page on it, and has no reason to wait for the tidying.
+func TestTheBundleSwappedOutIsRemovedOnlyOnceTheOldWindowHasQuit(t *testing.T) {
+	r := newUpdateRig(t)
+	head := r.f.run(r.f.other, "rev-parse", "HEAD")
+	// The update the old window runs: when it returns, its lock is free, and
+	// the window has not quit yet.
+	if err := r.update("old").Run(context.Background()); err != nil {
+		t.Fatalf("update: %v (steps %v)", err, r.steps())
+	}
+	waitClosed(t, r.done, "the new window's Done")
+	staged := filepath.Join(StagingDir(r.canonical), BundleName)
+	waitSaid(t, r.said, "waiting for the old window")
+	if _, err := os.Stat(staged); err != nil {
+		t.Fatalf("the bundle swapped out went while the old window was still running out of it: %v", err)
+	}
+
+	r.old.quit()
+	waitClosed(t, r.takeoverDone, "the new window's takeover, once the old window quit")
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("the bundle swapped out is still at %s after a successful update: %v", staged, err)
+	}
+	if got := revisionIn(t, r.canonical); got != head {
+		t.Fatalf("the canonical bundle is %q, want %q", got, head)
+	}
+	// What says how the handover went stays, for whoever looks next.
+	if _, err := os.Stat(filepath.Join(StagingDir(r.canonical), "handover")); err != nil {
+		t.Fatalf("the handover file went with the bundle: %v", err)
+	}
+}
+
+// An old window that does not quit within the bound leaves the bundle it runs
+// out of where it is, and the new window says so rather than removing it
+// under a running process.
+func TestTheBundleSwappedOutStaysWhenTheOldWindowDoesNotQuit(t *testing.T) {
+	r := newUpdateRig(t)
+	r.retireWait = 300 * time.Millisecond
+	if err := r.update("old").Run(context.Background()); err != nil {
+		t.Fatalf("update: %v (steps %v)", err, r.steps())
+	}
+	waitClosed(t, r.takeoverDone, "the new window's takeover, past its wait for the old window")
+	waitSaid(t, r.said, "stays")
+	staged := filepath.Join(StagingDir(r.canonical), BundleName)
+	if _, err := os.Stat(staged); err != nil {
+		t.Fatalf("the bundle swapped out was removed though the old window had not quit: %v", err)
+	}
+}
+
+// waitClosed waits for ch to be closed, and fails the case after 10 s.
+func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s did not come within 10s", what)
+	}
+}
+
+// waitSaid waits for a line carrying word on said, and fails the case after 10 s.
+func waitSaid(t *testing.T, said <-chan string, word string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case line := <-said:
+			if strings.Contains(line, word) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("the new window did not say %q within 10s", word)
+		}
+	}
+}
+
+// A failed handover leaves the canonical bundle as it was, and the old window
+// says so -- with where to read why: the new window's own log.
+func TestAFailedHandoverNamesTheNewWindowsLogAndTouchesNoRegistration(t *testing.T) {
+	r := newUpdateRig(t)
+	r.newKind = "crash"
+	err := r.update("old").Run(context.Background())
+	logPath := filepath.Join(StagingDir(r.canonical), NewWindowLog)
+	if err == nil || !strings.Contains(err.Error(), logPath) {
+		t.Fatalf("update: %v; want the new window's log %s named", err, logPath)
+	}
+	if got := r.registry.told(); len(got) != 0 {
+		t.Fatalf("a failed handover told LaunchServices %+v", got)
 	}
 }
