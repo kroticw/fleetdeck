@@ -133,6 +133,28 @@ func TestTheTimelineCountsFromTheNewWindowsStart(t *testing.T) {
 	}
 }
 
+func TestTheTimelineHoldsTheWindowsOwnStartSteps(t *testing.T) {
+	started, err := time.ParseInLocation(windowLogLayout, "2026/09/14 15:00:56.234000", time.Local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := "2026/09/14 15:00:56.260000 fleetdeck-window: started, 24 ms after the process started\n" +
+		"2026/09/14 15:00:57.400000 fleetdeck-window: the web view is made, 1164 ms after the process started\n" +
+		"2026/09/14 15:00:58.100000 fleetdeck-window: the glass frame is made, 1864 ms after the process started\n" +
+		"2026/09/14 15:00:58.560000 fleetdeck-window: worked out how this build updates, 2324 ms after the process started\n"
+	got := strings.Join(timeline(started, log, nil), "\n")
+	want := strings.Join([]string{
+		"+26ms the new window's first log line",
+		"+26ms the new window: started (24 ms after its process started)",
+		"+1166ms the new window: the web view is made (1164 ms after its process started)",
+		"+1866ms the new window: the glass frame is made (1864 ms after its process started)",
+		"+2326ms the new window: worked out how this build updates (2324 ms after its process started)",
+	}, "\n")
+	if got != want {
+		t.Errorf("timeline:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestATimelineWithNothingInItSaysSo(t *testing.T) {
 	started := time.Now()
 	got := timeline(started, "", []stepAt{{"handover", started.Add(-time.Millisecond)}})

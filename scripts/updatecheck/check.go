@@ -79,6 +79,11 @@ func registeredOnce(dump, canonical string) error {
 // (log.LstdFlags | log.Lmicroseconds).
 const windowLogLayout = "2006/01/02 15:04:05.000000"
 
+// startStepLine is a step of the window's own start as it logs it
+// (cmd/fleetdeck-window/startupsteps.go): what was done, and how long after its
+// process started by the kernel's clock.
+var startStepLine = regexp.MustCompile(`fleetdeck-window: (.+), (\d+) ms after the process started\s*$`)
+
 // stepAt is an update's step and when this program heard of it.
 type stepAt struct {
 	step string
@@ -86,9 +91,9 @@ type stepAt struct {
 }
 
 // timeline is the handover counted from the new window's process start: its
-// first log line, the moment it starts taking the panel over, and each
-// handover step as the old window read it. It is what says where the old
-// window's deadline went.
+// first log line, each step of its own start it logs, the moment it starts
+// taking the panel over, and each handover step as the old window read it. It
+// is what says where the old window's deadline went.
 func timeline(started time.Time, windowLog string, steps []stepAt) []string {
 	var events []stepAt
 	first := true
@@ -103,6 +108,9 @@ func timeline(started time.Time, windowLog string, steps []stepAt) []string {
 		if first {
 			events = append(events, stepAt{"the new window's first log line", at})
 			first = false
+		}
+		if m := startStepLine.FindStringSubmatch(line); m != nil {
+			events = append(events, stepAt{fmt.Sprintf("the new window: %s (%s ms after its process started)", m[1], m[2]), at})
 		}
 		if strings.Contains(line, "taking the panel over by") {
 			events = append(events, stepAt{"the new window starts taking the panel over", at})
