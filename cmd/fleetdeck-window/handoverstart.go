@@ -53,7 +53,7 @@ func startHandover(events *supervisor.KeeperEvents, tk *supervisor.Takeover, gat
 	ended := make(chan struct{})
 	go func() {
 		defer close(ended)
-		err := tk.Run(context.Background())
+		err := events.Take(context.Background(), tk)
 		if err == nil {
 			return
 		}
