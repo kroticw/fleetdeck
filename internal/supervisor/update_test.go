@@ -39,6 +39,10 @@ type updateRig struct {
 	progress  []Progress
 	mu        sync.Mutex
 	newKind   string // the stand-in kind the new window's panel runs as
+	// viaKeeperEvents: the new window hears its keeper as the window binary
+	// does, through KeeperEvents and Take, with the window's own route never
+	// read.
+	viaKeeperEvents bool
 	// expect, when set, is the build the new window believes it is, in place
 	// of what its bundle says.
 	expect    string
@@ -190,6 +194,10 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 		rev = []byte(r.expect)
 	}
 	events := make(chan Event, 16)
+	var keeperEvents *KeeperEvents
+	if r.viaKeeperEvents {
+		keeperEvents = NewKeeperEvents()
+	}
 	k := &Keeper{
 		URL: r.url, Bin: PanelIn(staged),
 		Env:     helperEnvFor(r.newKind, r.addr),
@@ -207,6 +215,10 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 			r.mu.Lock()
 			r.newFrom = append(r.newFrom, k.bin())
 			r.mu.Unlock()
+		}
+		if keeperEvents != nil {
+			keeperEvents.Push(e)
+			return
 		}
 		select {
 		case events <- e:
@@ -233,7 +245,12 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 	}
 	r.takeoverDone = done
 	go func() {
-		err := tk.Run(ctx)
+		var err error
+		if keeperEvents != nil {
+			err = keeperEvents.Take(ctx, tk)
+		} else {
+			err = tk.Run(ctx)
+		}
 		r.mu.Lock()
 		r.takeover = err
 		r.mu.Unlock()

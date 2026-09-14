@@ -166,7 +166,7 @@ func main() {
 	// The keeper's word waits in keeperEvents until the window can act on it:
 	// the keeper is made before the window's web views, and nothing it says
 	// may be lost to that.
-	keeperEvents := newKeeperQueue()
+	keeperEvents := supervisor.NewKeeperEvents()
 	keeper := &supervisor.Keeper{
 		URL:  *url,
 		Bin:  panelBinary(exe),
@@ -179,7 +179,7 @@ func main() {
 		StartTimeout: stand.startTimeout(),
 		MinUptime:    launchdThrottle,
 		Poll:         takenPanelPoll,
-		OnEvent:      keeperEvents.push,
+		OnEvent:      keeperEvents.Push,
 	}
 	// A panel this window did not start, of another build than the window's,
 	// is used as it is and named over its page (foreign.go).
@@ -265,16 +265,8 @@ func main() {
 		log.Printf("fleetdeck-window: the board is not a WKWebView: WebKit will say nothing of its navigations, and the panel's page is asked for again only every %s", navSilentWait)
 	}
 	notices := &panelNotice{}
-	// A takeover watches the keeper's events too, while it runs.
-	var takeoverEvents atomic.Pointer[chan supervisor.Event]
 	handleKeeperEvent := func(e supervisor.Event) {
 		log.Printf("fleetdeck-window: panel %s", describeEvent(e))
-		if ch := takeoverEvents.Load(); ch != nil {
-			select {
-			case *ch <- e:
-			default:
-			}
-		}
 		// Worked out here, off the UI thread: it may read a launch agent's file.
 		n := noticeFor(own, *url, e, home)
 		w.Dispatch(func() {
@@ -291,7 +283,7 @@ func main() {
 		})
 	}
 	// The keeper's word, in order, now that the window can act on it.
-	go keeperEvents.run(context.Background(), handleKeeperEvent)
+	go keeperEvents.Run(context.Background(), handleKeeperEvent)
 
 	// Bound before the first navigation, so the page finds them from its very
 	// first load. A reload the page or a person asks for is a navigation the
@@ -453,8 +445,8 @@ func main() {
 	// one look at the URL.
 	w.SetHtml(blankPage)
 	if *handover != "" {
-		events := make(chan supervisor.Event, 16)
-		takeoverEvents.Store(&events)
+		// Its Events are set by keeperEvents.Take: every keeper event from
+		// when it starts, whether or not this window is reading them yet.
 		tk := &supervisor.Takeover{
 			URL:         *url,
 			Handover:    supervisor.Handover{Path: *handover},
@@ -463,7 +455,6 @@ func main() {
 			Revision:    ownRevision(),
 			Keeper:      keeper,
 			StartKeeper: kept.start,
-			Events:      events,
 			// The bundle swapped out is forgotten by LaunchServices and then
 			// removed, once the old window's update has let go of the lock
 			// (docs/engineering/window-and-panel.md).
@@ -486,8 +477,7 @@ func main() {
 			Logf: func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) },
 		}
 		go func() {
-			err := tk.Run(context.Background())
-			takeoverEvents.Store(nil)
+			err := keeperEvents.Take(context.Background(), tk)
 			if err != nil {
 				// The old window resumes the panel it had; this one goes.
 				log.Printf("fleetdeck-window: taking the panel over failed: %v", err)

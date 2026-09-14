@@ -391,12 +391,20 @@ func (t *Takeover) retirable() error {
 
 // waitOwnAnswer waits for the keeper to say its own panel answers.
 func (t *Takeover) waitOwnAnswer(ctx context.Context) error {
+	// The panel waited for is the one the keeper starts during this wait: an
+	// answer from a panel it started before -- the staged one, while the
+	// canonical one is awaited -- is not this one's, and is passed over.
+	started := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case e := <-t.Events:
 			switch {
+			case e.State == Starting:
+				started = e.PID
+			case e.State == Answering && e.Ours && (started == 0 || e.PID != started):
+				continue
 			case e.State == Answering && e.Ours:
 				return nil
 			case e.State == Answering:
