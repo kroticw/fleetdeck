@@ -292,6 +292,18 @@ jobs:
         run: |
           sw_vers
           system_profiler SPDisplaysDataType | grep --extended-regexp 'Resolution|UI Looks like' || true
+      # With reduced transparency or increased contrast the window draws its
+      # frame and capsules opaque, not in glass (currentGlassMode), and a stand
+      # then shows nothing of the glass. What the runner has, and both turned off
+      # for the stands; the step after the tests puts them back.
+      - name: The runner's transparency and contrast, turned off for the stands
+        run: |
+          for key in reduceTransparency increaseContrast; do
+            was=$(defaults read com.apple.universalaccess "$key" 2>/dev/null || echo unset)
+            echo "$key $was" >>"$RUNNER_TEMP/universalaccess-before"
+            defaults write com.apple.universalaccess "$key" -bool false || echo "=== $key could not be written"
+            echo "=== $key: was $was, now $(defaults read com.apple.universalaccess "$key" 2>/dev/null || echo unset)"
+          done
       # The window's gate, before the tests. After them, on this runner, the
       # panel the window started did not answer in 330 ms in 3 runs of 3, while
       # before them it did in 2 of 2, and a panel started without a window
@@ -346,6 +358,17 @@ jobs:
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
       - name: The window's tests on macOS 26
         run: go test -count=1 ./cmd/fleetdeck-window/
+      - name: The runner's transparency and contrast as they were
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/universalaccess-before" ] || exit 0
+          while read -r key was; do
+            case $was in
+              unset) defaults delete com.apple.universalaccess "$key" 2>/dev/null || true ;;
+              1) defaults write com.apple.universalaccess "$key" -bool true || true ;;
+              *) defaults write com.apple.universalaccess "$key" -bool false || true ;;
+            esac
+          done <"$RUNNER_TEMP/universalaccess-before"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

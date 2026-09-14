@@ -53,6 +53,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 	}
 	g.ctl = newController(panelURL, loadPanelWidths(), mode)
 	g.frame.setMode(mode)
+	logFrameMode(mode)
 	width, height := windowContentSize(w.Window())
 	g.run(g.ctl.resized(width, height, windowIsFullscreen(w.Window())))
 	g.run(g.ctl.titlebarInset(g.frame.titlebarInset()))
@@ -349,7 +350,15 @@ func (g *glassWindow) setCapsules(model json.RawMessage) {
 func (g *glassWindow) setFrameMode(m glassMode) {
 	g.mode = m
 	g.frame.setMode(m)
+	logFrameMode(m)
 	g.redrawCapsules()
+}
+
+// logFrameMode is the window's log line for what the frame is drawn in: glass,
+// or vibrancy or opaque when the system has no glass or asks for less
+// transparency or more contrast. A stand's screenshot cannot tell them apart.
+func logFrameMode(m glassMode) {
+	log.Printf("fleetdeck-window: the frame is drawn in %s", m)
 }
 
 func (g *glassWindow) reloadBoard() { g.askBoard() }

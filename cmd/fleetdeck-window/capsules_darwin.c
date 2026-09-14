@@ -448,6 +448,14 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   id parent = (id)container;
   fd_capsules_clear(container);
   listenForSystemMode();
+  // The window's log says the capsules' material once each time it changes:
+  // glass, vibrancy or opaque decide what a capsule takes its colours from, and
+  // a stand's screenshot cannot tell the three apart.
+  static char modeSaid[16];
+  if (strcmp(mode, modeSaid) != 0) {
+    strncpy(modeSaid, mode, sizeof modeSaid - 1);
+    fprintf(stderr, "fleetdeck-window: the capsules are drawn in %s\n", mode);
+  }
 
   CGRect bounds = sendRect0(parent, sel("bounds"));
   id rowView = initWithFrame((id)rowClass(), bounds);
