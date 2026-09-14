@@ -149,6 +149,10 @@ func main() {
 		MinUptime:    launchdThrottle,
 		Poll:         takenPanelPoll,
 	}
+	// A panel this window did not start, of another build than the window's,
+	// is used as it is and named over its page (foreign.go).
+	own := ownBuild()
+	notices := &panelNotice{}
 	// A takeover watches the keeper's events too, while it runs.
 	var takeoverEvents atomic.Pointer[chan supervisor.Event]
 	keeper.OnEvent = func(e supervisor.Event) {
@@ -159,7 +163,15 @@ func main() {
 			default:
 			}
 		}
+		// Worked out here, off the UI thread: it may read a launch agent's file.
+		n := noticeFor(own, *url, e, home)
 		w.Dispatch(func() {
+			if notices.set(n) {
+				if n != nil {
+					log.Printf("fleetdeck-window: %s", n)
+				}
+				w.Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
+			}
 			navigate, page := scr.on(e)
 			switch {
 			case navigate:
@@ -182,6 +194,27 @@ func main() {
 	if err := w.Bind(chooseFolderBindingName, chooseFolder); err != nil {
 		log.Printf("fleetdeck-window: the setup page will offer no folder chooser: %v", err)
 	}
+	if err := w.Bind(noticeBindingName, notices.page); err != nil {
+		log.Printf("fleetdeck-window: a panel of another build will be shown without a word: %v", err)
+	}
+	if err := w.Bind(noticeShownBindingName, func(text string) {
+		if text == "" {
+			log.Printf("fleetdeck-window: the page took the notice about the panel down")
+			return
+		}
+		log.Printf("fleetdeck-window: the page shows the notice about the panel: %q", text)
+	}); err != nil {
+		log.Printf("fleetdeck-window: the log will not say whether the notice reached the page: %v", err)
+	}
+	if err := w.Bind(replaceBindingName, func() {
+		log.Printf("fleetdeck-window: replacing the panel at %s, as asked from the notice", *url)
+		keeper.Replace()
+	}); err != nil {
+		log.Printf("fleetdeck-window: the notice's button will not replace the panel: %v", err)
+	}
+	// After the bindings, so the script finds them; before the first
+	// navigation, so it runs in the first page too.
+	w.Init(noticeScript)
 	// The update button is on screen only while there is something to update
 	// to, and its appearing is the notice (watch.go). A build that cannot
 	// update itself never finds anything to update to, so it shows no button;

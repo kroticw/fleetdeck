@@ -100,7 +100,7 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 		// Covers the panel's page too: that page belongs to the panel being
 		// stopped, and it would only go offline under the person.
 		s.showingPanel = false
-		return false, replacingPage(e.Detail)
+		return false, replacingPage(e.Detail, e.Asked)
 	case supervisor.Failed:
 		s.showingPanel = false
 		return false, failedPage(s.url, e, s.logPath)
@@ -173,9 +173,15 @@ func startingPage(url string, takingOver bool) string {
 </html>`, pageStyle, heading, text, waitShownAfter.Milliseconds())
 }
 
-// replacingPage is shown while a panel an earlier window left behind is being
-// stopped, for the window to start its own. whose says why it is replaced.
-func replacingPage(whose string) string {
+// replacingPage is shown while a panel is being stopped for the window to
+// start its own: one an earlier window left behind, whose says why; or, asked,
+// one a person chose to replace from the notice about a panel of another
+// build (foreign.go).
+func replacingPage(whose string, asked bool) string {
+	text := "На месте панели отвечала панель, оставленная прежним окном: " + html.EscapeString(whose) + ". Окно останавливает её и запускает свою."
+	if asked {
+		text = "Окно останавливает панель другой сборки, которую запустило не оно, и запускает свою."
+	}
 	return fmt.Sprintf(`<!doctype html>
 <html>
 <head>
@@ -186,10 +192,10 @@ func replacingPage(whose string) string {
 <body>
 <main>
   <h1>Заменяю панель</h1>
-  <p>На месте панели отвечала панель, оставленная прежним окном: %s. Окно останавливает её и запускает свою.</p>
+  <p>%s</p>
 </main>
 </body>
-</html>`, pageStyle, html.EscapeString(whose))
+</html>`, pageStyle, text)
 }
 
 // failedPage says why the panel is not there, with what the panel itself last
