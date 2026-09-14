@@ -267,3 +267,40 @@ jobs:
           path: out
           if-no-files-found: ignore
           retention-days: 7
+
+  window-on-macos-26:
+    # Opens the same app on the macOS its glass is for. v0.10.0 went out with its
+    # window seen whole only on macOS 15, where the frame is NSVisualEffectView; on
+    # the operator's macOS 26 it could not be dragged and its capsules could not be
+    # read. The glass tests of `check` run on macos-latest, which moves; they run
+    # here too, on the named release, next to the window's screenshot.
+    needs: oldest-macos-app
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oldest-macos-app
+          path: new
+      - name: Unpack this build
+        run: ditto -x -k new/fleetdeck-v0.0.0-ci-macos.zip new
+      - name: Show the macOS and the screen
+        run: |
+          sw_vers
+          system_profiler SPDisplaysDataType | grep --extended-regexp 'Resolution|UI Looks like' || true
+      # The frame on hidden windows: glass, the capsules inside it, the drag band.
+      - name: The window's tests on macOS 26
+        run: go test -count=1 ./cmd/fleetdeck-window/
+      - name: This build's window, started directly, shows the panel's page in its frame
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/new-exec exec frame
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: window-on-macos-26
+          path: out
+          if-no-files-found: ignore
+          retention-days: 7
