@@ -294,9 +294,13 @@ func TestTheTakeoverSequenceCreatesSurfacesOnce(t *testing.T) {
 		return effects
 	}
 	// The new window's "taking over" page, then the staged panel answering while
-	// the handover is not done: the window's own page both times.
-	count(c.boardShowsOwnPage())
-	count(c.boardShowsOwnPage())
+	// the handover is not done: the window's own page both times, with no frame
+	// up yet to take down.
+	for i := 1; i <= 2; i++ {
+		if got := count(c.boardShowsOwnPage()); len(got) != 0 {
+			t.Fatalf("the window's own page %d before any panel page: %#v, want nothing", i, got)
+		}
+	}
 	// Handed over: the board loads and reports, then loads again once the panel
 	// is restarted from the canonical bundle.
 	count(c.layout(1, "panel", "work"))
@@ -307,8 +311,20 @@ func TestTheTakeoverSequenceCreatesSurfacesOnce(t *testing.T) {
 	if len(again) == 0 || !reflect.DeepEqual(again[0], boardInsets()) {
 		t.Fatalf("a repeated report must give the new board page its insets again: %#v", again)
 	}
-	count(c.layout(1, "panel", "home"))
+	// The next update replacing the panel under the frame: its page takes the
+	// frame down once, and a second page of the window's finds nothing to take.
+	if got := count(c.boardShowsOwnPage()); !reflect.DeepEqual(got, []effect{destroySurfaces{}}) {
+		t.Fatalf("the window's own page over the frame: %#v, want the surfaces taken down", got)
+	}
+	if got := count(c.boardShowsOwnPage()); len(got) != 0 {
+		t.Fatalf("a second own page: %#v, want nothing", got)
+	}
+	count(c.layout(1, "panel", "work"))
 	if creates != 2 {
+		t.Fatalf("the panel page after the update must bring the surfaces back once: created %d times", creates)
+	}
+	count(c.layout(1, "panel", "home"))
+	if creates != 3 {
 		t.Fatalf("another fleet must bring the surfaces back on it: created %d times", creates)
 	}
 }

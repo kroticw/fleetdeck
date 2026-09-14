@@ -18,6 +18,8 @@ void fd_surface_destroy(void *surface);
 // How many message handler objects are alive, and how many times their class
 // was registered: the tests' measure of a surface that leaves nothing behind.
 int fd_surface_live_handlers(void);
+// How many of the surfaces' WKWebViews are not freed yet.
+int fd_surface_live_webviews(void);
 int fd_surface_handler_class_registrations(void);
 
 // For surface_darwin_test.go, which cannot use cgo itself.

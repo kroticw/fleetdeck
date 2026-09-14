@@ -66,6 +66,9 @@ func TestSurfacesCreatedAndDestroyedManyTimesLeaveNothingBehind(t *testing.T) {
 	if r.liveAfterChurn != 0 {
 		t.Fatalf("live message handlers after 20 rounds = %d, want 0", r.liveAfterChurn)
 	}
+	if left := r.webViewsAfterChurn - r.webViewsBeforeChurn; left != 0 {
+		t.Fatalf("web views not freed after 20 rounds = %d, want 0: destroy keeps a WKWebView, and its web content process, alive", left)
+	}
 	if r.subviewsAfterChurn != 0 {
 		t.Fatalf("subviews left in the panels = %d, want 0", r.subviewsAfterChurn)
 	}

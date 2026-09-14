@@ -65,6 +65,27 @@ static int liveHandlers;
 static int handlerClassRegistrations;
 static Class handlerSuper;
 
+// A WKWebView has no dealloc of the window's own to count, so each carries an
+// object tied to it: released, and counted out, only when the web view is
+// freed. A web view destroy forgets to release stays counted.
+static int liveWebViews;
+static const char lifeKey = 0;
+
+static void lifeDealloc(id self, SEL _cmd) {
+  liveWebViews--;
+  struct objc_super up = {self, (Class)objc_getClass("NSObject")};
+  ((void (*)(struct objc_super *, SEL))objc_msgSendSuper)(&up, _cmd);
+}
+
+static Class lifeClass(void) {
+  static Class klass;
+  if (klass) return klass;
+  klass = objc_allocateClassPair((Class)objc_getClass("NSObject"), "FleetdeckWebViewLife", 0);
+  class_addMethod(klass, sel("dealloc"), (IMP)lifeDealloc, "v@:");
+  objc_registerClassPair(klass);
+  return klass;
+}
+
 // The origin of the document in frameInfo, as scheme://host[:port]: WebKit
 // reports a scheme's default port as 0, and the origin is then without it.
 static void originOf(id frameInfo, char *out, size_t size) {
@@ -216,6 +237,10 @@ void *fd_surface_create(void *board, void *container, const char *name, const ch
   CGRect bounds = sendRect0((id)container, sel("bounds"));
   s->webview = ((id (*)(id, SEL, CGRect, id))objc_msgSend)(send0(cls("WKWebView"), sel("alloc")),
                                                            sel("initWithFrame:configuration:"), bounds, s->config);
+  id life = send0((id)lifeClass(), sel("new"));
+  liveWebViews++;
+  objc_setAssociatedObject(s->webview, &lifeKey, life, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  sendVoid0(life, sel("release"));
   // Transparent, so the glass under the web view is what shows.
   sendVoid2(s->webview, sel("setValue:forKey:"), nsbool(0), nsstring("drawsBackground"));
   sendVoid1(s->webview, sel("setUnderPageBackgroundColor:"), send0(cls("NSColor"), sel("clearColor")));
@@ -269,6 +294,7 @@ void fd_surface_destroy(void *surface) {
 }
 
 int fd_surface_live_handlers(void) { return liveHandlers; }
+int fd_surface_live_webviews(void) { return liveWebViews; }
 int fd_surface_handler_class_registrations(void) { return handlerClassRegistrations; }
 
 // --- for the tests ---------------------------------------------------------------

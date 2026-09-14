@@ -139,6 +139,8 @@ type surfaceProbe struct {
 	userScripts                int
 	liveAfterCreate            int
 	liveAfterChurn             int
+	webViewsBeforeChurn        int
+	webViewsAfterChurn         int
 	subviewsAfterChurn         int
 	classRegistrations         int
 	eventsSet                  bool
@@ -183,7 +185,11 @@ func probeSurfacesForTest() surfaceProbe {
 	s.reload()
 	s.close()
 
-	// Twenty fleet switches' worth of surfaces made and taken down.
+	// Twenty fleet switches' worth of surfaces made and taken down. The web view
+	// above was asked to load, and WebKit holds a web view with a load under way
+	// until the run loop turns, which it does not here: the churn is counted
+	// against what was alive before it.
+	out.webViewsBeforeChurn = int(C.fd_surface_live_webviews())
 	for round := 0; round < 20; round++ {
 		o := newSurface(f.board(), f.panelContent("orchestrator"), "orchestrator", page, glassModeGlass, b)
 		t := newSurface(f.board(), f.panelContent("sessions"), "sessions", page, glassModeGlass, b)
@@ -191,6 +197,7 @@ func probeSurfacesForTest() surfaceProbe {
 		t.close()
 	}
 	out.liveAfterChurn = int(C.fd_surface_live_handlers())
+	out.webViewsAfterChurn = int(C.fd_surface_live_webviews())
 	out.subviewsAfterChurn = int(C.fd_test_subview_count(f.panelContent("orchestrator"))) + int(C.fd_test_subview_count(f.panelContent("sessions")))
 	out.classRegistrations = int(C.fd_surface_handler_class_registrations())
 	return out

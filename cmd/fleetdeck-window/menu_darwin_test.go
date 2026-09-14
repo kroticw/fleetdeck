@@ -41,6 +41,9 @@ var (
 	reloadKey             string
 	reloadKeyOK           bool
 	reloadHasTarget       bool
+	// reloadRuns is how many times pressing Reload ran the window's reload.
+	reloadRuns    int
+	reloadPressed bool
 
 	closeHideWindow             unsafe.Pointer
 	closeHideShouldCloseResult  int
@@ -61,6 +64,11 @@ func TestMain(m *testing.M) {
 	quitKey, quitKeyOK = testAppMenuQuitKeyEquivalent()
 	reloadKey, reloadKeyOK = testMenuItemKey("View", "fleetdeckReloadAll:")
 	reloadHasTarget = testMenuItemHasTarget("View", "fleetdeckReloadAll:")
+	// Pressed as a click presses it: through the item's target, into what
+	// glasswindow.go sets as the reload.
+	setMenuReload(func() { reloadRuns++ })
+	reloadPressed = testMenuItemPerform("View", "fleetdeckReloadAll:")
+	setMenuReload(nil)
 
 	closeHideWindow = testNewHiddenWindow()
 	if closeHideWindow != nil {
@@ -123,6 +131,9 @@ func TestReloadReloadsEveryWebViewNotOnlyTheFocusedOne(t *testing.T) {
 	}
 	if reloadKey != "r" {
 		t.Fatalf("Reload key equivalent = %q, want \"r\"", reloadKey)
+	}
+	if !reloadPressed || reloadRuns != 1 {
+		t.Fatalf("pressing Reload: taken = %v, the window's reload ran %d times; want it run once", reloadPressed, reloadRuns)
 	}
 }
 
