@@ -169,6 +169,8 @@ func main() {
 			if notices.set(n) {
 				if n != nil {
 					log.Printf("fleetdeck-window: %s", n)
+				} else {
+					log.Printf("fleetdeck-window: the notice about the panel at %s is taken down: %s", *url, describeEvent(e))
 				}
 				w.Eval("window." + noticeRepaintFunction + " && window." + noticeRepaintFunction + "()")
 			}
