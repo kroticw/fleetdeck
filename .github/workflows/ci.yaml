@@ -189,7 +189,9 @@ jobs:
     #
     # Only this build decides the job. v0.9.1 is measured beside it and recorded as
     # it comes: a first run of this job found its window loads on macOS 15.7.9, so
-    # nothing here may assume it fails.
+    # nothing here may assume it fails. Its stand never reports "panel" either way:
+    # v0.9.1's window logs no page state, and knows nothing of FLEETDECK_STAND_SOCKET,
+    # which is harmless on a runner with no fleet daemon and nowhere else.
     needs: oldest-macos-app
     runs-on: macos-15
     timeout-minutes: 25

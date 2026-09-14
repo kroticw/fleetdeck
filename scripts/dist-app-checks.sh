@@ -211,7 +211,9 @@ app_is_the_release() {
 # that macOS: availability checks up to it are compiled out, and what it links
 # may exist on no older one. dyld does not refuse a binary for the number
 # itself -- measured on macOS 15.7.9, and in dyld's Loader.cpp the number only
-# adds a note to a "Symbol not found" error. v0.9.1 was built on a macOS 26
+# adds a note to a "Symbol not found" error -- but LaunchServices, which Finder
+# opens apps through, does: on that same macOS it refused v0.9.1 with
+# kLSIncompatibleSystemVersionErr although its plist promised 11.0. v0.9.1 was built on a macOS 26
 # runner: its window named 26.0 under a plist promising 11.0, and imported
 # libc++'s std::bad_function_call, which the SDK marks as introduced in macOS
 # 15.4. Equal rather than "not newer": a slice naming an older macOS than the
