@@ -68,22 +68,34 @@ static id initWithFrame(id klass, CGRect r) {
 }
 
 // TEMPORARY (T-061, v0.10.1), removed before merge: for one diagnostic stand on
-// macOS 26, FLEETDECK_STAND_CAPSULE_APPEARANCE=app on a stand (FLEETDECK_STAND_SOCKET
-// set) draws the row and its capsules in the app's appearance, to see whether
-// that is what keeps them white in the dark.
-static id standCapsuleAppearance(void) {
+// macOS 26. The capsules' glass takes the system's mode and their controls the
+// app's (run 34863293838), so a theme other than the system's leaves them
+// unreadable. FLEETDECK_STAND_CAPSULE_APPEARANCE on a stand (FLEETDECK_STAND_SOCKET
+// set) names a candidate: "tint" tints the glass in the app's mode, "system"
+// draws the controls in the system's mode, "vibrancy" draws the capsules in
+// vibrancy instead of glass.
+static int standCapsuleVariantIs(const char *variant) {
   const char *socket = getenv("FLEETDECK_STAND_SOCKET");
   const char *choice = getenv("FLEETDECK_STAND_CAPSULE_APPEARANCE");
-  if (!socket || !*socket || !choice || strcmp(choice, "app") != 0) return (id)0;
-  id appearance = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("effectiveAppearance"));
+  if (!socket || !*socket || !choice || strcmp(choice, variant) != 0) return 0;
   static int said;
   if (!said) {
     said = 1;
-    id name = appearance ? send0(appearance, sel("name")) : (id)0;
-    fprintf(stderr, "fleetdeck-window: on this stand the capsules are drawn in the app's appearance, %s\n",
-            name ? ((const char *(*)(id, SEL))objc_msgSend)(name, sel("UTF8String")) : "(none)");
+    fprintf(stderr, "fleetdeck-window: on this stand the capsules are drawn as candidate %s\n", choice);
   }
-  return appearance;
+  return 1;
+}
+
+static int appIsDark(void) {
+  id appearance = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("effectiveAppearance"));
+  id name = appearance ? send0(appearance, sel("name")) : (id)0;
+  return name && strstr(cstring(name), "Dark") != NULL;
+}
+
+static int systemIsDark(void) {
+  id style = send1(send0(cls("NSUserDefaults"), sel("standardUserDefaults")), sel("stringForKey:"),
+                   nsstring("AppleInterfaceStyle"));
+  return style && strcmp(cstring(style), "Dark") == 0;
 }
 
 // Added to parent, which then owns it.
@@ -231,8 +243,18 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
   }
   sendVoid0(holder, sel("release"));
   sendVoidLong(wrapper, sel("setAutoresizingMask:"), autoresizing);
-  id standAppearance = standCapsuleAppearance();  // TEMPORARY (T-061)
-  if (standAppearance) sendVoid1(wrapper, sel("setAppearance:"), standAppearance);
+  // TEMPORARY (T-061): the candidates "tint" and "system".
+  if (standCapsuleVariantIs("tint") && respondsTo(wrapper, "setTintColor:")) {
+    double grey = appIsDark() ? 0.16 : 0.95;
+    id tint = ((id (*)(id, SEL, double, double, double, double))objc_msgSend)(
+        cls("NSColor"), sel("colorWithSRGBRed:green:blue:alpha:"), grey, grey, grey + 0.01, 0.85);
+    sendVoid1(wrapper, sel("setTintColor:"), tint);
+  }
+  if (standCapsuleVariantIs("system")) {
+    sendVoid1(holder, sel("setAppearance:"),
+              send1(cls("NSAppearance"), sel("appearanceNamed:"),
+                    nsstring(systemIsDark() ? "NSAppearanceNameDarkAqua" : "NSAppearanceNameAqua")));
+  }
   return wrapper;
 }
 
@@ -390,8 +412,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     sendVoid1(rowView, sel("setContentView:"), into);
     sendVoid0(into, sel("release"));
   }
-  id standAppearance = standCapsuleAppearance();  // TEMPORARY (T-061)
-  if (standAppearance) sendVoid1(rowView, sel("setAppearance:"), standAppearance);
+  if (standCapsuleVariantIs("vibrancy") && strcmp(mode, "glass") == 0) mode = "vibrancy";  // TEMPORARY (T-061)
   adopt(parent, rowView);
 
   for (int i = 0; i < tabsDrawn; i++) free(tabIDsDrawn[i]);

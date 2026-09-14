@@ -335,14 +335,18 @@ jobs:
             FLEETDECK_STAND_APPEARANCE=$1 scripts/ci-window-stand.sh new/fleetdeck.app "$2" "out/diag-$3" exec frame ||
               echo "=== stand $3 did not reach its frame"
           }
-          system false; fold false; stand dark 7821 a-system-light-unfolded-app-dark
-          fold true; stand dark 7822 b-system-light-folded-app-dark
-          system true; fold false; stand dark 7823 c-system-dark-unfolded-app-dark
-          fold true; stand dark 7824 d-system-dark-folded-app-dark
-          fold false; stand light 7825 g-system-dark-unfolded-app-light
-          export FLEETDECK_STAND_CAPSULE_APPEARANCE=app
-          stand light 7826 g-with-capsules-in-app-appearance
-          system false; stand dark 7827 e-system-light-unfolded-app-dark-capsules-in-app-appearance
+          # Run 34863293838 found the glass taking the system's mode and the
+          # controls the app's. The candidates, each in both directions: a, the
+          # system light and the app dark; g, the system dark and the app light.
+          fold false
+          system false; stand dark 7821 a-control
+          system true; stand light 7822 g-control
+          port=7823
+          for candidate in tint system vibrancy; do
+            system false; FLEETDECK_STAND_CAPSULE_APPEARANCE=$candidate stand dark "$port" "a-$candidate"
+            system true; FLEETDECK_STAND_CAPSULE_APPEARANCE=$candidate stand light "$(( port + 1 ))" "g-$candidate"
+            port=$(( port + 2 ))
+          done
       - name: "TEMPORARY (T-061): the system light and the panels unfolded again"
         if: always()
         run: |
