@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Часть Б начинается только после мержа T-057 и выпуска v0.9.2; предусловие — T-058 (нижняя версия macOS окна). Первая задача — задача 0: план пересверяется с master и коммитится; остальные задачи пишутся от этого коммита.
+- Часть Б идёт от master после мержа T-057 (PR #161, 659f50d; тег v0.9.2); задачи 1–9 выполнены до мержа и перенесены rebase. Задача 0 — пересверка ниже, раздел «Сверка с master после T-057». T-058 (нижняя версия macOS окна) идёт параллельно и правит `Makefile`, `scripts/build-dist-app.sh`, `scripts/verify-dist-app.sh`, `release.yaml` и `cmd/fleetdeck-window/Info.plist`: эти файлы часть Б не трогает, кроме `ci.yaml` в задаче 17.
 - Страница без `window.fleetdeckHost` (браузер, старое окно) показывает нынешнюю раскладку из трёх колонок без единого изменения поведения.
 - Окно показывает раму только после `fleetdeckLayout({ version: 1, mode: "panel", fleet })` от доски. Неизвестная `version` — это «не сообщила».
 - Стекло — только `NSGlassEffectView` со `style` 0 (Regular). Clear (1) не используется.
@@ -26,6 +26,28 @@
 - Коммиты подписаны GPG, с `--signoff`, сообщения по-английски. Документация `docs/en` и `docs/ru` правится одним коммитом.
 - Проверки перед коммитом: `make test`, `make test-web`, `make lint`, `golangci-lint run`.
 - Этот план закрепляет интерфейсы, тесты и порядок. Код нативных задач (9, 10, 12, 13, 14) описан по шагам с точными вызовами AppKit, а не целиком: он пишется от master после T-057 и T-058. Места файлов и имена из T-057 и T-058 подтверждает задача 0.
+
+## Сверка с master после T-057 (задача 0)
+
+Сверено с `origin/master` 659f50d. Имена T-057, на которые опираются задачи 10–12, 16 и 17:
+
+- `pageLoadScript(panelURL string) string` (`owner.go`) сообщает `fleetdeckPageLoaded(state, href)` — два аргумента. Состояний четыре: `loading` (документ начался), `panel`, `broken`, `leaving`; константы `pageLoading`, `pagePanel`, `pageBroken`, `pageLeaving`.
+- Ожидание два: `pageLoadWait` (531 мс) — пока документ не начался, `pageLoadingWait` (840 мс) — после `loading`; `pageLoadTries = 3`, `pageLoadTick = 100 мс`.
+- `pageFailedPage(pageURL string, wait time.Duration) string` — страница «страница панели не загрузилась».
+- `screen` ведёт адрес, на котором страница себя назвала: `href`, `left`, `target()`; навигация доски в `main.go` — `w.Navigate(scr.target())`. Страница, ушедшая сама (`leaving`), ждёт следующую, и окно её не переспрашивает. Поля `takingOver`, `handed` и метод `handedOver()` — как в спеке 8.
+- Стенд: `standSocketEnv = "FLEETDECK_STAND_SOCKET"`, `panelArgs(window int, standSocket string)` передаёт `--stand-socket`; лог панелей — `$HOME/Library/Logs/fleetdeck.log`; строка `daemon discovery disabled` — в `cmd/fleetdeck/main.go`. `supervisor.StandBundleID = "dev.fleetdeck.stand"`; `scripts/verify-dist-app.sh` принимает идентификатор седьмым аргументом, подписанный бандл обязан нести собственный идентификатор приложения.
+- `Takeover.retire` (`internal/supervisor/update.go`) удаляет подменённый бандл после ухода старого окна; окна часть Б это не меняет.
+
+Что это меняет в задачах: задача 11 — `pageLoaded` принимает `loading` и ничего на него не отдаёт; задача 12 — таймер поверхности по двум ожиданиям и `pageFailedPage(url, pageLoadingWait)`; `navigateBoard` — `w.Navigate(url)` без правки `screen`: доска скажет `leaving`, затем `loading` с новым `href`, и `screen` пойдёт за ней сам.
+
+### Что изменилось при исполнении задач 1–9
+
+- Каждый новый модуль `web/js` добавлен в точный список `TestEmbeddedFSContainsExpectedFiles` (`internal/server/static_test.go`) в своей задаче.
+- Задача 4: крестик закрытия — `closeCrossHTML` в `web/js/icon.js`, как остальные SVG страницы, через `innerHTML`; тест проверяет разметку, потому что `fake-dom.js` её не разбирает. Затемнение `#sheet-scrim` показывается одним правилом `:has` в `app.css` по атрибуту `hidden` трёх оверлеев — `main.js` не меняется.
+- Задача 5: `applyTheme(choice)` добавлен в `theme.js`; `createNewCard` возвращает `{ open }`; на доске прячутся кнопки вкладок и «+ карточка», а не весь `#tabs` — форма новой карточки живёт в нём.
+- Задача 6: переход на другой флот в колонке сессий — делегированный клик по корню колонки (разметка колонки — строка, `fake-dom.js` её не разбирает); свёртывание в боковой поверхности пересылается окну наблюдателем `data-folded` в `main.js`, `columnresize.js` не меняется.
+- Задача 7: `delegate` в `buildcheck.js` не вводится. Сборку проверяет только доска: её `fleetdeckReload` перезагружает все три вида, а потолок попыток (`ATTEMPTS_KEY`) остаётся в хранилище одного вида — перезагрузка без записей его сняла бы. Шапка не делится на функции, а получает `parts` (`HEADER_PARTS`, `joinHeaderParts`): поверхность оркестратора — `brand` и `update`, сессий — `counters`; добавлены `limitsOf(snap, nowMs)` и `themeLabelText()`. Плашка сборки на доске стоит под капсулами.
+- Задача 9: `Board.Right` — ширина панели сессий и поле (356 при ширине 348), а не 0: доска прокручивается под стеклом, а лист и доки открываются в стороне от панели.
 
 ---
 
@@ -1835,6 +1857,7 @@ Expected: FAIL — `undefined: newController`.
 - `layout`: `version != 1` или `mode != "panel"` — пустой список, если рамы нет, иначе `destroySurfaces{}`; первый отчёт или другой флот — `createSurfaces`, `applyGeometry`, `insets` и `glass` доске, готовность поверхностей сбрасывается; тот же флот — только `insets`, `glass` и тема (если известна) доске;
 - адрес поверхностей и доски при смене флота — `baseURL + "?fleet=" + url.QueryEscape(fleet)`;
 - `sendTo` для `orchestrator` и `sessions` добавляется в список только при `ready[surface]`; `pageLoaded(surface, "panel")` ставит готовность, обнуляет попытки и отдаёт тему (если известна), `glass`, `folded` и, для оркестратора, `fullscreen`;
+- `pageLoaded(surface, "loading")` ничего не отдаёт: готовность приходит только с `panel`;
 - `pageLoaded(surface, "leaving")` снимает готовность и ничего не отдаёт; `pageLoaded(surface, "broken")` увеличивает попытки: меньше `pageLoadTries` — `reloadSurface`, иначе `destroySurfaces` и `showFailedPage`, рама снимается;
 - `navigate` вызывает `navigationDecision(baseURL, адрес поверхностей, target)`: `Allow` — `true` без эффектов; `Board` — `false`, `destroySurfaces` и `navigateBoard`, рама снимается; `External` — `false`, `openExternal`; иначе — `false` без эффектов;
 - `resized` при раме отдаёт `applyGeometry`, `insets` доске и, если `fullscreen` изменился, последним — `fullscreen` поверхности оркестратора;
@@ -1866,7 +1889,7 @@ git commit --signoff --message "feat(window): decide the frame from what the pag
 
 **Interfaces:**
 
-- Consumes: `bridge` (8); `installFrame`, `currentGlassMode` (9); `newSurface`, `hostScript`, `fleetdeckSurfaceNavigation` (10); `controller` и эффекты (11); из T-057 (`owner.go`, `main.go` ветки `fix/update-staged-bundle-relaunch`, подтверждаются задачей 0): `pageLoadScript(panelURL string) string`, `pageLoadedBindingName = "fleetdeckPageLoaded"`, `pageLoadTries = 3`, `pageFailedPage(panelURL string, tries int) string`, поля `takingOver` и `handed` у `screen`.
+- Consumes: `bridge` (8); `installFrame`, `currentGlassMode` (9); `newSurface`, `hostScript`, `fleetdeckSurfaceNavigation` (10); `controller` и эффекты (11); из T-057 (`owner.go`, `main.go` ветки `fix/update-staged-bundle-relaunch`, подтверждаются задачей 0): `pageLoadScript(panelURL string) string`, `pageLoadedBindingName = "fleetdeckPageLoaded"` с аргументами `(state, href)`, `pageLoadWait`, `pageLoadingWait`, `pageLoadTries = 3`, `pageFailedPage(pageURL string, wait time.Duration) string`, `screen.target()`.
 - Produces:
   - `type natives interface { createSurface(kind, url string, glass glassMode); destroySurfaces(); send(surface string, msg map[string]any); focus(surface string); navigateBoard(url string); openExternal(url string); reloadSurface(surface string); showFailedPage(); setAppearance(choice string); applyGeometry(g geometry); saveWidths(w panelWidths); setCapsules(model json.RawMessage); setFrameMode(m glassMode); reloadAll() }` и `runEffects(n natives, effects []effect)` — для задач 13 (`setCapsules`) и 14 (`reloadAll`);
   - привязки в реестре: `fleetdeckLayout`, `fleetdeckOpen`, `fleetdeckSwitchFleet`, `fleetdeckCapsules`, `fleetdeckTheme`, `fleetdeckPanel`; `fleetdeckPageLoaded` из поверхности уходит в `controller.pageLoaded(surface, state)`, из доски — в обработчик T-057 без изменений; восемь существующих привязок переносятся в реестр — для задачи 16 (стенд).
@@ -1933,12 +1956,12 @@ Expected: FAIL — `undefined: runEffects`.
 
 - [ ] **Step 3: Implement**
 
-- `effects.go`: `runEffects` — `switch` по типу эффекта с вызовом метода `natives`. Реальная реализация `natives` держит `*frame`, две `*surface` и `webview.WebView`; нативные вызовы — через `w.Dispatch`. `openExternal` — `[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:]]`; `showFailedPage` — `w.SetHtml(pageFailedPage(url, pageLoadTries))` в доску; `reloadSurface` — `(*surface).reload()`.
+- `effects.go`: `runEffects` — `switch` по типу эффекта с вызовом метода `natives`. Реальная реализация `natives` держит `*frame`, две `*surface` и `webview.WebView`; нативные вызовы — через `w.Dispatch`. `openExternal` — `[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:]]`; `showFailedPage` — `w.SetHtml(pageFailedPage(url, pageLoadingWait))` в доску; `navigateBoard` — `w.Navigate(url)`: `screen` пойдёт за доской по её `leaving` и `loading` с новым `href`; `reloadSurface` — `(*surface).reload()`.
 - `main.go`, сразу после `webview.New`: `installFrame(w.Window())` — до первой навигации; `w.Init(hostScript("board", currentGlassMode(), nil))` рядом с `w.Init(noticeScript)` и `w.Init(pageLoadScript(*url))`; реестр привязок; каждая привязка регистрируется в реестре и через `w.Bind` для доски с адаптером `func(args json.RawMessage) (any, error) { return reg.call("board", name, args) }`; существующие обработчики заворачиваются в `bridgeHandler` без изменения поведения.
-- На каждую загрузку поверхности `natives` заводит таймер `pageLoadWait`: `panel`, `broken` или `leaving` до срока его снимают, а сработавший таймер отдаёт контроллеру `pageLoaded(surface, "broken")` — так «нет ответа» идёт тем же путём повторов, что и у доски в T-057.
+- На каждую загрузку поверхности `natives` заводит таймер `pageLoadWait`, а после `loading` — `pageLoadingWait`, как `screen.tick`; `panel`, `broken` или `leaving` до срока его снимают, а сработавший таймер отдаёт контроллеру `pageLoaded(surface, "broken")` — так «нет ответа» идёт тем же путём повторов, что и у доски в T-057.
 - `fleetdeckSurfaceNavigation` (задача 10) зовёт `controller.navigate` синхронно — делегату нужен ответ сразу; эффекты уходят в `runEffects` через `w.Dispatch`. Контроллер вызывают главный поток (делегаты, наблюдатели) и горутины привязок, поэтому все его методы берут один `sync.Mutex`; эффекты исполняются после того, как мьютекс отпущен.
 - `frame_darwin.c`: наблюдатели `NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification` (центр уведомлений `NSWorkspace`), `NSWindowDidResizeNotification`, `NSWindowDidEnterFullScreenNotification`, `NSWindowDidExitFullScreenNotification`; наблюдатель зовёт экспортируемый Go `fleetdeckFrameChanged(kind *C.char)`, который отдаёт контроллеру `glassChanged(currentGlassMode())` или `resized(...)`.
-- `owner.go`: каждый раз, когда `screen` ставит свою страницу окна через `SetHtml`, вызывается `controller.boardShowsOwnPage()` и эффекты исполняются. Навигацию доски и подтверждение её загрузки `screen` ведёт как после T-057, без изменений.
+- `main.go`: в `show` ветка `page != ""` (своя страница окна через `w.SetHtml`) вызывает `controller.boardShowsOwnPage()` и исполняет эффекты; обработчик `fleetdeckPageLoaded` доски остаётся `scr.pageSays(state, href)`. Навигацию доски и подтверждение её загрузки `screen` ведёт как в T-057, без изменений.
 - Ширины панелей читаются и пишутся в `NSUserDefaults` приложения под ключами `glassOrchestratorWidth`, `glassSessionsWidth`, `glassOrchestratorFolded`, `glassSessionsFolded`.
 
 - [ ] **Step 4: Run tests**
