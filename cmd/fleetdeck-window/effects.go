@@ -15,13 +15,13 @@ type natives interface {
 	navigateBoard(url string)
 	openExternal(url string)
 	reloadSurface(surface string)
-	showFailedPage()
+	showWindowPage(page string)
 	setAppearance(choice string)
 	applyGeometry(g geometry)
 	saveWidths(w panelWidths)
 	setCapsules(model json.RawMessage)
 	setFrameMode(m glassMode)
-	reloadAll()
+	reloadBoard()
 }
 
 // runEffects carries effects out in the order the controller gave them.
@@ -44,8 +44,8 @@ func runEffects(n natives, effects []effect) {
 			n.openExternal(e.URL)
 		case reloadSurface:
 			n.reloadSurface(e.Surface)
-		case showFailedPage:
-			n.showFailedPage()
+		case showWindowPage:
+			n.showWindowPage(e.HTML)
 		case setAppearance:
 			n.setAppearance(e.Choice)
 		case applyGeometry:
@@ -56,8 +56,8 @@ func runEffects(n natives, effects []effect) {
 			n.setCapsules(e.Model)
 		case setFrameMode:
 			n.setFrameMode(e.Mode)
-		case reloadAll:
-			n.reloadAll()
+		case reloadBoard:
+			n.reloadBoard()
 		}
 	}
 }

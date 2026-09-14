@@ -179,6 +179,11 @@ func main() {
 		scr.reopen()
 		log.Printf("fleetdeck-window: asked for the panel's page again at %s, with every web view", scr.target())
 		w.Navigate(scr.target())
+	}, func(page string) {
+		// A side surface's page given up on: said in the board, as its own is.
+		scr.cover()
+		log.Printf("fleetdeck-window: put up the window's page %q for a side surface", pageHeading(page))
+		w.SetHtml(page)
 	})
 	// show does what the screen says, on the UI thread.
 	show := func(navigate bool, page string) {
@@ -198,7 +203,7 @@ func main() {
 	// What WKWebView says of each navigation, in the log with the time since
 	// the page was asked for: the page's own word begins only with its
 	// document, and a navigation that is slow before that says nothing.
-	observed := observeNavigation(w.Window(), func(e navEvent) {
+	observed := observeNavigation(glass.frame.board(), func(e navEvent) {
 		if scr.asked {
 			log.Printf("fleetdeck-window: navigation %s, %s after the page was asked for", e, time.Since(scr.askedAt).Round(time.Millisecond))
 		} else {
@@ -208,7 +213,7 @@ func main() {
 		show(scr.navSays(e))
 	})
 	if !observed {
-		log.Printf("fleetdeck-window: the window's content view is not a WKWebView: WebKit will say nothing of navigations, and the panel's page is asked for again only every %s", navSilentWait)
+		log.Printf("fleetdeck-window: the board is not a WKWebView: WebKit will say nothing of its navigations, and the panel's page is asked for again only every %s", navSilentWait)
 	}
 	keeper := &supervisor.Keeper{
 		URL:  *url,
@@ -451,7 +456,8 @@ func main() {
 		kept.start()
 	}
 
-	// Time going by for a page asked for and not loaded (screen.tick).
+	// Time going by for a page asked for and not loaded (screen.tick), the
+	// board's and the side surfaces'.
 	ticking, stopTicking := context.WithCancel(context.Background())
 	ticked := make(chan struct{})
 	go func() {
@@ -463,7 +469,10 @@ func main() {
 			case <-ticking.Done():
 				return
 			case <-tick.C:
-				w.Dispatch(func() { show(scr.tick()) })
+				w.Dispatch(func() {
+					show(scr.tick())
+					glass.tick()
+				})
 			}
 		}
 	}()

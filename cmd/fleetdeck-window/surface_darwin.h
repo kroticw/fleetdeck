@@ -23,6 +23,7 @@ int fd_surface_handler_class_registrations(void);
 // For surface_darwin_test.go, which cannot use cgo itself.
 void *fd_test_board_window(double width, double height);
 void *fd_test_surface_webview(void *surface);
+int fd_test_reports_navigation(void *surface);
 int fd_test_draws_background(void *webview);
 int fd_test_shares_pool(void *surface, void *board);
 int fd_test_shares_store(void *surface, void *board);

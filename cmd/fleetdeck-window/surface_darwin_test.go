@@ -31,6 +31,24 @@ func TestASurfaceIsATransparentWebViewSharingTheBoardsProcess(t *testing.T) {
 	}
 }
 
+// The frame takes the board out of the window's content view, where T-059's
+// navigation delegate first looked for it: without WebKit's word the board's
+// page would be asked for again on the old short waits.
+func TestTheBoardUnderTheFrameStillHasWebKitsWordOnItsNavigations(t *testing.T) {
+	if !surfaceResult.boardObserved {
+		t.Fatal("the board's web view under the glass frame takes no navigation delegate")
+	}
+}
+
+// A surface's delegate reports what WebKit says of its navigations, as the
+// board's does: with a delegate set, WebKit no longer reloads a page whose
+// process went away, and a surface would stay blank.
+func TestASurfaceReportsItsNavigationsAsTheBoardDoes(t *testing.T) {
+	if !surfaceResult.reportsNavigation {
+		t.Fatal("a surface's navigation delegate does not report commits, failures and a lost web content process")
+	}
+}
+
 func TestAClickInThePanelReachesItsSurfaceAndOnlyTheEdgeIsTheStrips(t *testing.T) {
 	if !surfaceResult.clickInPanelReachesSurface {
 		t.Fatalf("a click in the middle of the sessions panel does not reach its web view: it lands on %s; the web view's frame is %+v",

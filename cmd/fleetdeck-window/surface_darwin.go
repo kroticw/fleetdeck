@@ -134,6 +134,8 @@ type surfaceProbe struct {
 	subviewsAfterChurn         int
 	classRegistrations         int
 	eventsSet                  bool
+	boardObserved              bool
+	reportsNavigation          bool
 }
 
 func probeSurfacesForTest() surfaceProbe {
@@ -142,6 +144,8 @@ func probeSurfacesForTest() surfaceProbe {
 	f := installFrame(window)
 	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}))
 	f.setMode(glassModeGlass)
+	// The board moved under the frame is still the web view WebKit reports on.
+	out.boardObserved = observeNavigation(f.board(), func(navEvent) {})
 	b := newBridge()
 	setSurfaceEvents(func(string, string) {}, func(string, string) bool { return false })
 	surfaceEvents.Lock()
@@ -152,6 +156,7 @@ func probeSurfacesForTest() surfaceProbe {
 	s := newSurface(f.board(), f.panelContent("sessions"), "sessions", page, glassModeGlass, b)
 	webview := C.fd_test_surface_webview(s.p)
 	out.drawsBackground = C.fd_test_draws_background(webview) != 0
+	out.reportsNavigation = C.fd_test_reports_navigation(s.p) != 0
 	out.sharesPool = C.fd_test_shares_pool(s.p, f.board()) != 0
 	out.sharesStore = C.fd_test_shares_store(s.p, f.board()) != 0
 	out.userScripts = int(C.fd_test_user_scripts(s.p))

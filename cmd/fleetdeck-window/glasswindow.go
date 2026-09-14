@@ -5,7 +5,6 @@ package main
 import (
 	"encoding/json"
 	"log"
-	"time"
 
 	webview "github.com/webview/webview_go"
 )
@@ -23,16 +22,14 @@ type glassWindow struct {
 	mode     glassMode
 
 	surfaces map[string]*surface
-	// A load not heard from in time is a broken one (spec 6.6). generation
-	// tells a timer of a surface since replaced from one of the surface now.
-	timers     map[string]*time.Timer
-	generation map[string]int
-	framed     bool
-	model      json.RawMessage
+	framed   bool
+	model    json.RawMessage
 
-	// reloadBoard asks for the board's page again, the way the page's own
-	// reload does (main.go).
-	reloadBoard func()
+	// askBoard asks for the board's page again, the way the page's own reload
+	// does; putUp puts a page of the window's own in the board, the way the
+	// screen's are put up (main.go).
+	askBoard func()
+	putUp    func(page string)
 
 	// The drag on a panel's edge under way: which panel, the width it began
 	// at, and the pointer's x at the press.
@@ -41,18 +38,17 @@ type glassWindow struct {
 	dragX     float64
 }
 
-func newGlassWindow(w webview.WebView, panelURL string, reloadBoard func()) *glassWindow {
+func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp func(page string)) *glassWindow {
 	mode := currentGlassMode()
 	g := &glassWindow{
-		w:           w,
-		panelURL:    panelURL,
-		frame:       installFrame(w.Window()),
-		bridge:      newBridge(),
-		mode:        mode,
-		surfaces:    map[string]*surface{},
-		timers:      map[string]*time.Timer{},
-		generation:  map[string]int{},
-		reloadBoard: reloadBoard,
+		w:        w,
+		panelURL: panelURL,
+		frame:    installFrame(w.Window()),
+		bridge:   newBridge(),
+		mode:     mode,
+		surfaces: map[string]*surface{},
+		askBoard: askBoard,
+		putUp:    putUp,
 	}
 	g.ctl = newController(panelURL, loadPanelWidths(), mode)
 	g.frame.setMode(mode)
@@ -130,6 +126,7 @@ func newGlassWindow(w webview.WebView, panelURL string, reloadBoard func()) *gla
 	setWindowEvents(g.windowChanged)
 	setMenuReload(func() { g.run(g.ctl.reload()) })
 	setResizeEvents(g.resize)
+	observeSurfaceNavigation(g.surfaceNavigated)
 	observeWindow(w.Window())
 	return g
 }
@@ -165,12 +162,10 @@ func (g *glassWindow) run(effects []effect) { runEffects(g, effects) }
 func (g *glassWindow) boardShowsOwnPage() { g.run(g.ctl.boardShowsOwnPage()) }
 
 // reloadSurfaces is the board's page reloading: the surfaces go with it.
-func (g *glassWindow) reloadSurfaces() {
-	for kind, s := range g.surfaces {
-		s.reload()
-		g.arm(kind, pageLoadWait)
-	}
-}
+func (g *glassWindow) reloadSurfaces() { g.run(g.ctl.reloadSurfaces()) }
+
+// tick is time going by for the surfaces' pages asked for (main.go's ticker).
+func (g *glassWindow) tick() { g.run(g.ctl.tick()) }
 
 func (g *glassWindow) surfaceMessage(surface, message string) {
 	go func() {
@@ -193,13 +188,15 @@ func (g *glassWindow) surfaceNavigation(_, target string) bool {
 }
 
 func (g *glassWindow) pageLoaded(surface, state string) {
-	switch state {
-	case pageLoading:
-		g.arm(surface, pageLoadingWait)
-	default:
-		g.disarm(surface)
-	}
+	log.Printf("fleetdeck-window: the %s surface's page says %q", surface, state)
 	g.run(g.ctl.pageLoaded(surface, state))
+}
+
+// surfaceNavigated is WebKit's word about a surface's navigation, from inside
+// its delegate: carried out later, since it may take that web view down.
+func (g *glassWindow) surfaceNavigated(surface string, e navEvent) {
+	log.Printf("fleetdeck-window: the %s surface's navigation %s", surface, e)
+	g.later(g.ctl.surfaceNavigated(surface, e))
 }
 
 func (g *glassWindow) windowChanged(kind string) {
@@ -234,28 +231,6 @@ func (g *glassWindow) resize(side string, phase int, x float64) {
 	}
 }
 
-func (g *glassWindow) arm(surface string, wait time.Duration) {
-	g.disarm(surface)
-	g.generation[surface]++
-	generation := g.generation[surface]
-	g.timers[surface] = time.AfterFunc(wait, func() {
-		g.w.Dispatch(func() {
-			if g.generation[surface] != generation || g.surfaces[surface] == nil {
-				return
-			}
-			log.Printf("fleetdeck-window: the %s surface's page did not say it loaded within %s", surface, wait)
-			g.run(g.ctl.pageLoaded(surface, pageBroken))
-		})
-	})
-}
-
-func (g *glassWindow) disarm(surface string) {
-	if t := g.timers[surface]; t != nil {
-		t.Stop()
-		delete(g.timers, surface)
-	}
-}
-
 // --- natives ---------------------------------------------------------------------
 
 func (g *glassWindow) createSurface(kind, url string, glass glassMode) {
@@ -266,14 +241,11 @@ func (g *glassWindow) createSurface(kind, url string, glass glassMode) {
 	g.surfaces[kind] = s
 	g.framed = true
 	s.load(url)
-	g.arm(kind, pageLoadWait)
 	g.redrawCapsules()
 }
 
 func (g *glassWindow) destroySurfaces() {
-	for kind, s := range g.surfaces {
-		g.disarm(kind)
-		g.generation[kind]++
+	for _, s := range g.surfaces {
 		s.close()
 	}
 	g.surfaces = map[string]*surface{}
@@ -310,13 +282,10 @@ func (g *glassWindow) openExternal(url string)  { openExternalURL(url) }
 func (g *glassWindow) reloadSurface(surface string) {
 	if s := g.surfaces[surface]; s != nil {
 		s.reload()
-		g.arm(surface, pageLoadWait)
 	}
 }
 
-func (g *glassWindow) showFailedPage() {
-	g.w.SetHtml(pageFailedPage(g.panelURL, pageLoadingWait))
-}
+func (g *glassWindow) showWindowPage(page string) { g.putUp(page) }
 
 func (g *glassWindow) setAppearance(choice string) { applyAppearance(choice) }
 func (g *glassWindow) applyGeometry(geo geometry)  { g.frame.layout(geo) }
@@ -333,10 +302,7 @@ func (g *glassWindow) setFrameMode(m glassMode) {
 	g.redrawCapsules()
 }
 
-func (g *glassWindow) reloadAll() {
-	g.reloadBoard()
-	g.reloadSurfaces()
-}
+func (g *glassWindow) reloadBoard() { g.askBoard() }
 
 func (g *glassWindow) redrawCapsules() {
 	if !g.framed || g.model == nil {

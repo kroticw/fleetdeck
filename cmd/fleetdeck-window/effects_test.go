@@ -21,13 +21,13 @@ func (f *fakeNatives) focus(surface string)         { f.calls = append(f.calls, 
 func (f *fakeNatives) navigateBoard(url string)     { f.calls = append(f.calls, "navigate "+url) }
 func (f *fakeNatives) openExternal(url string)      { f.calls = append(f.calls, "external "+url) }
 func (f *fakeNatives) reloadSurface(surface string) { f.calls = append(f.calls, "reload "+surface) }
-func (f *fakeNatives) showFailedPage()              { f.calls = append(f.calls, "failed page") }
+func (f *fakeNatives) showWindowPage(page string)   { f.calls = append(f.calls, "page "+page) }
 func (f *fakeNatives) setAppearance(choice string)  { f.calls = append(f.calls, "appearance "+choice) }
 func (f *fakeNatives) applyGeometry(geometry)       { f.calls = append(f.calls, "geometry") }
 func (f *fakeNatives) saveWidths(panelWidths)       { f.calls = append(f.calls, "save") }
 func (f *fakeNatives) setCapsules(json.RawMessage)  { f.calls = append(f.calls, "capsules") }
 func (f *fakeNatives) setFrameMode(m glassMode)     { f.calls = append(f.calls, "frame "+string(m)) }
-func (f *fakeNatives) reloadAll()                   { f.calls = append(f.calls, "reload all") }
+func (f *fakeNatives) reloadBoard()                 { f.calls = append(f.calls, "reload board") }
 
 func TestCreatingSurfacesMakesBothColumnsOnTheSameAddress(t *testing.T) {
 	f := &fakeNatives{}
@@ -48,7 +48,7 @@ func TestEffectsRunInTheOrderTheControllerGaveThem(t *testing.T) {
 		navigateBoard{URL: "u"},
 		openExternal{URL: "https://x"},
 		reloadSurface{Surface: "sessions"},
-		showFailedPage{},
+		showWindowPage{HTML: "<h1>x</h1>"},
 		setAppearance{Choice: "dark"},
 		applyGeometry{},
 		saveWidths{},
@@ -56,11 +56,11 @@ func TestEffectsRunInTheOrderTheControllerGaveThem(t *testing.T) {
 		setFrameMode{Mode: glassModeOpaque},
 		sendTo{Surface: "board", Message: map[string]any{"type": "insets"}},
 		focusSurface{Surface: "board"},
-		reloadAll{},
+		reloadBoard{},
 	})
 	want := []string{
-		"destroy", "navigate u", "external https://x", "reload sessions", "failed page", "appearance dark",
-		"geometry", "save", "capsules", "frame opaque", "send board insets", "focus board", "reload all",
+		"destroy", "navigate u", "external https://x", "reload sessions", "page <h1>x</h1>", "appearance dark",
+		"geometry", "save", "capsules", "frame opaque", "send board insets", "focus board", "reload board",
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("calls = %v", f.calls)

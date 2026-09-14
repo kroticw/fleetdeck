@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"sync"
+	"time"
 )
 
 // The window's decisions about the glass frame, kept apart from AppKit: each
@@ -30,13 +31,13 @@ type (
 	navigateBoard  struct{ URL string }
 	openExternal   struct{ URL string }
 	reloadSurface  struct{ Surface string }
-	showFailedPage struct{}
+	showWindowPage struct{ HTML string }
 	setAppearance  struct{ Choice string }
 	applyGeometry  struct{ G geometry }
 	saveWidths     struct{ W panelWidths }
 	setCapsules    struct{ Model json.RawMessage }
 	setFrameMode   struct{ Mode glassMode }
-	reloadAll      struct{}
+	reloadBoard    struct{}
 )
 
 // hostVersion is the layout report's version this window frames; a page of
@@ -60,16 +61,17 @@ type controller struct {
 	fleet  string
 	// themeChoice is the board's theme once it has said it; "" until then.
 	themeChoice string
-	// ready: the surface's page said it loaded (spec 6.6); nothing is sent to
-	// a surface that has not. tries counts its failed loads in a row.
-	ready map[string]bool
-	tries map[string]int
+	// loads is each side surface's page asked for, by WebKit's word and the
+	// page's, as the board's is (pageWatch, spec 6.6): nothing is sent to a
+	// surface whose page has not said it loaded. now is the controller's clock.
+	loads map[string]*pageWatch
+	now   func() time.Time
 	// dragging is the panel whose edge is being dragged, "" when none.
 	dragging string
 }
 
 func newController(baseURL string, widths panelWidths, glass glassMode) *controller {
-	return &controller{baseURL: baseURL, widths: widths, glass: glass, ready: map[string]bool{}, tries: map[string]int{}}
+	return &controller{baseURL: baseURL, widths: widths, glass: glass, loads: map[string]*pageWatch{}, now: time.Now}
 }
 
 func (c *controller) pageURL(fleet string) string {
@@ -79,7 +81,7 @@ func (c *controller) pageURL(fleet string) string {
 // to is a message for surface, or nothing: the board gets messages while the
 // frame is up, a side surface only once its page has loaded.
 func (c *controller) to(surface string, message map[string]any) []effect {
-	if !c.framed || (surface != "board" && !c.ready[surface]) {
+	if !c.framed || (surface != "board" && (c.loads[surface] == nil || !c.loads[surface].showingPanel)) {
 		return nil
 	}
 	return []effect{sendTo{Surface: surface, Message: message}}
@@ -105,8 +107,7 @@ func (c *controller) folded(side string) bool {
 // takeDown drops the frame; the caller says what replaces it.
 func (c *controller) takeDown() {
 	c.framed = false
-	c.ready = map[string]bool{}
-	c.tries = map[string]int{}
+	c.loads = map[string]*pageWatch{}
 }
 
 // layout is the board's report of what page it is (spec 8).
@@ -132,44 +133,82 @@ func (c *controller) layout(version int, mode, fleet string) []effect {
 	}
 	c.takeDown()
 	c.framed, c.fleet = true, fleet
+	for _, side := range sideSurfaces {
+		c.loads[side] = &pageWatch{}
+		c.loads[side].ask(c.now())
+	}
 	out = append(out, createSurfaces{Fleet: fleet, URL: c.pageURL(fleet), Glass: c.glass}, applyGeometry{G: g})
 	out = append(out, c.insets(g)...)
 	return append(out, c.glassMessage("board")...)
 }
 
-// pageLoaded is a side surface's page saying where its load is (spec 6.6).
+// pageLoaded is a side surface's page saying where its load is (spec 6.6),
+// taken as the board's page's word is: a page that loaded broken is asked for
+// again after a pause, by tick; a document that has begun is given its wait.
 func (c *controller) pageLoaded(surface, state string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.framed || (surface != "orchestrator" && surface != "sessions") {
+	w := c.loads[surface]
+	if !c.framed || w == nil || !w.pageSays(state, "", c.now()) || state != pagePanel {
 		return nil
 	}
-	switch state {
-	case pagePanel:
-		c.ready[surface], c.tries[surface] = true, 0
-		var out []effect
-		if c.themeChoice != "" {
-			out = append(out, c.to(surface, map[string]any{"type": "theme", "choice": c.themeChoice})...)
-		}
-		out = append(out, c.glassMessage(surface)...)
-		out = append(out, c.to(surface, map[string]any{"type": "folded", "folded": c.folded(surface)})...)
-		if surface == "orchestrator" {
-			out = append(out, c.to(surface, map[string]any{"type": "fullscreen", "on": c.fullscreen})...)
-		}
-		return out
-	case pageLeaving:
-		c.ready[surface] = false
+	var out []effect
+	if c.themeChoice != "" {
+		out = append(out, c.to(surface, map[string]any{"type": "theme", "choice": c.themeChoice})...)
+	}
+	out = append(out, c.glassMessage(surface)...)
+	out = append(out, c.to(surface, map[string]any{"type": "folded", "folded": c.folded(surface)})...)
+	if surface == "orchestrator" {
+		out = append(out, c.to(surface, map[string]any{"type": "fullscreen", "on": c.fullscreen})...)
+	}
+	return out
+}
+
+// surfaceNavigated is WebKit's word about a side surface's navigation, taken
+// as it is for the board's (navscreen.go).
+func (c *controller) surfaceNavigated(surface string, e navEvent) []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w := c.loads[surface]
+	if !c.framed || w == nil {
 		return nil
-	case pageBroken:
-		c.ready[surface] = false
-		c.tries[surface]++
-		if c.tries[surface] < pageLoadTries {
-			return []effect{reloadSurface{Surface: surface}}
+	}
+	v, waited := w.navSays(e, c.now())
+	return c.follow(surface, v, waited)
+}
+
+// tick is time going by for the side surfaces' pages asked for.
+func (c *controller) tick() []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []effect
+	for _, side := range sideSurfaces {
+		// A surface given up on takes the frame down, and the other's watch
+		// with it.
+		if w := c.loads[side]; c.framed && w != nil {
+			v, waited := w.due(c.now())
+			out = append(out, c.follow(side, v, waited)...)
 		}
+	}
+	return out
+}
+
+// follow does for a side surface what its page watch says. A page given up on
+// takes the frame down, and the board says why, the way it does for its own.
+func (c *controller) follow(surface string, v loadVerdict, waited time.Duration) []effect {
+	switch v {
+	case loadAskAgain:
+		c.loads[surface].ask(c.now())
+		return []effect{reloadSurface{Surface: surface}}
+	case loadFailed:
+		page := pageFailedPage(c.pageURL(c.fleet), waited)
 		c.takeDown()
-		return []effect{destroySurfaces{}, showFailedPage{}}
+		return []effect{destroySurfaces{}, showWindowPage{HTML: page}}
+	case loadKeepsFalling:
+		page := processLostPage(c.pageURL(c.fleet))
+		c.takeDown()
+		return []effect{destroySurfaces{}, showWindowPage{HTML: page}}
 	}
-	// pageLoading: the document has begun; readiness comes with panel.
 	return nil
 }
 
@@ -343,7 +382,32 @@ func (c *controller) glassChanged(mode glassMode) []effect {
 	return out
 }
 
-func (c *controller) reload() []effect { return []effect{reloadAll{}} }
+// reload is every web view's page asked for again, as a person's reload: the
+// board, and the surfaces, their tries counted afresh.
+func (c *controller) reload() []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]effect{reloadBoard{}}, c.surfacesAskedAgain()...)
+}
+
+// reloadSurfaces is the board's page reloading: the surfaces go with it.
+func (c *controller) reloadSurfaces() []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.surfacesAskedAgain()
+}
+
+func (c *controller) surfacesAskedAgain() []effect {
+	var out []effect
+	for _, side := range sideSurfaces {
+		if w := c.loads[side]; c.framed && w != nil {
+			w.tries = 0
+			w.ask(c.now())
+			out = append(out, reloadSurface{Surface: side})
+		}
+	}
+	return out
+}
 
 // navigate is a side surface's web view about to go to target (spec 6.7).
 // allow is the answer its navigation delegate gives at once.

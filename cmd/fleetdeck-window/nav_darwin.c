@@ -46,7 +46,20 @@ static int webProcess(id webView) {
   return ((int (*)(id, SEL))objc_msgSend)(webView, s);
 }
 
-static void report(int kind, id webView, id navigation, id error) {
+// The web view a delegate serves, by name, kept on the delegate.
+static const char nameKey = 0;
+
+void fleetdeck_set_web_view_name(void *object, const char *name) {
+  id s = ((id (*)(id, SEL, const char *))objc_msgSend)((id)objc_getClass("NSString"),
+                                                       sel("stringWithUTF8String:"), name);
+  objc_setAssociatedObject((id)object, &nameKey, s, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+const char *fleetdeck_web_view_name(void *object) {
+  return utf8(objc_getAssociatedObject((id)object, &nameKey));
+}
+
+static void report(int kind, id self, id webView, id navigation, id error) {
   id url = send0(webView, sel("URL"));
   const char *href = url ? utf8(send0(url, sel("absoluteString"))) : "";
   long code = 0;
@@ -55,58 +68,62 @@ static void report(int kind, id webView, id navigation, id error) {
     code = ((long (*)(id, SEL))objc_msgSend)(error, sel("code"));
     domain = utf8(send0(error, sel("domain")));
   }
-  fleetdeckNavigationEvent(kind, (uintptr_t)navigation, (char *)href, code, (char *)domain,
-                           webProcess(webView));
+  fleetdeckNavigationEvent((char *)fleetdeck_web_view_name(self), kind, (uintptr_t)navigation,
+                           (char *)href, code, (char *)domain, webProcess(webView));
 }
 
 static void didStart(id self, SEL _cmd, id webView, id navigation) {
-  report(kindStarted, webView, navigation, nil);
+  report(kindStarted, self, webView, navigation, nil);
 }
 static void didCommit(id self, SEL _cmd, id webView, id navigation) {
-  report(kindCommitted, webView, navigation, nil);
+  report(kindCommitted, self, webView, navigation, nil);
 }
 static void didFinish(id self, SEL _cmd, id webView, id navigation) {
-  report(kindFinished, webView, navigation, nil);
+  report(kindFinished, self, webView, navigation, nil);
 }
 static void didFailProvisional(id self, SEL _cmd, id webView, id navigation, id error) {
-  report(kindFailedProvisional, webView, navigation, error);
+  report(kindFailedProvisional, self, webView, navigation, error);
 }
 static void didFail(id self, SEL _cmd, id webView, id navigation, id error) {
-  report(kindFailed, webView, navigation, error);
+  report(kindFailed, self, webView, navigation, error);
 }
 static void processGone(id self, SEL _cmd, id webView) {
-  report(kindProcessGone, webView, nil, nil);
+  report(kindProcessGone, self, webView, nil, nil);
+}
+
+void fleetdeck_navigation_reporting(void *delegateClass) {
+  Class c = (Class)delegateClass;
+  class_addProtocol(c, objc_getProtocol("WKNavigationDelegate"));
+  class_addMethod(c, sel("webView:didStartProvisionalNavigation:"), (IMP)didStart, "v@:@@");
+  class_addMethod(c, sel("webView:didCommitNavigation:"), (IMP)didCommit, "v@:@@");
+  class_addMethod(c, sel("webView:didFinishNavigation:"), (IMP)didFinish, "v@:@@");
+  class_addMethod(c, sel("webView:didFailProvisionalNavigation:withError:"),
+                  (IMP)didFailProvisional, "v@:@@@");
+  class_addMethod(c, sel("webView:didFailNavigation:withError:"), (IMP)didFail, "v@:@@@");
+  class_addMethod(c, sel("webViewWebContentProcessDidTerminate:"), (IMP)processGone, "v@:@");
 }
 
 // The delegate is kept here for the life of the process: WKWebView holds its
 // navigation delegate weakly.
 static id delegate;
 
-int fleetdeck_observe_navigation(void *window) {
-  // webview_go puts its WKWebView as the window's content view; a later
-  // webview_go that does not is told apart here rather than sent messages
-  // only a WKWebView answers.
-  id webView = send0((id)window, sel("contentView"));
+int fleetdeck_observe_navigation(void *webView) {
+  // A web view handed over that is not a WKWebView -- a later webview_go, a
+  // frame that moved the board -- is told apart here rather than sent
+  // messages only a WKWebView answers.
   Class wk = objc_getClass("WKWebView");
   if (!webView || !wk ||
-      !((BOOL (*)(id, SEL, Class))objc_msgSend)(webView, sel("isKindOfClass:"), wk)) {
+      !((BOOL (*)(id, SEL, Class))objc_msgSend)((id)webView, sel("isKindOfClass:"), wk)) {
     return 0;
   }
   const char *name = "FleetdeckNavigationDelegate";
   Class c = objc_getClass(name);
   if (!c) {
     c = objc_allocateClassPair(objc_getClass("NSObject"), name, 0);
-    class_addProtocol(c, objc_getProtocol("WKNavigationDelegate"));
-    class_addMethod(c, sel("webView:didStartProvisionalNavigation:"), (IMP)didStart, "v@:@@");
-    class_addMethod(c, sel("webView:didCommitNavigation:"), (IMP)didCommit, "v@:@@");
-    class_addMethod(c, sel("webView:didFinishNavigation:"), (IMP)didFinish, "v@:@@");
-    class_addMethod(c, sel("webView:didFailProvisionalNavigation:withError:"),
-                    (IMP)didFailProvisional, "v@:@@@");
-    class_addMethod(c, sel("webView:didFailNavigation:withError:"), (IMP)didFail, "v@:@@@");
-    class_addMethod(c, sel("webViewWebContentProcessDidTerminate:"), (IMP)processGone, "v@:@");
+    fleetdeck_navigation_reporting(c);
     objc_registerClassPair(c);
   }
   delegate = send0(send0((id)c, sel("alloc")), sel("init"));
-  ((void (*)(id, SEL, id))objc_msgSend)(webView, sel("setNavigationDelegate:"), delegate);
+  ((void (*)(id, SEL, id))objc_msgSend)((id)webView, sel("setNavigationDelegate:"), delegate);
   return 1;
 }

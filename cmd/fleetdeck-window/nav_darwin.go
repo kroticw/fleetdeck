@@ -69,29 +69,46 @@ func (e navEvent) String() string {
 	return s
 }
 
-// navigationObserver receives every event, on the UI thread: WKWebView calls
-// its delegate there.
-var navigationObserver func(navEvent)
+// navigationObserver receives every event of the board's web view, and
+// surfaceNavigationObserver every event of a side surface's, with its name, on
+// the UI thread: WKWebView calls its delegate there.
+var (
+	navigationObserver        func(navEvent)
+	surfaceNavigationObserver func(surface string, e navEvent)
+)
 
 //export fleetdeckNavigationEvent
-func fleetdeckNavigationEvent(kind C.int, id C.uintptr_t, href *C.char, code C.long, domain *C.char, pid C.int) {
-	if navigationObserver == nil {
-		return
-	}
-	navigationObserver(navEvent{
+func fleetdeckNavigationEvent(webView *C.char, kind C.int, id C.uintptr_t, href *C.char, code C.long, domain *C.char, pid C.int) {
+	e := navEvent{
 		kind:       navKind(kind),
 		id:         uintptr(id),
 		href:       C.GoString(href),
 		errCode:    int(code),
 		errDomain:  C.GoString(domain),
 		webProcess: int(pid),
-	})
+	}
+	if surface := C.GoString(webView); surface != "" {
+		if surfaceNavigationObserver != nil {
+			surfaceNavigationObserver(surface, e)
+		}
+		return
+	}
+	if navigationObserver != nil {
+		navigationObserver(e)
+	}
 }
 
-// observeNavigation has f told of every navigation event of the web view in
-// window, which must be the pointer webview's Window() returns. It reports
-// false, and nothing is told, when window's content view is not a WKWebView.
-func observeNavigation(window unsafe.Pointer, f func(navEvent)) bool {
+// observeNavigation has f told of every navigation event of webView, the
+// board's WKWebView (frame.board). It reports false, and nothing is told, when
+// webView is not a WKWebView.
+func observeNavigation(webView unsafe.Pointer, f func(navEvent)) bool {
 	navigationObserver = f
-	return C.fleetdeck_observe_navigation(window) != 0
+	return C.fleetdeck_observe_navigation(webView) != 0
+}
+
+// observeSurfaceNavigation has f told of every navigation event of the side
+// surfaces' web views, whose delegates report from the start
+// (surface_darwin.c).
+func observeSurfaceNavigation(f func(surface string, e navEvent)) {
+	surfaceNavigationObserver = f
 }
