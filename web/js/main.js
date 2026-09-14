@@ -231,6 +231,8 @@ if (regions.has("center")) {
 
   // After the tabs, not before: createSections replaces the row's children.
   newCard = createNewCard(document.getElementById("tabs"));
+  // A stand's frame with the form open (web/js/host.js, open).
+  if (host?.open === "newcard") newCard.open();
 }
 
 // The window's capsules (web/js/capsules.js), handed over by the board whenever

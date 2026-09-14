@@ -192,7 +192,7 @@ func main() {
 	defer w.Destroy()
 	w.SetTitle("fleetdeck")
 	w.SetSize(width, height, webview.HintNone)
-	hostOnStand = standSocket != ""
+	hostOnStand, hostStandOpen = standSocket != "", stand.open
 	if stand.appearance != "" {
 		standAppearance = stand.appearance
 		applyAppearance("auto")
