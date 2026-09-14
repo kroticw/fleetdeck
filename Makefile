@@ -47,6 +47,29 @@ else
 BUILD_BIN_NAMES := $(DIST_BIN_NAMES)
 endif
 
+# MACOS_MIN_VERSION is the oldest macOS the app runs on, read from the one place it
+# is written: LSMinimumSystemVersion in cmd/fleetdeck-window/Info.plist, which is
+# what Finder reads too, so the promise and the build cannot drift apart by an edit.
+# Every binary the app carries is built for it (DARWIN_CGO_ENV below) and the release
+# gates demand it of every slice. Why it is 13.0 is in docs/engineering/release-app.md,
+# "The oldest macOS". Read on darwin only: nothing else builds the app, and plutil is
+# a macOS tool.
+ifeq ($(HOST_GOOS),darwin)
+MACOS_MIN_VERSION := $(shell plutil -extract LSMinimumSystemVersion raw cmd/fleetdeck-window/Info.plist)
+endif
+
+# DARWIN_CGO_ENV tells clang the macOS to build for, and prefixes every go build of a
+# binary the app carries. Without it clang builds for the macOS of the machine it
+# runs on: v0.9.1, built on a macOS 26 runner, carried a window dyld refuses on every
+# older macOS. Flags rather than MACOSX_DEPLOYMENT_TARGET, because go build keys its
+# cache on the cgo flags and not on that variable, so an object cached by a build
+# without it would be linked in as it was. CXXFLAGS as well: webview_go's engine is
+# C++, and without them ld links it in built for the host's macOS. "-O2 -g" is go's
+# own default for each variable, which setting it replaces. The Go linker writes
+# 13.0 into the binaries it links on its own and takes no flag for it, which is
+# where the panel's minimum comes from.
+DARWIN_CGO_ENV = $(if $(MACOS_MIN_VERSION),,$(error cannot read LSMinimumSystemVersion from cmd/fleetdeck-window/Info.plist))CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_CXXFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)"
+
 ifeq ($(strip $(BIN_NAMES)),)
 $(error no command directories found under cmd/: there is nothing to build)
 endif
@@ -221,14 +244,14 @@ verify-dist:
 # under any identifier but the app's own, so a stand's cannot be published.
 BUNDLE_ID ?= dev.fleetdeck.window
 dist-app:
-	@scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(SIGN_IDENTITY)" "$(BUNDLE_ID)"
+	@$(DARWIN_CGO_ENV) scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(SIGN_IDENTITY)" "$(BUNDLE_ID)"
 	@$(MAKE) --no-print-directory verify-dist-app
 
 # verify-dist-app interrogates the zip dist-app wrote, the way it reaches a person:
 # unpacked, then looked at from the outside. The release workflow runs it as a step of
 # its own, for the same reason it runs verify-dist.
 verify-dist-app:
-	@scripts/verify-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)" "$(BUNDLE_ID)"
+	@scripts/verify-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)" "$(BUNDLE_ID)" "$(MACOS_MIN_VERSION)"
 
 # notarize-app sends the signed zip to Apple, waits for the answer, staples the ticket
 # to the bundle inside it and writes the zip again -- see scripts/notarize-dist-app.sh
@@ -262,7 +285,7 @@ dist-dmg:
 # person: mounted, then looked at from the outside. The release workflow runs it
 # as a step of its own, for the same reason it runs verify-dist-app.
 verify-dist-dmg:
-	@scripts/verify-dist-dmg.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)" "$(BUNDLE_ID)"
+	@scripts/verify-dist-dmg.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)" "$(BUNDLE_ID)" "$(MACOS_MIN_VERSION)"
 
 # notarize-dmg sends the signed image to Apple and staples the answer into it.
 # The app inside already carries its own ticket; this one is for the image,
@@ -329,8 +352,8 @@ window-app:
 	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
 	@plutil -replace CFBundleIdentifier -string "$(BUNDLE_ID)" "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
 	@cp cmd/fleetdeck-window/icon.icns "$(BINDIR)/fleetdeck.app/Contents/Resources/icon.icns"
-	go build -ldflags "$(WINDOW_LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
-	go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
+	$(DARWIN_CGO_ENV) go build -ldflags "$(WINDOW_LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
+	$(DARWIN_CGO_ENV) go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
 	@echo "window-app: $(BINDIR)/fleetdeck.app (open it, or: open $(BINDIR)/fleetdeck.app)"
 
 # icon rebuilds cmd/fleetdeck-window/icon.icns from icon-source.svg. A human tool,

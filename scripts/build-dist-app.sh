@@ -124,7 +124,10 @@ plutil -replace CFBundleIdentifier -string "$bundle_id" "$app/Contents/Info.plis
 # window cannot be built without it, and the other slices then differ from it in
 # nothing but the architecture. Go names the architectures one way and clang
 # another; clang is told the target through CC, since a plain GOARCH switch turns
-# cgo off for any architecture but the host's.
+# cgo off for any architecture but the host's. The macOS to build for comes from
+# the environment, CGO_CFLAGS, CGO_CXXFLAGS and CGO_LDFLAGS, which `make dist-app`
+# sets from Info.plist (DARWIN_CGO_ENV); a slice built without them is refused by
+# the gate (app_runs_on_its_minimum_macos).
 for b in $binaries; do
 	slices=
 	for arch in $arches; do

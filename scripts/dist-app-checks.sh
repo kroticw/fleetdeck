@@ -196,6 +196,43 @@ app_is_the_release() {
 	[ "$_reported" = "$_version" ] || fail "the app's panel reports '$_reported', not '$_version'"
 }
 
+# app_runs_on_its_minimum_macos checks that the bundle at $1 opens on the oldest
+# macOS it promises: Info.plist promises exactly the minimum the release is
+# built for, and every slice of every binary names that same minimum in its
+# LC_BUILD_VERSION, which is what dyld reads.
+#
+#   $1 the bundle
+#   $2 architectures, space separated, as Go names them
+#   $3 binaries, space separated
+#   $4 the minimum macOS the release is built for, e.g. 13.0
+#
+# Nothing on the machine that built the app shows the two apart. clang builds
+# for the macOS it runs on unless told otherwise, and dyld refuses a binary that
+# names a newer macOS than the one running it. v0.9.1 was built on a macOS 26
+# runner: its window named 26.0 while its plist promised 11.0, so it opened on
+# macOS 26 alone and Finder offered it to every Mac from 11 on. Equal rather
+# than "not newer": a slice naming an older macOS than the minimum is a build
+# that was not told the minimum, and is the same defect waiting for a runner.
+app_runs_on_its_minimum_macos() {
+	_app=$1
+	_arches=$2
+	_binaries=$3
+	_min=$4
+
+	[ -n "$_min" ] || fail "no minimum macOS to check the app against"
+	_promised=$(plutil -extract LSMinimumSystemVersion raw "$_app/Contents/Info.plist" 2>/dev/null || echo "(missing)")
+	[ "$_promised" = "$_min" ] ||
+		fail "Info.plist LSMinimumSystemVersion is '$_promised', not '$_min': Finder would offer the app to a macOS it was not built for"
+	for _b in $_binaries; do
+		for _arch in $_arches; do
+			_minos=$(xcrun vtool -arch "$(lipo_arch "$_arch")" -show-build "$_app/Contents/MacOS/$_b" 2>/dev/null |
+				awk '$1 == "minos" { print $2 }')
+			[ "$_minos" = "$_min" ] ||
+				fail "$_b ($(lipo_arch "$_arch")) is built for macOS ${_minos:-(no LC_BUILD_VERSION)}, not $_min: dyld refuses to load it on any macOS older than that"
+		done
+	done
+}
+
 # app_carries_the_seal checks who sealed the bundle at $1, and how.
 #
 #   $1 the bundle
