@@ -79,7 +79,7 @@
 | `cmd/fleetdeck-window/menu_darwin.c`, `foreign.go` | «Reload» для всех видов; метка сборки в поверхности | 14 |
 | `docs/engineering/window-and-panel.md`, `live-terminal.md`, `docs/en`, `docs/ru` | заметки и пользовательские доки | 15 |
 | `scripts/stand-glass-window.sh` | стенд части Б, замеры | 16 |
-| `scripts/window-smoke.sh`, `.github/workflows/ci.yaml` | дымовой запуск окна на macos-15 | 17 |
+| `scripts/ci-window-stand.sh` (T-058) | проверка окна со стеклом на macos-15 | 17 |
 | `docs/superpowers/plans/2026-09-14-liquid-glass-window.md` | пересверка плана с master | 0 |
 
 ---
@@ -2174,7 +2174,7 @@ git commit --signoff --message "docs(window): describe the glass frame and the w
 **Interfaces:**
 
 - Consumes: всё из задач 1–15; правила стенда T-057.
-- Produces: функция `stand_prepare <каталог>` в `scripts/stand-glass-window.sh` (режим `--library`) — собирает бандл, ставит `STAND_APP`, `STAND_URL`, `STAND_PANEL_LOG` и экспортирует `HOME` и `FLEETDECK_STAND_SOCKET` — для задачи 17; снимки и числа в карточке T-056 — для оператора и оркестратора.
+- Produces: снимки и числа в карточке T-056 — для оператора и оркестратора.
 
 - [ ] **Step 1: Скрипт стенда по правилам T-057** (спека 10.1):
   - `STAND=$(mktemp -d)`; `HOME="$STAND/home"`; свободный порт, не 7777; конфигурация флота стенда с пустой доской внутри `STAND`;
@@ -2182,7 +2182,6 @@ git commit --signoff --message "docs(window): describe the glass frame and the w
   - бандл — `make window-app BINDIR="$STAND/bin" BUNDLE_ID=dev.fleetdeck.stand`, `STAND_APP="$STAND/bin/fleetdeck.app"`; окно запускается как `"$STAND_APP/Contents/MacOS/fleetdeck-window" --url "$STAND_URL"`; после стенда — `lsregister -u "$STAND_APP"`;
   - вывод панелей окно пишет в `$HOME/Library/Logs/fleetdeck.log` (`main.go`, T-057), это `STAND_PANEL_LOG`; перед тем как показать окно, скрипт ждёт в нём строку `daemon discovery disabled` и без неё останавливает стенд с ошибкой; число таких строк сверяется с числом запусков панели после каждого перезапуска и обмена при обновлении;
   - скрипт печатает PID окна, PID панели и порт и не трогает ничего вне `STAND`;
-  - режим `--library` только объявляет `stand_prepare` и ничего не запускает.
 - [ ] **Step 2: База замеров.** На том же стенде окно сборки до части Б (master после T-057 и T-058), 60 с с открытым окном:
   - память: `footprint <pid>` для каждого процесса `com.apple.WebKit.WebContent`, появившегося после запуска окна (`pgrep -f com.apple.WebKit.WebContent` до и после), сумма и каждый;
   - CPU панели: `ps -o %cpu= -p <pid панели>` раз в секунду, среднее;
@@ -2207,108 +2206,34 @@ git commit --signoff --message "test(window): add a stand for the glass window"
 
 ---
 
-### Task 17: Дымовой запуск окна на macOS 15 в CI
+### Task 17: Окно со стеклом в проверке T-058 на macOS 15
+
+Выполняется после мержа T-058 (PR #163) и rebase на него. Отдельной задачи CI и отдельного помощника стенда нет: T-058 уже запускает окно на `macos-15` (задачи `oldest-macos-app` и `window-on-oldest-macos`, скрипт `scripts/ci-window-stand.sh`), и эта задача расширяет её проверку на раму.
 
 **Files:**
 
-- Create: `scripts/window-smoke.sh`
-- Modify: `.github/workflows/ci.yaml` (новая задача `window-smoke`), `cmd/fleetdeck-window/main.go` (строка лога с номером окна)
-- Test: `cmd/fleetdeck-window/main_test.go`; задача `window-smoke` на pull request
+- Modify: `scripts/ci-window-stand.sh`; `.github/workflows/ci.yaml` — только если T-058 передаёт ожидания задаче через переменные или шаги (сверяется при rebase)
+- Modify: `cmd/fleetdeck-window/glasswindow.go` (строка лога о готовности поверхности)
+- Test: `cmd/fleetdeck-window/glasswindow_test.go`; задача `window-on-oldest-macos` на pull request
 
 **Interfaces:**
 
-- Consumes: нижняя версия окна (T-058); стендовая изоляция панелей (T-057); `stand_prepare` (задача 16); окно части Б (задачи 1–14).
-- Produces: артефакт `window-smoke-macos-15` — снимок окна, лог окна и лог панели — для оркестратора и оператора при приёмке части Б (спека 10.2).
+- Consumes: скрипт стенда T-058 и то, чего он ждёт в логе окна (подтверждение страницы `panel` доски); `pageLoaded` поверхностей (задачи 11, 12).
+- Produces: строка лога `the <surface> surface's page says "panel"` для каждой поверхности — для скрипта T-058 и для задачи 16; снимок окна с рамой в артефакте задачи T-058.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1:** После rebase на master с T-058 прочитать `scripts/ci-window-stand.sh`: какую строку лога он ждёт, сколько ждёт, как называет артефакт.
+- [ ] **Step 2: Write the failing test** — `surfaceLoadedLine(surface, state string) string` отдаёт ровно ту строку, которую ждёт скрипт, для `orchestrator` и `sessions`, и ничего для других состояний.
+- [ ] **Step 3:** `glasswindow.go` пишет эту строку в `pageLoaded`, когда поверхность сказала `panel`.
+- [ ] **Step 4:** `scripts/ci-window-stand.sh` после строки доски ждёт строки обеих поверхностей тем же способом и тем же сроком; снимок делается после них. Нет строки поверхности — скрипт падает с именем поверхности, которой нет.
+- [ ] **Step 5: Run**
 
-```go
-func TestTheWindowLogsItsNumberForTheSmokeRun(t *testing.T) {
-	if got := windowNumberLine(4711); got != "window number 4711" {
-		t.Fatalf("line = %q", got)
-	}
-}
-```
+Run: `go test ./cmd/fleetdeck-window -run 'SurfaceLoadedLine' -count=1`, затем pull request с веткой.
 
-- [ ] **Step 2: Run to verify it fails**
+Expected: тест PASS; `window-on-oldest-macos` зелёная, в её логе есть строки доски и обеих поверхностей, на снимке — окно с рамой на `NSVisualEffectView`. Красная задача — находка для оркестратора, а не повод её выключить.
 
-Run: `go test ./cmd/fleetdeck-window -run 'LogsItsNumber' -count=1`
-
-Expected: FAIL — `undefined: windowNumberLine`.
-
-- [ ] **Step 3: Implement**
-
-```go
-// windowNumberLine is logged once the window is on screen. The number is the
-// window's CGWindowID, which is what screencapture -l takes: the smoke run
-// photographs this window and nothing else on the runner's screen.
-func windowNumberLine(n int) string { return fmt.Sprintf("window number %d", n) }
-```
-
-`main.go` пишет `log.Print(windowNumberLine(...))` с `[window windowNumber]` сразу после показа окна.
-
-- [ ] **Step 4: Скрипт**
+- [ ] **Step 6: Commit**
 
 ```bash
-#!/usr/bin/env bash
-# Smoke run of the fleetdeck window on a CI runner: starts the stand bundle with
-# the stand's isolation, photographs the window and checks it is still alive.
-set -euo pipefail
-
-out="$1" # where the artefact goes
-mkdir -p "$out"
-
-source "$(dirname "$0")/stand-glass-window.sh" --library
-stand_prepare "$out/stand"
-
-"$STAND_APP/Contents/MacOS/fleetdeck-window" --url "$STAND_URL" >"$out/window.log" 2>&1 &
-window=$!
-
-for _ in $(seq 60); do
-  grep -q 'window number' "$out/window.log" && break
-  sleep 1
-done
-number=$(sed -n 's/.*window number \([0-9][0-9]*\).*/\1/p' "$out/window.log" | head -n 1)
-test -n "$number"
-
-grep -q 'daemon discovery disabled' "$STAND_PANEL_LOG"
-sleep 10
-kill -0 "$window"
-/usr/sbin/screencapture -x -o -l"$number" "$out/window.png"
-cp "$STAND_PANEL_LOG" "$out/panel.log"
-kill "$window"
-```
-
-- [ ] **Step 5: Задача CI** — в `.github/workflows/ci.yaml`, с теми же закреплёнными версиями действий, что на c0ea864 стоят в `ci.yaml` (`check`) и `release.yaml` (`upload-artifact`); задача 0 сверяет их с master:
-
-```yaml
-  window-smoke:
-    # The window has shipped unable to start below macOS 26 once (T-058). This
-    # starts the stand bundle on the oldest runner and keeps a picture of it.
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: go.mod
-      - run: scripts/window-smoke.sh "$RUNNER_TEMP/smoke"
-      - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: window-smoke-macos-15
-          path: ${{ runner.temp }}/smoke
-```
-
-- [ ] **Step 6: Run**
-
-Run: `go test ./cmd/fleetdeck-window -run 'LogsItsNumber' -count=1`, затем pull request с этой веткой.
-
-Expected: тест PASS; задача `window-smoke` зелёная; в артефакте `window-smoke-macos-15` — `window.png` с окном fleetdeck, `window.log` со строкой `window number`, `panel.log` со строкой `daemon discovery disabled`. Красная задача — находка для оркестратора с артефактом, а не повод отключить задачу.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add scripts/window-smoke.sh .github/workflows/ci.yaml cmd/fleetdeck-window/main.go cmd/fleetdeck-window/main_test.go
-git commit --signoff --message "ci(window): smoke-run the window on macOS 15"
+git add scripts/ci-window-stand.sh cmd/fleetdeck-window/glasswindow.go cmd/fleetdeck-window/glasswindow_test.go
+git commit --signoff --message "ci(window): wait for the glass surfaces in the macOS 15 window check"
 ```
