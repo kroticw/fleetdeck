@@ -1,3 +1,5 @@
+//go:build darwin
+
 package main
 
 import (
@@ -50,12 +52,4 @@ func (q *keeperQueue) run(ctx context.Context, handle func(supervisor.Event)) {
 			return
 		}
 	}
-}
-
-// startsPanelFirst says whether this window starts its panel before its web
-// views: only a stand that asks (standPanelFirstEnv), never in a takeover,
-// whose panel the handover starts, and never from an update's staging
-// directory, which starts no panel.
-func startsPanelFirst(stand standSettings, handover string, action runAction) bool {
-	return stand.panelFirst && handover == "" && action != runRefused
 }

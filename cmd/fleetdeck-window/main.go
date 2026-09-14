@@ -159,13 +159,13 @@ func main() {
 	}
 	width, height := stand.size()
 	if stand != (standSettings{}) {
-		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q, panel started first: %v",
-			stand.startTimeout(), width, height, stand.appearance, stand.panelFirst)
+		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q",
+			stand.startTimeout(), width, height, stand.appearance)
 	}
 
 	// The keeper's word waits in keeperEvents until the window can act on it:
-	// a panel started before the window's web views (standPanelFirstEnv) says
-	// it is starting before there is anything to show that in.
+	// the keeper is made before the window's web views, and nothing it says
+	// may be lost to that.
 	keeperEvents := newKeeperQueue()
 	keeper := &supervisor.Keeper{
 		URL:  *url,
@@ -187,11 +187,6 @@ func main() {
 	// Asked again at a press, about the panel on the port by then.
 	keeper.MayReplace = mayReplace(own, *url, home)
 	kept := &keeperRun{k: keeper}
-	panelFirst := startsPanelFirst(stand, *handover, where.action)
-	if panelFirst {
-		log.Printf("fleetdeck-window: starting the panel before the window's web views, as this stand asks (%s)", standPanelFirstEnv)
-		kept.start()
-	}
 
 	w := webview.New(false)
 	defer w.Destroy()
@@ -497,7 +492,7 @@ func main() {
 				w.Dispatch(w.Terminate)
 			}
 		}()
-	} else if !panelFirst {
+	} else {
 		kept.start()
 	}
 

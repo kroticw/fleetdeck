@@ -1,3 +1,5 @@
+//go:build darwin
+
 package main
 
 import (
@@ -10,7 +12,6 @@ var standValues = map[string]string{
 	standPanelStartTimeoutEnv: "10s",
 	standWindowSizeEnv:        "1000x700",
 	standAppearanceEnv:        "dark",
-	standPanelFirstEnv:        "1",
 }
 
 // A person's window: every stand variable set, and none of it read, because
@@ -34,7 +35,7 @@ func TestAWindowOffAStandReadsNoStandSetting(t *testing.T) {
 	}
 }
 
-func TestAStandSetsTheDeadlineTheSizeTheAppearanceAndTheOrder(t *testing.T) {
+func TestAStandSetsTheDeadlineTheSizeAndTheAppearance(t *testing.T) {
 	s, err := standSettingsFrom("/tmp/stand/no-daemon.sock", func(name string) (string, bool) {
 		v, ok := standValues[name]
 		return v, ok
@@ -42,7 +43,7 @@ func TestAStandSetsTheDeadlineTheSizeTheAppearanceAndTheOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.startTimeout() != 10*time.Second || s.appearance != "dark" || !s.panelFirst {
+	if s.startTimeout() != 10*time.Second || s.appearance != "dark" {
 		t.Fatalf("settings %+v", s)
 	}
 	if w, h := s.size(); w != 1000 || h != 700 {
@@ -55,7 +56,6 @@ func TestAStandSettingThatMakesNoSenseIsRefusedByName(t *testing.T) {
 		standPanelStartTimeoutEnv: "ten seconds",
 		standWindowSizeEnv:        "300x200",
 		standAppearanceEnv:        "auto",
-		standPanelFirstEnv:        "yes",
 	} {
 		_, err := standSettingsFrom("/tmp/stand/no-daemon.sock", func(n string) (string, bool) {
 			if n == name {

@@ -1,3 +1,5 @@
+//go:build darwin
+
 package main
 
 import (
@@ -88,26 +90,5 @@ func TestAPanelThatFailedBeforeTheWindowWasReadyShowsTheFailure(t *testing.T) {
 	}
 	if len(pages) != 2 || pages[1] != pageHeading(failedPage(scr.url, supervisor.Event{State: supervisor.Failed, Err: errors.New("nothing answered")}, scr.logPath)) {
 		t.Fatalf("pages put up: %q; want the starting page, then the failure page", pages)
-	}
-}
-
-func TestOnlyAStandThatAsksStartsThePanelFirst(t *testing.T) {
-	asks := standSettings{panelFirst: true}
-	cases := []struct {
-		name     string
-		stand    standSettings
-		handover string
-		action   runAction
-		want     bool
-	}{
-		{"a person's window", standSettings{}, "", runHere, false},
-		{"a stand that asks", asks, "", runHere, true},
-		{"a takeover on that stand", asks, "/tmp/handover", runHere, false},
-		{"from a staging directory on that stand", asks, "", runRefused, false},
-	}
-	for _, c := range cases {
-		if got := startsPanelFirst(c.stand, c.handover, c.action); got != c.want {
-			t.Errorf("%s: starts the panel first = %v, want %v", c.name, got, c.want)
-		}
 	}
 }

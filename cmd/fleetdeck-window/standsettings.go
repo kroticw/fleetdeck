@@ -1,3 +1,5 @@
+//go:build darwin
+
 package main
 
 import (
@@ -23,10 +25,6 @@ const (
 	// appearance cannot be relied on to reach a window started after it
 	// changed.
 	standAppearanceEnv = "FLEETDECK_STAND_APPEARANCE"
-	// "1": the panel is started before the window's web views. TEMPORARY
-	// (T-056, v0.10.1): for one measurement of whether starting the panel
-	// alongside WebKit's own processes is what makes it slow under load.
-	standPanelFirstEnv = "FLEETDECK_STAND_PANEL_FIRST"
 )
 
 // standSettings is what a stand set; the zero value is a person's window.
@@ -34,7 +32,6 @@ type standSettings struct {
 	panelStartTimeout time.Duration
 	width, height     int
 	appearance        string
-	panelFirst        bool
 }
 
 // Smaller than this the frame has no room for both panels and the board.
@@ -67,12 +64,6 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 			return standSettings{}, fmt.Errorf("%s=%q is neither light nor dark", standAppearanceEnv, v)
 		}
 		s.appearance = v
-	}
-	if v, set := lookup(standPanelFirstEnv); set {
-		if v != "1" && v != "0" {
-			return standSettings{}, fmt.Errorf("%s=%q is neither 1 nor 0", standPanelFirstEnv, v)
-		}
-		s.panelFirst = v == "1"
 	}
 	return s, nil
 }
