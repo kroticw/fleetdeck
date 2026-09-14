@@ -65,6 +65,25 @@ func TestOnlyAnUnfoldedPanelCanBeResized(t *testing.T) {
 	}
 }
 
+// Each panel may take 60% of the window, which two panels cannot both have.
+func TestInANarrowWindowThePanelsNeverOverlapAndTheCapsuleRowIsNeverNegative(t *testing.T) {
+	for _, width := range []float64{1200, 900, 600, 400, 200} {
+		for _, w := range []panelWidths{
+			{Orchestrator: 5000, Sessions: 5000},
+			{Orchestrator: 5000, Sessions: 5000, SessionsFolded: true},
+			{Orchestrator: 368, Sessions: 348},
+		} {
+			g := layoutFor(width, 800, w)
+			if g.Orchestrator.X+g.Orchestrator.W > g.Sessions.X {
+				t.Errorf("width %v, %+v: orchestrator ends at %v, past the sessions panel's start %v", width, w, g.Orchestrator.X+g.Orchestrator.W, g.Sessions.X)
+			}
+			if g.Sessions.W < 0 || g.Capsules.W < 0 {
+				t.Errorf("width %v, %+v: sessions width %v, capsule row width %v; want neither below 0", width, w, g.Sessions.W, g.Capsules.W)
+			}
+		}
+	}
+}
+
 func TestAPanelNeverGoesBelowItsReadableWidthOrAboveSixtyPercent(t *testing.T) {
 	width := 1200.0
 	g := layoutFor(width, 800, panelWidths{Orchestrator: 100, Sessions: 5000})

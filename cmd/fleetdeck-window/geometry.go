@@ -2,6 +2,8 @@
 
 package main
 
+import "math"
+
 // The numbers are the chosen design's (canvas page "Выбрано", spec 5.2), in
 // points, with the origin at the window's top left.
 const (
@@ -67,6 +69,12 @@ func clampPanel(w, window float64, folded bool) float64 {
 func layoutFor(width, height float64, w panelWidths) geometry {
 	ow := clampPanel(w.Orchestrator, width, w.OrchestratorFolded)
 	sw := clampPanel(w.Sessions, width, w.SessionsFolded)
+	// Each panel's limit is 60% of the window, so two of them can ask for more
+	// than it has: the sessions panel gets at most what the orchestrator panel
+	// and the margins leave, and the two never overlap.
+	if room := math.Max(0, width-2*panelMargin-ow); sw > room {
+		sw = room
+	}
 	h := height - 2*panelMargin
 	o := rect{X: panelMargin, Y: panelMargin, W: ow, H: h}
 	s := rect{X: width - panelMargin - sw, Y: panelMargin, W: sw, H: h}
@@ -74,7 +82,8 @@ func layoutFor(width, height float64, w panelWidths) geometry {
 	return geometry{
 		Orchestrator: o,
 		Sessions:     s,
-		Capsules:     rect{X: capX, Y: capsuleTop, W: s.X - capsuleGapRight - capX, H: capsuleHeight},
+		// Between the panels, or nothing when a narrow window leaves no room.
+		Capsules: rect{X: capX, Y: capsuleTop, W: math.Max(0, s.X-capsuleGapRight-capX), H: capsuleHeight},
 		Board:        insets{Top: boardInsetTop, Left: o.X + o.W + boardGapLeft, Right: 0, ContentRight: width - s.X},
 
 		OrchestratorResizable: !w.OrchestratorFolded,
