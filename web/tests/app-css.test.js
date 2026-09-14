@@ -514,6 +514,15 @@ test("the board keeps clear of the panels by the insets the window sends", () =>
   assert.match(board, /padding-left:\s*var\(--host-inset-left/);
 });
 
+// E puts the board under the sessions glass: that is what the glass samples.
+// What opens over the board -- a card, a session, a document -- keeps clear of
+// that panel instead, by an inset of its own.
+test("the board runs on under the sessions glass; a sheet and the documents keep clear of it", () => {
+  assert.match(ruleBody(':root[data-surface="board"] #board'), /padding-right:\s*var\(--host-inset-right,\s*0px\)/);
+  assert.match(ruleBody(':root[data-surface="board"] #card-panel'), /right:\s*calc\(var\(--host-inset-content-right/);
+  assert.match(ruleBody(':root[data-surface="board"] .docs'), /--host-inset-content-right/);
+});
+
 test("every glass token has a light and both dark definitions", () => {
   for (const token of ["--on-glass-muted", "--surface-on-glass", "--glass-control", "--island-shadow"]) {
     assert.equal(countDefinitions(token), 3, token);

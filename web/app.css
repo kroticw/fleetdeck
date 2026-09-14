@@ -3590,7 +3590,7 @@ body.is-resizing {
   position: absolute;
   top: calc(var(--host-inset-top, 64px) - 8px);
   left: var(--host-inset-left, 394px);
-  right: calc(var(--host-inset-right, 356px) + 16px);
+  right: calc(var(--host-inset-content-right, 356px) + 16px);
   z-index: 4;
   border: none;
   border-radius: var(--radius-lg);
@@ -3605,7 +3605,7 @@ body.is-resizing {
 :root[data-surface="board"] #board {
   padding-top: var(--host-inset-top, 64px);
   padding-left: var(--host-inset-left, 394px);
-  padding-right: var(--host-inset-right, 356px);
+  padding-right: var(--host-inset-right, 0px);
   padding-bottom: 12px;
   gap: var(--gap-lg);
 }
@@ -3681,7 +3681,7 @@ body.is-resizing {
   inset: auto;
   top: calc(var(--host-inset-top, 64px) - 4px);
   left: var(--host-inset-left, 394px);
-  right: calc(var(--host-inset-right, 356px) + 16px);
+  right: calc(var(--host-inset-content-right, 356px) + 16px);
   bottom: 16px;
   z-index: 2;
   height: auto;
@@ -3711,7 +3711,7 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] .docs {
-  padding: calc(var(--host-inset-top, 64px) - 4px) calc(var(--host-inset-right, 356px) + 16px) 16px var(--host-inset-left, 394px);
+  padding: calc(var(--host-inset-top, 64px) - 4px) calc(var(--host-inset-content-right, 356px) + 16px) 16px var(--host-inset-left, 394px);
 }
 
 :root[data-surface="board"] .docs-island {

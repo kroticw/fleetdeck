@@ -20,8 +20,11 @@ const (
 type rect struct{ X, Y, W, H float64 }
 
 // insets is the room the frame takes from the board's web view, sent to the
-// page as --host-inset-*.
-type insets struct{ Top, Left, Right float64 }
+// page as --host-inset-*. Right is what the board scrolls clear of: nothing,
+// since in E the board runs on under the sessions glass, which is what the
+// glass is there to show. ContentRight is what opens over the board -- a card,
+// a session, a document -- keeps clear of: the sessions panel and its margin.
+type insets struct{ Top, Left, Right, ContentRight float64 }
 
 type panelWidths struct {
 	Orchestrator, Sessions             float64
@@ -69,6 +72,6 @@ func layoutFor(width, height float64, w panelWidths) geometry {
 		Orchestrator: o,
 		Sessions:     s,
 		Capsules:     rect{X: capX, Y: capsuleTop, W: s.X - capsuleGapRight - capX, H: capsuleHeight},
-		Board:        insets{Top: boardInsetTop, Left: o.X + o.W + boardGapLeft, Right: width - s.X},
+		Board:        insets{Top: boardInsetTop, Left: o.X + o.W + boardGapLeft, Right: 0, ContentRight: width - s.X},
 	}
 }
