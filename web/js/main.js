@@ -10,11 +10,12 @@ import { createNewCard } from "./newcard.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
-import { rememberFleet } from "./fleet.js";
+import { rememberFleet, switchFleet } from "./fleet.js";
 import { t } from "./i18n.js";
 import { readHost, callHost } from "./host.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
+import { routesFor } from "./hostroutes.js";
 import { applyTheme, cycleTheme } from "./theme.js";
 
 // In the fleetdeck window this page is one of three web views, and mounts only
@@ -83,7 +84,7 @@ const sessionPanel = document.getElementById("session-panel");
 // other opens. The same holds for the session panel a card jumps to:
 // openSession closes the card panel before it opens the session.
 const cardPanel = createCardPanel(document.getElementById("card-panel"), {
-  onOpenSession: (short) => openSession(short),
+  onOpenSession: (short) => showSession(short),
   onOpenDoc: (path) => {
     cardPanel.close();
     reader.open(path);
@@ -142,14 +143,41 @@ function openSession(short) {
   rememberOpenSession(storage, short);
 }
 
+// Where an action goes (web/js/hostroutes.js): in a browser tab, here; in the
+// fleetdeck window a side surface hands opening to the board through the window,
+// and every surface switches fleet and folds its panel through it.
+const routes = routesFor(window, host, {
+  openCard: terminalLinks.open,
+  openDoc: (path) => {
+    closeSession();
+    cardPanel.close();
+    reader.open(path);
+  },
+  openSession,
+  switchFleet: (name) => switchFleet(name, { storage }),
+  fold: () => {},
+  openOrchestrator: () => {},
+});
+
+// In the window the orchestrator's pinned session is its own panel, always on
+// screen, so opening it focuses that panel instead of a second copy in a sheet.
+function showSession(short) {
+  if (host && short === get()?.orchestratorSession) routes.openOrchestrator();
+  else routes.openSession(short);
+}
+
 // The card control in a session row opens that session's card, through the same
 // panel the board opens. Before this it opened the session instead, because it
 // had no handler of its own and the click reached the row.
-if (regions.has("sessions")) renderSessions(document.getElementById("sessions"), openSession, cardPanel.open);
-if (regions.has("header")) renderHeader(document.getElementById("header"));
+if (regions.has("sessions")) {
+  renderSessions(document.getElementById("sessions"), showSession, routes.openCard, { switchFleet: routes.switchFleet });
+}
+if (regions.has("header")) renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet });
 renderBuildBanner(document.getElementById("build-banner"), subscribe);
 if (regions.has("center")) renderBoard(document.getElementById("board"), cardPanel.open);
-if (regions.has("orchestrator")) renderOrchestrator(document.getElementById("orchestrator"), { links: terminalLinks });
+if (regions.has("orchestrator")) {
+  renderOrchestrator(document.getElementById("orchestrator"), { links: { resolve: terminalLinks.resolve, open: routes.openCard } });
+}
 
 // The centre column's two sections.
 //
@@ -187,6 +215,17 @@ if (regions.has("center")) {
 if (host) {
   const page = document.documentElement;
   const column = document.getElementById(host.surface);
+  // The window's panel folds with the column: a fold the column makes itself
+  // (its own button) is passed on, and one the window sends is not passed back.
+  let panelFolded = column?.dataset.folded === "1";
+  if (column && host.surface !== "board") {
+    new MutationObserver(() => {
+      const folded = column.dataset.folded === "1";
+      if (folded === panelFolded) return;
+      panelFolded = folded;
+      routes.fold(host.surface, folded);
+    }).observe(column, { attributes: true, attributeFilter: ["data-folded"] });
+  }
   wireHostActions(window, host, {
     openCard: (path) => terminalLinks.open(path),
     openDoc: (path) => {
@@ -194,7 +233,7 @@ if (host) {
       cardPanel.close();
       reader.open(path);
     },
-    openSession,
+    openSession: showSession,
     showSection: (id) => sections?.show(id),
     openNewCard: () => newCard?.open(),
     cycleTheme: () => cycleTheme() ?? "auto",
@@ -206,6 +245,7 @@ if (host) {
       page.dataset.glass = glass;
     },
     setFolded: (folded) => {
+      panelFolded = folded;
       if (folded) column.dataset.folded = "1";
       else delete column.dataset.folded;
     },

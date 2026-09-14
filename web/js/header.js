@@ -479,7 +479,17 @@ export function unknownMarkHTML(unknownCount) {
   return ` <abbr class="counter-unknown" title="${escapeHTML(t("waiting_unknown_count"))}">+?</abbr>`;
 }
 
-export function renderHeader(root) {
+// menuGo is where a pick in the fleet menu goes: another fleet through the
+// switcher the header was given, anything else (the start page, a new fleet) by
+// address. Pure, so the choice of switcher is testable without a menu.
+export function menuGo(go, { switchFleet: goFleet, assign }) {
+  if (go.fleet) goFleet(go.fleet);
+  else assign(go.path);
+}
+
+// options.switchFleet replaces the fleet switch. The fleetdeck window passes its
+// own, because a switch there changes all three of its web views, not this one.
+export function renderHeader(root, { switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }) } = {}) {
   initTheme();
 
   // One tracker per renderHeader() call, outside subscribe: both hold state
@@ -517,8 +527,7 @@ export function renderHeader(root) {
     menuOpen = next.open;
     lastPaint();
     if (!next.go) return;
-    if (next.go.fleet) switchFleet(next.go.fleet, { storage: pageStorage() });
-    else globalThis.location.assign(next.go.path);
+    menuGo(next.go, { switchFleet: goFleet, assign: (path) => globalThis.location.assign(path) });
   };
 
   // The button belongs to the window, not to a browser tab: only the window
