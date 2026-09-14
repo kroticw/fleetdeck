@@ -73,6 +73,9 @@ type controller struct {
 	// band is how far down from the top the board's page says nothing is
 	// (topBand): the band the window is dragged by, out of full screen.
 	band float64
+	// rowMin is the capsule row's narrowest form as last drawn (capsuleRow):
+	// the room the frame keeps for it, 0 until the row is drawn.
+	rowMin float64
 	// titlebar is where the title bar's zoom button ends (titlebar.go).
 	titlebar float64
 }
@@ -137,7 +140,7 @@ func (c *controller) layout(version int, mode, fleet string) []effect {
 		c.takeDown()
 		return []effect{destroySurfaces{}}
 	}
-	g := layoutFor(c.width, c.height, c.widths)
+	g := c.geometry()
 	if c.framed && fleet == c.fleet {
 		// The same page loaded again: a new document, which needs its insets
 		// and glass again. The surfaces are still there.
@@ -277,7 +280,7 @@ func (c *controller) panel(side string, folded bool) []effect {
 	if !c.framed {
 		return out
 	}
-	g := layoutFor(c.width, c.height, c.widths)
+	g := c.geometry()
 	out = append(out, applyGeometry{G: g})
 	out = append(out, c.insets(g)...)
 	return append(out, c.to(side, map[string]any{"type": "folded", "folded": folded})...)
@@ -310,11 +313,11 @@ func (c *controller) resizeTo(side string, start, dx float64) []effect {
 	}
 	width := draggedWidth(side, start, dx, c.width)
 	if side == "sessions" {
-		c.widths.Sessions = width
+		c.widths.Sessions = c.draggedBesideRow(width, c.widths.Orchestrator, c.widths.OrchestratorFolded)
 	} else {
-		c.widths.Orchestrator = width
+		c.widths.Orchestrator = c.draggedBesideRow(width, c.widths.Sessions, c.widths.SessionsFolded)
 	}
-	return []effect{applyGeometry{G: layoutFor(c.width, c.height, c.widths)}}
+	return []effect{applyGeometry{G: c.geometry()}}
 }
 
 // resizeEnd is the edge let go: the width is kept, and the board learns it.
@@ -326,7 +329,7 @@ func (c *controller) resizeEnd() []effect {
 	}
 	c.dragging = ""
 	out := []effect{saveWidths{W: c.widths}}
-	return append(out, c.insets(layoutFor(c.width, c.height, c.widths))...)
+	return append(out, c.insets(c.geometry())...)
 }
 
 // theme is the board reporting the theme it cycled to.
@@ -344,6 +347,54 @@ func (c *controller) theme(choice string) []effect {
 // capsules is the board's model for the capsule row, drawn as it is.
 func (c *controller) capsules(model json.RawMessage) []effect {
 	return []effect{setCapsules{Model: model}}
+}
+
+// capsuleRow is the capsule row drawn, with rowMin its narrowest form: the
+// frame keeps that room for it from then on, laid out again when it changes.
+func (c *controller) capsuleRow(rowMin float64) []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if rowMin == c.rowMin {
+		return nil
+	}
+	c.rowMin = rowMin
+	if !c.framed {
+		return nil
+	}
+	g := c.geometry()
+	return append([]effect{applyGeometry{G: g}}, c.insets(g)...)
+}
+
+// geometry is the frame for the window as it is, keeping the capsule row its
+// minimum.
+func (c *controller) geometry() geometry {
+	return layoutWithRow(c.width, c.height, c.widths, c.rowMin)
+}
+
+// draggedBesideRow is a dragged width stopped where the other panel, at its
+// width, and the capsule row's minimum leave no more room.
+func (c *controller) draggedBesideRow(width, other float64, otherFolded bool) float64 {
+	if c.rowMin <= 0 {
+		return width
+	}
+	return math.Min(width, rowRoomFor(c.width, clampPanel(other, c.width, otherFolded), c.rowMin))
+}
+
+// laidOut is the frame laid out as g. A geometry decided before the capsule row
+// gave its minimum -- effects run in order, and a row is drawn in the middle of
+// them -- is not the frame for the window as it is now; that frame is laid out
+// again, whatever order the effects came in.
+func (c *controller) laidOut(g geometry) []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.framed {
+		return nil
+	}
+	now := c.geometry()
+	if g == now {
+		return nil
+	}
+	return append([]effect{applyGeometry{G: now}}, c.insets(now)...)
 }
 
 func (c *controller) capsuleAction(action string) []effect {
@@ -381,7 +432,7 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	c.width, c.height, c.fullscreen = width, height, fullscreen
 	var out []effect
 	if c.framed {
-		g := layoutFor(width, height, c.widths)
+		g := c.geometry()
 		out = append([]effect{applyGeometry{G: g}}, c.insets(g)...)
 	}
 	if !changed {
