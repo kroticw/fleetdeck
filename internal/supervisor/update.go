@@ -196,9 +196,11 @@ type Takeover struct {
 	// quits only after that, running out of the bundle swapped out until it
 	// has; so the bundle is removed only once this says so. Nil counts as gone.
 	OldWindowGone func() bool
-	// RetireWait bounds the wait for the lock and the old window; zero is
-	// retireWait.
-	RetireWait time.Duration
+	// RetireWait is how long the wait for the lock and the old window is watched
+	// closely; zero is retireWait. RetireEvery is how often removal is tried
+	// again after that, for as long as this window runs; zero is retireEvery.
+	RetireWait  time.Duration
+	RetireEvery time.Duration
 	// Done is called once StepDone is reported.
 	Done func()
 	// Logf says what went wrong without failing the takeover; nil says nothing.
@@ -314,22 +316,34 @@ func (t *Takeover) Swapped() bool { return t.phase.swapped.Load() }
 // LaunchServices may have come after that, and put the staged path back.
 func (t *Takeover) Reregister() { t.reregister() }
 
-// retireWait bounds how long the new window waits for the old one to quit and
-// let go of the update lock before the bundle swapped out is removed. The old
-// window's update returns as soon as it reads done, within one look at the
-// handover file (handoverPoll), and the window quits right after; this is the
-// bound on a window that does not. Past it the bundle stays, and says so.
+// retireWait is how long the new window watches closely for the old one to quit
+// and let go of the update lock before the bundle swapped out is removed. The
+// old window's update returns as soon as it reads done, within one look at the
+// handover file (handoverPoll), and the window quits right after; this bounds
+// the close watch on a window that does not.
 const retireWait = time.Minute
+
+// retireEvery is how often removal is tried again past retireWait, for as long
+// as the new window runs: as often as the window looks for a newer version.
+const retireEvery = 10 * time.Minute
 
 // retire removes the bundle swapped out, once the old window has quit and its
 // update has let go of the lock. The order matters, and the lock alone is not
 // enough: the old window's update releases the lock as it returns, and the
 // window quits only after that -- running, until it has, out of the very
-// bundle this removes. Nothing goes back to that bundle -- an update that
-// fails does so before the swap and leaves the canonical bundle as it was --
-// and left in place it is the old version under the app's own identifier,
-// which LaunchServices finds again the next time anything walks it. The
-// handover file and the new window's log beside it stay.
+// bundle this removes. Nothing goes back to that bundle: an update that fails
+// does so before the swap and leaves the canonical bundle as it was.
+//
+// It does not give up (T-056, v0.10.1). While the bundle is on disk under
+// /Applications, LaunchServices holds its path under the app's own identifier
+// again however often it is told to forget it: in the end-to-end update from
+// v0.10.0 (run 34867562033) the staged path was registered again a second after
+// the new window had it forgotten, with the bundle still there. Removing the
+// bundle is the one thing that holds. So past retireWait removal is tried again
+// every retireEvery for as long as this window runs, LaunchServices is told
+// again at each try and once the bundle is gone, and a window that quits first
+// leaves the bundle to the next window's start (RetireLeftover). The handover
+// file and the new window's log beside the bundle stay.
 func (t *Takeover) retire(ctx context.Context) {
 	if err := t.retirable(); err != nil {
 		t.logf("the bundle swapped out is not removed: %v", err)
@@ -339,47 +353,72 @@ func (t *Takeover) retire(ctx context.Context) {
 		t.logf("no update lock to wait on; the bundle swapped out stays at %s", t.Staged)
 		return
 	}
-	wait := t.RetireWait
+	wait, every := t.RetireWait, t.RetireEvery
 	if wait <= 0 {
 		wait = retireWait
 	}
+	if every <= 0 {
+		every = retireEvery
+	}
 	deadline := time.Now().Add(wait)
-	var release func()
-	for waiting := false; ; {
-		if t.OldWindowGone == nil || t.OldWindowGone() {
-			r, err := Acquire(t.LockPath)
-			if err == nil {
-				release = r
-				break
-			}
-			if !errors.Is(err, ErrBusy) {
-				t.logf("the bundle swapped out stays at %s: the update lock could not be taken: %v", t.Staged, err)
-				return
-			}
+	for try, waiting := 1, false; ; {
+		removed, again, why := t.retireOnce()
+		if removed {
+			t.logf("removed the bundle swapped out at %s", t.Staged)
+			t.reregister()
+			return
 		}
-		if !waiting {
+		if !again {
+			t.logf("the bundle swapped out is not removed: %v", why)
+			return
+		}
+		next := handoverPoll
+		switch {
+		case time.Now().After(deadline):
+			t.logf("the bundle swapped out stays at %s for now (try %d): %v; LaunchServices is told again, and removing it is tried again in %s", t.Staged, try, why, every)
+			t.reregister()
+			try++
+			next = every
+		case !waiting:
 			waiting = true
 			t.logf("waiting for the old window to quit and let go of the update lock before removing the bundle swapped out at %s", t.Staged)
 		}
-		if time.Now().After(deadline) {
-			t.logf("the bundle swapped out stays at %s: the old window had not quit and let go of the update lock within %s", t.Staged, wait)
-			return
-		}
 		select {
 		case <-ctx.Done():
+			t.logf("the bundle swapped out stays at %s: this window is going, and the next window to start removes it", t.Staged)
 			return
-		case <-time.After(handoverPoll):
+		case <-time.After(next):
 		}
 	}
+}
+
+// retireOnce tries once to remove the bundle swapped out: when the old window
+// has quit, under the update lock, and only what retirable allows. It says
+// whether the bundle is gone, and otherwise whether trying again is worth it
+// and why it is not gone.
+func (t *Takeover) retireOnce() (removed, again bool, why error) {
+	if t.OldWindowGone != nil && !t.OldWindowGone() {
+		return false, true, errors.New("the window that ran out of it is still running")
+	}
+	release, err := Acquire(t.LockPath)
+	switch {
+	case errors.Is(err, ErrBusy):
+		return false, true, errors.New("the update lock is held")
+	case err != nil:
+		return false, true, fmt.Errorf("the update lock could not be taken: %w", err)
+	}
 	defer release()
-	// Asked again at the moment of removal: a minute may have passed.
+	if _, err := os.Lstat(t.Staged); os.IsNotExist(err) {
+		return true, false, nil
+	}
+	// Asked again at the moment of removal: minutes may have passed.
 	if err := t.retirable(); err != nil {
-		t.logf("the bundle swapped out is not removed: %v", err)
-		return
+		return false, false, err
 	}
 	if err := os.RemoveAll(t.Staged); err != nil {
-		t.logf("the bundle swapped out could not be removed from %s: %v", t.Staged, err)
+		return false, true, fmt.Errorf("removing it failed: %w", err)
 	}
+	return true, false, nil
 }
 
 // retirable says why Staged may not be removed, or nil. The removal happens

@@ -505,6 +505,15 @@ func main() {
 	if *handover == "" {
 		kept.start()
 	}
+	// A bundle an earlier update swapped out and could not remove -- its new
+	// window quit while the old one still ran out of it -- is removed now, beside
+	// the start, unless an update runs or something still runs out of it
+	// (supervisor.RetireLeftover, leftoverstart.go).
+	if retiresLeftover(*handover, canonical) {
+		go supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
+			supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
+			func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })
+	}
 
 	// Time going by for a page asked for and not loaded (screen.tick), the
 	// board's and the side surfaces'.
