@@ -50,6 +50,16 @@ func TestTheFrameCoversTheWholeWindowUnderTheTitleBar(t *testing.T) {
 	}
 }
 
+// Putting the frame in leaves the window where and as large as it was. On the
+// macos-15 runner of PR #166 the window came up 28 pt lower and shorter than
+// v0.9.1's, the desktop showing above it: the title bar's height, lost when the
+// style changed.
+func TestInstallingTheFrameKeepsTheWindowsFrame(t *testing.T) {
+	if frameResult.windowFrame != frameResult.windowFrameBefore {
+		t.Fatalf("window frame %+v after the frame went in, want %+v as before", frameResult.windowFrame, frameResult.windowFrameBefore)
+	}
+}
+
 func TestTheBoardStaysUnderneathThePanelsAndTheCapsulesOnTop(t *testing.T) {
 	r := frameResult
 	if r.boardIndex != 0 {

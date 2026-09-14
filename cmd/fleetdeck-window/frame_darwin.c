@@ -186,17 +186,18 @@ void *fd_frame_install(void *window) {
   f->board = send0(f->window, sel("contentView"));
 
   // The content runs under the title bar, whose buttons float over the
-  // orchestrator panel's top corner. Set before the root goes in, while the
-  // board is still the content view: on the macos-15 runner of PR #166 a root
-  // put in first kept the content area below the title bar when the style
-  // changed, and the title bar's 28 pt above the frame stayed black. The root
-  // is then made the size of the whole window, not of what the board had.
+  // orchestrator panel's top corner. Turning the full-size content view on
+  // keeps the content rect and makes the window's frame that rect: the window
+  // loses the title bar's height at its top edge. On the macos-15 runner of PR
+  // #166 it came up 28 pt lower than v0.9.1's, the desktop showing above it,
+  // and a test window here goes from 1014 to 982 pt tall. So the frame the
+  // window had -- webview_go's SetSize and center -- is put back.
+  CGRect whole = sendRect0(f->window, sel("frame"));
   unsigned long mask = (unsigned long)sendLong0(f->window, sel("styleMask"));
   sendVoidLong(f->window, sel("setStyleMask:"), (long)(mask | (1UL << 15)));  // full-size content view
   sendVoidBool(f->window, sel("setTitlebarAppearsTransparent:"), 1);
   sendVoidLong(f->window, sel("setTitleVisibility:"), 1);  // hidden
-
-  CGRect whole = sendRect0(f->window, sel("frame"));
+  ((void (*)(id, SEL, CGRect, signed char))objc_msgSend)(f->window, sel("setFrame:display:"), whole, 0);
   CGRect bounds = CGRectMake(0, 0, whole.size.width, whole.size.height);
   f->root = frameView(bounds);
   sendVoid1(f->window, sel("setContentView:"), f->root);

@@ -121,6 +121,7 @@ type frameProbe struct {
 	board, capsulesView unsafe.Pointer
 	// The window, and what covers it once the frame is in: the root, the
 	// board, and the content size the geometry is laid out for.
+	windowFrameBefore                  rect
 	windowFrame, rootFrame, boardFrame rect
 	contentWidth, contentHeight        float64
 }
@@ -132,6 +133,7 @@ func rectOf(r C.fd_rect) rect {
 func probeFrameForTest(g geometry) frameProbe {
 	var out frameProbe
 	window := C.fd_test_window(1512, 982)
+	out.windowFrameBefore = rectOf(C.fd_test_window_frame(window))
 	f := installFrame(window)
 	f.layout(g)
 	root := C.fd_test_root(f.p)
