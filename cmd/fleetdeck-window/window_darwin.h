@@ -15,6 +15,9 @@ double fd_defaults_double(const char *key, int *found);
 void fd_defaults_set_double(const char *key, double value);
 int fd_defaults_bool(const char *key);
 void fd_defaults_set_bool(const char *key, int value);
+// fd_defaults_use_suite sends every later default of this process to the suite
+// named name instead of the app's own defaults.
+void fd_defaults_use_suite(const char *name);
 
 // fd_observe_window calls fleetdeckWindowChanged with "size" when window's
 // content changes size, "fullscreen" when it enters or leaves full screen, and

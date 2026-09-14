@@ -56,6 +56,17 @@ func defaultsBool(key string) bool {
 	return C.fd_defaults_bool(c) != 0
 }
 
+// useWidthsSuite keeps the panels' widths in suite from now on (widthsSuite);
+// "" leaves them in the app's own defaults.
+func useWidthsSuite(suite string) {
+	if suite == "" {
+		return
+	}
+	c := C.CString(suite)
+	defer C.free(unsafe.Pointer(c))
+	C.fd_defaults_use_suite(c)
+}
+
 func loadPanelWidths() panelWidths {
 	return panelWidths{
 		Orchestrator:       defaultsDouble(orchestratorWidthKey, defaultOrchestrator),

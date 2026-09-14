@@ -62,7 +62,17 @@ void fd_focus_view(void *view) {
   if (window) sendVoid1(window, sel("makeFirstResponder:"), (id)view);
 }
 
-static id defaults(void) { return send0(cls("NSUserDefaults"), sel("standardUserDefaults")); }
+// The defaults the widths go to: the app's own, or a suite fd_defaults_use_suite
+// named, kept for the life of the process.
+static id suite;
+
+static id defaults(void) { return suite ? suite : send0(cls("NSUserDefaults"), sel("standardUserDefaults")); }
+
+void fd_defaults_use_suite(const char *name) {
+  void *pool = objc_autoreleasePoolPush();
+  suite = send1(send0(cls("NSUserDefaults"), sel("alloc")), sel("initWithSuiteName:"), nsstring(name));
+  objc_autoreleasePoolPop(pool);
+}
 
 double fd_defaults_double(const char *key, int *found) {
   void *pool = objc_autoreleasePoolPush();

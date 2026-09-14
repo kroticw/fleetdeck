@@ -134,6 +134,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("fleetdeck-window: %v", err)
 	}
+	// A stand's panel widths stay out of the operator's app's defaults.
+	useWidthsSuite(widthsSuite(standSocket))
 
 	// A window in an update's staging directory opens the installed app and
 	// goes, before it has a window to flash (staged.go).
