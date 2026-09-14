@@ -13,7 +13,9 @@ export function readHost(win) {
   const host = win?.fleetdeckHost;
   if (!host || host.version !== HOST_VERSION) return null;
   if (!SURFACES.has(host.surface) || !GLASSES.has(host.glass)) return null;
-  return { surface: host.surface, glass: host.glass };
+  // stand only when the window says so: a CI stand (cmd/fleetdeck-window,
+  // hostOnStand), never a person's window.
+  return host.stand === true ? { surface: host.surface, glass: host.glass, stand: true } : { surface: host.surface, glass: host.glass };
 }
 
 export function callHost(win, name, payload) {
