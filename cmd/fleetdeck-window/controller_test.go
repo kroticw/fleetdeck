@@ -537,3 +537,74 @@ func TestAReloadAsksForTheSurfacesAfresh(t *testing.T) {
 		}
 	}
 }
+
+func hasSave(effects []effect) bool {
+	for _, e := range effects {
+		if _, ok := e.(saveWidths); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func geometryOf(t *testing.T, effects []effect) geometry {
+	t.Helper()
+	for _, e := range effects {
+		if a, ok := e.(applyGeometry); ok {
+			return a.G
+		}
+	}
+	t.Fatalf("no geometry in %#v", effects)
+	return geometry{}
+}
+
+func TestTheCapsuleRowsMinimumLaysTheFrameOutAgainOnce(t *testing.T) {
+	c := loadedFrame()
+	g := layoutWithRow(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
+	want := append([]effect{applyGeometry{G: g}}, c.insets(g)...)
+	if got := c.capsuleRow(360); !reflect.DeepEqual(got, want) {
+		t.Fatalf("effects = %#v\nwant      %#v", got, want)
+	}
+	if got := c.capsuleRow(360); len(got) != 0 {
+		t.Fatalf("the same minimum again: %#v, want none", got)
+	}
+}
+
+// Narrowing the panels for the row is what the window shows, not the widths a
+// person set: a window made wide again has them back, and nothing is saved.
+func TestANarrowWindowNarrowsThePanelsOnlyOnScreen(t *testing.T) {
+	c := loadedFrame()
+	c.capsuleRow(360)
+	narrow := c.resized(1000, 700, false)
+	if g := geometryOf(t, narrow); g.Orchestrator.W >= 368 || g.Capsules.W < 360-1e-9 {
+		t.Fatalf("at 1000: %+v, want the panels narrower and the row at its minimum", g)
+	}
+	wide := c.resized(1440, 700, false)
+	if g := geometryOf(t, wide); g.Orchestrator.W != 368 || g.Sessions.W != 348 {
+		t.Fatalf("at 1440 again: panels %v and %v, want 368 and 348", g.Orchestrator.W, g.Sessions.W)
+	}
+	if hasSave(narrow) || hasSave(wide) {
+		t.Fatalf("a resize saved widths: %#v %#v", narrow, wide)
+	}
+	if c.widths != (panelWidths{Orchestrator: 368, Sessions: 348}) {
+		t.Fatalf("widths = %+v, want the ones set", c.widths)
+	}
+}
+
+func TestDraggingAPanelInANarrowWindowStopsWhereTheRowNeedsItsMinimum(t *testing.T) {
+	c := loadedFrame()
+	c.capsuleRow(360)
+	c.resized(1000, 700, false)
+	start, ok := c.resizeStart("orchestrator")
+	if !ok {
+		t.Fatal("no edge to drag")
+	}
+	if g := geometryOf(t, c.resizeTo("orchestrator", start, 2000)); g.Capsules.W < 360-1e-9 {
+		t.Fatalf("dragged wide: row = %v, want at least 360; %+v", g.Capsules.W, g)
+	}
+	saved := c.resizeEnd()
+	want := 1000 - 2*panelMargin - capsuleGapLeft - capsuleGapRight - 360 - 348
+	if len(saved) == 0 || saved[0] != (saveWidths{W: panelWidths{Orchestrator: want, Sessions: 348}}) {
+		t.Fatalf("on release: %#v, want the orchestrator saved at %v", saved, want)
+	}
+}
