@@ -322,3 +322,81 @@ jobs:
           path: out
           if-no-files-found: ignore
           retention-days: 7
+
+  update-from-v0.10.0:
+    # The operator's v0.10.0 updates to the next version with its Update button, and
+    # nothing else had ever run that update end to end. This runs it on a runner:
+    # v0.10.0 as released, installed in /Applications, updated to this branch's app.
+    #
+    # What is v0.10.0's own: supervisor.Update.Run, built from the tag -- its 2436 ms
+    # handover deadline, its keeper stopping and starting its panel -- and the new
+    # window started the way it starts one (--url --handover --canonical, no deadline
+    # flag), as a child, on a stand (FLEETDECK_STAND_SOCKET). The window code
+    # scripts/updatecheck has to copy is compared with the tag's source first.
+    #
+    # What is NOT, so a green job does not say the button or the signature were
+    # checked: the source (this branch's zip from oldest-macos-app, not a download
+    # from GitHub), Seal.Verify (not asked: that zip is sealed ad hoc), and the press
+    # (Update.Run is called directly). docs/engineering/update-from-release.md,
+    # sections 8 and 9.
+    needs: oldest-macos-app
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oldest-macos-app
+          path: new
+      # By its commit: the tag is signed, and a runner has no key to verify it with.
+      - name: Check out v0.10.0 beside this branch
+        run: |
+          set -eu
+          git fetch --no-tags --depth=1 origin +refs/tags/v0.10.0:refs/tags/v0.10.0
+          test "$(git rev-parse 'v0.10.0^{commit}')" = fec135e37fce3274a3617e3a91e7884c6b936998
+          git worktree add --detach "$RUNNER_TEMP/v0.10.0" fec135e37fce3274a3617e3a91e7884c6b936998
+      - name: Build the update check against v0.10.0's supervisor
+        run: |
+          set -eu
+          cp -R scripts/updatecheck "$RUNNER_TEMP/v0.10.0/scripts/updatecheck"
+          cd "$RUNNER_TEMP/v0.10.0"
+          go build -o "$RUNNER_TEMP/updatecheck" ./scripts/updatecheck
+      - name: Download v0.10.0 as released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v0.10.0 --repo "$GITHUB_REPOSITORY" --pattern fleetdeck-v0.10.0-macos.zip --dir old
+      # Fails on any of: a copy drifted from the tag; the new window not reporting
+      # alive, panel, swapped and done in order within v0.10.0's 2436 ms; the panel at
+      # the URL not being this commit's, from /Applications/fleetdeck.app; v0.10.0 not
+      # left in /Applications/.fleetdeck-update.
+      - name: Update v0.10.0 to this branch, as its Update button does
+        run: |
+          set -eu
+          stand="$RUNNER_TEMP/stand"
+          port=7820
+          mkdir -p "$stand/home/.config/fleetdeck"
+          printf 'server:\n  port: %s\n' "$port" >"$stand/home/.config/fleetdeck/config.yaml"
+          HOME="$stand/home" FLEETDECK_STAND_SOCKET="$stand/no-daemon-here.sock" "$RUNNER_TEMP/updatecheck" \
+            -old-archive "$PWD/old/fleetdeck-v0.10.0-macos.zip" \
+            -new-archive "$PWD/new/fleetdeck-v0.0.0-ci-macos.zip" \
+            -canonical /Applications/fleetdeck.app \
+            -url "http://127.0.0.1:$port/" \
+            -want-revision "$(git rev-parse HEAD)" \
+            -tag-window "$RUNNER_TEMP/v0.10.0/cmd/fleetdeck-window"
+      - name: Keep what the update left, and stop its windows
+        if: always()
+        run: |
+          mkdir -p out
+          cp /Applications/.fleetdeck-update/handover /Applications/.fleetdeck-update/new-window.log out/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/stand/home/Library/Logs/fleetdeck.log" out/panel.log 2>/dev/null || true
+          pkill -f 'fleetdeck.app/Contents/MacOS/' || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: update-from-v0.10.0
+          path: out
+          if-no-files-found: ignore
+          retention-days: 7
