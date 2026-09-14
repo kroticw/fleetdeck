@@ -70,6 +70,8 @@ func TestMain(m *testing.M) {
 		closeHideVisibleAfterReopen = testWindowIsVisible(closeHideWindow)
 	}
 
+	collectFrameResults()
+
 	os.Exit(m.Run())
 }
 
