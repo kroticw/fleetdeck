@@ -34,6 +34,9 @@ type panelWidths struct {
 type geometry struct {
 	Orchestrator, Sessions, Capsules rect
 	Board                            insets
+	// Resizable: the panel has an edge to drag. A folded panel is the strip of
+	// marks, with no width of its own.
+	OrchestratorResizable, SessionsResizable bool
 }
 
 // glassMode is what sits under the side surfaces: Liquid Glass, the vibrancy
@@ -73,5 +76,20 @@ func layoutFor(width, height float64, w panelWidths) geometry {
 		Sessions:     s,
 		Capsules:     rect{X: capX, Y: capsuleTop, W: s.X - capsuleGapRight - capX, H: capsuleHeight},
 		Board:        insets{Top: boardInsetTop, Left: o.X + o.W + boardGapLeft, Right: 0, ContentRight: width - s.X},
+
+		OrchestratorResizable: !w.OrchestratorFolded,
+		SessionsResizable:     !w.SessionsFolded,
 	}
+}
+
+// draggedWidth is a panel's width after its edge was dragged dx points to the
+// right from where the drag began, at start. The orchestrator's edge is its
+// right one, the sessions panel's its left one; either way the width stays
+// within the same limits as a width set any other way.
+func draggedWidth(side string, start, dx, window float64) float64 {
+	w := start + dx
+	if side == "sessions" {
+		w = start - dx
+	}
+	return clampPanel(w, window, false)
 }

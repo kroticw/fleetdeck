@@ -6,7 +6,11 @@ package main
 #include <stdlib.h>
 */
 import "C"
-import "unsafe"
+
+import (
+	"sync"
+	"unsafe"
+)
 
 // frame is the glass frame over the board's web view (frame_darwin.c). Every
 // method is AppKit and runs on the main thread.
@@ -26,7 +30,39 @@ func (f *frame) setMode(m glassMode) {
 }
 
 func (f *frame) layout(g geometry) {
-	C.fd_frame_layout(f.p, fdRect(g.Orchestrator), fdRect(g.Sessions), fdRect(g.Capsules))
+	C.fd_frame_layout(f.p, fdRect(g.Orchestrator), fdRect(g.Sessions), fdRect(g.Capsules),
+		cBool(g.OrchestratorResizable), cBool(g.SessionsResizable))
+}
+
+func cBool(b bool) C.int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// resizeEvents is where a drag on a panel's edge goes: glasswindow.go hands it
+// to the controller. phase is 0 for the press, 1 for a drag, 2 for the release;
+// x is the pointer's, in the window.
+var resizeEvents = struct {
+	sync.Mutex
+	drag func(side string, phase int, x float64)
+}{}
+
+func setResizeEvents(drag func(side string, phase int, x float64)) {
+	resizeEvents.Lock()
+	defer resizeEvents.Unlock()
+	resizeEvents.drag = drag
+}
+
+//export fleetdeckResize
+func fleetdeckResize(side *C.char, phase C.int, x C.double) {
+	resizeEvents.Lock()
+	drag := resizeEvents.drag
+	resizeEvents.Unlock()
+	if drag != nil {
+		drag(C.GoString(side), int(phase), float64(x))
+	}
 }
 
 // panelContent is the view a side surface's web view goes into.
@@ -61,6 +97,13 @@ func currentGlassMode() glassMode {
 // What frame_darwin_test.go reads; Go test files cannot use cgo.
 
 type frameProbe struct {
+	contentFitsPanel    bool
+	contentFollowsDrag  bool
+	stripShown          bool
+	stripOfFoldedHidden bool
+	draggedWidth        float64
+	clampedWidth        float64
+	savedWidths         []panelWidths
 	glassAvailable      bool
 	classes             [2]string
 	styles              [2]int
@@ -87,6 +130,8 @@ func probeFrameForTest(g geometry) frameProbe {
 	out.glassAvailable = C.fd_glass_available() != 0
 	f.setMode(glassModeGlass)
 	content := f.panelContent("orchestrator")
+	fits := C.fd_test_frame_of(content)
+	out.contentFitsPanel = float64(fits.w) == g.Orchestrator.W && float64(fits.h) == g.Orchestrator.H
 	for side := 0; side < 2; side++ {
 		panel := C.fd_test_panel(f.p, C.int(side))
 		out.classes[side] = C.GoString(C.fd_test_class_name(panel))
@@ -112,5 +157,49 @@ func probeFrameForTest(g geometry) frameProbe {
 	f.setMode(glassModeOpaque)
 	out.opaqueClass = C.GoString(C.fd_test_class_name(C.fd_test_panel(f.p, 0)))
 	out.contentKept = f.panelContent("orchestrator") == content
+
+	// The edge dragged through the strip's own mouse methods, into a
+	// controller, and back into the frame.
+	ctl := newController("http://127.0.0.1:7777/", panelWidths{Orchestrator: 368, Sessions: 348}, glassModeOpaque)
+	ctl.resized(1512, 982, false)
+	ctl.layout(1, "panel", "work")
+	var start, pressedAt float64
+	setResizeEvents(func(side string, phase int, x float64) {
+		var effects []effect
+		switch phase {
+		case 0:
+			start, _ = ctl.resizeStart(side)
+			pressedAt = x
+		case 1:
+			effects = ctl.resizeTo(side, start, x-pressedAt)
+		case 2:
+			effects = ctl.resizeEnd()
+		}
+		for _, e := range effects {
+			switch e := e.(type) {
+			case applyGeometry:
+				f.layout(e.G)
+			case saveWidths:
+				out.savedWidths = append(out.savedWidths, e.W)
+			}
+		}
+	})
+	// On glass, whose content view is the one AppKit does not size by itself.
+	f.setMode(glassModeGlass)
+	strip := C.fd_test_strip(f.p, 0)
+	out.stripShown = C.fd_test_is_hidden(strip) == 0
+	C.fd_test_mouse(strip, 0, 380)
+	C.fd_test_mouse(strip, 1, 430)
+	C.fd_test_mouse(strip, 2, 430)
+	out.draggedWidth = float64(C.fd_test_frame_of(C.fd_test_panel(f.p, 0)).w)
+	out.contentFollowsDrag = float64(C.fd_test_frame_of(f.panelContent("orchestrator")).w) == out.draggedWidth
+	C.fd_test_mouse(strip, 0, 426)
+	C.fd_test_mouse(strip, 1, -1000)
+	C.fd_test_mouse(strip, 2, -1000)
+	out.clampedWidth = float64(C.fd_test_frame_of(C.fd_test_panel(f.p, 0)).w)
+	setResizeEvents(nil)
+
+	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348, SessionsFolded: true}))
+	out.stripOfFoldedHidden = C.fd_test_is_hidden(C.fd_test_strip(f.p, 1)) != 0
 	return out
 }

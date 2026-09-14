@@ -13,6 +13,9 @@ func TestTheDefaultLayoutMatchesTheChosenDesign(t *testing.T) {
 		// The board runs on under the sessions glass; a card, a session or a
 		// document opens clear of the panel and its margin.
 		Board: insets{Top: 64, Left: 394, Right: 0, ContentRight: 356},
+
+		OrchestratorResizable: true,
+		SessionsResizable:     true,
 	}
 	if g != want {
 		t.Fatalf("layout = %+v\nwant     %+v", g, want)
@@ -29,6 +32,36 @@ func TestAFoldedSessionsPanelIsTheStripOfMarks(t *testing.T) {
 	}
 	if g.Board.Right != 0 || g.Board.ContentRight != 56 {
 		t.Fatalf("board insets = %+v, want the board under the strip and content clear of it", g.Board)
+	}
+}
+
+func TestDraggingAPanelsEdgeMovesItsWidthWithThePointerWithinLimits(t *testing.T) {
+	cases := []struct {
+		name          string
+		side          string
+		start, dx     float64
+		window, width float64
+	}{
+		// The orchestrator's edge is its right one: right is wider.
+		{"orchestrator wider", "orchestrator", 368, 40, 1512, 408},
+		{"orchestrator narrower", "orchestrator", 368, -40, 1512, 328},
+		// The sessions panel's edge is its left one: left is wider.
+		{"sessions wider", "sessions", 348, -52, 1512, 400},
+		{"sessions narrower", "sessions", 348, 48, 1512, 300},
+		{"never below the floor", "orchestrator", 368, -400, 1512, 220},
+		{"never above sixty percent", "sessions", 348, -2000, 1200, 720},
+	}
+	for _, c := range cases {
+		if got := draggedWidth(c.side, c.start, c.dx, c.window); got != c.width {
+			t.Errorf("%s: width = %v, want %v", c.name, got, c.width)
+		}
+	}
+}
+
+func TestOnlyAnUnfoldedPanelCanBeResized(t *testing.T) {
+	g := layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348, SessionsFolded: true})
+	if !g.OrchestratorResizable || g.SessionsResizable {
+		t.Fatalf("resizable = orchestrator %v, sessions %v; want only the unfolded one", g.OrchestratorResizable, g.SessionsResizable)
 	}
 }
 

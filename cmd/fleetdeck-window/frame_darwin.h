@@ -15,10 +15,16 @@ void *fd_frame_install(void *window);
 
 // fd_frame_set_mode wraps the panels in "glass" (NSGlassEffectView, Regular),
 // "vibrancy" (NSVisualEffectView, sidebar, within the window) or "opaque" (a
-// plain view). The views inside the wrappers are kept and moved over.
+// plain view). The view a surface goes into is kept, and stays over the new
+// wrapper with the same frame: over it, not inside, since glass keeps the clicks
+// on its own content.
 void fd_frame_set_mode(void *frame, const char *mode);
 
-void fd_frame_layout(void *frame, fd_rect orchestrator, fd_rect sessions, fd_rect capsules);
+// The panels' edges carry a strip that drags their width, shown only for a
+// resizable panel; a drag calls fleetdeckResize with the side, the phase (0
+// press, 1 drag, 2 release) and the pointer's x in the window.
+void fd_frame_layout(void *frame, fd_rect orchestrator, fd_rect sessions, fd_rect capsules, int orchestratorResizable,
+                     int sessionsResizable);
 
 // side 0 is the orchestrator panel, 1 the sessions panel.
 void *fd_frame_panel_content(void *frame, int side);
@@ -41,5 +47,10 @@ long fd_test_material(void *view);
 int fd_test_subview_index(void *parent, void *child);
 fd_rect fd_test_frame_of(void *view);
 int fd_test_passes_through(void *view);
+void *fd_test_strip(void *frame, int side);
+int fd_test_is_hidden(void *view);
+void fd_test_mouse(void *view, int phase, double x);
+int fd_test_hit_within(void *frame, double x, double y, void *view);
+const char *fd_test_hit_chain(void *frame, double x, double y);
 
 #endif

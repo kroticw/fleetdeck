@@ -3,6 +3,7 @@ package main
 /*
 #cgo LDFLAGS: -framework Cocoa -framework WebKit
 #include <stdlib.h>
+#include "frame_darwin.h"
 #include "surface_darwin.h"
 */
 import "C"
@@ -120,15 +121,19 @@ func fleetdeckSurfaceNavigation(surface, target *C.char) C.int {
 // What surface_darwin_test.go reads; Go test files cannot use cgo.
 
 type surfaceProbe struct {
-	drawsBackground    bool
-	sharesPool         bool
-	sharesStore        bool
-	userScripts        int
-	liveAfterCreate    int
-	liveAfterChurn     int
-	subviewsAfterChurn int
-	classRegistrations int
-	eventsSet          bool
+	clickInPanelLandsOn        string
+	surfaceFrame               rect
+	clickInPanelReachesSurface bool
+	clickOnEdgeReachesStrip    bool
+	drawsBackground            bool
+	sharesPool                 bool
+	sharesStore                bool
+	userScripts                int
+	liveAfterCreate            int
+	liveAfterChurn             int
+	subviewsAfterChurn         int
+	classRegistrations         int
+	eventsSet                  bool
 }
 
 func probeSurfacesForTest() surfaceProbe {
@@ -151,6 +156,13 @@ func probeSurfacesForTest() surfaceProbe {
 	out.sharesStore = C.fd_test_shares_store(s.p, f.board()) != 0
 	out.userScripts = int(C.fd_test_user_scripts(s.p))
 	out.liveAfterCreate = int(C.fd_surface_live_handlers())
+	// The sessions panel is at x 1156-1504: its middle is the surface's, its
+	// edge the width strip's.
+	out.clickInPanelReachesSurface = C.fd_test_hit_within(f.p, 1330, 491, webview) != 0
+	out.clickInPanelLandsOn = C.GoString(C.fd_test_hit_chain(f.p, 1330, 491))
+	r := C.fd_test_frame_of(webview)
+	out.surfaceFrame = rect{X: float64(r.x), Y: float64(r.y), W: float64(r.w), H: float64(r.h)}
+	out.clickOnEdgeReachesStrip = C.fd_test_hit_within(f.p, 1156, 491, C.fd_test_strip(f.p, 1)) != 0
 	s.send(map[string]any{"type": "glass", "glass": "glass"})
 	s.focus()
 	s.load("about:blank")

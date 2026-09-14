@@ -33,6 +33,12 @@ type glassWindow struct {
 	// reloadBoard asks for the board's page again, the way the page's own
 	// reload does (main.go).
 	reloadBoard func()
+
+	// The drag on a panel's edge under way: which panel, the width it began
+	// at, and the pointer's x at the press.
+	dragSide  string
+	dragWidth float64
+	dragX     float64
 }
 
 func newGlassWindow(w webview.WebView, panelURL string, reloadBoard func()) *glassWindow {
@@ -123,6 +129,7 @@ func newGlassWindow(w webview.WebView, panelURL string, reloadBoard func()) *gla
 	setCapsuleEvents(func(action string) { g.run(g.ctl.capsuleAction(action)) })
 	setWindowEvents(g.windowChanged)
 	setMenuReload(func() { g.run(g.ctl.reload()) })
+	setResizeEvents(g.resize)
 	observeWindow(w.Window())
 	return g
 }
@@ -202,6 +209,28 @@ func (g *glassWindow) windowChanged(kind string) {
 	default:
 		width, height := windowContentSize(g.w.Window())
 		g.run(g.ctl.resized(width, height, windowIsFullscreen(g.w.Window())))
+	}
+}
+
+// resize is the width strip at a panel's edge (frame_darwin.c), on the main
+// thread: the frame follows every drag in this process, and the board hears of
+// the new width on release.
+func (g *glassWindow) resize(side string, phase int, x float64) {
+	switch phase {
+	case 0:
+		width, ok := g.ctl.resizeStart(side)
+		if !ok {
+			g.dragSide = ""
+			return
+		}
+		g.dragSide, g.dragWidth, g.dragX = side, width, x
+	case 1:
+		if g.dragSide == side {
+			g.run(g.ctl.resizeTo(side, g.dragWidth, x-g.dragX))
+		}
+	case 2:
+		g.dragSide = ""
+		g.run(g.ctl.resizeEnd())
 	}
 }
 

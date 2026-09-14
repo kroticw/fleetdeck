@@ -523,6 +523,13 @@ test("the board runs on under the sessions glass; a sheet and the documents keep
   assert.match(ruleBody(':root[data-surface="board"] .docs'), /--host-inset-content-right/);
 });
 
+// In the window a panel's width is dragged at the panel's edge by the window.
+// The page's own strip stays for a browser tab and goes in a surface, where it
+// would drag a column that already fills its web view and move nothing.
+test("the page's resize strip is left to a browser tab", () => {
+  assert.match(ruleBody(":root[data-surface] .col-grip"), /display:\s*none/);
+});
+
 test("every glass token has a light and both dark definitions", () => {
   for (const token of ["--on-glass-muted", "--surface-on-glass", "--glass-control", "--island-shadow"]) {
     assert.equal(countDefinitions(token), 3, token);

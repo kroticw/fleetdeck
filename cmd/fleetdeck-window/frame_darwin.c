@@ -4,6 +4,11 @@
 // names NSGlassEffectViewStyle (Wails #4541: declaring it breaks the build on
 // SDKs that define it).
 //
+// A panel is two views: the material (glass, vibrancy or nothing) and, over it
+// with the same frame, the view the surface's web view goes into. Glass does
+// not pass clicks into a content view it is given, so the web view is not its
+// content.
+//
 // There is no NSGlassEffectContainerView. A container covering the window sits
 // over the whole board, and a view over the board takes its clicks: hit-testing
 // stops at the deepest view under the pointer, whether or not it handles the
@@ -11,6 +16,8 @@
 // and the frame's own views pass a click on to the board where they have no
 // subview under it.
 #include "frame_darwin.h"
+
+#include "_cgo_export.h"
 
 #include <CoreGraphics/CGGeometry.h>
 #include <objc/message.h>
@@ -98,6 +105,67 @@ static id frameView(CGRect r) {
   return v;
 }
 
+// --- the width strip ----------------------------------------------------------
+//
+// A panel's width is dragged at its inner edge, by the window: the web view in
+// the panel fills it, and the geometry is the native layer's (spec 5.3). The
+// strip sits over the glass and the surface's web view, and reports a press, a
+// drag and a release in the window's coordinates.
+
+static const double stripWidth = 8;
+
+static const char *sideOf(id strip) {
+  id identifier = send0(strip, sel("identifier"));
+  return identifier ? ((const char *(*)(id, SEL))objc_msgSend)(identifier, sel("UTF8String")) : "";
+}
+
+static double pointerX(id event) {
+  return ((CGPoint (*)(id, SEL))objc_msgSend)(event, sel("locationInWindow")).x;
+}
+
+static void stripDown(id self, SEL _cmd, id event) {
+  (void)_cmd;
+  fleetdeckResize((char *)sideOf(self), 0, pointerX(event));
+}
+
+static void stripDragged(id self, SEL _cmd, id event) {
+  (void)_cmd;
+  fleetdeckResize((char *)sideOf(self), 1, pointerX(event));
+}
+
+static void stripUp(id self, SEL _cmd, id event) {
+  (void)_cmd;
+  fleetdeckResize((char *)sideOf(self), 2, pointerX(event));
+}
+
+static void stripCursorRects(id self, SEL _cmd) {
+  (void)_cmd;
+  id cursor = send0(cls("NSCursor"), sel("resizeLeftRightCursor"));
+  ((void (*)(id, SEL, CGRect, id))objc_msgSend)(self, sel("addCursorRect:cursor:"), sendRect0(self, sel("bounds")), cursor);
+}
+
+// A press on the edge of an inactive window drags at once, as a window's own
+// edge does.
+static signed char stripFirstMouse(id self, SEL _cmd, id event) {
+  (void)self;
+  (void)_cmd;
+  (void)event;
+  return 1;
+}
+
+static Class stripClass(void) {
+  static Class klass;
+  if (klass) return klass;
+  klass = objc_allocateClassPair((Class)objc_getClass("NSView"), "FleetdeckResizeStrip", 0);
+  class_addMethod(klass, sel("mouseDown:"), (IMP)stripDown, "v@:@");
+  class_addMethod(klass, sel("mouseDragged:"), (IMP)stripDragged, "v@:@");
+  class_addMethod(klass, sel("mouseUp:"), (IMP)stripUp, "v@:@");
+  class_addMethod(klass, sel("resetCursorRects"), (IMP)stripCursorRects, "v@:");
+  class_addMethod(klass, sel("acceptsFirstMouse:"), (IMP)stripFirstMouse, "c@:@");
+  objc_registerClassPair(klass);
+  return klass;
+}
+
 // --- the frame ---------------------------------------------------------------
 
 struct fd_frame {
@@ -108,6 +176,7 @@ struct fd_frame {
   id contents[2];
   CGRect rects[2];
   id capsules;
+  id strips[2];
   char mode[16];
 };
 
@@ -133,10 +202,27 @@ void *fd_frame_install(void *window) {
   sendVoidLong(f->window, sel("setTitleVisibility:"), 1);  // hidden
 
   for (int side = 0; side < 2; side++) {
-    f->contents[side] = frameView(CGRectZero);
+    // Placed by fd_frame_layout, never stretched with the root; rounded like
+    // the glass under it, so nothing of a surface shows past its corners.
+    id content = frameView(CGRectZero);
+    sendVoidLong(content, sel("setAutoresizingMask:"), 0);
+    sendVoidBool(content, sel("setWantsLayer:"), 1);
+    id layer = send0(content, sel("layer"));
+    sendVoidDouble(layer, sel("setCornerRadius:"), 18.0);
+    sendVoidBool(layer, sel("setMasksToBounds:"), 1);
+    f->contents[side] = content;
   }
   f->capsules = initWithFrame(NULL, frameViewClass(), CGRectZero);
   sendVoid1(f->root, sel("addSubview:"), f->capsules);
+  // Above everything else in the frame, over the panels' edges.
+  const char *sides[2] = {"orchestrator", "sessions"};
+  for (int side = 0; side < 2; side++) {
+    f->strips[side] = initWithFrame(NULL, stripClass(), CGRectZero);
+    sendVoid1(f->strips[side], sel("setIdentifier:"),
+              ((id (*)(id, SEL, const char *))objc_msgSend)(cls("NSString"), sel("stringWithUTF8String:"), sides[side]));
+    sendVoidBool(f->strips[side], sel("setHidden:"), 1);
+    sendVoid1(f->root, sel("addSubview:"), f->strips[side]);
+  }
   return f;
 }
 
@@ -175,26 +261,42 @@ void fd_frame_set_mode(void *frame, const char *mode) {
     }
     id w = wrapperFor(f->mode, f->rects[side]);
     f->wrappers[side] = w;
-    if (isGlass(w)) {
-      sendVoid1(w, sel("setContentView:"), content);
-    } else {
-      sendVoidRect(content, sel("setFrame:"), sendRect0(w, sel("bounds")));
-      sendVoid1(w, sel("addSubview:"), content);
-    }
     // Above the board and below the capsule row.
     ((void (*)(id, SEL, id, long, id))objc_msgSend)(f->root, sel("addSubview:positioned:relativeTo:"), w, -1,
                                                     f->capsules);
+    // The view a surface goes into sits over its panel, not inside it. Glass
+    // keeps the clicks on its own content view: a web view given to it as
+    // content is drawn but cannot be clicked (found by the surface test). Over
+    // the glass, the transparent web view still shows the glass, and the glass
+    // still shows the board under it.
+    sendVoidRect(content, sel("setFrame:"), f->rects[side]);
+    ((void (*)(id, SEL, id, long, id))objc_msgSend)(f->root, sel("addSubview:positioned:relativeTo:"), content, 1, w);
   }
 }
 
-void fd_frame_layout(void *frame, fd_rect orchestrator, fd_rect sessions, fd_rect capsules) {
+void fd_frame_layout(void *frame, fd_rect orchestrator, fd_rect sessions, fd_rect capsules, int orchestratorResizable,
+                     int sessionsResizable) {
   struct fd_frame *f = frame;
   f->rects[0] = cgrect(orchestrator);
   f->rects[1] = cgrect(sessions);
   for (int side = 0; side < 2; side++) {
-    if (f->wrappers[side]) sendVoidRect(f->wrappers[side], sel("setFrame:"), f->rects[side]);
+    if (!f->wrappers[side]) continue;
+    sendVoidRect(f->wrappers[side], sel("setFrame:"), f->rects[side]);
+    sendVoidRect(f->contents[side], sel("setFrame:"), f->rects[side]);
   }
   sendVoidRect(f->capsules, sel("setFrame:"), cgrect(capsules));
+
+  // The orchestrator's inner edge is its right one, the sessions panel's its left.
+  double edges[2] = {orchestrator.x + orchestrator.w, sessions.x};
+  int resizable[2] = {orchestratorResizable, sessionsResizable};
+  for (int side = 0; side < 2; side++) {
+    CGRect r = f->rects[side];
+    sendVoidRect(f->strips[side], sel("setFrame:"),
+                 CGRectMake(edges[side] - stripWidth / 2, r.origin.y, stripWidth, r.size.height));
+    sendVoidBool(f->strips[side], sel("setHidden:"), !(resizable[side] && r.size.width > 0));
+    id window = send0(f->strips[side], sel("window"));
+    if (window) sendVoid1(window, sel("invalidateCursorRectsForView:"), f->strips[side]);
+  }
 }
 
 void *fd_frame_panel_content(void *frame, int side) { return ((struct fd_frame *)frame)->contents[side]; }
@@ -258,6 +360,56 @@ fd_rect fd_test_frame_of(void *view) {
   CGRect r = sendRect0((id)view, sel("frame"));
   fd_rect out = {r.origin.x, r.origin.y, r.size.width, r.size.height};
   return out;
+}
+
+void *fd_test_strip(void *frame, int side) { return ((struct fd_frame *)frame)->strips[side]; }
+
+int fd_test_is_hidden(void *view) { return sendBool0((id)view, sel("isHidden")) != 0; }
+
+// A press, a drag or a release at x in the window, sent to view as AppKit
+// sends one: through the view's own mouse methods.
+void fd_test_mouse(void *view, int phase, double x) {
+  unsigned long types[3] = {1, 6, 2};  // left mouse down, dragged, up
+  id window = send0((id)view, sel("window"));
+  long number = window ? sendLong0(window, sel("windowNumber")) : 0;
+  id event = ((id (*)(id, SEL, unsigned long, CGPoint, unsigned long, double, long, id, long, long, float))objc_msgSend)(
+      cls("NSEvent"), sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
+      types[phase], CGPointMake(x, 100), 0, 0, number, (id)0, 0, 1, 1.0f);
+  const char *selectors[3] = {"mouseDown:", "mouseDragged:", "mouseUp:"};
+  sendVoid1((id)view, sel(selectors[phase]), event);
+}
+
+// Whether a click at (x, y), in the frame's coordinates from the top left,
+// lands on view or inside it.
+int fd_test_hit_within(void *frame, double x, double y, void *view) {
+  struct fd_frame *f = frame;
+  id superview = send0(f->root, sel("superview"));
+  CGPoint p = CGPointMake(x, y);
+  if (superview) {
+    p = ((CGPoint (*)(id, SEL, CGPoint, id))objc_msgSend)(f->root, sel("convertPoint:toView:"), p, superview);
+  }
+  id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(f->root, sel("hitTest:"), p);
+  return hit && ((signed char (*)(id, SEL, id))objc_msgSend)(hit, sel("isDescendantOf:"), (id)view) != 0;
+}
+
+// What a click at (x, y) lands on, and the views above it up to the root, as
+// class names: "WKWebView < FleetdeckFrameView < NSGlassEffectView".
+const char *fd_test_hit_chain(void *frame, double x, double y) {
+  static char chain[512];
+  struct fd_frame *f = frame;
+  id superview = send0(f->root, sel("superview"));
+  CGPoint p = CGPointMake(x, y);
+  if (superview) {
+    p = ((CGPoint (*)(id, SEL, CGPoint, id))objc_msgSend)(f->root, sel("convertPoint:toView:"), p, superview);
+  }
+  id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(f->root, sel("hitTest:"), p);
+  chain[0] = 0;
+  if (!hit) return "nothing";
+  for (id v = hit; v && v != f->root; v = send0(v, sel("superview"))) {
+    if (chain[0]) strncat(chain, " < ", sizeof chain - strlen(chain) - 1);
+    strncat(chain, class_getName((Class)send0(v, sel("class"))), sizeof chain - strlen(chain) - 1);
+  }
+  return chain;
 }
 
 int fd_test_passes_through(void *view) {
