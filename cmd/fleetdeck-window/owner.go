@@ -112,8 +112,8 @@ const startBindingName = "fleetdeckStartPanel"
 // had not -- and the next stayed on its "Принимаю пульт" page, the navigation
 // refused before anything arrived. webview_go sets no navigation delegate, so
 // nothing said so. Now the page says it has loaded (pageLoadScript), and until
-// it has, the window asks for it again: when a panel answers again, and when
-// pageLoadWait goes by.
+// it has, the window asks for it again: when a panel answers again, when WebKit
+// says the navigation failed, and when its wait goes by (navscreen.go).
 type screen struct {
 	url     string
 	logPath string
@@ -132,6 +132,20 @@ type screen struct {
 	// went away to an address the window does not know yet.
 	href string
 	left bool
+	// waitFrom is when the wait running now began: the ask, the document
+	// beginning, or the failure it waits out (waitFor).
+	waitFrom time.Time
+	// committed: WebKit has committed a navigation since the window last
+	// asked, so the page's word is about a document that ask brought; navSeen,
+	// that WebKit has said anything at all (navscreen.go).
+	committed, navSeen bool
+	// retrySoon: the page failed, or loaded broken, and is asked for again once
+	// navFailedRetryPause has gone by.
+	retrySoon bool
+	// processLosses counts the web content process going away under the shown
+	// panel; finishedAt is the last load WebKit finished (navscreen.go).
+	processLosses int
+	finishedAt    time.Time
 	// answering: a panel answers, as the keeper last reported.
 	answering bool
 	// startingUp: the starting page is on screen.
@@ -185,27 +199,21 @@ const (
 	pageRunningMarker = "fleetdeckPage"
 )
 
-// How long the panel's page has to say it loaded before it is asked for
-// again, and how many times it is asked for before the window says it did not
-// load: the worst of twenty measured loads, three times over.
+// How many times in a row the panel's page is asked for before the window
+// says it did not load, the margin every measured wait is given, and how often
+// the window looks at a page asked for. How long each wait is follows from
+// what WebKit and the page have said (navscreen.go, waitFor).
 //
-// Measured on 2026-09-14 on the operator's machine, with the fleet running, on
-// a stand of its own (HOME, port 7791, a configured fleet, a -stand-socket
-// panel): twenty windows started one after another, each a new process with a
-// cold web view, timed from the navigation to the page saying it had loaded.
-// The board, /?fleet=stand, in ms: 177, 94, 94, 89, 89, 93, 90, 94, 94, 92 --
-// the first slower, as the first start of a web view is. The start page, /,
-// which the app opens on: 62, 63, 55, 61, 65, 56, 64, 61, 60, 62. Not
-// measured: a load straight after login, with nothing in the disk cache, or on
-// a board of hundreds of cards. A page slower than this is asked for again,
-// not given up on, and only pageLoadTries in a row are said to have failed.
+// There was once a short wait here, pageLoadWait: the worst of twenty page
+// loads measured on a stand, 177 ms, three times over. It asked again every
+// 531 ms while the page said nothing, and on the operator's update of
+// 2026-09-14 that was every ask until the web content process, paused for
+// 1.38 s, answered the third; see navscreen.go.
 const (
-	measuredWorstPageLoad = 177 * time.Millisecond
-	pageLoadMargin        = 3
-	pageLoadWait          = measuredWorstPageLoad * pageLoadMargin
-	pageLoadTries         = 3
+	pageLoadMargin = 3
+	pageLoadTries  = 3
 	// pageLoadTick is how often the window looks at a page asked for: often
-	// enough that a wait is not stretched by much past pageLoadWait.
+	// enough that no wait is stretched by much.
 	pageLoadTick = 100 * time.Millisecond
 )
 
@@ -253,7 +261,9 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 // says so.
 func (s *screen) ask() bool {
 	s.showingPanel, s.startingUp, s.loading, s.left = false, false, false, false
+	s.committed, s.retrySoon = false, false
 	s.asked, s.askedAt = true, s.time()
+	s.waitFrom = s.askedAt
 	s.tries++
 	return true
 }
@@ -269,6 +279,7 @@ func (s *screen) time() time.Time {
 // cover is one of the window's own pages going up.
 func (s *screen) cover() {
 	s.showingPanel, s.asked, s.startingUp, s.left = false, false, false, false
+	s.committed, s.retrySoon = false, false
 }
 
 // reopen is a navigation to the panel asked for by a person or by the page
@@ -281,6 +292,18 @@ func (s *screen) reopen() {
 // pageSays takes the panel's page's word about itself, and the address it
 // said it from.
 func (s *screen) pageSays(state, href string) {
+	if !s.asked && !s.showingPanel {
+		// A page the window has covered with one of its own, still speaking
+		// as it goes: not what is on screen.
+		return
+	}
+	if s.navSeen && !s.committed {
+		// A word from the document the last ask cut off, taken off the UI
+		// thread's queue after that ask: WebKit has not yet committed the
+		// navigation the window asked for. Without WebKit's word at all -- a
+		// delegate that never took -- the page's word is all there is.
+		return
+	}
 	switch state {
 	case pagePanel:
 		s.showingPanel, s.asked, s.tries, s.loading, s.left = true, false, 0, false, false
@@ -288,22 +311,25 @@ func (s *screen) pageSays(state, href string) {
 			s.href = href
 		}
 	case pageLoading:
-		// The document has begun: given pageLoadingWait, not cut off at
-		// pageLoadWait, and asked for again, if it has to be, where it began.
+		// The document has begun: given pageLoadingWait from here, and asked
+		// for again, if it has to be, where it began.
 		if !s.asked {
 			return
 		}
-		s.loading = true
+		if !s.loading {
+			s.loading, s.waitFrom = true, s.time()
+		}
 		if href != "" {
 			s.href = href
 		}
 		if s.left {
 			// The page the person went to: counted from here, as a first try.
-			s.left, s.askedAt, s.tries = false, s.time(), 1
+			s.left, s.askedAt, s.waitFrom, s.tries = false, s.time(), s.time(), 1
 		}
 	case pageBroken:
-		// Not the panel: left asked, so time asks for it again.
-		s.showingPanel, s.loading = false, false
+		// Not the panel, and finished: waiting longer mends nothing, so it is
+		// asked for again after navFailedRetryPause.
+		s.showingPanel, s.loading, s.retrySoon, s.waitFrom = false, false, true, s.time()
 	case pageLeaving:
 		if s.showingPanel {
 			// Gone to an address the window does not know until the next page
@@ -313,6 +339,7 @@ func (s *screen) pageSays(state, href string) {
 			// went. Should the next page never begin, it says so.
 			s.showingPanel, s.loading = false, false
 			s.asked, s.askedAt, s.tries, s.left = true, s.time(), pageLoadTries, true
+			s.waitFrom = s.askedAt
 		}
 	}
 }
@@ -339,18 +366,11 @@ func (s *screen) handedOver() bool {
 }
 
 // tick is time going by: a page asked for and not loaded is asked for again,
-// pageLoadTries times in all, and then said not to have loaded. A navigation
-// that never reached its document is asked for again after pageLoadWait; one
-// whose document has begun is left to load for pageLoadingWait, since asking
-// again would cut it off and start it over.
+// pageLoadTries times in all, and then said not to have loaded. How long it is
+// given follows from what WebKit and the page have said of it (waitFor).
 func (s *screen) tick() (navigate bool, page string) {
-	// A page that left waits as long as one that has begun: it went somewhere
-	// on purpose, and the window cannot ask for it again.
-	wait := pageLoadWait
-	if s.loading || s.left {
-		wait = pageLoadingWait
-	}
-	if !s.asked || s.time().Sub(s.askedAt) < wait {
+	wait := s.waitFor()
+	if !s.asked || s.time().Sub(s.waitFrom) < wait {
 		return false, ""
 	}
 	if s.tries < pageLoadTries {
@@ -400,6 +420,17 @@ func pageLoadScript(panelURL string) string {
 // panel's own background, so a panel that answers at once opens without a
 // white flash in between.
 const blankPage = `<!doctype html><html><head><meta charset="utf-8"><title>fleetdeck</title></head><body style="margin:0;background:#14161a"></body></html>`
+
+// pageHeading is what a page of the window's says first, as it is written in
+// the page, for the log; empty for a page with no heading.
+func pageHeading(page string) string {
+	_, rest, ok := strings.Cut(page, "<h1>")
+	if !ok {
+		return ""
+	}
+	heading, _, _ := strings.Cut(rest, "</h1>")
+	return heading
+}
 
 const pageStyle = `<style>
   html, body { height: 100%; margin: 0; }
