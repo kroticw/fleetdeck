@@ -48,6 +48,20 @@ func TestAPressInTheRowBecomesTheControllersAction(t *testing.T) {
 	}
 }
 
+// On glass, as on the operator's macOS 26: NSGlassEffectView keeps the clicks
+// on its own content view, as the surfaces' web views showed (frame_darwin.c),
+// and a press sent with sendAction: never finds that out.
+func TestAClickOnEachCapsuleOnGlassReachesItsControl(t *testing.T) {
+	if !frameResult.glassAvailable {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	for which, name := range []string{"the tabs", "the new card button", "the theme button"} {
+		if !capsulesResult.clicksReach[which] {
+			t.Errorf("a click at the middle of %s, drawn on glass, does not reach it", name)
+		}
+	}
+}
+
 func TestAClickInTheGapBetweenCapsulesReachesTheBoard(t *testing.T) {
 	if !capsulesResult.rowPassesThrough {
 		t.Fatal("the capsule row's container takes a click between capsules, over the board")

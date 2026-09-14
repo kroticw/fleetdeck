@@ -93,6 +93,9 @@ type capsulesProbe struct {
 	countAfterRedraw int
 	rowPassesThrough bool
 	presses          []string
+	// clicksReach: a click at the middle of the tabs, the new card button and
+	// the theme button, drawn on glass, reaches that control.
+	clicksReach [3]bool
 }
 
 func probeCapsulesForTest(m capsuleModel) capsulesProbe {
@@ -111,6 +114,9 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	out.levelValue = float64(C.fd_test_level_value(0))
 	out.capsuleCount = int(C.fd_test_capsule_count())
 	out.rowPassesThrough = C.fd_test_row_passes_through(f.capsules()) != 0
+	for which := range out.clicksReach {
+		out.clicksReach[which] = C.fd_test_click_reaches_capsule(C.int(which)) != 0
+	}
 	C.fd_test_press_segment(1)
 	C.fd_test_press_new_card()
 

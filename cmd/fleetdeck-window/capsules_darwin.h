@@ -26,5 +26,6 @@ double fd_test_level_value(int i);
 int fd_test_row_passes_through(void *container);
 void fd_test_press_segment(int i);
 void fd_test_press_new_card(void);
+int fd_test_click_reaches_capsule(int which);
 
 #endif

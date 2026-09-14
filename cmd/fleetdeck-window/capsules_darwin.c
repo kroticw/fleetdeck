@@ -152,10 +152,16 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
   sendVoidRect(content, sel("setFrame:"), inner);
   sendVoid1(holder, sel("addSubview:"), content);
   if (strcmp(mode, "glass") == 0 && cls("NSGlassEffectView")) {
-    wrapper = initWithFrame(cls("NSGlassEffectView"), frame);
-    sendVoidLong(wrapper, sel("setStyle:"), 0);
-    sendVoidDouble(wrapper, sel("setCornerRadius:"), capsuleHeight / 2);
-    sendVoid1(wrapper, sel("setContentView:"), holder);
+    // The glass is only the material under the control. A click over
+    // NSGlassEffectView's content view lands on the glass, as it did for the
+    // surfaces' web views (frame_darwin.c), so the control lies over the glass
+    // in a plain view of the capsule's frame, not inside it.
+    wrapper = initWithFrame(cls("NSView"), frame);
+    id glass = initWithFrame(cls("NSGlassEffectView"), CGRectMake(0, 0, frame.size.width, frame.size.height));
+    sendVoidLong(glass, sel("setStyle:"), 0);
+    sendVoidDouble(glass, sel("setCornerRadius:"), capsuleHeight / 2);
+    adopt(wrapper, glass);
+    sendVoid1(wrapper, sel("addSubview:"), holder);
   } else {
     if (strcmp(mode, "opaque") == 0) {
       wrapper = initWithFrame(cls("NSView"), frame);
@@ -328,3 +334,25 @@ void fd_test_press_segment(int i) {
 }
 
 void fd_test_press_new_card(void) { sendAction(newCardDrawn); }
+
+// A click at the middle of a capsule's control, hit-tested the way the window
+// hit-tests a mouse down: from its content view down. which is 0 for the tabs,
+// 1 for the new card button, 2 for the theme button.
+int fd_test_click_reaches_capsule(int which) {
+  id control = which == 0 ? segmentedDrawn : which == 1 ? newCardDrawn : themeDrawn;
+  id window = send0(control, sel("window"));
+  if (!window) return 0;
+  CGRect b = sendRect0(control, sel("bounds"));
+  CGPoint mid = CGPointMake(b.origin.x + b.size.width / 2, b.origin.y + b.size.height / 2);
+  CGPoint inWindow =
+      ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(control, sel("convertPoint:toView:"), mid, (id)0);
+  id content = send0(window, sel("contentView"));
+  // hitTest: takes the point in the content view's superview, whose coordinates
+  // are the window's.
+  id superview = send0(content, sel("superview"));
+  CGPoint inSuper = superview ? ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(superview, sel("convertPoint:fromView:"),
+                                                                                  inWindow, (id)0)
+                              : inWindow;
+  id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(content, sel("hitTest:"), inSuper);
+  return hit && ((signed char (*)(id, SEL, id))objc_msgSend)(hit, sel("isDescendantOf:"), control) != 0;
+}
