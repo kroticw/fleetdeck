@@ -235,7 +235,9 @@ jobs:
           done
           grep -q 'Usage of' out/new-load.log
       # With a fleet's page, so the glass frame comes up: on macOS 15 there is no
-      # NSGlassEffectView, and the frame's panels are NSVisualEffectView.
+      # NSGlassEffectView, and the frame's panels are NSVisualEffectView -- unless
+      # the runner reduces transparency, when the window draws them opaque and
+      # its log says so.
       - name: This build's window, started directly, shows the panel's page in its frame
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7791 out/new-exec exec frame
       - name: v0.9.1's window, started directly, as it comes
@@ -310,10 +312,11 @@ jobs:
       # right after them answered in 53 ms (run 34850302115). The window is
       # sized to the runner's 1024x768 screen, so both panels are in the
       # screenshot, and drawn light and then dark: the operator uses dark. The
-      # dark screenshot proves the capsules' colour and that none lies over
-      # another; it does not prove the text under the glass is sharp, since this
-      # runner draws v0.10.0's capsules without the blur the operator's Mac
-      # showed (run 34854756877).
+      # dark screenshot shows the capsules' colour and that none lies over
+      # another, in the frame the window logs it drew: glass, since the step
+      # above turns reduced transparency off. Before 2026-09-14 21:29 these
+      # screenshots were opaque, so those runs, 34854756877 among them, say
+      # nothing of glass or of blur.
       #
       # The frame is shown with content (scripts/standdaemon): a card in every
       # stage, more long-named sessions than the sessions panel shows, one
