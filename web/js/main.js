@@ -12,6 +12,39 @@ import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
 import { rememberFleet } from "./fleet.js";
 import { t } from "./i18n.js";
+import { readHost, callHost } from "./host.js";
+import { regionsFor, layoutReport } from "./surfaces.js";
+
+// In the fleetdeck window this page is one of three web views, and mounts only
+// its own part of the panel (surfaces.js). The side surfaces keep the centre
+// column's overlays, hidden, until opening goes through the window.
+const host = readHost(window);
+const regions = regionsFor(host);
+if (host) {
+  document.documentElement.dataset.surface = host.surface;
+  document.documentElement.dataset.glass = host.glass;
+}
+const center = regions.has("center");
+const kept = {
+  header: regions.has("header") || regions.has("brand"),
+  orchestrator: regions.has("orchestrator"),
+  sessions: regions.has("sessions"),
+  tabs: center,
+  board: center,
+  docs: center,
+};
+for (const [id, keep] of Object.entries(kept)) {
+  if (!keep) document.getElementById(id)?.remove();
+}
+document.getElementById("center").hidden = !center;
+
+let layoutReported = false;
+subscribe((snap) => {
+  const report = layoutReport(host, snap);
+  if (!report || layoutReported) return;
+  layoutReported = true;
+  callHost(window, "fleetdeckLayout", report);
+});
 
 // This module and every one it imports have arrived. The window reads this
 // once the page has loaded, and a page loaded without it -- its scripts cut off
@@ -110,11 +143,11 @@ function openSession(short) {
 // The card control in a session row opens that session's card, through the same
 // panel the board opens. Before this it opened the session instead, because it
 // had no handler of its own and the click reached the row.
-renderSessions(document.getElementById("sessions"), openSession, cardPanel.open);
-renderHeader(document.getElementById("header"));
+if (regions.has("sessions")) renderSessions(document.getElementById("sessions"), openSession, cardPanel.open);
+if (regions.has("header")) renderHeader(document.getElementById("header"));
 renderBuildBanner(document.getElementById("build-banner"), subscribe);
-renderBoard(document.getElementById("board"), cardPanel.open);
-renderOrchestrator(document.getElementById("orchestrator"), { links: terminalLinks });
+if (regions.has("center")) renderBoard(document.getElementById("board"), cardPanel.open);
+if (regions.has("orchestrator")) renderOrchestrator(document.getElementById("orchestrator"), { links: terminalLinks });
 
 // The centre column's two sections.
 //
@@ -129,23 +162,26 @@ renderOrchestrator(document.getElementById("orchestrator"), { links: terminalLin
 // show rather than here: it fetches when it is built, and a panel with no
 // documentation directories configured would otherwise ask for them — and take
 // the server's 404 — before the operator had opened that section at all.
-createSections(document.getElementById("tabs"), [
-  { id: "board", label: t("tab_board"), root: document.getElementById("board") },
-  {
-    id: "docs",
-    label: t("tab_docs"),
-    root: document.getElementById("docs"),
-    onFirstShow: () => renderDocs(document.getElementById("docs"), { onOpenCard: cardPanel.open }),
-  },
-]);
+if (regions.has("center")) {
+  createSections(document.getElementById("tabs"), [
+    { id: "board", label: t("tab_board"), root: document.getElementById("board") },
+    {
+      id: "docs",
+      label: t("tab_docs"),
+      root: document.getElementById("docs"),
+      onFirstShow: () => renderDocs(document.getElementById("docs"), { onOpenCard: cardPanel.open }),
+    },
+  ]);
 
-// After the tabs, not before: createSections replaces the row's children.
-createNewCard(document.getElementById("tabs"));
+  // After the tabs, not before: createSections replaces the row's children.
+  createNewCard(document.getElementById("tabs"));
+}
 
 connect();
 
 // The session that was open when this page was last loaded, reopened once.
 // Nothing above opens or closes a session while the module loads, so the
-// stored value is still the one the previous page left.
-const reopen = takeOpenSession(storage);
+// stored value is still the one the previous page left. Only the board shows
+// sessions; a side surface leaves the stored value to it.
+const reopen = regions.has("center") ? takeOpenSession(storage) : "";
 if (reopen) openSession(reopen);
