@@ -70,6 +70,42 @@ static int respondsTo(id object, const char *selector) {
 
 // --- the row: a container that lets clicks through its gaps ---------------------
 
+// TEMPORARY (T-056, v0.10.1), for one diagnostic stand on macOS 26: which row
+// the capsules are drawn in, to find why they are white in the dark.
+// "container" (the row as it is), "plain" (a plain view, each capsule its own
+// glass), "appearance" (the container, with the app's appearance set on the
+// row and every capsule), "clear" (the container, the glass's Clear style).
+static char rowVariant[16] = "container";
+
+void fd_capsules_set_variant(const char *variant) {
+  strncpy(rowVariant, variant, sizeof rowVariant - 1);
+  rowVariant[sizeof rowVariant - 1] = 0;
+}
+
+static int variantIs(const char *variant) { return strcmp(rowVariant, variant) == 0; }
+
+static id appAppearance(void) {
+  return send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("effectiveAppearance"));
+}
+
+static Class plainRowSuper;
+
+static id plainRowHitTest(id self, SEL _cmd, CGPoint point) {
+  struct objc_super up = {self, plainRowSuper};
+  id hit = ((id (*)(struct objc_super *, SEL, CGPoint))objc_msgSendSuper)(&up, _cmd, point);
+  return hit == self ? (id)0 : hit;
+}
+
+static Class plainRowClass(void) {
+  static Class klass;
+  if (klass) return klass;
+  plainRowSuper = (Class)objc_getClass("NSView");
+  klass = objc_allocateClassPair(plainRowSuper, "FleetdeckCapsuleRowPlain", 0);
+  class_addMethod(klass, sel("hitTest:"), (IMP)plainRowHitTest, "@@:{CGPoint=dd}");
+  objc_registerClassPair(klass);
+  return klass;
+}
+
 static Class rowSuper;
 
 static id rowHitTest(id self, SEL _cmd, CGPoint point) {
@@ -159,8 +195,9 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
     // The reason for moving it out was a hit test on a window never laid out,
     // where the content view had no size yet; laid out, a click reaches it.
     wrapper = initWithFrame(cls("NSGlassEffectView"), frame);
-    sendVoidLong(wrapper, sel("setStyle:"), 0);
+    sendVoidLong(wrapper, sel("setStyle:"), variantIs("clear") ? 1 : 0);
     sendVoidDouble(wrapper, sel("setCornerRadius:"), capsuleHeight / 2);
+    if (variantIs("appearance")) sendVoid1(wrapper, sel("setAppearance:"), appAppearance());
     sendVoidLong(holder, sel("setAutoresizingMask:"), 18);
     sendVoid1(wrapper, sel("setContentView:"), holder);
   } else {
@@ -228,8 +265,9 @@ void fd_capsules_draw(void *container, const char *mode, const char **tabIDs, co
   fd_capsules_clear(container);
 
   CGRect bounds = sendRect0(parent, sel("bounds"));
-  id rowView = initWithFrame((id)rowClass(), bounds);
+  id rowView = initWithFrame(variantIs("plain") ? (id)plainRowClass() : (id)rowClass(), bounds);
   sendVoidLong(rowView, sel("setAutoresizingMask:"), 18);
+  if (variantIs("appearance")) sendVoid1(rowView, sel("setAppearance:"), appAppearance());
   id into = rowView;
   if (respondsTo(rowView, "setContentView:")) {
     into = initWithFrame(cls("NSView"), CGRectMake(0, 0, bounds.size.width, bounds.size.height));

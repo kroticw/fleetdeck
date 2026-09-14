@@ -15,6 +15,10 @@ void fd_capsules_draw(void *container, const char *mode, const char **tabIDs, co
 // fd_capsules_clear takes every capsule out of container: no panel page, no row.
 void fd_capsules_clear(void *container);
 
+// TEMPORARY (T-056, v0.10.1): the row the next draw uses, for a diagnostic
+// stand: "container", "plain", "appearance" or "clear".
+void fd_capsules_set_variant(const char *variant);
+
 // For capsules_darwin_test.go, which cannot use cgo itself: what the last draw
 // made, and presses sent the way a click sends them.
 int fd_test_capsule_count(void);

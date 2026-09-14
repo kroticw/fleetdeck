@@ -25,6 +25,10 @@ const (
 	// appearance cannot be relied on to reach a window started after it
 	// changed.
 	standAppearanceEnv = "FLEETDECK_STAND_APPEARANCE"
+	// The row the capsules are drawn in: container, plain, appearance or
+	// clear (capsules_darwin.c). TEMPORARY (T-056, v0.10.1): for one
+	// diagnostic of why the capsules are white in the dark.
+	standCapsuleRowEnv = "FLEETDECK_STAND_CAPSULE_ROW"
 )
 
 // standSettings is what a stand set; the zero value is a person's window.
@@ -32,6 +36,7 @@ type standSettings struct {
 	panelStartTimeout time.Duration
 	width, height     int
 	appearance        string
+	capsuleRow        string
 }
 
 // Smaller than this the frame has no room for both panels and the board.
@@ -64,6 +69,14 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 			return standSettings{}, fmt.Errorf("%s=%q is neither light nor dark", standAppearanceEnv, v)
 		}
 		s.appearance = v
+	}
+	if v, set := lookup(standCapsuleRowEnv); set {
+		switch v {
+		case "container", "plain", "appearance", "clear":
+			s.capsuleRow = v
+		default:
+			return standSettings{}, fmt.Errorf("%s=%q is none of container, plain, appearance, clear", standCapsuleRowEnv, v)
+		}
 	}
 	return s, nil
 }

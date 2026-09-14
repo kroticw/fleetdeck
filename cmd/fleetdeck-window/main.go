@@ -159,8 +159,8 @@ func main() {
 	}
 	width, height := stand.size()
 	if stand != (standSettings{}) {
-		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q",
-			stand.startTimeout(), width, height, stand.appearance)
+		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q, capsule row %q",
+			stand.startTimeout(), width, height, stand.appearance, stand.capsuleRow)
 	}
 
 	// The keeper's word waits in keeperEvents until the window can act on it:
@@ -193,6 +193,9 @@ func main() {
 	w.SetTitle("fleetdeck")
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand = standSocket != ""
+	if stand.capsuleRow != "" {
+		setCapsuleRowVariant(stand.capsuleRow)
+	}
 	if stand.appearance != "" {
 		standAppearance = stand.appearance
 		applyAppearance("auto")

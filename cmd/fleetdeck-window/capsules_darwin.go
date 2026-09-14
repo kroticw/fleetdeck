@@ -58,6 +58,14 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) {
 // clearCapsules empties the capsule row. Main thread.
 func clearCapsules(container unsafe.Pointer) { C.fd_capsules_clear(container) }
 
+// setCapsuleRowVariant is a diagnostic stand's row for the capsules
+// (standCapsuleRowEnv). TEMPORARY (T-056, v0.10.1).
+func setCapsuleRowVariant(variant string) {
+	c := C.CString(variant)
+	defer C.free(unsafe.Pointer(c))
+	C.fd_capsules_set_variant(c)
+}
+
 // capsuleEvents is where a press in the capsule row goes: effects.go hands it to
 // the controller's capsuleAction. Until it is set a press does nothing.
 var capsuleEvents = struct {
