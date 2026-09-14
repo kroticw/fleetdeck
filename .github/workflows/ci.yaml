@@ -268,6 +268,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  panel-cold-start:
+    # TEMPORARY (T-056, v0.10.1), removed before merge: how long a freshly unpacked
+    # panel takes to answer on its first start, on each macOS the window is checked
+    # on. A fresh runner per matrix entry, so each entry's first start is cold.
+    needs: oldest-macos-app
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15]
+        run: [1, 2, 3]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oldest-macos-app
+          path: new
+      - name: Measure the panel's first start
+        run: python3 scripts/ci-panel-cold-start.py new/fleetdeck-v0.0.0-ci-macos.zip out 7796
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: panel-cold-start-${{ matrix.os }}-${{ matrix.run }}
+          path: out
+          if-no-files-found: ignore
+          retention-days: 7
+
   window-on-macos-26:
     # Opens the same app on the macOS its glass is for. v0.10.0 went out with its
     # window seen whole only on macOS 15, where the frame is NSVisualEffectView; on
