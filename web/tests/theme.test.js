@@ -8,7 +8,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { initTheme, cycleTheme } from "../js/theme.js";
+import { initTheme, cycleTheme, applyTheme } from "../js/theme.js";
 
 function fakeStorage() {
   const store = new Map();
@@ -74,4 +74,17 @@ test("a storage failure is swallowed, not thrown", () => {
   // The choice still applies for the rest of this load even though it could
   // not be written down for the next one.
   assert.equal(root.getAttribute("data-theme"), "light");
+});
+
+// In the fleetdeck window the orchestrator and sessions surfaces are told the
+// board's choice. Following it must not write it down: the board's own cycle is
+// the one record, and a follower writing too would race it.
+test("a choice applied from the window is shown and not remembered", () => {
+  applyTheme("dark");
+  assert.equal(root.getAttribute("data-theme"), "dark");
+  assert.equal(localStorage.getItem("fleetdeck-theme"), null);
+  applyTheme("auto");
+  assert.equal(root.getAttribute("data-theme"), null);
+  applyTheme("sepia");
+  assert.equal(root.getAttribute("data-theme"), null, "an unknown choice is the system's, not an attribute");
 });

@@ -127,4 +127,8 @@ export function createNewCard(host, { create = createCard } = {}) {
       openButton.focus();
     }
   });
+
+  // open, for the fleetdeck window: its new card capsule stands in for the
+  // button, which the board hides there.
+  return { open };
 }
