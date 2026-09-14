@@ -75,6 +75,25 @@ func registeredOnce(dump, canonical string) error {
 	return nil
 }
 
+// waitFor asks cond every poll until it says yes. Past within it says what did
+// not happen, and why the last look said no when cond gave a reason.
+func waitFor(what string, within, poll time.Duration, cond func() (bool, error)) error {
+	deadline := time.Now().Add(within)
+	for {
+		ok, err := cond()
+		if ok {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("%s did not happen within %s: %w", what, within, err)
+			}
+			return fmt.Errorf("%s did not happen within %s", what, within)
+		}
+		time.Sleep(poll)
+	}
+}
+
 // windowLogLayout is how the window stamps its log lines
 // (log.LstdFlags | log.Lmicroseconds).
 const windowLogLayout = "2006/01/02 15:04:05.000000"

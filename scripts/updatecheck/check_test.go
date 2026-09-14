@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -152,6 +153,27 @@ func TestTheTimelineHoldsTheWindowsOwnStartSteps(t *testing.T) {
 	}, "\n")
 	if got != want {
 		t.Errorf("timeline:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestWaitingEndsWhenTheThingHappens(t *testing.T) {
+	calls := 0
+	err := waitFor("the third look", time.Second, time.Millisecond, func() (bool, error) {
+		calls++
+		return calls == 3, nil
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("waitFor: %v after %d looks, want nil after 3", err, calls)
+	}
+}
+
+func TestWaitingThatRunsOutSaysWhatDidNotHappenAndWhy(t *testing.T) {
+	why := errors.New("LaunchServices knows it twice")
+	err := waitFor("LaunchServices settling", 20*time.Millisecond, time.Millisecond, func() (bool, error) {
+		return false, why
+	})
+	if err == nil || !errors.Is(err, why) || !strings.Contains(err.Error(), "LaunchServices settling") {
+		t.Fatalf("waitFor: %v, want one naming what did not happen, wrapping %v", err, why)
 	}
 }
 

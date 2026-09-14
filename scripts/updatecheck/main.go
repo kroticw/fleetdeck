@@ -38,10 +38,26 @@ type options struct {
 	launchServices         bool
 }
 
-// retireWait bounds how long the new window has, once the update run is gone,
-// to remove the bundle swapped out: it does so within a look at the update
-// lock after its parent has gone.
-const retireWait = 30 * time.Second
+// What checkLaunchServices waits for, each from the moment the one before it
+// has happened:
+//
+//   - windowReadyWait: the new window saying the handover is done, which it
+//     does once its window is made and running -- the moment its check-in with
+//     LaunchServices is behind it and it tells LaunchServices again where the
+//     app is (cmd/fleetdeck-window/handoverstart.go);
+//   - retireWait: the new window removing the bundle swapped out, which it does
+//     within a look at the update lock once its parent has gone;
+//   - launchServicesWait: LaunchServices holding what the new window told it,
+//     which the window does from a goroutine and says nothing more about.
+const (
+	windowReadyWait    = 30 * time.Second
+	retireWait         = 30 * time.Second
+	launchServicesWait = 15 * time.Second
+)
+
+// windowDoneLine is what the new window logs once the handover is done and its
+// window runs.
+const windowDoneLine = "fleetdeck-window: the handover is done"
 
 // checkLaunchServices is what an update leaves behind once the old window has
 // gone, as this program's update run has when this runs: the bundle swapped
@@ -51,32 +67,46 @@ func checkLaunchServices(o options) error {
 	if os.Getenv("GITHUB_ACTIONS") != "true" {
 		return errors.New("runs on a GitHub Actions runner only: it checks an app this program installed")
 	}
-	swappedOut := filepath.Join(supervisor.StagingDir(o.canonical), supervisor.BundleName)
-	deadline := time.Now().Add(retireWait)
-	for {
-		if _, err := os.Lstat(swappedOut); errors.Is(err, os.ErrNotExist) {
-			break
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%s is still there %s after the update run went: the new window did not remove the bundle swapped out", swappedOut, retireWait)
-		}
-		time.Sleep(100 * time.Millisecond)
+	staging := supervisor.StagingDir(o.canonical)
+	windowLog := filepath.Join(staging, supervisor.NewWindowLog)
+	if err := waitFor("the new window saying the handover is done", windowReadyWait, 100*time.Millisecond, func() (bool, error) {
+		data, err := os.ReadFile(windowLog)
+		return err == nil && strings.Contains(string(data), windowDoneLine), err
+	}); err != nil {
+		return err
+	}
+	log.Printf("updatecheck: the new window says the handover is done")
+
+	swappedOut := filepath.Join(staging, supervisor.BundleName)
+	if err := waitFor("the new window removing the bundle swapped out at "+swappedOut, retireWait, 100*time.Millisecond, func() (bool, error) {
+		_, err := os.Lstat(swappedOut)
+		return errors.Is(err, os.ErrNotExist), nil
+	}); err != nil {
+		return err
 	}
 	log.Printf("updatecheck: pass: the new window removed the bundle swapped out at %s", swappedOut)
 
-	out, err := exec.Command(supervisor.LsregisterPath, "-dump").Output()
-	if err != nil {
-		return fmt.Errorf("lsregister -dump: %w", err)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
+	var dump string
+	err := waitFor("LaunchServices knowing "+o.canonical+" once and nothing in "+staging, launchServicesWait, 500*time.Millisecond, func() (bool, error) {
+		out, err := exec.Command(supervisor.LsregisterPath, "-dump").Output()
+		if err != nil {
+			return false, fmt.Errorf("lsregister -dump: %w", err)
+		}
+		dump = string(out)
+		if err := registeredOnce(dump, o.canonical); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	for _, line := range strings.Split(dump, "\n") {
 		if strings.HasPrefix(line, "path:") && strings.Contains(line, "fleetdeck") {
 			log.Printf("updatecheck: LaunchServices: %s", line)
 		}
 	}
-	if err := registeredOnce(string(out), o.canonical); err != nil {
+	if err != nil {
 		return err
 	}
-	log.Printf("updatecheck: pass: LaunchServices knows %s once and nothing in %s", o.canonical, supervisor.StagingDir(o.canonical))
+	log.Printf("updatecheck: pass: LaunchServices knows %s once and nothing in %s", o.canonical, staging)
 	return nil
 }
 
