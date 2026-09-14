@@ -334,6 +334,9 @@ func main() {
 	// navigation, so it runs in the first page too. The host object tells the
 	// board's page it is the board of the glass window (web/js/host.js).
 	w.Init(hostScript("board", glass.mode, nil))
+	// Every page the board shows tells the window the empty band at its top,
+	// which the window is dragged by (web/js/topband.js).
+	w.Init(topBandScript())
 	w.Init(noticeScript)
 	w.Init(pageLoadScript(*url))
 	// The update button is on screen only while there is something to update

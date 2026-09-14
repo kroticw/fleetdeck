@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -28,6 +29,9 @@ func (f *fakeNatives) saveWidths(panelWidths)       { f.calls = append(f.calls, 
 func (f *fakeNatives) setCapsules(json.RawMessage)  { f.calls = append(f.calls, "capsules") }
 func (f *fakeNatives) setFrameMode(m glassMode)     { f.calls = append(f.calls, "frame "+string(m)) }
 func (f *fakeNatives) reloadBoard()                 { f.calls = append(f.calls, "reload board") }
+func (f *fakeNatives) setDragBand(h float64) {
+	f.calls = append(f.calls, fmt.Sprintf("drag band %v", h))
+}
 
 func TestCreatingSurfacesMakesBothColumnsOnTheSameAddress(t *testing.T) {
 	f := &fakeNatives{}
@@ -57,10 +61,11 @@ func TestEffectsRunInTheOrderTheControllerGaveThem(t *testing.T) {
 		sendTo{Surface: "board", Message: map[string]any{"type": "insets"}},
 		focusSurface{Surface: "board"},
 		reloadBoard{},
+		setDragBand{Height: 40},
 	})
 	want := []string{
 		"destroy", "navigate u", "external https://x", "reload sessions", "page <h1>x</h1>", "appearance dark",
-		"geometry", "save", "capsules", "frame opaque", "send board insets", "focus board", "reload board",
+		"geometry", "save", "capsules", "frame opaque", "send board insets", "focus board", "reload board", "drag band 40",
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("calls = %v", f.calls)

@@ -81,6 +81,7 @@ func TestMain(m *testing.M) {
 	}
 
 	collectFrameResults()
+	collectBandResults()
 	collectSurfaceResults()
 	collectCapsuleResults()
 

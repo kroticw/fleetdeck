@@ -13,10 +13,13 @@
   <header id="header"></header>
   <main>
     <section id="orchestrator" class="col col-orchestrator"></section>
-    <section id="center" class="col col-center">
+    <!-- data-window-ground: the page's ground, not something to click or read;
+         the fleetdeck window is dragged by the empty band above it
+         (js/topband.js). -->
+    <section id="center" class="col col-center" data-window-ground>
       <nav id="tabs"></nav>
-      <div id="board"></div>
-      <div id="docs" hidden></div>
+      <div id="board" data-window-ground></div>
+      <div id="docs" data-window-ground hidden></div>
       <!-- Dims the board under an open card, document or session in the
            fleetdeck window; shown by web/app.css alone. -->
       <div id="sheet-scrim"></div>

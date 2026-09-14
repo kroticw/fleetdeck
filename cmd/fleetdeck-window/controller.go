@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"net/url"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ type (
 	setCapsules    struct{ Model json.RawMessage }
 	setFrameMode   struct{ Mode glassMode }
 	reloadBoard    struct{}
+	setDragBand    struct{ Height float64 }
 )
 
 // hostVersion is the layout report's version this window frames; a page of
@@ -68,6 +70,9 @@ type controller struct {
 	now   func() time.Time
 	// dragging is the panel whose edge is being dragged, "" when none.
 	dragging string
+	// band is how far down from the top the board's page says nothing is
+	// (topBand): the band the window is dragged by, out of full screen.
+	band float64
 }
 
 // newController frames the panel at panelURL. The window may be opened on a
@@ -369,15 +374,38 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	defer c.mu.Unlock()
 	changed := fullscreen != c.fullscreen
 	c.width, c.height, c.fullscreen = width, height, fullscreen
-	if !c.framed {
-		return nil
+	var out []effect
+	if c.framed {
+		g := layoutFor(width, height, c.widths)
+		out = append([]effect{applyGeometry{G: g}}, c.insets(g)...)
 	}
-	g := layoutFor(width, height, c.widths)
-	out := append([]effect{applyGeometry{G: g}}, c.insets(g)...)
-	if changed {
+	if !changed {
+		return out
+	}
+	out = append(out, c.dragBand())
+	if c.framed {
 		out = append(out, c.to("orchestrator", map[string]any{"type": "fullscreen", "on": fullscreen})...)
 	}
 	return out
+}
+
+// topBand is the board page's word on how far down from its top nothing is
+// (web/js/topband.js), whatever page it shows: the band the window is dragged
+// by, never taller than the board's top inset.
+func (c *controller) topBand(height float64) []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.band = math.Max(0, math.Min(height, boardInsetTop))
+	return []effect{c.dragBand()}
+}
+
+// dragBand is the band as the window shows it: none in full screen, where a
+// window is not moved.
+func (c *controller) dragBand() effect {
+	if c.fullscreen {
+		return setDragBand{Height: 0}
+	}
+	return setDragBand{Height: c.band}
 }
 
 func (c *controller) glassChanged(mode glassMode) []effect {

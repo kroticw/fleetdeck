@@ -73,6 +73,10 @@ func (f *frame) panelContent(side string) unsafe.Pointer {
 	return C.fd_frame_panel_content(f.p, 0)
 }
 
+// setDragBand is the band at the window's top the window is dragged by, height
+// points tall across the window; 0 is none.
+func (f *frame) setDragBand(height float64) { C.fd_frame_set_drag_band(f.p, C.double(height)) }
+
 func (f *frame) capsules() unsafe.Pointer { return C.fd_frame_capsules(f.p) }
 func (f *frame) board() unsafe.Pointer    { return C.fd_frame_board(f.p) }
 
@@ -220,4 +224,76 @@ func probeFrameForTest(g geometry) frameProbe {
 	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348, SessionsFolded: true}))
 	out.stripOfFoldedHidden = C.fd_test_is_hidden(C.fd_test_strip(f.p, 1)) != 0
 	return out
+}
+
+// What dragband_darwin_test.go reads: where a press at the window's top lands,
+// and what the band asks of the window.
+type bandProbe struct {
+	hasFill   bool
+	bandWidth float64
+	// On a 64 pt band.
+	bandTakesTheTop, boardBelowTheBand, surfaceOverTheBand, capsuleOverTheBand bool
+	// On a 20 pt band and on none.
+	boardBelowAShortBand, bandAboveAShortBand, boardWithNoBand bool
+	// Counts of drag, zoom, fill, minimize.
+	press       [4]int
+	doubleClick map[string][4]int
+	fullScreen  [4]int
+}
+
+func probeBandForTest(g geometry) bandProbe {
+	out := bandProbe{hasFill: C.fd_test_has_fill() != 0, doubleClick: map[string][4]int{}}
+	f := installFrame(C.fd_test_counting_window(1512, 982))
+	f.layout(g)
+	f.setMode(glassModeGlass)
+	// What a surface and a capsule put where the band is.
+	C.fd_test_add_subview(f.panelContent("orchestrator"), fdRect(rect{W: g.Orchestrator.W, H: g.Orchestrator.H}))
+	capsule := C.fd_test_add_subview(f.capsules(), fdRect(rect{W: 40, H: capsuleHeight}))
+	within := func(x, y float64, view unsafe.Pointer) bool {
+		return C.fd_test_hit_within(f.p, C.double(x), C.double(y), view) != 0
+	}
+	band := C.fd_test_band(f.p)
+	// Between the panels, where the board shows.
+	boardX := g.Orchestrator.X + g.Orchestrator.W + 200
+
+	f.setDragBand(boardInsetTop)
+	out.bandWidth = float64(C.fd_test_frame_of(band).w)
+	out.bandTakesTheTop = within(boardX, 30, band)
+	out.boardBelowTheBand = within(boardX, boardInsetTop+6, f.board())
+	out.surfaceOverTheBand = within(g.Orchestrator.X+20, g.Orchestrator.Y+20, f.panelContent("orchestrator"))
+	out.capsuleOverTheBand = within(g.Capsules.X+20, g.Capsules.Y+capsuleHeight/2, capsule)
+
+	C.fd_test_reset_window_calls()
+	C.fd_test_press_band(f.p, 1)
+	out.press = windowCalls()
+	for _, action := range []string{"Maximize", "Fill", "Minimize", "None"} {
+		setting := C.CString(action)
+		C.fd_test_set_double_click_action(setting)
+		C.fd_test_reset_window_calls()
+		C.fd_test_press_band(f.p, 2)
+		out.doubleClick[action] = windowCalls()
+		C.fd_test_set_double_click_action(nil)
+		C.free(unsafe.Pointer(setting))
+	}
+	C.fd_test_set_full_screen(1)
+	C.fd_test_reset_window_calls()
+	C.fd_test_press_band(f.p, 1)
+	C.fd_test_press_band(f.p, 2)
+	out.fullScreen = windowCalls()
+	C.fd_test_set_full_screen(0)
+
+	f.setDragBand(20)
+	out.boardBelowAShortBand = within(boardX, 30, f.board())
+	out.bandAboveAShortBand = within(boardX, 10, band)
+	f.setDragBand(0)
+	out.boardWithNoBand = within(boardX, 10, f.board())
+	return out
+}
+
+func windowCalls() [4]int {
+	var calls [4]int
+	for kind := range calls {
+		calls[kind] = int(C.fd_test_window_calls(C.int(kind)))
+	}
+	return calls
 }

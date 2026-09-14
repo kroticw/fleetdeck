@@ -31,6 +31,11 @@ void *fd_frame_panel_content(void *frame, int side);
 void *fd_frame_capsules(void *frame);
 void *fd_frame_board(void *frame);
 
+// fd_frame_set_drag_band makes the band at the window's top, height points tall
+// across the window, drag the window: above the board, below the panels, the
+// capsules and the width strips. 0 takes it away.
+void fd_frame_set_drag_band(void *frame, double height);
+
 // fd_frame_board_observed says whether fd_frame_install set the navigation
 // delegate on the board (fleetdeck_observe_navigation): 0 when the window's
 // content view was not a WKWebView.
@@ -58,5 +63,18 @@ int fd_test_is_hidden(void *view);
 void fd_test_mouse(void *view, int phase, double x);
 int fd_test_hit_within(void *frame, double x, double y, void *view);
 const char *fd_test_hit_chain(void *frame, double x, double y);
+
+// The drag band's tests: a window counting drags, zooms, fills and minimizes
+// (kind 0 to 3) instead of doing them, and able to say it is in full screen.
+void *fd_test_counting_window(double width, double height);
+int fd_test_window_calls(int kind);
+void fd_test_reset_window_calls(void);
+void fd_test_set_full_screen(int on);
+// NULL reads the system's setting again.
+void fd_test_set_double_click_action(const char *action);
+int fd_test_has_fill(void);
+void *fd_test_band(void *frame);
+void fd_test_press_band(void *frame, long clickCount);
+void *fd_test_add_subview(void *parent, fd_rect r);
 
 #endif

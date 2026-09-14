@@ -78,6 +78,16 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		g.later(g.ctl.layout(report.Version, report.Mode, report.Fleet))
 		return nil, nil
 	})
+	// The empty band at the top of whatever page the board shows, which the
+	// window is dragged by (web/js/topband.js).
+	g.bindBoard(topBandBindingName, func(_ string, args json.RawMessage) (any, error) {
+		var height float64
+		if err := json.Unmarshal(args, &height); err != nil {
+			return nil, err
+		}
+		g.later(g.ctl.topBand(height))
+		return nil, nil
+	})
 	g.bind("fleetdeckOpen", func(_ string, args json.RawMessage) (any, error) {
 		var open struct {
 			Kind  string `json:"kind"`
@@ -337,6 +347,8 @@ func (g *glassWindow) setFrameMode(m glassMode) {
 }
 
 func (g *glassWindow) reloadBoard() { g.askBoard() }
+
+func (g *glassWindow) setDragBand(height float64) { g.frame.setDragBand(height) }
 
 func (g *glassWindow) redrawCapsules() {
 	if !g.framed || g.model == nil {
