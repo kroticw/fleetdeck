@@ -5,11 +5,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
@@ -59,6 +62,62 @@ const (
 	handoverMargin        = 3
 	handoverTimeout       = measuredWorstHandover * handoverMargin
 )
+
+// handoverTimeoutFlag is how a window tells the new window it starts how long
+// it gives the handover (newWindowArgs).
+const handoverTimeoutFlag = "handover-timeout"
+
+// oldWindowHandoverTimeoutV0100 is how long a window of v0.10.0 gives the
+// whole handover: its handoverTimeout, 812 ms three times over, as measured
+// above, written into it. A window of v0.10.0 or before starts the new window
+// without --handover-timeout and cannot be asked. It is not handoverTimeout:
+// that is this build's own, which a later build may change while windows of
+// v0.10.0 are still installed.
+const oldWindowHandoverTimeoutV0100 = 2436 * time.Millisecond
+
+// oldWindowHandoverTimeout is how long the window that started this one gives
+// the handover: what it said, or v0.10.0's when it said nothing.
+func oldWindowHandoverTimeout(told time.Duration) time.Duration {
+	if told > 0 {
+		return told
+	}
+	return oldWindowHandoverTimeoutV0100
+}
+
+// handoverDeadline is when the window that started this one gives up on the
+// handover. Its clock starts once it has started this process, so counting
+// from the kernel's start time for this process ends no later than it does;
+// counting from when main runs would end later, by however long this process
+// took to get there.
+func handoverDeadline(told time.Duration) time.Time {
+	started, err := processStart()
+	if err != nil {
+		log.Printf("fleetdeck-window: this process's start time is unknown (%v); the handover deadline counts from now", err)
+		started = time.Now()
+	}
+	return started.Add(oldWindowHandoverTimeout(told))
+}
+
+// processStart is when the kernel started this process.
+func processStart() (time.Time, error) {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", os.Getpid())
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(kp.Proc.P_starttime.Unix()), nil
+}
+
+// newWindowArgs is what the new window is started with: where the panel
+// answers, the handover file, the installed bundle, and how long this window
+// gives the handover.
+func newWindowArgs(url, canonical, handover string) []string {
+	return []string{
+		"--url", url,
+		"--handover", handover,
+		"--canonical", canonical,
+		"--" + handoverTimeoutFlag, handoverTimeout.String(),
+	}
+}
 
 // bundleOf is the .app bundle exe sits in, or "" when it is not in one.
 func bundleOf(exe string) string {
@@ -128,7 +187,7 @@ func launchNewWindow(url string) func(staged, canonical, handover string) (func(
 			return nil, err
 		}
 		cmd := exec.Command(filepath.Join(staged, "Contents", "MacOS", "fleetdeck-window"),
-			"--url", url, "--handover", handover, "--canonical", canonical)
+			newWindowArgs(url, canonical, handover)...)
 		cmd.Stdout, cmd.Stderr = log, log
 		if err := cmd.Start(); err != nil {
 			_ = log.Close()
