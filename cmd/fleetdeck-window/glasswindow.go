@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 
 	webview "github.com/webview/webview_go"
@@ -188,8 +189,15 @@ func (g *glassWindow) surfaceNavigation(_, target string) bool {
 }
 
 func (g *glassWindow) pageLoaded(surface, state string) {
-	log.Printf("fleetdeck-window: the %s surface's page says %q", surface, state)
+	log.Printf("fleetdeck-window: %s", surfacePageSays(surface, state))
 	g.run(g.ctl.pageLoaded(surface, state))
+}
+
+// surfacePageSays is the window's log line for a surface's page's word about
+// itself. scripts/ci-window-stand.sh waits for it; glasswindow_test.go holds
+// both sides.
+func surfacePageSays(surface, state string) string {
+	return fmt.Sprintf("the %s surface's page says %q", surface, state)
 }
 
 // surfaceNavigated is WebKit's word about a surface's navigation, from inside

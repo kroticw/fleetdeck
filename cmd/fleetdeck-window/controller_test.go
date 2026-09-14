@@ -40,6 +40,18 @@ func TestAPageThatReportsTheCurrentVersionGetsItsSurfaces(t *testing.T) {
 	}
 }
 
+// A window opened on a fleet's page -- the CI stand opens /?fleet=stand, since
+// / is the start page -- gives its surfaces that fleet's page, not an address
+// with the query twice.
+func TestAWindowOpenedOnAFleetsPageGivesItsSurfacesTheirOwnAddress(t *testing.T) {
+	c := newController("http://127.0.0.1:7791/?fleet=stand", panelWidths{Orchestrator: 368, Sessions: 348}, glassModeVibrancy)
+	c.resized(1512, 982, false)
+	got := c.layout(1, "panel", "stand")
+	if len(got) == 0 || got[0] != (createSurfaces{Fleet: "stand", URL: "http://127.0.0.1:7791/?fleet=stand", Glass: glassModeVibrancy}) {
+		t.Fatalf("effects = %#v", got)
+	}
+}
+
 func TestAPageOfAnUnknownVersionStaysOnePlainWebView(t *testing.T) {
 	if got := started().layout(2, "panel", "work"); len(got) != 0 {
 		t.Fatalf("effects = %#v, want none", got)

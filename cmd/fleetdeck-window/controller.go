@@ -70,8 +70,17 @@ type controller struct {
 	dragging string
 }
 
-func newController(baseURL string, widths panelWidths, glass glassMode) *controller {
-	return &controller{baseURL: baseURL, widths: widths, glass: glass, loads: map[string]*pageWatch{}, now: time.Now}
+// newController frames the panel at panelURL. The window may be opened on a
+// fleet's page -- a stand opens /?fleet=stand, the start page naming no fleet
+// -- so the surfaces' address is built on the panel's address without its
+// query.
+func newController(panelURL string, widths panelWidths, glass glassMode) *controller {
+	base := panelURL
+	if u, err := url.Parse(panelURL); err == nil {
+		u.RawQuery, u.Fragment = "", ""
+		base = u.String()
+	}
+	return &controller{baseURL: base, widths: widths, glass: glass, loads: map[string]*pageWatch{}, now: time.Now}
 }
 
 func (c *controller) pageURL(fleet string) string {

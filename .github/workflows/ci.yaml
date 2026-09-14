@@ -234,8 +234,10 @@ jobs:
             cat "out/$app-load.log"
           done
           grep -q 'Usage of' out/new-load.log
-      - name: This build's window, started directly, shows the panel's page
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7791 out/new-exec exec
+      # With a fleet's page, so the glass frame comes up: on macOS 15 there is no
+      # NSGlassEffectView, and the frame's panels are NSVisualEffectView.
+      - name: This build's window, started directly, shows the panel's page in its frame
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7791 out/new-exec exec frame
       - name: v0.9.1's window, started directly, as it comes
         run: scripts/ci-window-stand.sh old/fleetdeck.app 7792 out/old-exec exec || echo "=== v0.9.1, started directly, did not reach the panel's page"
       # LaunchServices is what Finder goes through, and it reads LSMinimumSystemVersion.
@@ -243,7 +245,7 @@ jobs:
       # is itself something to find out.
       - name: Both windows, opened through LaunchServices, as they come
         run: |
-          scripts/ci-window-stand.sh new/fleetdeck.app 7793 out/new-open open || echo "=== this build, opened, did not reach the panel's page"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7793 out/new-open open frame || echo "=== this build, opened, did not reach the panel's page in its frame"
           scripts/ci-window-stand.sh old/fleetdeck.app 7794 out/old-open open || echo "=== v0.9.1, opened, did not reach the panel's page"
       - name: What LaunchServices does with a bundle that asks for macOS 26
         run: |
