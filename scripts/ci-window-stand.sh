@@ -215,6 +215,18 @@ if [ "$loaded" = no ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
 	fi
 fi
 
+# For content, the sessions list's scrollbar as the sessions surface measured
+# it (web/js/standreport.js): the classic bar macOS draws for a mouse is 15 px,
+# the islands ask for 6.
+scrollbar=yes
+if [ "$expect" = content ]; then
+	width=$(sed -n 's/.*the sessions surface reports its scrolling: .*"scrollbarWidth":\([0-9]*\).*/\1/p' "$out/window.log" | tail -n 1)
+	echo "--- the sessions list's scrollbar: ${width:-not reported} px"
+	if [ -z "$width" ] || [ "$width" -gt 8 ]; then
+		scrollbar=no
+	fi
+fi
+
 # The appearance the stand asked for, as AppKit reports the window drawn
 # (window_darwin.go).
 appearance=yes
@@ -223,5 +235,5 @@ case ${FLEETDECK_STAND_APPEARANCE:-} in
 	light) grep -q 'the window is drawn in NSAppearanceNameAqua ' "$out/window.log" || appearance=no ;;
 esac
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance"
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$appearance" = yes ]
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, sessions scrollbar thin: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance"
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$appearance" = yes ]

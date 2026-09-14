@@ -45,6 +45,48 @@ export function boardScrollReport(win, board) {
   };
 }
 
+// listScrollReport is what the sessions surface's list (#sessions) in win says
+// of its vertical scrolling: how much taller its content is than it, and how wide
+// the bar beside it is. macOS draws a classic 15 px bar for a mouse; the islands
+// ask WebKit for 6 (web/app.css).
+export function listScrollReport(win, list) {
+  const style = win.getComputedStyle(list);
+  const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
+  return {
+    surface: "sessions",
+    scrollHeight: list.scrollHeight,
+    clientHeight: list.clientHeight,
+    scrollbarWidth: list.offsetWidth - list.clientWidth - border,
+    overflowY: style.overflowY,
+  };
+}
+
+// watchListScroll reports list's scrolling as watchBoardScroll does the
+// board's: once laid out, on a resize, whenever the list draws its rows, and
+// when the returned function is called; at most once a frame, and only when the
+// report changed.
+export function watchListScroll(win, list, report) {
+  let last = "";
+  let queued = false;
+  const measure = () => {
+    queued = false;
+    const now = listScrollReport(win, list);
+    const text = JSON.stringify(now);
+    if (text === last) return;
+    last = text;
+    report(now);
+  };
+  const later = () => {
+    if (queued) return;
+    queued = true;
+    win.requestAnimationFrame(measure);
+  };
+  win.addEventListener("resize", later);
+  if (typeof win.MutationObserver === "function") new win.MutationObserver(later).observe(list, { childList: true });
+  later();
+  return later;
+}
+
 // watchBoardScroll reports board's scrolling once the page has laid it out,
 // whenever the window is resized, whenever the board draws its columns, and
 // whenever the returned function is called -- after the window's insets change

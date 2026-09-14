@@ -133,6 +133,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		return nil, nil
 	})
 
+	handleStandReports(g.bridge, hostOnStand, log.Printf)
 	setSurfaceEvents(g.surfaceMessage, g.surfaceNavigation)
 	setCapsuleEvents(func(action string) { g.run(g.ctl.capsuleAction(action)) })
 	setWindowEvents(g.windowChanged)
