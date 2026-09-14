@@ -76,6 +76,9 @@ func timeline(started time.Time, windowLog string, steps []stepAt) []string {
 			events = append(events, s)
 		}
 	}
+	if len(events) == 0 {
+		return []string{"nothing: the new window wrote no log line and reported no handover step"}
+	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].at.Before(events[j].at) })
 	lines := make([]string, 0, len(events))
 	for _, e := range events {

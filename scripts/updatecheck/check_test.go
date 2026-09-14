@@ -133,6 +133,15 @@ func TestTheTimelineCountsFromTheNewWindowsStart(t *testing.T) {
 	}
 }
 
+func TestATimelineWithNothingInItSaysSo(t *testing.T) {
+	started := time.Now()
+	got := timeline(started, "", []stepAt{{"handover", started.Add(-time.Millisecond)}})
+	want := "nothing: the new window wrote no log line and reported no handover step"
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("timeline %q, want [%q]", got, want)
+	}
+}
+
 func TestTheHandoverStepsAreCheckedInOrder(t *testing.T) {
 	full := []string{"check", "unpack", "handover", "handover:alive", "handover:panel", "handover:swapped", "handover:done", "done"}
 	if err := handoverInOrder(full); err != nil {
