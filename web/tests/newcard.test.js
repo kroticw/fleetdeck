@@ -150,3 +150,28 @@ test("new card: the form opens without its button", () => {
   card.open();
   assert.equal(other.querySelector("div.newcard").hidden, false);
 });
+
+// In the window the capsule is the button: a second press closes what the
+// first opened. v0.10.0's capsule only opened, and with the button hidden
+// the form could not be put away but by Cancel.
+test("new card: the capsule's second press closes the form, as the button's does", () => {
+  const other = dom.element("nav");
+  dom.document.body.appendChild(other);
+  const card = createNewCard(other, { create: fakeCreate });
+  const form = other.querySelector("div.newcard");
+  card.toggle();
+  assert.equal(form.hidden, false);
+  card.toggle();
+  assert.equal(form.hidden, true);
+  assert.equal(sent.length, 0);
+});
+
+test("new card: Escape closes the form from anywhere in it, and goes no further", () => {
+  for (const selector of ["select.newcard-zone", "button.newcard-create", "button.newcard-cancel"]) {
+    const form = open();
+    const escape = fireEvent(form.querySelector(selector), "keydown", { key: "Escape" });
+    assert.equal(form.hidden, true, `Escape on ${selector} left the form open`);
+    assert.equal(escape.propagationStopped, true, `Escape on ${selector} reached the page`);
+  }
+  assert.equal(sent.length, 0);
+});

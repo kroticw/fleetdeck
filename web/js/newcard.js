@@ -108,7 +108,9 @@ export function createNewCard(host, { create = createCard } = {}) {
     }
   };
 
-  openButton.addEventListener("click", () => (form.hidden ? open() : close()));
+  const toggle = () => (form.hidden ? open() : close());
+
+  openButton.addEventListener("click", toggle);
   createButton.addEventListener("click", submit);
   note.addEventListener("click", () => {
     note.hidden = true;
@@ -118,17 +120,22 @@ export function createNewCard(host, { create = createCard } = {}) {
     if (ev.key === "Enter") {
       ev.preventDefault?.();
       submit();
-    } else if (ev.key === "Escape") {
-      // Kept to the form: an Escape that reached the page would close an open
-      // card, and one that reached a terminal would interrupt a session.
-      ev.preventDefault?.();
-      ev.stopPropagation?.();
-      close();
-      openButton.focus();
     }
   });
+  // Escape from anywhere in the form, not only its title: the zone and the
+  // buttons take focus too.
+  form.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape") return;
+    // Kept to the form: an Escape that reached the page would close an open
+    // card, and one that reached a terminal would interrupt a session.
+    ev.preventDefault?.();
+    ev.stopPropagation?.();
+    close();
+    openButton.focus();
+  });
 
-  // open, for the fleetdeck window: its new card capsule stands in for the
-  // button, which the board hides there.
-  return { open };
+  // open and toggle, for the fleetdeck window: its new card capsule stands in
+  // for the button, which the board hides there, and a second press closes the
+  // form as the button's does.
+  return { open, toggle };
 }

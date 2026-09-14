@@ -524,6 +524,19 @@ test("the board runs on under the sessions glass; a sheet and the documents keep
   assert.match(ruleBody(':root[data-surface="board"] .docs'), /--host-inset-content-right/);
 });
 
+// On the board the tab row is out of flow with nothing left in it, so it has no
+// width. v0.10.0's form took its width and its right edge from that row: a
+// column of bare controls at the orchestrator panel's edge. It opens from the
+// row's left edge, which is the board's left inset, as wide as the room between
+// the panels allows.
+test("on the board the new card form opens between the panels at a width of its own", () => {
+  const form = ruleBody(':root[data-surface="board"] .newcard');
+  assert.match(form, /left:\s*0/);
+  assert.match(form, /right:\s*auto/);
+  assert.match(form, /width:\s*min\(28rem,\s*calc\(100vw - var\(--host-inset-left[^)]*\) - var\(--host-inset-content-right/);
+  assert.match(ruleBody(':root[data-surface="board"] #tabs'), /left:\s*var\(--host-inset-left/);
+});
+
 // In the window a panel's width is dragged at the panel's edge by the window.
 // The page's own strip stays for a browser tab and goes in a surface, where it
 // would drag a column that already fills its web view and move nothing.

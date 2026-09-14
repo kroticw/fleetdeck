@@ -11,7 +11,7 @@ const TARGETS = [
   "openDoc",
   "openSession",
   "showSection",
-  "openNewCard",
+  "toggleNewCard",
   "cycleTheme",
   "applyTheme",
   "setInsets",
@@ -55,7 +55,7 @@ test("the board keeps clear of the panels by the insets the window sends", () =>
   send({ type: "insets", top: 64, left: 394, right: 0, contentRight: 356 });
   send({ type: "show", section: "docs" });
   send({ type: "newCard" });
-  assert.deepEqual(calls, [["setInsets", { top: 64, left: 394, right: 0, contentRight: 356 }], ["showSection", "docs"], ["openNewCard"]]);
+  assert.deepEqual(calls, [["setInsets", { top: 64, left: 394, right: 0, contentRight: 356 }], ["showSection", "docs"], ["toggleNewCard"]]);
 });
 
 test("a side surface ignores what only the board handles", () => {

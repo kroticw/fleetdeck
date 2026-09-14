@@ -3611,6 +3611,16 @@ body.is-resizing {
   display: none;
 }
 
+/* With its tabs and button hidden the row has no width, so the form does not
+   take one from it: it opens from the row's left edge, the board's left inset,
+   as wide as the room between the panels allows. */
+:root[data-surface="board"] .newcard {
+  top: 0;
+  left: 0;
+  right: auto;
+  width: min(28rem, calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px) - 2 * var(--gap-lg)));
+}
+
 :root[data-surface="board"] #board {
   padding-top: var(--host-inset-top, 64px);
   padding-left: var(--host-inset-left, 394px);

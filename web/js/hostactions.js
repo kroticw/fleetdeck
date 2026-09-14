@@ -27,7 +27,7 @@ export function wireHostActions(win, host, targets) {
         targets.showSection(message.section);
         return;
       case "newCard":
-        targets.openNewCard();
+        targets.toggleNewCard();
         return;
       case "cycleTheme":
         callHost(win, "fleetdeckTheme", targets.cycleTheme());

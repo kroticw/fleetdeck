@@ -279,7 +279,7 @@ if (host) {
       section = id;
       publishCapsules();
     },
-    openNewCard: () => newCard?.open(),
+    toggleNewCard: () => newCard?.toggle(),
     cycleTheme: () => {
       const choice = cycleTheme() ?? "auto";
       publishCapsules();
