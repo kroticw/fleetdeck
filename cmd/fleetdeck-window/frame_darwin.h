@@ -46,6 +46,7 @@ long fd_test_blending_mode(void *view);
 long fd_test_material(void *view);
 int fd_test_subview_index(void *parent, void *child);
 fd_rect fd_test_frame_of(void *view);
+fd_rect fd_test_window_frame(void *window);
 int fd_test_passes_through(void *view);
 void *fd_test_strip(void *frame, int side);
 int fd_test_is_hidden(void *view);

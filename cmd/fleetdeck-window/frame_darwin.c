@@ -184,22 +184,28 @@ void *fd_frame_install(void *window) {
   struct fd_frame *f = calloc(1, sizeof *f);
   f->window = (id)window;
   f->board = send0(f->window, sel("contentView"));
-  CGRect bounds = f->board ? sendRect0(f->board, sel("frame")) : CGRectZero;
 
+  // The content runs under the title bar, whose buttons float over the
+  // orchestrator panel's top corner. Set before the root goes in, while the
+  // board is still the content view: on the macos-15 runner of PR #166 a root
+  // put in first kept the content area below the title bar when the style
+  // changed, and the title bar's 28 pt above the frame stayed black. The root
+  // is then made the size of the whole window, not of what the board had.
+  unsigned long mask = (unsigned long)sendLong0(f->window, sel("styleMask"));
+  sendVoidLong(f->window, sel("setStyleMask:"), (long)(mask | (1UL << 15)));  // full-size content view
+  sendVoidBool(f->window, sel("setTitlebarAppearsTransparent:"), 1);
+  sendVoidLong(f->window, sel("setTitleVisibility:"), 1);  // hidden
+
+  CGRect whole = sendRect0(f->window, sel("frame"));
+  CGRect bounds = CGRectMake(0, 0, whole.size.width, whole.size.height);
   f->root = frameView(bounds);
   sendVoid1(f->window, sel("setContentView:"), f->root);
+  sendVoidRect(f->root, sel("setFrame:"), bounds);
   if (f->board) {
     sendVoidRect(f->board, sel("setFrame:"), sendRect0(f->root, sel("bounds")));
     sendVoidLong(f->board, sel("setAutoresizingMask:"), 18);
     sendVoid1(f->root, sel("addSubview:"), f->board);
   }
-
-  // The content runs under the title bar, whose buttons float over the
-  // orchestrator panel's top corner.
-  unsigned long mask = (unsigned long)sendLong0(f->window, sel("styleMask"));
-  sendVoidLong(f->window, sel("setStyleMask:"), (long)(mask | (1UL << 15)));  // full-size content view
-  sendVoidBool(f->window, sel("setTitlebarAppearsTransparent:"), 1);
-  sendVoidLong(f->window, sel("setTitleVisibility:"), 1);  // hidden
 
   for (int side = 0; side < 2; side++) {
     // Placed by fd_frame_layout, never stretched with the root; rounded like
@@ -326,6 +332,11 @@ void *fd_test_window(double width, double height) {
   // A plain view stands in for the board's web view.
   sendVoid1(w, sel("setContentView:"), initWithFrame("NSView", Nil, rect));
   return w;
+}
+
+fd_rect fd_test_window_frame(void *window) {
+  CGRect r = sendRect0((id)window, sel("frame"));
+  return (fd_rect){r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 
 void *fd_test_panel(void *frame, int side) { return ((struct fd_frame *)frame)->wrappers[side]; }

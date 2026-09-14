@@ -32,6 +32,24 @@ func TestPanelsAreRegularGlassWithTheDesignRadius(t *testing.T) {
 	}
 }
 
+// The frame runs under the title bar: the capsules' 12 pt and the panels' 8 pt
+// are from the window's top edge, with the window's buttons over the
+// orchestrator panel's corner. On the macos-15 runner of PR #166 the root kept
+// the content area it replaced, and the title bar's 28 pt above it were black.
+func TestTheFrameCoversTheWholeWindowUnderTheTitleBar(t *testing.T) {
+	r := frameResult
+	whole := rect{W: r.windowFrame.W, H: r.windowFrame.H}
+	if r.rootFrame != whole {
+		t.Fatalf("root frame %+v, want the whole window %+v", r.rootFrame, whole)
+	}
+	if r.boardFrame != whole {
+		t.Fatalf("board frame %+v, want the whole window %+v", r.boardFrame, whole)
+	}
+	if r.contentWidth != whole.W || r.contentHeight != whole.H {
+		t.Fatalf("the geometry is laid out for %vx%v, want the whole window %vx%v", r.contentWidth, r.contentHeight, whole.W, whole.H)
+	}
+}
+
 func TestTheBoardStaysUnderneathThePanelsAndTheCapsulesOnTop(t *testing.T) {
 	r := frameResult
 	if r.boardIndex != 0 {

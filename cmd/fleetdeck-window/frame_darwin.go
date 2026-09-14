@@ -119,6 +119,14 @@ type frameProbe struct {
 	vibrancyMaterial    int
 	opaqueClass         string
 	board, capsulesView unsafe.Pointer
+	// The window, and what covers it once the frame is in: the root, the
+	// board, and the content size the geometry is laid out for.
+	windowFrame, rootFrame, boardFrame rect
+	contentWidth, contentHeight        float64
+}
+
+func rectOf(r C.fd_rect) rect {
+	return rect{X: float64(r.x), Y: float64(r.y), W: float64(r.w), H: float64(r.h)}
 }
 
 func probeFrameForTest(g geometry) frameProbe {
@@ -127,6 +135,10 @@ func probeFrameForTest(g geometry) frameProbe {
 	f := installFrame(window)
 	f.layout(g)
 	root := C.fd_test_root(f.p)
+	out.windowFrame = rectOf(C.fd_test_window_frame(window))
+	out.rootFrame = rectOf(C.fd_test_frame_of(root))
+	out.boardFrame = rectOf(C.fd_test_frame_of(f.board()))
+	out.contentWidth, out.contentHeight = windowContentSize(window)
 	out.glassAvailable = C.fd_glass_available() != 0
 	f.setMode(glassModeGlass)
 	content := f.panelContent("orchestrator")
