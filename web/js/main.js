@@ -87,19 +87,27 @@ const sessionPanel = document.getElementById("session-panel");
 // cards linking to it. Only one of them may be up, so each closes before the
 // other opens. The same holds for the session panel a card jumps to:
 // openSession closes the card panel before it opens the session.
-const cardPanel = createCardPanel(document.getElementById("card-panel"), {
-  onOpenSession: (short) => showSession(short),
-  onOpenDoc: (path) => {
-    cardPanel.close();
-    reader.open(path);
-  },
-});
-const reader = createReader(document.getElementById("reader-panel"), {
-  onOpenCard: (path) => {
-    reader.close();
-    cardPanel.open(path);
-  },
-});
+//
+// Only where the board is: a side surface hands every card and document to the
+// board through the window, and has neither overlay to open.
+const noOverlay = { open() {}, close() {} };
+const cardPanel = center
+  ? createCardPanel(document.getElementById("card-panel"), {
+      onOpenSession: (short) => showSession(short),
+      onOpenDoc: (path) => {
+        cardPanel.close();
+        reader.open(path);
+      },
+    })
+  : noOverlay;
+const reader = center
+  ? createReader(document.getElementById("reader-panel"), {
+      onOpenCard: (path) => {
+        reader.close();
+        cardPanel.open(path);
+      },
+    })
+  : noOverlay;
 
 // Exactly one session panel at a time, and its stop function held here.
 //
