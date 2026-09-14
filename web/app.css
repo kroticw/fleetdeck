@@ -3586,16 +3586,25 @@ body.is-resizing {
 /* No second edge down the terminal's right side. xterm's viewport scrolls
    natively under xterm's own bar (overflow-y: scroll in web/vendor/xterm.css),
    and WebKit draws a classic bar for it at all times, a grey strip the height of
-   the terminal. That bar is hidden, the scrolling is not: xterm's own bar stays,
-   out of sight at rest, shown while the terminal scrolls, and shown under the
-   pointer. A scrollbar-width other than auto makes WebKit ignore
-   ::-webkit-scrollbar. */
+   the terminal. That bar is hidden, the scrolling is not. A scrollbar-width other
+   than auto makes WebKit ignore ::-webkit-scrollbar.
+
+   xterm's own bar stays, out of sight at rest and in sight under the pointer,
+   where a wheel or a trackpad scrolls the terminal. Out of sight by this sheet
+   alone: xterm hides the bar with a timer after it shows it, and on the macOS 26
+   stand that timer never ran, leaving the bar in sight for as long as the stand
+   watched. */
 :root[data-surface="orchestrator"] .o-term .xterm-viewport {
   scrollbar-width: auto;
 }
 
 :root[data-surface="orchestrator"] .o-term .xterm-viewport::-webkit-scrollbar {
   width: 0;
+}
+
+:root[data-surface="orchestrator"] .o-term .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 0;
+  pointer-events: none;
 }
 
 :root[data-surface="orchestrator"] .o-term:hover .xterm-scrollable-element > .scrollbar.vertical {

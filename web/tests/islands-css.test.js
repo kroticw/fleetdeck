@@ -120,9 +120,18 @@ test("the orchestrator's terminal draws no native scroll bar beside its own", ()
   assert.match(ruleBody(':root[data-surface="orchestrator"] .o-term .xterm-viewport::-webkit-scrollbar'), /width:\s*0/);
 });
 
-// xterm's own bar is out of sight at rest and shows while the terminal scrolls
-// (its visibility is auto); over the terminal it shows as well, as the system's
-// does.
+// xterm hides its own bar with a timer after it shows it, and on the macOS 26
+// stand that timer never ran: the bar stayed in sight at opacity 1 for as long
+// as the stand watched. At rest the bar is out of sight by the stylesheet alone,
+// whatever class xterm left on it.
+test("the orchestrator's terminal keeps its scroll bar out of sight at rest", () => {
+  const rest = ruleBody(':root[data-surface="orchestrator"] .o-term .xterm-scrollable-element > .scrollbar.vertical');
+  assert.match(rest, /opacity:\s*0/);
+  assert.match(rest, /pointer-events:\s*none/);
+});
+
+// Under the pointer it shows, and a wheel or a trackpad scrolls a terminal
+// under the pointer, so it shows while one scrolls it too.
 test("the orchestrator's terminal shows its scroll bar under the pointer", () => {
   const hover = ruleBody(':root[data-surface="orchestrator"] .o-term:hover .xterm-scrollable-element > .scrollbar.vertical');
   assert.match(hover, /opacity:\s*1/);
