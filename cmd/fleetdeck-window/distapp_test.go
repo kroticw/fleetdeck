@@ -187,11 +187,11 @@ func TestDistAppBuildsAnAppAPersonCanInstall(t *testing.T) {
 					t.Errorf("%s (%s) was built with %s, want %s", filepath.Base(bin), cpu, s.ldflags, wantReleaseLdflags)
 				}
 				// Built on a runner with a newer macOS, clang targets that
-				// macOS unless told otherwise, and dyld then refuses the
-				// window on every older one -- while the plist, which Finder
-				// reads, promises the minimum.
+				// macOS unless told otherwise: the slice then links what only
+				// that macOS may have and compiles out the checks for it,
+				// while the plist, which Finder reads, promises the minimum.
 				if s.minos != wantMinimumMacOS {
-					t.Errorf("%s (%s) is built for macOS %s, want %s: dyld refuses to load it on any older macOS", filepath.Base(bin), cpu, s.minos, wantMinimumMacOS)
+					t.Errorf("%s (%s) is built for macOS %s, want %s: it assumes a macOS the plist does not ask for", filepath.Base(bin), cpu, s.minos, wantMinimumMacOS)
 				}
 				// The window is WebKit or it is nothing; the panel must not be a
 				// second copy of it. Checked per slice: a cross-built slice is
@@ -428,14 +428,14 @@ func plistKeys(t *testing.T, path string) map[string]any {
 // first. See docs/engineering/release-app.md, "The oldest macOS".
 const wantMinimumMacOS = "13.0"
 
-// loadCmdBuildVersion is LC_BUILD_VERSION, the load command dyld reads the
-// minimum macOS from. debug/macho has no type for it and hands it over raw.
+// loadCmdBuildVersion is LC_BUILD_VERSION, the load command that records the
+// macOS a binary was built for. debug/macho has no type for it and hands it
+// over raw.
 const loadCmdBuildVersion = 0x32
 
 // TestTheAppPromisesTheMacOSItIsBuiltFor holds the one place the build takes
 // the minimum macOS from to the version decided. A plist that promises less
-// than the binaries need is an app that shows in Finder as fine for a Mac dyld
-// will refuse it on.
+// than the binaries assume is an app Finder offers to a Mac it may fail on.
 func TestTheAppPromisesTheMacOSItIsBuiltFor(t *testing.T) {
 	if got := plistKeys(t, "Info.plist")["LSMinimumSystemVersion"]; got != wantMinimumMacOS {
 		t.Errorf("Info.plist LSMinimumSystemVersion = %v, want %s", got, wantMinimumMacOS)
@@ -446,8 +446,7 @@ type slice struct {
 	goarch  string
 	ldflags string
 	webkit  bool
-	// minos is the minimum macOS the slice's LC_BUILD_VERSION names: dyld
-	// refuses to load the slice on anything older.
+	// minos is the macOS the slice's LC_BUILD_VERSION says it was built for.
 	minos string
 }
 

@@ -60,8 +60,8 @@ endif
 
 # DARWIN_CGO_ENV tells clang the macOS to build for, and prefixes every go build of a
 # binary the app carries. Without it clang builds for the macOS of the machine it
-# runs on: v0.9.1, built on a macOS 26 runner, carried a window dyld refuses on every
-# older macOS. Flags rather than MACOSX_DEPLOYMENT_TARGET, because go build keys its
+# runs on: v0.9.1, built on a macOS 26 runner, carried a window built for macOS 26
+# under a plist promising 11.0. Flags rather than MACOSX_DEPLOYMENT_TARGET, because go build keys its
 # cache on the cgo flags and not on that variable, so an object cached by a build
 # without it would be linked in as it was. CXXFLAGS as well: webview_go's engine is
 # C++, and without them ld links it in built for the host's macOS. "-O2 -g" is go's

@@ -199,7 +199,7 @@ app_is_the_release() {
 # app_runs_on_its_minimum_macos checks that the bundle at $1 opens on the oldest
 # macOS it promises: Info.plist promises exactly the minimum the release is
 # built for, and every slice of every binary names that same minimum in its
-# LC_BUILD_VERSION, which is what dyld reads.
+# LC_BUILD_VERSION: the macOS clang was told to build it for.
 #
 #   $1 the bundle
 #   $2 architectures, space separated, as Go names them
@@ -207,12 +207,16 @@ app_is_the_release() {
 #   $4 the minimum macOS the release is built for, e.g. 13.0
 #
 # Nothing on the machine that built the app shows the two apart. clang builds
-# for the macOS it runs on unless told otherwise, and dyld refuses a binary that
-# names a newer macOS than the one running it. v0.9.1 was built on a macOS 26
-# runner: its window named 26.0 while its plist promised 11.0, so it opened on
-# macOS 26 alone and Finder offered it to every Mac from 11 on. Equal rather
-# than "not newer": a slice naming an older macOS than the minimum is a build
-# that was not told the minimum, and is the same defect waiting for a runner.
+# for the macOS it runs on unless told otherwise, and what it builds assumes
+# that macOS: availability checks up to it are compiled out, and what it links
+# may exist on no older one. dyld does not refuse a binary for the number
+# itself -- measured on macOS 15.7.9, and in dyld's Loader.cpp the number only
+# adds a note to a "Symbol not found" error. v0.9.1 was built on a macOS 26
+# runner: its window named 26.0 under a plist promising 11.0, and imported
+# libc++'s std::bad_function_call, which the SDK marks as introduced in macOS
+# 15.4. Equal rather than "not newer": a slice naming an older macOS than the
+# minimum is a build that was not told the minimum, and is the same defect
+# waiting for a runner.
 app_runs_on_its_minimum_macos() {
 	_app=$1
 	_arches=$2
@@ -228,7 +232,7 @@ app_runs_on_its_minimum_macos() {
 			_minos=$(xcrun vtool -arch "$(lipo_arch "$_arch")" -show-build "$_app/Contents/MacOS/$_b" 2>/dev/null |
 				awk '$1 == "minos" { print $2 }')
 			[ "$_minos" = "$_min" ] ||
-				fail "$_b ($(lipo_arch "$_arch")) is built for macOS ${_minos:-(no LC_BUILD_VERSION)}, not $_min: dyld refuses to load it on any macOS older than that"
+				fail "$_b ($(lipo_arch "$_arch")) is built for macOS ${_minos:-(no LC_BUILD_VERSION)}, not $_min: what it links and which availability checks it keeps assume that macOS, and Info.plist promises $_min"
 		done
 	done
 }
