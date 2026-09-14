@@ -143,10 +143,10 @@ type Keeper struct {
 
 	// StartTimeout is how long a started panel has to answer at URL.
 	StartTimeout time.Duration
-	// StartTimeoutNow, when set, is asked at each start in place of
-	// StartTimeout: during an update, what the takeover has left of the old
-	// window's deadline (Takeover.StartTimeout).
-	StartTimeoutNow func() time.Duration
+	// StartLimitsNow, when set, is asked at each start in place of
+	// StartTimeout and stopGrace: during an update, what the takeover has left
+	// of the old window's deadline (Takeover.StartLimits).
+	StartLimitsNow func() StartLimits
 	// MinUptime: a panel that dies sooner than this after it started is not
 	// started again without Retry.
 	MinUptime time.Duration
@@ -425,11 +425,11 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 	started := time.Now()
 	k.emit(Event{State: Starting, PID: p.PID})
 
-	timeout := k.StartTimeout
-	if k.StartTimeoutNow != nil {
-		timeout = k.StartTimeoutNow()
+	limits := StartLimits{Answer: k.StartTimeout, StopGrace: stopGrace}
+	if k.StartLimitsNow != nil {
+		limits = k.StartLimitsNow()
 	}
-	answerCtx, cancel := context.WithTimeout(ctx, timeout)
+	answerCtx, cancel := context.WithTimeout(ctx, limits.Answer)
 	answered := make(chan error, 1)
 	go func() { answered <- WaitAnswer(answerCtx, k.URL) }()
 	select {
@@ -445,8 +445,8 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 		if err != nil {
 			// A panel that runs and does not answer where it is looked for is
 			// stopped, not left running where nobody would find it.
-			_ = p.Stop(stopGrace)
-			k.fail(fmt.Errorf("the panel started (pid %d), but nothing answered at %s within %s; it has been stopped", p.PID, k.URL, timeout),
+			_ = p.Stop(limits.StopGrace)
+			k.fail(fmt.Errorf("the panel started (pid %d), but nothing answered at %s within %s; it has been stopped", p.PID, k.URL, limits.Answer),
 				LogTail(k.LogPath, tailLines))
 			return false
 		}

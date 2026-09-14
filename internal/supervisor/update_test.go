@@ -252,7 +252,7 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 	if r.running != nil {
 		tk.Deadline = launched.Add(r.running.HandoverTimeout)
 	}
-	k.StartTimeoutNow = func() time.Duration { return tk.StartTimeout(k.StartTimeout) }
+	k.StartLimitsNow = func() StartLimits { return tk.StartLimits(k.StartTimeout) }
 	r.takeoverDone = done
 	go func() {
 		var err error
