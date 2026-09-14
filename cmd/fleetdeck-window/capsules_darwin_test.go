@@ -48,9 +48,25 @@ func TestAPressInTheRowBecomesTheControllersAction(t *testing.T) {
 	}
 }
 
-// On glass, as on the operator's macOS 26: NSGlassEffectView keeps the clicks
-// on its own content view, as the surfaces' web views showed (frame_darwin.c),
-// and a press sent with sendAction: never finds that out.
+// v0.10.0 drew the capsules' labels under the glass on the operator's macOS 26:
+// the controls lay beside their glass in the row's NSGlassEffectContainerView,
+// which draws its glass in a view above its content. Only a glass's contentView
+// is drawn inside the glass.
+func TestEachCapsuleControlOnGlassIsItsGlassesContent(t *testing.T) {
+	if !frameResult.glassAvailable {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	for which, name := range []string{"the tabs", "the new card button", "the theme button"} {
+		if !capsulesResult.insideGlass[which] {
+			t.Errorf("%s, drawn on glass, is not its glass's content view: the glass draws over it", name)
+		}
+	}
+}
+
+// A click at the middle of each capsule reaches its control, on a window laid
+// out as one on screen is: before layout a glass's content view has no size,
+// and a hit test stops at the glass -- the measurement that once moved the
+// controls out of the glass.
 func TestAClickOnEachCapsuleOnGlassReachesItsControl(t *testing.T) {
 	if !frameResult.glassAvailable {
 		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")

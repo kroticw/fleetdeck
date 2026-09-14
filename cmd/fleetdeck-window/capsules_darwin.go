@@ -96,6 +96,9 @@ type capsulesProbe struct {
 	// clicksReach: a click at the middle of the tabs, the new card button and
 	// the theme button, drawn on glass, reaches that control.
 	clicksReach [3]bool
+	// insideGlass: each of those controls, drawn on glass, is its glass's
+	// content -- the one place a glass draws a view inside itself.
+	insideGlass [3]bool
 }
 
 func probeCapsulesForTest(m capsuleModel) capsulesProbe {
@@ -115,6 +118,7 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	out.capsuleCount = int(C.fd_test_capsule_count())
 	out.rowPassesThrough = C.fd_test_row_passes_through(f.capsules()) != 0
 	for which := range out.clicksReach {
+		out.insideGlass[which] = C.fd_test_capsule_inside_glass(C.int(which)) != 0
 		out.clicksReach[which] = C.fd_test_click_reaches_capsule(C.int(which)) != 0
 	}
 	C.fd_test_press_segment(1)

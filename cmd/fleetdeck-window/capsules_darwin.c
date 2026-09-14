@@ -152,16 +152,17 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
   sendVoidRect(content, sel("setFrame:"), inner);
   sendVoid1(holder, sel("addSubview:"), content);
   if (strcmp(mode, "glass") == 0 && cls("NSGlassEffectView")) {
-    // The glass is only the material under the control. A click over
-    // NSGlassEffectView's content view lands on the glass, as it did for the
-    // surfaces' web views (frame_darwin.c), so the control lies over the glass
-    // in a plain view of the capsule's frame, not inside it.
-    wrapper = initWithFrame(cls("NSView"), frame);
-    id glass = initWithFrame(cls("NSGlassEffectView"), CGRectMake(0, 0, frame.size.width, frame.size.height));
-    sendVoidLong(glass, sel("setStyle:"), 0);
-    sendVoidDouble(glass, sel("setCornerRadius:"), capsuleHeight / 2);
-    adopt(wrapper, glass);
-    sendVoid1(wrapper, sel("addSubview:"), holder);
+    // The control is the glass's content: only NSGlassEffectView's contentView
+    // is drawn inside the glass. In v0.10.0 the control lay beside the glass in
+    // a plain view, and the row's NSGlassEffectContainerView, which draws its
+    // glass in a view above its own content, drew the glass over the labels.
+    // The reason for moving it out was a hit test on a window never laid out,
+    // where the content view had no size yet; laid out, a click reaches it.
+    wrapper = initWithFrame(cls("NSGlassEffectView"), frame);
+    sendVoidLong(wrapper, sel("setStyle:"), 0);
+    sendVoidDouble(wrapper, sel("setCornerRadius:"), capsuleHeight / 2);
+    sendVoidLong(holder, sel("setAutoresizingMask:"), 18);
+    sendVoid1(wrapper, sel("setContentView:"), holder);
   } else {
     if (strcmp(mode, "opaque") == 0) {
       wrapper = initWithFrame(cls("NSView"), frame);
@@ -335,6 +336,21 @@ void fd_test_press_segment(int i) {
 
 void fd_test_press_new_card(void) { sendAction(newCardDrawn); }
 
+// Whether a capsule's control is drawn inside its glass: a descendant of the
+// contentView of the nearest NSGlassEffectView above it. which is as below.
+int fd_test_capsule_inside_glass(int which) {
+  id control = which == 0 ? segmentedDrawn : which == 1 ? newCardDrawn : themeDrawn;
+  id glassClass = cls("NSGlassEffectView");
+  if (!control || !glassClass) return 0;
+  for (id v = send0(control, sel("superview")); v; v = send0(v, sel("superview"))) {
+    if (((signed char (*)(id, SEL, id))objc_msgSend)(v, sel("isKindOfClass:"), glassClass)) {
+      id content = send0(v, sel("contentView"));
+      return content && ((signed char (*)(id, SEL, id))objc_msgSend)(control, sel("isDescendantOf:"), content) != 0;
+    }
+  }
+  return 0;
+}
+
 // A click at the middle of a capsule's control, hit-tested the way the window
 // hit-tests a mouse down: from its content view down. which is 0 for the tabs,
 // 1 for the new card button, 2 for the theme button.
@@ -342,6 +358,9 @@ int fd_test_click_reaches_capsule(int which) {
   id control = which == 0 ? segmentedDrawn : which == 1 ? newCardDrawn : themeDrawn;
   id window = send0(control, sel("window"));
   if (!window) return 0;
+  // Laid out first, as a window on screen is before any click: until then a
+  // glass's content view has no size, and a hit test stops at the glass.
+  sendVoid0(send0(window, sel("contentView")), sel("layoutSubtreeIfNeeded"));
   CGRect b = sendRect0(control, sel("bounds"));
   CGPoint mid = CGPointMake(b.origin.x + b.size.width / 2, b.origin.y + b.size.height / 2);
   CGPoint inWindow =
