@@ -36,6 +36,30 @@ out=$3
 how=$4
 
 mkdir -p "$out"
+
+# T-059 diagnosis, not for master: on this runner a window asked three times for
+# the panel's page and then heard nothing for a minute, while the panel answered.
+# snapshot records, while the window is alive, what every process was doing, what
+# each WebKit process and the window were doing, and what the system logged of
+# them: taken once the page has been silent for a while, and once at "panel", for
+# comparison.
+snapshot() {
+	d="$out/diag-$1"
+	mkdir -p "$d"
+	date '+%Y-%m-%d %H:%M:%S %z' >"$d/when.txt"
+	curl --silent --show-error --max-time 5 --output /dev/null --write-out 'panel answered HTTP %{http_code} in %{time_total}s\n' "$url" >"$d/curl.txt" 2>&1 || true
+	ps -axo pid,ppid,stat,lstart,etime,%cpu,rss,command >"$d/ps.txt" || true
+	sudo --non-interactive spindump -notarget 5 10 -o "$d/spindump.txt" || echo "spindump exit $?" >>"$d/errors.txt"
+	for pid in $(pgrep -f 'com.apple.WebKit' || true) "$window"; do
+		sample "$pid" 2 -file "$d/sample-$pid.txt" >/dev/null 2>&1 || echo "sample $pid exit $?" >>"$d/errors.txt"
+	done
+	# /usr/bin/log: a shell may have a builtin of that name.
+	/usr/bin/log show --last 3m --info --debug --style compact \
+		--predicate 'process CONTAINS "WebKit" OR process CONTAINS "fleetdeck" OR process == "runningboardd" OR process == "linkd"' \
+		>"$d/system.log" 2>&1 || echo "log show exit $?" >>"$d/errors.txt"
+	echo "--- diagnosis snapshot $1 taken in $d"
+}
+
 stand=$(mktemp -d)
 mkdir -p "$stand/home/.config/fleetdeck"
 printf 'server:\n  port: %s\n' "$port" >"$stand/home/.config/fleetdeck/config.yaml"
@@ -77,11 +101,17 @@ case $how in
 esac
 
 loaded=no
+waited=0
 for _ in $(seq 60); do
 	kill -0 "$window" 2>/dev/null || break
 	if grep -q "the panel's page says \"panel\"" "$out/window.log" 2>/dev/null; then
 		loaded=yes
+		snapshot loaded
 		break
+	fi
+	waited=$((waited + 1))
+	if [ "$waited" -eq 10 ]; then
+		snapshot silent
 	fi
 	sleep 1
 done
