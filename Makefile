@@ -212,10 +212,13 @@ verify-dist:
 # window needs cgo against WebKit, and the bundle needs lipo, codesign and ditto.
 #
 # BUNDLE_ID is the bundle identifier the app is built under, for this target and
-# window-app alike. A release keeps the app's own. Every test and every stand builds
-# under dev.fleetdeck.stand instead (supervisor.StandBundleID): macOS keeps each
-# bundle it is shown under its identifier, and a stand under the app's own can open
-# as the app (docs/engineering/window-and-panel.md, "Test stands").
+# window-app alike, and the one verify-dist-app and verify-dist-dmg demand. It defaults
+# to the app's own, which a release keeps and the release workflow names on every
+# command. Tests and stands are to pass BUNDLE_ID=dev.fleetdeck.stand
+# (supervisor.StandBundleID): macOS keeps each bundle it is shown under its
+# identifier, and a stand under the app's own can open as the app
+# (docs/engineering/window-and-panel.md, "Test stands"). The gates refuse a signed app
+# under any identifier but the app's own, so a stand's cannot be published.
 BUNDLE_ID ?= dev.fleetdeck.window
 dist-app:
 	@scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(SIGN_IDENTITY)" "$(BUNDLE_ID)"
@@ -225,7 +228,7 @@ dist-app:
 # unpacked, then looked at from the outside. The release workflow runs it as a step of
 # its own, for the same reason it runs verify-dist.
 verify-dist-app:
-	@scripts/verify-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)"
+	@scripts/verify-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)" "$(BUNDLE_ID)"
 
 # notarize-app sends the signed zip to Apple, waits for the answer, staples the ticket
 # to the bundle inside it and writes the zip again -- see scripts/notarize-dist-app.sh
@@ -259,7 +262,7 @@ dist-dmg:
 # person: mounted, then looked at from the outside. The release workflow runs it
 # as a step of its own, for the same reason it runs verify-dist-app.
 verify-dist-dmg:
-	@scripts/verify-dist-dmg.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)"
+	@scripts/verify-dist-dmg.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(EXPECT_SEAL)" "$(BUNDLE_ID)"
 
 # notarize-dmg sends the signed image to Apple and staples the answer into it.
 # The app inside already carries its own ticket; this one is for the image,

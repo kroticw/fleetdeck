@@ -260,7 +260,9 @@ func diskImageBuiltFromTheZip(t *testing.T, root, distDir string) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command("make", "dist-dmg", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=")
+	// The app in the image is the zip's, built under the stand identifier, and
+	// the image's gate is told so.
+	cmd := exec.Command("make", "dist-dmg", "VERSION="+releaseAppVersion, "DISTDIR="+distDir, "SIGN_IDENTITY=", "BUNDLE_ID="+supervisor.StandBundleID)
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
