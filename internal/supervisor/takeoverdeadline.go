@@ -63,8 +63,12 @@ type StartLimits struct {
 	StopGrace time.Duration
 }
 
-// takeoverPhase is where Takeover.Run is, for StartLimits.
-type takeoverPhase struct{ v atomic.Int32 }
+// takeoverPhase is where Takeover.Run is, for StartLimits, and whether it has
+// swapped the bundles, for Swapped.
+type takeoverPhase struct {
+	v       atomic.Int32
+	swapped atomic.Bool
+}
 
 const (
 	beforeSwap int32 = iota
