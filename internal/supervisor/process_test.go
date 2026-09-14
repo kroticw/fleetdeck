@@ -108,6 +108,17 @@ func runHelper(mode string) {
 		// A panel slow to start -- a fresh binary's first run on a cold
 		// machine -- that answers once it has.
 		time.Sleep(slowListen)
+	case "slower":
+		time.Sleep(slowerListen)
+	case "slower-canonical":
+		// Slower only when started from anywhere but an update's staging
+		// directory: a takeover's second start slow, its first not. A bundle's
+		// panel is <dir>/fleetdeck.app/Contents/MacOS/fleetdeck.
+		self, _ := os.Executable()
+		dir := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(self))))
+		if filepath.Base(dir) != filepath.Base(StagingDir(dir)) {
+			time.Sleep(slowerListen)
+		}
 	}
 	exe, _ := os.Executable()
 	fmt.Printf("helper ppid: %d\n", os.Getppid())

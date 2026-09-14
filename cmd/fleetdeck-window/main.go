@@ -108,6 +108,7 @@ func main() {
 	url := flag.String("url", defaultURL, "URL the panel answers on")
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
+	toldHandoverTimeout := flag.Duration(handoverTimeoutFlag, 0, "set by an update: how long the window that started this one gives the handover, from this window's start")
 	flag.Parse()
 	// Milliseconds in the window's log: a handover, the page asked for and its
 	// navigation all happen within one second, and whole seconds tell nothing
@@ -473,6 +474,11 @@ func main() {
 			},
 			Logf: func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) },
 		}
+		// Every start of the keeper held inside the old window's deadline: the
+		// keeper's own ceiling is longer than a v0.10.0 window's whole handover.
+		tk.Deadline = handoverDeadline(*toldHandoverTimeout)
+		keeper.StartTimeoutNow = func() time.Duration { return tk.StartTimeout(keeper.StartTimeout) }
+		log.Printf("fleetdeck-window: taking the panel over by %s, the old window's deadline", tk.Deadline.Format("15:04:05.000"))
 		go func() {
 			err := keeperEvents.Take(context.Background(), tk)
 			if err != nil {
