@@ -334,6 +334,7 @@ jobs:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
           FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_SYSTEM: light
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
       - name: This build's window in its frame, dark, with the new card form open
         env:
@@ -351,33 +352,41 @@ jobs:
       # transparency, both ways. Each fails unless the window's log says the
       # capsules are drawn in that material and the app's appearance: that is the
       # wiring, not that the capsules can be read, which their screenshots show.
+      # Each also fails unless the window found the system in the mode set here
+      # (FLEETDECK_STAND_SYSTEM): glass menus and the Dock show the wallpaper, so
+      # a screenshot cannot say, and `defaults` says only what was written.
       - name: This build's window in its frame, glass, the system dark and the app light
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
           FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_SYSTEM: dark
         run: |
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
-          echo "=== the system's appearance: $(defaults read -g AppleInterfaceStyle 2>/dev/null || echo light)"
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7801 out/glass-system-dark-app-light exec content
       - name: This build's window in its frame, opaque, the system dark and the app light
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
           FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: dark
         run: |
           defaults write com.apple.universalaccess reduceTransparency -bool true
           echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7803 out/opaque-system-dark-app-light exec content
       - name: This build's window in its frame, opaque, the system light and the app dark
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
           FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: light
         run: |
           defaults write com.apple.universalaccess reduceTransparency -bool true
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7805 out/opaque-system-light-app-dark exec content
       - name: The system light again
         if: always()

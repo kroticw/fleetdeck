@@ -37,6 +37,11 @@
 # it and the app's appearance. It checks that wiring, not that the capsules can
 # be read; the screenshot is for that.
 #
+# FLEETDECK_STAND_SYSTEM, when set, is the system's mode the stand was set to,
+# dark or light: the window's log has to say the system's appearance is that, as
+# AppKit drew the app before its theme was given (window_darwin.go). `defaults`
+# says what was written, and a screenshot of glass menus says nothing.
+#
 # The stand is the documented one: its own HOME with a configuration naming <port>,
 # and FLEETDECK_STAND_SOCKET naming the stand's socket -- nothing listens on it but
 # standdaemon, for content -- so the panel never looks for the fleet daemon. "panel" is what the window's page script reports for a
@@ -283,5 +288,21 @@ if [ -n "${FLEETDECK_STAND_CAPSULES:-}" ]; then
 	[ "$capsules_said" = "$capsules_want" ] || capsules=no
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}"
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ]
+# The system's mode the window found, before it gave the app its theme.
+system=yes
+system_said=
+if [ -n "${FLEETDECK_STAND_SYSTEM:-}" ]; then
+	case $FLEETDECK_STAND_SYSTEM in
+		dark) system_want=NSAppearanceNameDarkAqua ;;
+		light) system_want=NSAppearanceNameAqua ;;
+		*)
+			echo "unknown system mode: $FLEETDECK_STAND_SYSTEM" >&2
+			exit 2
+			;;
+	esac
+	system_said=$(sed -n "s/.*fleetdeck-window: the system's appearance is \([A-Za-z]*\)$/\1/p" "$out/window.log" | head -n 1)
+	[ "$system_said" = "$system_want" ] || system=no
+fi
+
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
