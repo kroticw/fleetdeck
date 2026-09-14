@@ -77,12 +77,28 @@ test("a board under the sessions panel reports that its last column stays under 
   assert.equal(report.boardClearOfSessions, false);
 });
 
-test("the sessions panel's edge follows the inset, folded or not", () => {
+// Both panels folded in a 1000 px window: the window sends a left inset of 74
+// and a content-right inset of 56, so the box runs from 74 - 16 = 58 to the
+// sessions panel's edge at 944. The stand draws its panels unfolded only, so
+// this is where the folded case is proven.
+test("with both panels folded the last column still comes out in the open", () => {
   const board = fakeBoard({ left: 58, right: 944, scrollWidth: 1500, clientWidth: 886, columnRights: [1484] });
   const report = boardScrollReport(fakeWindow({ contentRight: "56px" }), board);
   assert.equal(report.sessionsLeft, 944);
+  assert.equal(report.boardLeft, 58);
   assert.equal(report.lastColumnRightAtEnd, 870);
   assert.equal(report.lastColumnClear, true);
+  assert.equal(report.boardClearOfSessions, true);
+});
+
+// v0.10.0's board with both panels folded: the box is the whole window, and
+// the last column ends under the folded sessions panel at the end of the scroll.
+test("with both panels folded v0.10.0's board still leaves its last column under the sessions panel", () => {
+  const board = fakeBoard({ left: 0, right: 1000, scrollWidth: 1580, clientWidth: 1000, columnRights: [1580] });
+  const report = boardScrollReport(fakeWindow({ contentRight: "56px" }), board);
+  assert.equal(report.lastColumnRightAtEnd, 1000);
+  assert.equal(report.lastColumnClear, false);
+  assert.equal(report.boardClearOfSessions, false);
 });
 
 // Sub-pixel layout is not a column under the panel.
