@@ -19,6 +19,7 @@
 #include <objc/message.h>
 #include <objc/objc.h>
 #include <objc/runtime.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -64,6 +65,25 @@ static const char *cstring(id s) {
 
 static id initWithFrame(id klass, CGRect r) {
   return ((id (*)(id, SEL, CGRect))objc_msgSend)(send0(klass, sel("alloc")), sel("initWithFrame:"), r);
+}
+
+// TEMPORARY (T-061, v0.10.1), removed before merge: for one diagnostic stand on
+// macOS 26, FLEETDECK_STAND_CAPSULE_APPEARANCE=app on a stand (FLEETDECK_STAND_SOCKET
+// set) draws the row and its capsules in the app's appearance, to see whether
+// that is what keeps them white in the dark.
+static id standCapsuleAppearance(void) {
+  const char *socket = getenv("FLEETDECK_STAND_SOCKET");
+  const char *choice = getenv("FLEETDECK_STAND_CAPSULE_APPEARANCE");
+  if (!socket || !*socket || !choice || strcmp(choice, "app") != 0) return (id)0;
+  id appearance = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("effectiveAppearance"));
+  static int said;
+  if (!said) {
+    said = 1;
+    id name = appearance ? send0(appearance, sel("name")) : (id)0;
+    fprintf(stderr, "fleetdeck-window: on this stand the capsules are drawn in the app's appearance, %s\n",
+            name ? ((const char *(*)(id, SEL))objc_msgSend)(name, sel("UTF8String")) : "(none)");
+  }
+  return appearance;
 }
 
 // Added to parent, which then owns it.
@@ -211,6 +231,8 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
   }
   sendVoid0(holder, sel("release"));
   sendVoidLong(wrapper, sel("setAutoresizingMask:"), autoresizing);
+  id standAppearance = standCapsuleAppearance();  // TEMPORARY (T-061)
+  if (standAppearance) sendVoid1(wrapper, sel("setAppearance:"), standAppearance);
   return wrapper;
 }
 
@@ -368,6 +390,8 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     sendVoid1(rowView, sel("setContentView:"), into);
     sendVoid0(into, sel("release"));
   }
+  id standAppearance = standCapsuleAppearance();  // TEMPORARY (T-061)
+  if (standAppearance) sendVoid1(rowView, sel("setAppearance:"), standAppearance);
   adopt(parent, rowView);
 
   for (int i = 0; i < tabsDrawn; i++) free(tabIDsDrawn[i]);

@@ -312,6 +312,43 @@ jobs:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec frame
+      # TEMPORARY (T-061, v0.10.1), removed before merge: why the capsules are
+      # white pills in the dark. Run 34854756877 had dark capsules with both the
+      # panels folded and the system in dark mode; the stands above keep the
+      # system light and set only the app's appearance. Each variable apart:
+      # the system's mode, the panels' fold, the app's appearance, and the
+      # capsules drawn in the app's appearance (FLEETDECK_STAND_CAPSULE_APPEARANCE).
+      - name: "TEMPORARY (T-061): the capsules' colour, one variable at a time"
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+        run: |
+          system() {
+            osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $1" || echo "=== the system's mode could not be set to dark=$1"
+            echo "=== the system's appearance: $(defaults read -g AppleInterfaceStyle 2>/dev/null || echo light)"
+          }
+          fold() {
+            defaults write dev.fleetdeck.stand.widths glassOrchestratorFolded -bool "$1"
+            defaults write dev.fleetdeck.stand.widths glassSessionsFolded -bool "$1"
+          }
+          stand() {
+            echo "=== stand $3: app $1"
+            FLEETDECK_STAND_APPEARANCE=$1 scripts/ci-window-stand.sh new/fleetdeck.app "$2" "out/diag-$3" exec frame ||
+              echo "=== stand $3 did not reach its frame"
+          }
+          system false; fold false; stand dark 7821 a-system-light-unfolded-app-dark
+          fold true; stand dark 7822 b-system-light-folded-app-dark
+          system true; fold false; stand dark 7823 c-system-dark-unfolded-app-dark
+          fold true; stand dark 7824 d-system-dark-folded-app-dark
+          fold false; stand light 7825 g-system-dark-unfolded-app-light
+          export FLEETDECK_STAND_CAPSULE_APPEARANCE=app
+          stand light 7826 g-with-capsules-in-app-appearance
+          system false; stand dark 7827 e-system-light-unfolded-app-dark-capsules-in-app-appearance
+      - name: "TEMPORARY (T-061): the system light and the panels unfolded again"
+        if: always()
+        run: |
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
+          defaults write dev.fleetdeck.stand.widths glassOrchestratorFolded -bool false
+          defaults write dev.fleetdeck.stand.widths glassSessionsFolded -bool false
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
       - name: The window's tests on macOS 26
         run: go test -count=1 ./cmd/fleetdeck-window/
