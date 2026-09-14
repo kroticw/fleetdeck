@@ -159,8 +159,15 @@ Afterwards: the app at the canonical path answered `v0.4.0` when its panel was r
 
 **Measured, and it was the test's error rather than the app's:** the panel reports its path through `EvalSymlinks`, so on macOS a bundle under `/var/folders/…` is reported under `/private/var/folders/…`. The first run failed on that comparison. It is not translocation — the path holds no `AppTranslocation` component, which is now checked for by name.
 
+### In CI, from v0.10.0 as released
+
+**Run by CI's `update-from-v0.10.0`**, on `macos-26`, for every pull request and every push to master (`scripts/updatecheck`). The installed app is v0.10.0's release zip, downloaded from GitHub and put at `/Applications/fleetdeck.app` on the runner. The program is built inside a checkout of the tag — `v0.10.0^{commit}` is compared with `fec135e`, because the runner has no key to verify the tag's signature — against that tag's `internal/supervisor`, and runs its `Update.Run`: v0.10.0's 2436 ms handover deadline, and v0.10.0's keeper stopping and starting v0.10.0's panel. The new window is this branch's app, started the way v0.10.0 starts it — `--url --handover --canonical` and no deadline flag, as the program's child, with the stand's `FLEETDECK_STAND_SOCKET`. What the program copies from v0.10.0's window, which cannot be imported — the deadline, the launch arguments, the panel's arguments and the keeper's settings — is compared with the tag's source before anything runs.
+
+It passes only when the new window reports `alive`, `panel`, `swapped` and `done` in that order within the deadline; the panel at the URL reports this branch's commit and an executable inside `/Applications/fleetdeck.app`; and `/Applications/.fleetdeck-update/fleetdeck.app` answers `v0.10.0`. The old version is pinned to v0.10.0.
+
 ## 9. Not verified
 
+- **The button, the download and the seal, in CI's update from v0.10.0.** `update-from-v0.10.0` replaces exactly three things: the source — this branch's app is unpacked from a local archive, where v0.10.0 downloads a release; `Seal.Verify` — not asked, since this branch's app is sealed ad hoc on a runner with no certificate; and the press — `Update.Run` is called directly. A green job means v0.10.0's handover reaches done with this branch's window on a runner. It does not mean the button, the download or the signature check were tried.
 - **The press itself.** Everything above the button is measured; the button calls `supervisor.Update` through `runUpdate`, and the acceptance calls `supervisor.Update`. A click into a WKWebView cannot be made from a test.
 - **An app in `/Applications` replacing itself**, rather than a stand at a path of its own. The difference is the directory's permissions, which are checked and refused in words, and App Translocation, which needs a quarantine attribute this never sets.
 - **Two published releases.** The stand was built locally rather than downloaded, so "the app a person installed" has still not been the thing doing the updating.
