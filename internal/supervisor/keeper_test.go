@@ -301,8 +301,12 @@ func TestARestartDoesNotWaitOutTheStopGraceForAPanelThatIgnoresTerm(t *testing.T
 	if up := r.expect(t, Answering, 15*time.Second); !up.Ours || up.PID != again.PID {
 		t.Fatalf("Answering %+v, want the restarted panel", up)
 	}
-	if took := time.Since(asked); took > time.Second {
-		t.Fatalf("the restart took %s with a panel that ignores SIGTERM; want it within a second", took.Round(time.Millisecond))
+	// A restart that waited out the ordinary grace would take stopGrace at
+	// least. Half of it tells the two apart with room for a loaded machine and
+	// -race; that the handover fits the old window's deadline is the update
+	// test's to show.
+	if took := time.Since(asked); took >= stopGrace/2 {
+		t.Fatalf("the restart took %s with a panel that ignores SIGTERM; want it well within the ordinary stop grace of %s", took.Round(time.Millisecond), stopGrace)
 	}
 }
 

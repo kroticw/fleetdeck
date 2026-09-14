@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -99,8 +101,9 @@ func TestAPanelToldToStopDoesNotWaitOnAConnectionThatAskedForNothing(t *testing.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = held.Close() })
-	// Accepted by the panel, not only by the kernel.
-	time.Sleep(200 * time.Millisecond)
+	if !acceptedBy(t, panel.Process.Pid, held.LocalAddr().(*net.TCPAddr).Port, 5*time.Second) {
+		t.Fatal("the panel never accepted the held connection")
+	}
 
 	termed := time.Now()
 	_ = panel.Process.Signal(syscall.SIGTERM)
@@ -112,4 +115,25 @@ func TestAPanelToldToStopDoesNotWaitOnAConnectionThatAskedForNothing(t *testing.
 	case <-time.After(10 * time.Second):
 		t.Fatal("the panel was still running 10 s after SIGTERM")
 	}
+}
+
+// acceptedBy reports whether process pid comes to hold, within the given time,
+// the connection whose far end is localPort: accepted by the panel, not only
+// queued by the kernel. The server tracks a connection from the moment it
+// accepts it, in the same step, so a connection the panel holds is one it
+// counts.
+func acceptedBy(t *testing.T, pid, localPort int, within time.Duration) bool {
+	t.Helper()
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("no lsof on this machine")
+	}
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		out, _ := exec.Command("lsof", "-nP", "-a", "-p", strconv.Itoa(pid), "-iTCP:"+strconv.Itoa(localPort), "-sTCP:ESTABLISHED", "-t").Output()
+		if strings.TrimSpace(string(out)) != "" {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
 }
