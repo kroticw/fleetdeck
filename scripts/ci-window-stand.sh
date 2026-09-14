@@ -175,6 +175,23 @@ if [ "$expect" = content ]; then
 		sleep 1
 	done
 fi
+# terminal_at_rest: the orchestrator surface's last report says neither bar down
+# its terminal is in sight -- no native bar under xterm's viewport, and xterm's
+# own bar faded out (web/js/standreport.js). It sets native and own.
+terminal_at_rest() {
+	terminal=$(grep 'the orchestrator surface reports its scrolling' "$out/window.log" | tail -n 1)
+	native=$(printf '%s\n' "$terminal" | sed -n 's/.*"viewportScrollbarWidth":\([0-9]*\).*/\1/p')
+	own=$(printf '%s\n' "$terminal" | sed -n 's/.*"ownBarOpacity":\([0-9.]*\).*/\1/p')
+	[ "$native" = 0 ] && [ "$own" = 0 ]
+}
+# For content the screenshot is of the terminal at rest: xterm's bar shows while
+# the terminal writes its first screen and fades after.
+if [ "$expect" = content ]; then
+	for _ in $(seq 15); do
+		terminal_at_rest && break
+		sleep 1
+	done
+fi
 # The screenshot comes after every page said so: for frame, it is the frame's.
 sleep 3
 capture_screen "$out/window.png"
@@ -227,11 +244,10 @@ if [ "$expect" = content ]; then
 	fi
 	# And down the orchestrator's terminal, at rest: no native bar under xterm's
 	# viewport, and xterm's own bar out of sight.
-	terminal=$(grep 'the orchestrator surface reports its scrolling' "$out/window.log" | tail -n 1)
-	native=$(printf '%s\n' "$terminal" | sed -n 's/.*"viewportScrollbarWidth":\([0-9]*\).*/\1/p')
-	own=$(printf '%s\n' "$terminal" | sed -n 's/.*"ownBarOpacity":\([0-9.]*\).*/\1/p')
+	rest=yes
+	terminal_at_rest || rest=no
 	echo "--- the orchestrator's terminal at rest: native bar ${native:-not reported} px, xterm's own bar opacity ${own:-not reported}"
-	if [ "$native" != 0 ] || [ "$own" != 0 ]; then
+	if [ "$rest" = no ]; then
 		scrollbar=no
 	fi
 fi

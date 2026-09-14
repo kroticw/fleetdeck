@@ -43,6 +43,47 @@ test("a column with no terminal yet reports nothing", () => {
   assert.equal(terminalScrollReport(win("0"), column({ viewport: null, bar: null })), null);
 });
 
+// xterm's bar shows while the terminal writes and fades after it stops. The
+// macOS 26 stand's last report was taken mid-fade (opacity 0.98875), because the
+// second measure was timed from the first change and not the last.
+test("the terminal is measured again once its last change has settled", () => {
+  const parts = { viewport: { offsetWidth: 368, clientWidth: 368 }, bar: { isBar: true, offsetWidth: 14 } };
+  let opacity = "0";
+  let timer = null;
+  let observed = null;
+  const w = {
+    getComputedStyle: (el) => (el.isBar ? { opacity } : { borderLeftWidth: "0px", borderRightWidth: "0px" }),
+    requestAnimationFrame: (f) => f(),
+    // A fresh id for every timer, as a browser's are: the measure passed in is
+    // the same function each time.
+    setTimeout: (f) => {
+      timer = { run: f };
+      return timer;
+    },
+    clearTimeout: (id) => {
+      if (timer === id) timer = null;
+    },
+    addEventListener() {},
+    MutationObserver: class {
+      constructor(f) {
+        observed = f;
+      }
+      observe() {}
+    },
+  };
+  const heard = [];
+  watchTerminalScroll(w, column(parts), (r) => heard.push(r.ownBarOpacity));
+  opacity = "1";
+  observed();
+  const early = timer;
+  opacity = "0.98875";
+  observed();
+  assert.notEqual(timer, early, "a later change did not put the settled measure off");
+  opacity = "0";
+  timer.run();
+  assert.deepEqual(heard, [0, 1, 0.98875, 0]);
+});
+
 test("the window hears the terminal once it is there, and again only when it changes", () => {
   const parts = { viewport: null, bar: null };
   const listeners = {};

@@ -111,11 +111,11 @@ export function terminalScrollReport(win, column) {
 
 // watchTerminalScroll reports the terminal's edges once there is a terminal,
 // whenever the column's content or the window's size changes, and again once
-// the change has settled; only when the report changed.
+// the last change has settled; only when the report changed.
 export function watchTerminalScroll(win, column, report) {
   let last = "";
   let queued = false;
-  let settling = false;
+  let settle = null;
   const measure = () => {
     queued = false;
     const now = terminalScrollReport(win, column);
@@ -130,13 +130,10 @@ export function watchTerminalScroll(win, column, report) {
       queued = true;
       win.requestAnimationFrame(measure);
     }
-    if (!settling) {
-      settling = true;
-      win.setTimeout(() => {
-        settling = false;
-        measure();
-      }, TERMINAL_SETTLE_MS);
-    }
+    // Timed from the last change, not the first: a terminal that goes on
+    // writing keeps its bar in sight, and only its quiet has to be measured.
+    if (settle !== null && typeof win.clearTimeout === "function") win.clearTimeout(settle);
+    settle = win.setTimeout(measure, TERMINAL_SETTLE_MS);
   };
   win.addEventListener("resize", later);
   if (typeof win.MutationObserver === "function") new win.MutationObserver(later).observe(column, { childList: true, subtree: true });
