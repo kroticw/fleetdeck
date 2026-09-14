@@ -104,6 +104,10 @@ func runHelper(mode string) {
 		// A panel that runs but never answers where it is looked for -- a port
 		// in its configuration other than the one the window asks.
 		select {}
+	case "slow":
+		// A panel slow to start -- a fresh binary's first run on a cold
+		// machine -- that answers once it has.
+		time.Sleep(slowListen)
 	}
 	exe, _ := os.Executable()
 	fmt.Printf("helper ppid: %d\n", os.Getppid())
