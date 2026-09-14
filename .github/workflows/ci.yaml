@@ -297,7 +297,11 @@ jobs:
       # before them it did in 2 of 2, and a panel started without a window
       # right after them answered in 53 ms (run 34850302115). The window is
       # sized to the runner's 1024x768 screen, so both panels are in the
-      # screenshot, and drawn light and then dark: the operator uses dark.
+      # screenshot, and drawn light and then dark: the operator uses dark. The
+      # dark screenshot proves the capsules' colour and that none lies over
+      # another; it does not prove the text under the glass is sharp, since this
+      # runner draws v0.10.0's capsules without the blur the operator's Mac
+      # showed (run 34854756877).
       - name: This build's window in its frame, light
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
@@ -308,64 +312,9 @@ jobs:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec frame
-      # DIAGNOSTIC (T-056, v0.10.1), removed before merge: why the capsules are
-      # white pills in the dark on this runner, while the operator's v0.10.0 had
-      # dark, blurred ones. Both panels folded, so the row has room and a
-      # screenshot shows colour, not overlap. First v0.10.0 as released, to see
-      # whether this runner draws its capsules as the operator's Mac did; then
-      # this build's capsules in each row the diagnosis compares.
-      - name: Fold both panels for the capsule stands
-        run: |
-          defaults write dev.fleetdeck.stand.widths glassOrchestratorFolded -bool true
-          defaults write dev.fleetdeck.stand.widths glassSessionsFolded -bool true
-      - name: v0.10.0's capsules in the dark, as the operator saw them
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download v0.10.0 --repo "$GITHUB_REPOSITORY" --pattern fleetdeck-v0.10.0-macos.zip --dir old
-          ditto -x -k old/fleetdeck-v0.10.0-macos.zip old
-          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' || echo "=== the system's dark mode could not be set"
-          echo "=== the system's appearance: $(defaults read -g AppleInterfaceStyle 2>/dev/null || echo light)"
-          scripts/ci-window-stand.sh old/fleetdeck.app 7810 out/capsules-v0.10.0 exec frame || echo "=== v0.10.0 did not reach the panel's page in its frame"
-      - name: This build's capsules in the dark, in each row
-        env:
-          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
-          FLEETDECK_STAND_APPEARANCE: dark
-        run: |
-          port=7811
-          for row in container plain appearance clear; do
-            FLEETDECK_STAND_CAPSULE_ROW=$row scripts/ci-window-stand.sh new/fleetdeck.app "$port" "out/capsules-$row" exec frame ||
-              echo "=== capsules in the $row row did not reach the panel's page in its frame"
-            port=$(( port + 1 ))
-          done
-      - name: Unfold the panels again
-        run: |
-          defaults write dev.fleetdeck.stand.widths glassOrchestratorFolded -bool false
-          defaults write dev.fleetdeck.stand.widths glassSessionsFolded -bool false
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
-      # MEASUREMENT (T-056, v0.10.1), removed before merge: while the tests run,
-      # four stands one after another, the panel given 10 s, each logging how
-      # long its panel took to answer. Run 34852671968 measured the start only
-      # after the tests had ended (254 ms at 0 s, then 103-106 ms) and never
-      # caught the load under which 3 stands of 3 missed 330 ms.
-      - name: The window's tests on macOS 26, with the panel's start measured under them
-        env:
-          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
-          FLEETDECK_STAND_PANEL_START_TIMEOUT: 10s
-        run: |
-          go test -count=1 ./cmd/fleetdeck-window/ > out/window-tests.txt 2>&1 &
-          tests=$!
-          started=$(date +%s)
-          for i in 1 2 3 4; do
-            echo "=== run $i: $(( $(date +%s) - started ))s into the tests, tests still running: $(kill -0 "$tests" 2>/dev/null && echo yes || echo no)" | tee -a out/under-tests.txt
-            scripts/ci-window-stand.sh new/fleetdeck.app $(( 7800 + i )) "out/under-tests-$i" exec frame > "out/under-tests-$i.txt" 2>&1 ||
-              echo "=== run $i did not reach the panel's page in its frame" | tee -a out/under-tests.txt
-            grep --extended-regexp 'answered .* after it started|panel failed' "out/under-tests-$i/window.log" | tee -a out/under-tests.txt || true
-          done
-          status=0
-          wait "$tests" || status=$?
-          cat out/window-tests.txt
-          exit "$status"
+      - name: The window's tests on macOS 26
+        run: go test -count=1 ./cmd/fleetdeck-window/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
