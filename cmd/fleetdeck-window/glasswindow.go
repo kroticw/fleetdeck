@@ -359,7 +359,7 @@ func (g *glassWindow) redrawCapsules() {
 		log.Printf("fleetdeck-window: the capsules are not drawn: %v", err)
 		return
 	}
-	drawCapsules(g.frame.capsules(), m, g.mode)
+	g.run(g.ctl.capsuleRow(drawCapsules(g.frame.capsules(), m, g.mode)))
 }
 
 // broadcast is the board's web view with Eval reaching the surfaces too: the
