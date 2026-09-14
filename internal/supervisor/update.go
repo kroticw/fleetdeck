@@ -259,7 +259,6 @@ func (t *Takeover) Run(ctx context.Context) error {
 	// that directory but never has LaunchServices forget it. Measured on
 	// 2026-09-14: forgetting and registering together took 19-30 ms, inside a
 	// handover whose worst stand run was 1144 ms against the old window's 2436.
-	t.reregister()
 	report(StepSwapped, t.Canonical)
 
 	t.Keeper.Restart(PanelIn(t.Canonical))
