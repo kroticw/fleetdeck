@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
@@ -250,8 +251,17 @@ func TestTheLogSaysWhosePanelIsBeingReplaced(t *testing.T) {
 	}
 }
 
-func TestTheStartTimeoutIsTheMeasuredWorstTimesThree(t *testing.T) {
-	if measuredWorstStart*startMargin != panelStartTimeout {
-		t.Fatalf("panelStartTimeout = %s, want %s x %d", panelStartTimeout, measuredWorstStart, startMargin)
+// The worst start measured with the keeper logging it, on the macos-26 runner
+// right as the window's tests ended (run 34852671968). The 330 ms before it was
+// missed three runs of three there; the ceiling must stay well past this, and
+// short enough that a panel which will not start is said so soon.
+const worstStartMeasured = 254 * time.Millisecond
+
+func TestTheStartCeilingIsWellPastEveryStartMeasured(t *testing.T) {
+	if panelStartTimeout < 10*worstStartMeasured {
+		t.Fatalf("panelStartTimeout = %s, want at least ten times the worst start measured, %s", panelStartTimeout, worstStartMeasured)
+	}
+	if panelStartTimeout > 5*time.Second {
+		t.Fatalf("panelStartTimeout = %s: a panel that will not start would be waited on for too long", panelStartTimeout)
 	}
 }

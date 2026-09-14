@@ -32,8 +32,15 @@ const helperEnv = "FLEETDECK_SUPERVISOR_HELPER"
 const ownerEnv = "FLEETDECK_SUPERVISOR_HELPER_OWNER"
 
 // helperEnvFor is the environment a stand-in of kind is started with.
+//
+// A stand-in built with -race, as make test builds it, sleeps a second before
+// it exits (the race detector's atexit_sleep_ms), and a panel does not: a
+// takeover stopping one spent that second of the old window's deadline, and a
+// handover within 2436 ms failed only because of it. Stand-ins exit at once;
+// the cases about a panel slow to go say so with a "slow-term" kind.
 func helperEnvFor(kind, addr string) []string {
-	return append(os.Environ(), helperEnv+"="+kind+"@"+addr, ownerEnv+"="+strconv.Itoa(os.Getpid()))
+	race := strings.TrimSpace(os.Getenv("GORACE") + " atexit_sleep_ms=0")
+	return append(os.Environ(), helperEnv+"="+kind+"@"+addr, ownerEnv+"="+strconv.Itoa(os.Getpid()), "GORACE="+race)
 }
 
 // watchOwner ends the stand-in once the test process that started it is gone.
@@ -104,6 +111,21 @@ func runHelper(mode string) {
 		// A panel that runs but never answers where it is looked for -- a port
 		// in its configuration other than the one the window asks.
 		select {}
+	case "slow":
+		// A panel slow to start -- a fresh binary's first run on a cold
+		// machine -- that answers once it has.
+		time.Sleep(slowListen)
+	case "slower", "slower-slow-term":
+		time.Sleep(slowerListen)
+	case "slower-canonical", "slower-canonical-slow-term":
+		// Slower only when started from anywhere but an update's staging
+		// directory: a takeover's second start slow, its first not. A bundle's
+		// panel is <dir>/fleetdeck.app/Contents/MacOS/fleetdeck.
+		self, _ := os.Executable()
+		dir := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(self))))
+		if filepath.Base(dir) != filepath.Base(StagingDir(dir)) {
+			time.Sleep(slowerListen)
+		}
 	}
 	exe, _ := os.Executable()
 	fmt.Printf("helper ppid: %d\n", os.Getppid())

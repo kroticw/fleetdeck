@@ -338,6 +338,42 @@ func TestTheKeeperGivesUpOnAPanelThatDiesTooSoonAndWaitsToBeAsked(t *testing.T) 
 	r.expect(t, Answering, 10*time.Second)
 }
 
+// slowListen is how long the "slow" stand-in takes to listen: three times the
+// 330 ms the window gave a panel before v0.10.1, which a fresh panel's first
+// start on a macos-26 runner did not make.
+const slowListen = time.Second
+
+// A panel slower than the keeper's first look is the same process still
+// starting: the keeper waits on it up to StartTimeout, and does not stop it
+// and throw its start away.
+func TestTheKeeperWaitsForASlowPanelUpToItsCeiling(t *testing.T) {
+	addr := freeAddr(t)
+	k := newKeeper(t, "slow", addr)
+	k.StartTimeout = 3 * slowListen
+	r := run(t, k)
+	starting := r.expect(t, Starting, 5*time.Second)
+	up := r.expect(t, Answering, 5*time.Second)
+	if !up.Ours || up.PID != starting.PID {
+		t.Fatalf("Answering %+v, want the slow panel started first (pid %d), not another start", up, starting.PID)
+	}
+	// What the window logs, so a start's real length is known and not only
+	// whether it made the ceiling.
+	if up.Took < slowListen || up.Took > k.StartTimeout {
+		t.Fatalf("Answering took %v, want between the stand-in's %v and the ceiling %v", up.Took, slowListen, k.StartTimeout)
+	}
+}
+
+// The ceiling is for a panel still running. One that is gone is reported when
+// it goes, not when the ceiling runs out.
+func TestTheKeeperReportsAPanelThatDiesAtOnceNotAtItsCeiling(t *testing.T) {
+	addr := freeAddr(t)
+	k := newKeeper(t, "crash", addr)
+	k.StartTimeout = time.Minute
+	r := run(t, k)
+	r.expect(t, Starting, 5*time.Second)
+	r.expect(t, Failed, 5*time.Second)
+}
+
 func TestTheKeeperSaysWhyAPanelDiedBeforeItAnswered(t *testing.T) {
 	addr := freeAddr(t)
 	r := run(t, newKeeper(t, "crash", addr))

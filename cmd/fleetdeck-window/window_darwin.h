@@ -3,6 +3,11 @@
 
 // The window's appearance: "light", "dark", or anything else for the system's.
 void fd_window_set_appearance(const char *choice);
+// The appearance the app is drawn in now, by name: "NSAppearanceNameDarkAqua".
+const char *fd_window_effective_appearance(void);
+// The system's appearance by name, as AppKit draws an app with no appearance of
+// its own; "" once the app has one, when AppKit no longer says it.
+const char *fd_window_system_appearance(void);
 
 // Opens url in the system's browser.
 void fd_open_external(const char *url);

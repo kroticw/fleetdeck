@@ -64,23 +64,27 @@ func standIsolation(lookup func(string) (string, bool)) (string, error) {
 	return socket, nil
 }
 
-// How long a panel the window started has to answer: the worst of ten
-// measured starts, three times over.
+// How long a panel the window started has to answer. The window shows its
+// starting page for as long as it waits, and a panel that answers sooner is not
+// kept waiting, so a long ceiling costs a fast start nothing; a short one fails
+// a slow start that would have answered.
 //
 // Measured on 2026-09-11 on the operator's kind of machine, with the fleet
-// running: ten separately built panels -- ten different binaries, each run
-// for the first time, as after every update -- started against a stand
-// configuration and polled the way supervisor.WaitAnswer polls (at once, then
-// every 100 ms). Every one answered at the second poll, 107-110 ms: the panel
-// itself is up in well under 100 ms. Not measured: a start straight after
-// login, with nothing of the binary in the disk cache. A panel slower than
-// this is not waited on in silence -- the window says it did not start and
-// offers to start it again.
-const (
-	measuredWorstStart = 110 * time.Millisecond
-	startMargin        = 3
-	panelStartTimeout  = measuredWorstStart * startMargin
-)
+// running: ten separately built panels, each run for the first time, answered
+// at the second poll, 107-110 ms. The deadline was that three times over,
+// 330 ms. On 2026-09-14 on GitHub's macos-26 runner the window's panel did not
+// answer within 330 ms three runs of three, each right after the window's
+// tests, and logged nothing; how long it would have taken is not known, the
+// keeper stopped it. Measured there since, the keeper logging the time to
+// answer (runs 34852671968 and 34854756877): 104-110 ms before the tests, 254
+// ms at the moment they ended, 103-106 ms after, and 102-107 ms while they ran;
+// a panel started by a script with no window, on fresh runners, 32-104 ms.
+// The load under which 330 ms was missed was not caught again, so the ceiling
+// is not three times a worst case: it is a choice, 3 s, well past every start
+// measured and still short enough that a panel which will not start is said
+// so soon. Not measured: a start straight after login with nothing in the
+// disk cache.
+const panelStartTimeout = 3 * time.Second
 
 // launchdThrottle is what launchd's ThrottleInterval defaults to: the launch
 // agent the window replaces did not start the panel again sooner than this

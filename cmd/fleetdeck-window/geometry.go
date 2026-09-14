@@ -22,10 +22,11 @@ const (
 type rect struct{ X, Y, W, H float64 }
 
 // insets is the room the frame takes from the board's web view, sent to the
-// page as --host-inset-*. Right is what the board scrolls clear of: nothing,
-// since in E the board runs on under the sessions glass, which is what the
-// glass is there to show. ContentRight is what opens over the board -- a card,
-// a session, a document -- keeps clear of: the sessions panel and its margin.
+// page as --host-inset-*. The board keeps clear of the panels by Left and
+// ContentRight: ContentRight is the sessions panel and its margin, which the
+// board and what opens over it -- a card, a session, a document -- stay clear
+// of. Right is always 0, and stays only while the page still reads it as
+// --host-inset-right (web/js/hostactions.js, web/app.css).
 type insets struct{ Top, Left, Right, ContentRight float64 }
 
 type panelWidths struct {
@@ -64,11 +65,27 @@ func clampPanel(w, window float64, folded bool) float64 {
 	return w
 }
 
+// frameMinWidth is the window's minimum width less the capsule row's: both
+// panels at their readable width, the margins and the row's gaps to them.
+func frameMinWidth() float64 {
+	return 2*panelMargin + 2*minPanelWidth + capsuleGapLeft + capsuleGapRight
+}
+
 // layoutFor places the two panels, the capsule row between them and the
 // board's insets for a window of the given size.
 func layoutFor(width, height float64, w panelWidths) geometry {
+	return layoutWithRow(width, height, w, 0)
+}
+
+// layoutWithRow is layoutFor keeping rowMin points for the capsule row, its
+// narrowest form (capsules_darwin.c): where the panels at their widths leave
+// less, the unfolded ones narrow in proportion to what each has above its
+// readable width, and no further. This is only what the window shows; the
+// widths a person set are kept, and come back in a window wide enough.
+func layoutWithRow(width, height float64, w panelWidths, rowMin float64) geometry {
 	ow := clampPanel(w.Orchestrator, width, w.OrchestratorFolded)
 	sw := clampPanel(w.Sessions, width, w.SessionsFolded)
+	ow, sw = narrowForRow(width, ow, sw, w, rowMin)
 	// Each panel's limit is 60% of the window, so two of them can ask for more
 	// than it has: the sessions panel gets at most what the orchestrator panel
 	// and the margins leave, and the two never overlap.
@@ -89,6 +106,31 @@ func layoutFor(width, height float64, w panelWidths) geometry {
 		OrchestratorResizable: !w.OrchestratorFolded,
 		SessionsResizable:     !w.SessionsFolded,
 	}
+}
+
+func narrowForRow(width, ow, sw float64, w panelWidths, rowMin float64) (float64, float64) {
+	excess := ow + sw - (width - 2*panelMargin - capsuleGapLeft - capsuleGapRight - rowMin)
+	if rowMin <= 0 || excess <= 0 {
+		return ow, sw
+	}
+	spare := func(pw float64, folded bool) float64 {
+		if folded {
+			return 0
+		}
+		return math.Max(0, pw-minPanelWidth)
+	}
+	os, ss := spare(ow, w.OrchestratorFolded), spare(sw, w.SessionsFolded)
+	if os+ss == 0 {
+		return ow, sw
+	}
+	share := math.Min(1, excess/(os+ss))
+	return ow - os*share, sw - ss*share
+}
+
+// rowRoomFor is the widest a panel may be dragged to beside the other panel at
+// its width, leaving the capsule row rowMin: never below the readable width.
+func rowRoomFor(width, other, rowMin float64) float64 {
+	return math.Max(minPanelWidth, width-2*panelMargin-capsuleGapLeft-capsuleGapRight-rowMin-other)
 }
 
 // draggedWidth is a panel's width after its edge was dragged dx points to the

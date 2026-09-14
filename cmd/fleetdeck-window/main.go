@@ -108,11 +108,15 @@ func main() {
 	url := flag.String("url", defaultURL, "URL the panel answers on")
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
+	toldHandoverTimeout := flag.Duration(handoverTimeoutFlag, 0, "set by an update: how long the window that started this one gives the handover, from this window's start")
 	flag.Parse()
 	// Milliseconds in the window's log: a handover, the page asked for and its
 	// navigation all happen within one second, and whole seconds tell nothing
 	// of which came first or how long each took.
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	// Each step of the start, timed from the process's own start (startupsteps.go).
+	startupStep := startupSteps()
+	startupStep("started")
 	// For a window started by an update, the window that started it.
 	oldWindow := os.Getppid()
 
@@ -152,10 +156,90 @@ func main() {
 		where.action = runRefused
 	}
 
+	// What a stand sets and a person's window never has (standsettings.go).
+	stand, err := standSettingsFrom(standSocket, os.LookupEnv)
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+	width, height := stand.size()
+	if stand != (standSettings{}) {
+		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q",
+			stand.startTimeout(), width, height, stand.appearance)
+	}
+
+	// The keeper's word waits in keeperEvents until the window can act on it:
+	// the keeper is made before the window's web views, and nothing it says
+	// may be lost to that.
+	keeperEvents := supervisor.NewKeeperEvents()
+	keeper := &supervisor.Keeper{
+		URL:  *url,
+		Bin:  panelBinary(exe),
+		Args: panelArgs(os.Getpid(), standSocket),
+		// This window: its panels report it as their owner and go when it
+		// goes, and a panel whose window is gone is replaced.
+		Owner:        os.Getpid(),
+		Env:          os.Environ(),
+		LogPath:      logPath,
+		StartTimeout: stand.startTimeout(),
+		MinUptime:    launchdThrottle,
+		Poll:         takenPanelPoll,
+		OnEvent:      keeperEvents.Push,
+	}
+	// A panel this window did not start, of another build than the window's,
+	// is used as it is and named over its page (foreign.go).
+	own := ownBuild()
+	// Asked again at a press, about the panel on the port by then.
+	keeper.MayReplace = mayReplace(own, *url, home)
+	kept := &keeperRun{k: keeper}
+
+	// A window started by an update takes the panel over now, before anything
+	// of its window is made; what the handover comes to for the window waits in
+	// gate until the window is (handoverstart.go).
+	gate := &windowGate{}
+	if *handover != "" {
+		// Its Events are set by keeperEvents.Take: every keeper event from
+		// when it starts, whether or not this window is reading them yet.
+		tk := &supervisor.Takeover{
+			URL:         *url,
+			Handover:    supervisor.Handover{Path: *handover},
+			Staged:      bundleOf(exe),
+			Canonical:   *toldCanonical,
+			Revision:    ownRevision(),
+			Keeper:      keeper,
+			StartKeeper: kept.start,
+			// The bundle swapped out is forgotten by LaunchServices and then
+			// removed, once the old window's update has let go of the lock
+			// (docs/engineering/window-and-panel.md).
+			Registry: supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
+			LockPath: updateLockPath(*toldCanonical),
+			// The old window started this one, so it is this process's parent
+			// until it exits, and then this process is handed to launchd: the
+			// parent changing is the old window gone, with no PID to be reused.
+			// Works with an old window of any version, which says nothing of
+			// itself in the handover.
+			OldWindowGone: func() bool { return os.Getppid() != oldWindow },
+			Logf:          func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) },
+		}
+		// Every start of the keeper held inside the old window's deadline: the
+		// keeper's own ceiling is longer than a v0.10.0 window's whole handover.
+		tk.Deadline = handoverDeadline(*toldHandoverTimeout)
+		keeper.StartLimitsNow = func() supervisor.StartLimits { return tk.StartLimits(keeper.StartTimeout) }
+		log.Printf("fleetdeck-window: taking the panel over by %s, the old window's deadline", tk.Deadline.Format("15:04:05.000"))
+		// A failure before the window is made ends the process: no window is
+		// shown for a handover that did not happen.
+		startHandover(keeperEvents, tk, gate, kept.stop, func() { os.Exit(1) })
+	}
+
 	w := webview.New(false)
+	startupStep("the web view is made")
 	defer w.Destroy()
 	w.SetTitle("fleetdeck")
-	w.SetSize(1440, 900, webview.HintNone)
+	w.SetSize(width, height, webview.HintNone)
+	hostOnStand, hostStandOpen = standSocket != "", stand.open
+	if stand.appearance != "" {
+		standAppearance = stand.appearance
+		applyAppearance("auto")
+	}
 
 	// Both calls need the native window, which is already valid here --
 	// confirmed by timing, not assumed: SetTitle/SetSize above already rely
@@ -190,6 +274,7 @@ func main() {
 		log.Printf("fleetdeck-window: put up the window's page %q for a side surface", pageHeading(page))
 		w.SetHtml(page)
 	})
+	startupStep("the glass frame is made")
 	// show does what the screen says, on the UI thread.
 	show := func(navigate bool, page string) {
 		switch {
@@ -220,35 +305,9 @@ func main() {
 	if !glass.frame.boardObserved() {
 		log.Printf("fleetdeck-window: the board is not a WKWebView: WebKit will say nothing of its navigations, and the panel's page is asked for again only every %s", navSilentWait)
 	}
-	keeper := &supervisor.Keeper{
-		URL:  *url,
-		Bin:  panelBinary(exe),
-		Args: panelArgs(os.Getpid(), standSocket),
-		// This window: its panels report it as their owner and go when it
-		// goes, and a panel whose window is gone is replaced.
-		Owner:        os.Getpid(),
-		Env:          os.Environ(),
-		LogPath:      logPath,
-		StartTimeout: panelStartTimeout,
-		MinUptime:    launchdThrottle,
-		Poll:         takenPanelPoll,
-	}
-	// A panel this window did not start, of another build than the window's,
-	// is used as it is and named over its page (foreign.go).
-	own := ownBuild()
 	notices := &panelNotice{}
-	// Asked again at a press, about the panel on the port by then.
-	keeper.MayReplace = mayReplace(own, *url, home)
-	// A takeover watches the keeper's events too, while it runs.
-	var takeoverEvents atomic.Pointer[chan supervisor.Event]
-	keeper.OnEvent = func(e supervisor.Event) {
+	handleKeeperEvent := func(e supervisor.Event) {
 		log.Printf("fleetdeck-window: panel %s", describeEvent(e))
-		if ch := takeoverEvents.Load(); ch != nil {
-			select {
-			case *ch <- e:
-			default:
-			}
-		}
 		// Worked out here, off the UI thread: it may read a launch agent's file.
 		n := noticeFor(own, *url, e, home)
 		w.Dispatch(func() {
@@ -264,7 +323,8 @@ func main() {
 			show(scr.on(e))
 		})
 	}
-	kept := &keeperRun{k: keeper}
+	// The keeper's word, in order, now that the window can act on it.
+	go keeperEvents.Run(context.Background(), handleKeeperEvent)
 
 	// Bound before the first navigation, so the page finds them from its very
 	// first load. A reload the page or a person asks for is a navigation the
@@ -295,6 +355,14 @@ func main() {
 		})
 	}); err != nil {
 		log.Printf("fleetdeck-window: the window will not know whether the panel's page loaded: %v", err)
+	}
+	// On a stand the board says what a screenshot cannot (web/js/standreport.js).
+	if hostOnStand {
+		if err := w.Bind("fleetdeckStandReport", func(report map[string]any) {
+			log.Printf("fleetdeck-window: the board reports its scrolling: %v", report)
+		}); err != nil {
+			log.Printf("fleetdeck-window: the board will not report its scrolling: %v", err)
+		}
 	}
 	if err := w.Bind(startBindingName, keeper.Retry); err != nil {
 		log.Printf("fleetdeck-window: the failure page will not be able to start the panel again: %v", err)
@@ -334,6 +402,9 @@ func main() {
 	// navigation, so it runs in the first page too. The host object tells the
 	// board's page it is the board of the glass window (web/js/host.js).
 	w.Init(hostScript("board", glass.mode, nil))
+	// Every page the board shows tells the window the empty band at its top,
+	// which the window is dragged by (web/js/topband.js).
+	w.Init(topBandScript())
 	w.Init(noticeScript)
 	w.Init(pageLoadScript(*url))
 	// The update button is on screen only while there is something to update
@@ -342,33 +413,54 @@ func main() {
 	// why it cannot is in the log, and in the answer to the update binding
 	// should anything call it anyway.
 	canonical := canonicalBundle(exe, *toldCanonical)
-	how := updateWay(config{
-		tree:      treeDir,
-		exe:       exe,
-		version:   version.String(),
-		teamID:    ownTeamID(exe),
-		canonical: *toldCanonical,
-	})
-	if how.Refusal != "" {
-		log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
-	}
-	var watch *updateWatch
-	if how.Source != nil {
-		if markPath, err := askedMarkPath(); err != nil {
-			log.Printf("fleetdeck-window: no home directory to keep the answer about a newer version in, so this window will not look for one: %v", err)
-		} else {
-			watch = &updateWatch{
-				source:   how.Source,
-				running:  how.Running,
-				markPath: markPath,
-				tell:     func(r report) { tell(glass.view(), r) },
-				now:      time.Now,
-			}
+	// How this build updates is worked out beside the start, not in front of it:
+	// ownTeamID asks codesign, a process of its own, and a window started by an
+	// update has the old window's deadline to keep (handoverstart.go).
+	updateWayOf := sync.OnceValue(func() way {
+		how := updateWay(config{
+			tree:      treeDir,
+			exe:       exe,
+			version:   version.String(),
+			teamID:    ownTeamID(exe),
+			canonical: *toldCanonical,
+		})
+		startupStep("worked out how this build updates")
+		if how.Refusal != "" {
+			log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
 		}
-	}
+		return how
+	})
+	// Looking for a newer version runs beside the window for as long as it is
+	// open, silent unless what it knows changes. A window started by a
+	// handover looks too: it stays open as long as the one it replaced would
+	// have, and the answer kept for the version before it does not apply.
+	var watching atomic.Pointer[updateWatch]
+	go func() {
+		how := updateWayOf()
+		if how.Source == nil {
+			return
+		}
+		markPath, err := askedMarkPath()
+		if err != nil {
+			log.Printf("fleetdeck-window: no home directory to keep the answer about a newer version in, so this window will not look for one: %v", err)
+			return
+		}
+		watch := &updateWatch{
+			source:   how.Source,
+			running:  how.Running,
+			markPath: markPath,
+			tell:     func(r report) { tell(glass.view(), r) },
+			now:      time.Now,
+		}
+		watching.Store(watch)
+		watch.run(context.Background(), time.NewTicker(lookEvery).C)
+	}()
 	// A page asks this as it loads -- the first time, and again after every
-	// reload -- because it misses every report sent before it was there.
+	// reload -- because it misses every report sent before it was there. Asked
+	// before the watch has begun, the answer is nothing newer, which is what the
+	// watch knows until its first look, and that look tells the page.
 	known := func() report {
+		watch := watching.Load()
 		if watch == nil {
 			return report{Step: "none"}
 		}
@@ -387,6 +479,7 @@ func main() {
 		}
 		go func() {
 			defer updating.Store(false)
+			how := updateWayOf()
 			if how.Refusal != "" {
 				tell(glass.view(), refusalProgress(how.Refusal))
 				return
@@ -403,62 +496,23 @@ func main() {
 		update()
 		return nil, nil
 	})
-	// Looking for a newer version runs beside the window for as long as it is
-	// open, silent unless what it knows changes. A window started by a
-	// handover looks too: it stays open as long as the one it replaced would
-	// have, and the answer kept for the version before it does not apply.
-	if watch != nil {
-		go watch.run(context.Background(), time.NewTicker(lookEvery).C)
-	}
 
 	// The window's own ground until the keeper's first word, which comes within
 	// one look at the URL.
 	w.SetHtml(blankPage)
-	if *handover != "" {
-		events := make(chan supervisor.Event, 16)
-		takeoverEvents.Store(&events)
-		tk := &supervisor.Takeover{
-			URL:         *url,
-			Handover:    supervisor.Handover{Path: *handover},
-			Staged:      bundleOf(exe),
-			Canonical:   *toldCanonical,
-			Revision:    ownRevision(),
-			Keeper:      keeper,
-			StartKeeper: kept.start,
-			Events:      events,
-			// The bundle swapped out is forgotten by LaunchServices and then
-			// removed, once the old window's update has let go of the lock
-			// (docs/engineering/window-and-panel.md).
-			Registry: supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
-			LockPath: updateLockPath(*toldCanonical),
-			// The old window started this one, so it is this process's parent
-			// until it exits, and then this process is handed to launchd: the
-			// parent changing is the old window gone, with no PID to be reused.
-			// Works with an old window of any version, which says nothing of
-			// itself in the handover.
-			OldWindowGone: func() bool { return os.Getppid() != oldWindow },
-			Done: func() {
-				w.Dispatch(func() {
-					log.Printf("fleetdeck-window: the handover is done")
-					if scr.handedOver() {
-						show(true, "")
-					}
-				})
-			},
-			Logf: func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) },
-		}
-		go func() {
-			err := tk.Run(context.Background())
-			takeoverEvents.Store(nil)
-			if err != nil {
-				// The old window resumes the panel it had; this one goes.
-				log.Printf("fleetdeck-window: taking the panel over failed: %v", err)
-				kept.stop()
-				w.Dispatch(w.Terminate)
-			}
-		}()
-	} else {
+	// A window started by an update began taking the panel over before any of
+	// this; any other starts its keeper now.
+	if *handover == "" {
 		kept.start()
+	}
+	// A bundle an earlier update swapped out and could not remove -- its new
+	// window quit while the old one still ran out of it -- is removed now, beside
+	// the start, unless an update runs or something still runs out of it
+	// (supervisor.RetireLeftover, leftoverstart.go).
+	if retiresLeftover(*handover, canonical) {
+		go supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
+			supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
+			func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })
 	}
 
 	// Time going by for a page asked for and not loaded (screen.tick), the
@@ -481,6 +535,18 @@ func main() {
 			}
 		}
 	}()
+
+	// The window is made: what a takeover begun before it held back for it goes
+	// to the UI thread now, and runs as the window starts to run.
+	gate.open(windowUI{
+		dispatch: w.Dispatch,
+		handedOver: func() {
+			if scr.handedOver() {
+				show(true, "")
+			}
+		},
+		terminate: w.Terminate,
+	})
 
 	w.Run()
 	stopTicking()
@@ -598,6 +664,8 @@ func describeEvent(e supervisor.Event) string {
 		return fmt.Sprintf("%s: %v", e.State, e.Err)
 	case e.Detail != "":
 		return fmt.Sprintf("%s: %s", e.State, e.Detail)
+	case e.PID != 0 && e.Took > 0:
+		return fmt.Sprintf("%s (pid %d, started by this window, answered %s after it started)", e.State, e.PID, e.Took.Round(time.Millisecond))
 	case e.PID != 0:
 		return fmt.Sprintf("%s (pid %d, started by this window)", e.State, e.PID)
 	default:

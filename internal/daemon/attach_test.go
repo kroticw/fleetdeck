@@ -3,7 +3,6 @@ package daemon
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,69 +11,25 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/daemon/daemontest"
 )
 
-// fakeDaemon answers ping itself and hands every other request to handle, along
-// with the connection it arrived on, so a test can script exactly what an attach
-// stream or a resize reply looks like. Every non-ping request is also recorded.
+// fakeDaemon is the shared stand-in (internal/daemon/daemontest), which answers
+// ping itself and hands every other request to handle, along with the
+// connection it arrived on, so a test can script exactly what an attach stream
+// or a resize reply looks like. Every non-ping request is also recorded.
 type fakeDaemon struct {
 	socket string
-	mu     sync.Mutex
-	seen   []map[string]any
+	d      *daemontest.Daemon
 }
 
-func (f *fakeDaemon) requests(op string) []map[string]any {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []map[string]any
-	for _, r := range f.seen {
-		if r["op"] == op {
-			out = append(out, r)
-		}
-	}
-	return out
-}
+func (f *fakeDaemon) requests(op string) []map[string]any { return f.d.Requests(op) }
 
 func startFakeDaemon(t *testing.T, handle func(req map[string]any, c net.Conn, r *bufio.Reader)) *fakeDaemon {
 	t.Helper()
-	listener, err := net.Listen("unix", tempSocket(t))
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	f := &fakeDaemon{socket: listener.Addr().String()}
-	// No wait for the handlers here: t.Cleanup runs last-registered first, and a
-	// handler held open by holdOpen only returns once holdOpen's own cleanup has
-	// run — which, registered earlier, comes after this one. Waiting would deadlock.
-	t.Cleanup(func() { _ = listener.Close() })
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				r := bufio.NewReader(c)
-				line, err := r.ReadString('\n')
-				if err != nil {
-					return
-				}
-				var req map[string]any
-				if json.Unmarshal([]byte(line), &req) != nil {
-					return
-				}
-				if req["op"] == "ping" {
-					fmt.Fprint(c, `{"ok":true,"op":"ping","version":"test","proto":1}`+"\n")
-					return
-				}
-				f.mu.Lock()
-				f.seen = append(f.seen, req)
-				f.mu.Unlock()
-				handle(req, c, r)
-			}(conn)
-		}
-	}()
-	return f
+	d := daemontest.StartTest(t, handle)
+	return &fakeDaemon{socket: d.Socket, d: d}
 }
 
 // holdOpen keeps a scripted attach connection open until the test ends, the way

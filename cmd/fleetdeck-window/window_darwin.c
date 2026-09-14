@@ -48,6 +48,36 @@ void fd_window_set_appearance(const char *choice) {
   objc_autoreleasePoolPop(pool);
 }
 
+const char *fd_window_effective_appearance(void) {
+  static char name[64];
+  void *pool = objc_autoreleasePoolPush();
+  id appearance = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("effectiveAppearance"));
+  id n = appearance ? send0(appearance, sel("name")) : (id)0;
+  const char *s = n ? ((const char *(*)(id, SEL))objc_msgSend)(n, sel("UTF8String")) : "";
+  int i = 0;
+  for (; s[i] && i < (int)sizeof name - 1; i++) name[i] = s[i];
+  name[i] = 0;
+  objc_autoreleasePoolPop(pool);
+  return name;
+}
+
+const char *fd_window_system_appearance(void) {
+  static char name[64];
+  name[0] = 0;
+  void *pool = objc_autoreleasePoolPush();
+  id app = send0(cls("NSApplication"), sel("sharedApplication"));
+  if (!send0(app, sel("appearance"))) {
+    id appearance = send0(app, sel("effectiveAppearance"));
+    id n = appearance ? send0(appearance, sel("name")) : (id)0;
+    const char *s = n ? ((const char *(*)(id, SEL))objc_msgSend)(n, sel("UTF8String")) : "";
+    int i = 0;
+    for (; s[i] && i < (int)sizeof name - 1; i++) name[i] = s[i];
+    name[i] = 0;
+  }
+  objc_autoreleasePoolPop(pool);
+  return name;
+}
+
 void fd_open_external(const char *url) {
   void *pool = objc_autoreleasePoolPush();
   id u = send1(cls("NSURL"), sel("URLWithString:"), nsstring(url));

@@ -235,7 +235,9 @@ jobs:
           done
           grep -q 'Usage of' out/new-load.log
       # With a fleet's page, so the glass frame comes up: on macOS 15 there is no
-      # NSGlassEffectView, and the frame's panels are NSVisualEffectView.
+      # NSGlassEffectView, and the frame's panels are NSVisualEffectView -- unless
+      # the runner reduces transparency, when the window draws them opaque and
+      # its log says so.
       - name: This build's window, started directly, shows the panel's page in its frame
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7791 out/new-exec exec frame
       - name: v0.9.1's window, started directly, as it comes
@@ -264,6 +266,250 @@ jobs:
         if: always()
         with:
           name: window-on-oldest-macos
+          path: out
+          if-no-files-found: ignore
+          retention-days: 7
+
+  window-on-macos-26:
+    # Opens the same app on the macOS its glass is for. v0.10.0 went out with its
+    # window seen whole only on macOS 15, where the frame is NSVisualEffectView; on
+    # the operator's macOS 26 it could not be dragged and its capsules could not be
+    # read. The glass tests of `check` run on macos-latest, which moves; they run
+    # here too, on the named release, next to the window's screenshot.
+    needs: oldest-macos-app
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oldest-macos-app
+          path: new
+      - name: Unpack this build
+        run: ditto -x -k new/fleetdeck-v0.0.0-ci-macos.zip new
+      - name: Show the macOS and the screen
+        run: |
+          sw_vers
+          system_profiler SPDisplaysDataType | grep --extended-regexp 'Resolution|UI Looks like' || true
+      # With reduced transparency or increased contrast the window draws its
+      # frame and capsules opaque, not in glass (currentGlassMode), and a stand
+      # then shows nothing of the glass. What the runner has, and both turned off
+      # for the stands; the step after the tests puts them back.
+      - name: The runner's transparency and contrast, turned off for the stands
+        run: |
+          for key in reduceTransparency increaseContrast; do
+            was=$(defaults read com.apple.universalaccess "$key" 2>/dev/null || echo unset)
+            echo "$key $was" >>"$RUNNER_TEMP/universalaccess-before"
+            defaults write com.apple.universalaccess "$key" -bool false || echo "=== $key could not be written"
+            echo "=== $key: was $was, now $(defaults read com.apple.universalaccess "$key" 2>/dev/null || echo unset)"
+          done
+      # The window's gate, before the tests. After them, on this runner, the
+      # panel the window started did not answer in 330 ms in 3 runs of 3, while
+      # before them it did in 2 of 2, and a panel started without a window
+      # right after them answered in 53 ms (run 34850302115). The window is
+      # sized to the runner's 1024x768 screen, so both panels are in the
+      # screenshot, and drawn light and then dark: the operator uses dark. The
+      # dark screenshot shows the capsules' colour and that none lies over
+      # another, in the frame the window logs it drew: glass, since the step
+      # above turns reduced transparency off. Before 2026-09-14 21:29 these
+      # screenshots were opaque, so those runs, 34854756877 among them, say
+      # nothing of glass or of blur.
+      #
+      # The frame is shown with content (scripts/standdaemon): a card in every
+      # stage, more long-named sessions than the sessions panel shows, one
+      # waiting and one stopped, and an orchestrator terminal with long lines
+      # and a status line. An empty frame hid what the operator saw broken in
+      # v0.10.0's panels. The last frame has the new card form open.
+      - name: This build's window in its frame, light
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/light exec content
+      - name: This build's window in its frame, dark
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_SYSTEM: light
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
+      - name: This build's window in its frame, dark, with the new card form open
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_OPEN: newcard
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7799 out/dark-newcard exec content
+      # The capsules take the theme chosen in fleetdeck, whatever the system's
+      # (capsules_darwin.c). With a theme other than the system's they were dark
+      # on dark or light on light on glass (run 34868250061), and white on white
+      # when opaque (runs 34863293838 and 34864709919). The operator's system is
+      # dark, and a light theme is one press of the theme capsule away. The dark
+      # stand above is glass with the system light and the app dark; these are
+      # glass with the system dark and the app light, then opaque, with reduced
+      # transparency, both ways. Each fails unless the window's log says the
+      # capsules are drawn in that material and the app's appearance: that is the
+      # wiring, not that the capsules can be read, which their screenshots show.
+      # Each also fails unless the window found the system in the mode set here
+      # (FLEETDECK_STAND_SYSTEM): glass menus and the Dock show the wallpaper, so
+      # a screenshot cannot say, and `defaults` says only what was written.
+      - name: This build's window in its frame, glass, the system dark and the app light
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_SYSTEM: dark
+        run: |
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7801 out/glass-system-dark-app-light exec content
+      - name: This build's window in its frame, opaque, the system dark and the app light
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: dark
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7803 out/opaque-system-dark-app-light exec content
+      - name: This build's window in its frame, opaque, the system light and the app dark
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: light
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7805 out/opaque-system-light-app-dark exec content
+      - name: The system light again
+        if: always()
+        run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
+      # The frame on hidden windows: glass, the capsules inside it, the drag band.
+      - name: The window's tests on macOS 26
+        run: go test -count=1 ./cmd/fleetdeck-window/
+      - name: The runner's transparency and contrast as they were
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/universalaccess-before" ] || exit 0
+          while read -r key was; do
+            case $was in
+              unset) defaults delete com.apple.universalaccess "$key" 2>/dev/null || true ;;
+              1) defaults write com.apple.universalaccess "$key" -bool true || true ;;
+              *) defaults write com.apple.universalaccess "$key" -bool false || true ;;
+            esac
+          done <"$RUNNER_TEMP/universalaccess-before"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: window-on-macos-26
+          path: out
+          if-no-files-found: ignore
+          retention-days: 7
+
+  update-from-v0-10-0:
+    # The operator's v0.10.0 updates to the next version with its Update button, and
+    # nothing else had ever run that update end to end. This runs it on a runner:
+    # v0.10.0 as released, installed in /Applications, updated to this branch's app.
+    #
+    # What is v0.10.0's own: supervisor.Update.Run, built from the tag -- its 2436 ms
+    # handover deadline, its keeper stopping and starting its panel -- and the new
+    # window started the way it starts one (--url --handover --canonical, no deadline
+    # flag), as a child, on a stand (FLEETDECK_STAND_SOCKET). The window code
+    # scripts/updatecheck has to copy is compared with the tag's source first.
+    #
+    # What is NOT, so a green job does not say the button or the signature were
+    # checked: the source (this branch's zip from oldest-macos-app, not a download
+    # from GitHub), Seal.Verify (not asked: that zip is sealed ad hoc), and the press
+    # (Update.Run is called directly). docs/engineering/update-from-release.md,
+    # sections 8 and 9.
+    needs: oldest-macos-app
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oldest-macos-app
+          path: new
+      # By its commit: the tag is signed, and a runner has no key to verify it with.
+      - name: Check out v0.10.0 beside this branch
+        run: |
+          set -eu
+          git fetch --no-tags --depth=1 origin +refs/tags/v0.10.0:refs/tags/v0.10.0
+          test "$(git rev-parse 'v0.10.0^{commit}')" = fec135e37fce3274a3617e3a91e7884c6b936998
+          git worktree add --detach "$RUNNER_TEMP/v0.10.0" fec135e37fce3274a3617e3a91e7884c6b936998
+      - name: Build the update check against v0.10.0's supervisor
+        run: |
+          set -eu
+          cp -R scripts/updatecheck "$RUNNER_TEMP/v0.10.0/scripts/updatecheck"
+          cd "$RUNNER_TEMP/v0.10.0"
+          go build -o "$RUNNER_TEMP/updatecheck" ./scripts/updatecheck
+      - name: Download v0.10.0 as released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v0.10.0 --repo "$GITHUB_REPOSITORY" --pattern fleetdeck-v0.10.0-macos.zip --dir old
+      # Fails on any of: a copy drifted from the tag; the new window not reporting
+      # alive, panel, swapped and done in order within v0.10.0's 2436 ms; the panel at
+      # the URL not being this commit's, from /Applications/fleetdeck.app; v0.10.0 not
+      # left in /Applications/.fleetdeck-update.
+      #
+      # Then, while this program -- the old window -- still runs and the bundle swapped
+      # out is still on disk, it only observes LaunchServices, for three looks: what it
+      # holds, whether that bundle is on disk as each look starts, and what
+      # dev.fleetdeck.stand and dev.fleetdeck.window open. On the operator's machine that
+      # moment lasts a fraction of a second, since their v0.10.0 window quits as soon as
+      # it reads done; here this program stretches it. LaunchServices registers the
+      # staged path again about half a second after the new window tells it where the
+      # app is (run 34867562033), so nothing is required of that moment, and a window
+      # that does not tell LaunchServices again once it is ready is no longer caught by
+      # this job: TestAWindowStartedByAnUpdateTakesThePanelOverBeforeItsWindowIsMade
+      # holds it.
+      - name: Update v0.10.0 to this branch, as its Update button does
+        run: |
+          set -eu
+          stand="$RUNNER_TEMP/stand"
+          port=7820
+          mkdir -p "$stand/home/.config/fleetdeck" out
+          printf 'server:\n  port: %s\n' "$port" >"$stand/home/.config/fleetdeck/config.yaml"
+          HOME="$stand/home" FLEETDECK_STAND_SOCKET="$stand/no-daemon-here.sock" "$RUNNER_TEMP/updatecheck" \
+            -old-archive "$PWD/old/fleetdeck-v0.10.0-macos.zip" \
+            -new-archive "$PWD/new/fleetdeck-v0.0.0-ci-macos.zip" \
+            -canonical /Applications/fleetdeck.app \
+            -url "http://127.0.0.1:$port/" \
+            -want-revision "$(git rev-parse HEAD)" \
+            -tag-window "$RUNNER_TEMP/v0.10.0/cmd/fleetdeck-window" \
+            -out "$PWD/out"
+      # With the update run gone, as the old window is once its update returns: the new
+      # window must remove the bundle swapped out within 30 s, and then, in each of ten
+      # looks, dev.fleetdeck.stand (this build) must open /Applications/fleetdeck.app,
+      # dev.fleetdeck.window (v0.10.0) must open nothing in .fleetdeck-update, and
+      # LaunchServices must hold no record of a path in .fleetdeck-update that is on
+      # disk as the look starts -- or "open fleetdeck" may start the version just
+      # replaced. A record of a path gone from disk is printed, not failed on. The first
+      # and last dump are kept in out/.
+      - name: The swapped-out bundle is gone, and nothing opens it
+        run: '"$RUNNER_TEMP/updatecheck" -launchservices -canonical /Applications/fleetdeck.app -out "$PWD/out"'
+      - name: Keep what the update left, and stop its windows
+        if: always()
+        run: |
+          mkdir -p out
+          cp /Applications/.fleetdeck-update/handover /Applications/.fleetdeck-update/new-window.log out/ 2>/dev/null || true
+          cp "$RUNNER_TEMP/stand/home/Library/Logs/fleetdeck.log" out/panel.log 2>/dev/null || true
+          pkill -f 'fleetdeck.app/Contents/MacOS/' || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: update-from-v0-10-0
           path: out
           if-no-files-found: ignore
           retention-days: 7

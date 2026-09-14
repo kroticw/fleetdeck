@@ -167,12 +167,82 @@ static Class stripClass(void) {
   return klass;
 }
 
+// --- the drag band ------------------------------------------------------------
+//
+// The board's web view runs under the transparent title bar, so the title bar
+// never sees a press and the window has nothing to be dragged by. The band is:
+// a view across the window's top, over the board and under the panels, the
+// capsules and the width strips, as tall as the board's page says nothing is
+// there (web/js/topband.js) -- so it never takes a click meant for the page.
+// A press drags the window as its title bar would; a double click does what the
+// system's "Double-click a window's title bar to" says.
+
+static const char *doubleClickOverride;
+
+static id nsstring(const char *s) {
+  return ((id (*)(id, SEL, const char *))objc_msgSend)(cls("NSString"), sel("stringWithUTF8String:"), s);
+}
+
+// AppleActionOnDoubleClick: "Maximize" (shown as Zoom), "Fill" (macOS 15 and
+// later), "Minimize" or "None"; unset, the older switch
+// AppleMiniaturizeOnDoubleClick, and unset too, zoom.
+static const char *doubleClickAction(void) {
+  if (doubleClickOverride) return doubleClickOverride;
+  id defaults = send0(cls("NSUserDefaults"), sel("standardUserDefaults"));
+  id action = ((id (*)(id, SEL, id))objc_msgSend)(defaults, sel("stringForKey:"), nsstring("AppleActionOnDoubleClick"));
+  if (action) return ((const char *(*)(id, SEL))objc_msgSend)(action, sel("UTF8String"));
+  if (((signed char (*)(id, SEL, id))objc_msgSend)(defaults, sel("boolForKey:"), nsstring("AppleMiniaturizeOnDoubleClick"))) {
+    return "Minimize";
+  }
+  return "Maximize";
+}
+
+static int respondsTo(id obj, const char *selector) {
+  return ((signed char (*)(id, SEL, SEL))objc_msgSend)(obj, sel("respondsToSelector:"), sel(selector)) != 0;
+}
+
+static void bandDown(id self, SEL _cmd, id event) {
+  (void)_cmd;
+  id window = send0(self, sel("window"));
+  if (!window) return;
+  // Entering or leaving full screen, before the controller hears of it and
+  // takes the band away: nothing to move, and a zoom would fight the system's.
+  if (((unsigned long)sendLong0(window, sel("styleMask")) & (1UL << 14)) != 0) return;
+  if (sendLong0(event, sel("clickCount")) != 2) {
+    sendVoid1(window, sel("performWindowDragWithEvent:"), event);
+    return;
+  }
+  const char *action = doubleClickAction();
+  if (strcmp(action, "None") == 0) return;
+  if (strcmp(action, "Minimize") == 0) {
+    sendVoid1(window, sel("miniaturize:"), self);
+  } else if (strcmp(action, "Fill") == 0 && respondsTo(window, "_zoomFill:")) {
+    // What the Window menu's Fill sends; there is no public name for it.
+    sendVoid1(window, sel("_zoomFill:"), self);
+  } else {
+    sendVoid1(window, sel("zoom:"), self);
+  }
+}
+
+// A press on the top of an inactive window drags it at once, as its title bar
+// would.
+static Class bandClass(void) {
+  static Class klass;
+  if (klass) return klass;
+  klass = objc_allocateClassPair((Class)objc_getClass("NSView"), "FleetdeckWindowDrag", 0);
+  class_addMethod(klass, sel("mouseDown:"), (IMP)bandDown, "v@:@");
+  class_addMethod(klass, sel("acceptsFirstMouse:"), (IMP)stripFirstMouse, "c@:@");
+  objc_registerClassPair(klass);
+  return klass;
+}
+
 // --- the frame ---------------------------------------------------------------
 
 struct fd_frame {
   id window;
   id root;
   id board;
+  id band;
   id wrappers[2];
   id contents[2];
   CGRect rects[2];
@@ -214,6 +284,13 @@ void *fd_frame_install(void *window) {
     sendVoidLong(f->board, sel("setAutoresizingMask:"), 18);
     sendVoid1(f->root, sel("addSubview:"), f->board);
   }
+  // Right over the board: the panels go in above it (fd_frame_set_mode), the
+  // capsules and the strips after it. Width follows the window; the height is
+  // the page's (fd_frame_set_drag_band), none until it says.
+  f->band = initWithFrame(NULL, bandClass(), CGRectMake(0, 0, whole.size.width, 0));
+  sendVoidLong(f->band, sel("setAutoresizingMask:"), 2 | 32);  // width sizable, bottom margin flexible
+  sendVoidBool(f->band, sel("setHidden:"), 1);
+  sendVoid1(f->root, sel("addSubview:"), f->band);
 
   for (int side = 0; side < 2; side++) {
     // Placed by fd_frame_layout, never stretched with the root; rounded like
@@ -315,7 +392,30 @@ void fd_frame_layout(void *frame, fd_rect orchestrator, fd_rect sessions, fd_rec
 
 void *fd_frame_panel_content(void *frame, int side) { return ((struct fd_frame *)frame)->contents[side]; }
 void *fd_frame_capsules(void *frame) { return ((struct fd_frame *)frame)->capsules; }
+
+void fd_frame_set_drag_band(void *frame, double height) {
+  struct fd_frame *f = frame;
+  double width = sendRect0(f->root, sel("bounds")).size.width;
+  sendVoidRect(f->band, sel("setFrame:"), CGRectMake(0, 0, width, height > 0 ? height : 0));
+  sendVoidBool(f->band, sel("setHidden:"), !(height > 0));
+}
+
 void *fd_frame_board(void *frame) { return ((struct fd_frame *)frame)->board; }
+
+double fd_frame_titlebar_inset(void *frame) {
+  id window = ((struct fd_frame *)frame)->window;
+  // NSWindowZoomButton, the rightmost of the three.
+  id zoom = ((id (*)(id, SEL, unsigned long))objc_msgSend)(window, sel("standardWindowButton:"), 2);
+  if (!zoom || sendBool0(zoom, sel("isHidden"))) return 0;
+  CGRect bounds = sendRect0(zoom, sel("bounds"));
+  CGRect inWindow;
+#if defined(__x86_64__)
+  ((void (*)(CGRect *, id, SEL, CGRect, id))objc_msgSend_stret)(&inWindow, zoom, sel("convertRect:toView:"), bounds, nil);
+#else
+  inWindow = ((CGRect (*)(id, SEL, CGRect, id))objc_msgSend)(zoom, sel("convertRect:toView:"), bounds, nil);
+#endif
+  return inWindow.origin.x + inWindow.size.width;
+}
 
 int fd_glass_available(void) { return cls("NSGlassEffectView") != (id)0; }
 
@@ -343,6 +443,92 @@ void *fd_test_window(double width, double height) {
 }
 
 int fd_frame_board_observed(void *frame) { return ((struct fd_frame *)frame)->boardObserved; }
+
+// A window that counts what the band asks of it instead of doing it: a real
+// drag or zoom would run AppKit's loop or animate a window never on screen.
+static int windowCalls[4];  // drag, zoom, fill, minimize
+static int windowInFullScreen;
+
+static void countDrag(id self, SEL _cmd, id event) {
+  (void)self, (void)_cmd, (void)event;
+  windowCalls[0]++;
+}
+static void countZoom(id self, SEL _cmd, id sender) {
+  (void)self, (void)_cmd, (void)sender;
+  windowCalls[1]++;
+}
+static void countFill(id self, SEL _cmd, id sender) {
+  (void)self, (void)_cmd, (void)sender;
+  windowCalls[2]++;
+}
+static void countMinimize(id self, SEL _cmd, id sender) {
+  (void)self, (void)_cmd, (void)sender;
+  windowCalls[3]++;
+}
+
+static Class windowSuper;
+
+static unsigned long countingStyleMask(id self, SEL _cmd) {
+  struct objc_super up = {self, windowSuper};
+  unsigned long mask = ((unsigned long (*)(struct objc_super *, SEL))objc_msgSendSuper)(&up, _cmd);
+  return windowInFullScreen ? mask | (1UL << 14) : mask;
+}
+
+void *fd_test_counting_window(double width, double height) {
+  Class klass = (Class)objc_getClass("FleetdeckCountingWindow");
+  if (!klass) {
+    windowSuper = (Class)objc_getClass("NSWindow");
+    klass = objc_allocateClassPair(windowSuper, "FleetdeckCountingWindow", 0);
+    class_addMethod(klass, sel("performWindowDragWithEvent:"), (IMP)countDrag, "v@:@");
+    class_addMethod(klass, sel("zoom:"), (IMP)countZoom, "v@:@");
+    class_addMethod(klass, sel("miniaturize:"), (IMP)countMinimize, "v@:@");
+    // Only where the system has Fill: elsewhere Fill is a zoom.
+    if (class_getInstanceMethod(windowSuper, sel("_zoomFill:"))) {
+      class_addMethod(klass, sel("_zoomFill:"), (IMP)countFill, "v@:@");
+    }
+    class_addMethod(klass, sel("styleMask"), (IMP)countingStyleMask, "Q@:");
+    objc_registerClassPair(klass);
+  }
+  id w = send0((id)klass, sel("alloc"));
+  CGRect rect = CGRectMake(0, 0, width, height);
+  w = ((id (*)(id, SEL, CGRect, unsigned long, unsigned long, signed char))objc_msgSend)(
+      w, sel("initWithContentRect:styleMask:backing:defer:"), rect, 1 | 2 | 4 | 8, 2, 0);
+  sendVoid1(w, sel("setContentView:"), initWithFrame("NSView", Nil, rect));
+  return w;
+}
+
+int fd_test_window_calls(int kind) { return windowCalls[kind]; }
+void fd_test_reset_window_calls(void) { memset(windowCalls, 0, sizeof windowCalls); }
+void fd_test_set_full_screen(int on) { windowInFullScreen = on; }
+void fd_test_set_double_click_action(const char *action) { doubleClickOverride = action; }
+int fd_test_has_fill(void) { return class_getInstanceMethod((Class)objc_getClass("NSWindow"), sel("_zoomFill:")) != NULL; }
+void *fd_test_band(void *frame) { return ((struct fd_frame *)frame)->band; }
+
+// A press with clickCount clicks at the middle of the band, sent as AppKit sends
+// one: to the view a hit test at that point finds.
+void fd_test_press_band(void *frame, long clickCount) {
+  struct fd_frame *f = frame;
+  CGRect b = sendRect0(f->band, sel("frame"));
+  CGPoint inRoot = CGPointMake(b.size.width / 2, b.size.height / 2);
+  CGPoint inWindow = ((CGPoint (*)(id, SEL, CGPoint, id))objc_msgSend)(f->root, sel("convertPoint:toView:"), inRoot, (id)0);
+  id window = send0(f->root, sel("window"));
+  id event = ((id (*)(id, SEL, unsigned long, CGPoint, unsigned long, double, long, id, long, long, float))objc_msgSend)(
+      cls("NSEvent"), sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
+      1, inWindow, 0, 0, sendLong0(window, sel("windowNumber")), (id)0, 0, clickCount, 1.0f);
+  id superview = send0(f->root, sel("superview"));
+  CGPoint p = superview ? ((CGPoint (*)(id, SEL, CGPoint, id))objc_msgSend)(f->root, sel("convertPoint:toView:"), inRoot, superview)
+                        : inRoot;
+  id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(f->root, sel("hitTest:"), p);
+  if (hit) sendVoid1(hit, sel("mouseDown:"), event);
+}
+
+// A plain view put into parent at r, standing in for what a surface or a
+// capsule puts there.
+void *fd_test_add_subview(void *parent, fd_rect r) {
+  id v = initWithFrame("NSView", Nil, cgrect(r));
+  sendVoid1((id)parent, sel("addSubview:"), v);
+  return v;
+}
 
 fd_rect fd_test_window_frame(void *window) {
   CGRect r = sendRect0((id)window, sel("frame"));

@@ -11,7 +11,7 @@ const TARGETS = [
   "openDoc",
   "openSession",
   "showSection",
-  "openNewCard",
+  "toggleNewCard",
   "cycleTheme",
   "applyTheme",
   "setInsets",
@@ -19,7 +19,24 @@ const TARGETS = [
   "setFolded",
   "focusTerminal",
   "setFullscreen",
+  "setTitlebarInset",
 ];
+
+// The title bar's buttons float over the orchestrator panel; its surface starts
+// its header past them (cmd/fleetdeck-window/titlebar_test.go).
+test("the orchestrator surface takes where the title bar's buttons end", () => {
+  const { send, calls } = setup("orchestrator");
+  send({ type: "titlebar", inset: 76 });
+  assert.deepEqual(calls, [["setTitlebarInset", 76]]);
+});
+
+test("the sessions surface and the board ignore the title bar", () => {
+  for (const surface of ["sessions", "board"]) {
+    const { send, calls } = setup(surface);
+    send({ type: "titlebar", inset: 76 });
+    assert.deepEqual(calls, [], surface);
+  }
+});
 
 function setup(surface) {
   const calls = [];
@@ -55,7 +72,7 @@ test("the board keeps clear of the panels by the insets the window sends", () =>
   send({ type: "insets", top: 64, left: 394, right: 0, contentRight: 356 });
   send({ type: "show", section: "docs" });
   send({ type: "newCard" });
-  assert.deepEqual(calls, [["setInsets", { top: 64, left: 394, right: 0, contentRight: 356 }], ["showSection", "docs"], ["openNewCard"]]);
+  assert.deepEqual(calls, [["setInsets", { top: 64, left: 394, right: 0, contentRight: 356 }], ["showSection", "docs"], ["toggleNewCard"]]);
 });
 
 test("a side surface ignores what only the board handles", () => {

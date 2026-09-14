@@ -53,8 +53,10 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 	}
 	g.ctl = newController(panelURL, loadPanelWidths(), mode)
 	g.frame.setMode(mode)
+	logFrameMode(mode)
 	width, height := windowContentSize(w.Window())
 	g.run(g.ctl.resized(width, height, windowIsFullscreen(w.Window())))
+	g.run(g.ctl.titlebarInset(g.frame.titlebarInset()))
 
 	// A surface's page says where its load is through the same binding the
 	// board's does; the board's own goes to the screen (main.go).
@@ -76,6 +78,16 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 			return nil, err
 		}
 		g.later(g.ctl.layout(report.Version, report.Mode, report.Fleet))
+		return nil, nil
+	})
+	// The empty band at the top of whatever page the board shows, which the
+	// window is dragged by (web/js/topband.js).
+	g.bindBoard(topBandBindingName, func(_ string, args json.RawMessage) (any, error) {
+		var height float64
+		if err := json.Unmarshal(args, &height); err != nil {
+			return nil, err
+		}
+		g.later(g.ctl.topBand(height))
 		return nil, nil
 	})
 	g.bind("fleetdeckOpen", func(_ string, args json.RawMessage) (any, error) {
@@ -122,6 +134,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		return nil, nil
 	})
 
+	handleStandReports(g.bridge, hostOnStand, log.Printf)
 	setSurfaceEvents(g.surfaceMessage, g.surfaceNavigation)
 	setCapsuleEvents(func(action string) { g.run(g.ctl.capsuleAction(action)) })
 	setWindowEvents(g.windowChanged)
@@ -239,6 +252,7 @@ func (g *glassWindow) windowChanged(kind string) {
 	default:
 		width, height := windowContentSize(g.w.Window())
 		g.run(g.ctl.resized(width, height, windowIsFullscreen(g.w.Window())))
+		g.run(g.ctl.titlebarInset(g.frame.titlebarInset()))
 	}
 }
 
@@ -321,9 +335,17 @@ func (g *glassWindow) reloadSurface(surface string) {
 
 func (g *glassWindow) showWindowPage(page string) { g.putUp(page) }
 
-func (g *glassWindow) setAppearance(choice string) { applyAppearance(choice) }
-func (g *glassWindow) applyGeometry(geo geometry)  { g.frame.layout(geo) }
-func (g *glassWindow) saveWidths(w panelWidths)    { storePanelWidths(w) }
+// setAppearance is the app's theme changing: the capsules are drawn again in it,
+// whether or not the board's page has sent their model again first.
+func (g *glassWindow) setAppearance(choice string) {
+	applyAppearance(choice)
+	g.redrawCapsules()
+}
+func (g *glassWindow) applyGeometry(geo geometry) {
+	g.frame.layout(geo)
+	g.run(g.ctl.laidOut(geo))
+}
+func (g *glassWindow) saveWidths(w panelWidths) { storePanelWidths(w) }
 
 func (g *glassWindow) setCapsules(model json.RawMessage) {
 	g.model = model
@@ -333,21 +355,38 @@ func (g *glassWindow) setCapsules(model json.RawMessage) {
 func (g *glassWindow) setFrameMode(m glassMode) {
 	g.mode = m
 	g.frame.setMode(m)
+	logFrameMode(m)
 	g.redrawCapsules()
 }
 
+// logFrameMode is the window's log line for what the frame is drawn in: glass,
+// or vibrancy or opaque when the system has no glass or asks for less
+// transparency or more contrast. A stand's screenshot cannot tell them apart.
+func logFrameMode(m glassMode) {
+	log.Printf("fleetdeck-window: the frame is drawn in %s", m)
+}
+
 func (g *glassWindow) reloadBoard() { g.askBoard() }
+
+func (g *glassWindow) setDragBand(height float64) { g.frame.setDragBand(height) }
 
 func (g *glassWindow) redrawCapsules() {
 	if !g.framed || g.model == nil {
 		return
 	}
-	m, err := parseCapsuleModel(g.model)
+	drawCapsuleRow(g.frame, g.model, g.mode, g.ctl, g.run)
+}
+
+// drawCapsuleRow draws the board's capsule model into the frame's row and gives
+// the controller the row's minimum, whose effects run carries out. The window's
+// stand probe (capsulestand_darwin.go) draws the row the same way.
+func drawCapsuleRow(f *frame, model json.RawMessage, mode glassMode, ctl *controller, run func([]effect)) {
+	m, err := parseCapsuleModel(model)
 	if err != nil {
 		log.Printf("fleetdeck-window: the capsules are not drawn: %v", err)
 		return
 	}
-	drawCapsules(g.frame.capsules(), m, g.mode)
+	run(ctl.capsuleRow(drawCapsules(f.capsules(), m, mode)))
 }
 
 // broadcast is the board's web view with Eval reaching the surfaces too: the

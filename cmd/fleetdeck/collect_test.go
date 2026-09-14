@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/daemon/daemontest"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/usage"
 )
@@ -870,54 +869,8 @@ func TestATransientUsageFailureKeepsTheLastKnownLimits(t *testing.T) {
 // control-socket.md section 4 describes.
 func fakeDaemon(t *testing.T, jobs string) *daemon.Client {
 	t.Helper()
-	// A short, hand-rolled temp dir rather than t.TempDir(): that embeds the
-	// full test name, which a few directories below overflows macOS's ~104
-	// byte sun_path limit on a unix socket ("bind: invalid argument") — the
-	// same workaround internal/daemon's own client_test.go uses.
-	dir, err := os.MkdirTemp("", "fd")
-	if err != nil {
-		t.Fatalf("creating temp dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-
-	listener, err := net.Listen("unix", filepath.Join(dir, "s.sock"))
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				// The listener was closed at test teardown; nothing left to serve.
-				return
-			}
-			go func() {
-				defer conn.Close()
-				line, err := bufio.NewReader(conn).ReadString('\n')
-				if err != nil {
-					return
-				}
-				var req map[string]any
-				if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &req); err != nil {
-					return
-				}
-				var resp string
-				switch req["op"] {
-				case "ping":
-					resp = `{"ok":true,"op":"ping","version":"test","proto":1}` + "\n"
-				case "list":
-					resp = fmt.Sprintf(`{"ok":true,"op":"list","jobs":[%s]}`, jobs) + "\n"
-				default:
-					return
-				}
-				_, _ = conn.Write([]byte(resp))
-			}()
-		}
-	}()
-
-	return daemon.New(listener.Addr().String(), func() (string, error) { return "key", nil })
+	d := daemontest.StartTest(t, daemontest.Ops(map[string]daemontest.Handler{"list": daemontest.List(jobs)}))
+	return daemon.New(d.Socket, func() (string, error) { return "key", nil })
 }
 
 // newConfigFile writes cfg to a fresh config file and returns its path, so a

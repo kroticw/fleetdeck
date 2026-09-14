@@ -22,6 +22,7 @@ type natives interface {
 	setCapsules(model json.RawMessage)
 	setFrameMode(m glassMode)
 	reloadBoard()
+	setDragBand(height float64)
 }
 
 // runEffects carries effects out in the order the controller gave them.
@@ -58,6 +59,8 @@ func runEffects(n natives, effects []effect) {
 			n.setFrameMode(e.Mode)
 		case reloadBoard:
 			n.reloadBoard()
+		case setDragBand:
+			n.setDragBand(e.Height)
 		}
 	}
 }

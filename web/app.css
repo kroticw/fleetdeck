@@ -3539,14 +3539,177 @@ body.is-resizing {
   display: none;
 }
 
+/* The glass is the panel, and a side surface draws no second panel inside it:
+   the head rows a browser tab's column has lie on the glass, with no ground of
+   their own and no rule between them. In v0.10.0 they read as a bordered panel
+   inside the island. */
+:root[data-surface]:not([data-surface="board"]) #header,
+:root[data-surface]:not([data-surface="board"]) .col-size,
+:root[data-surface]:not([data-surface="board"]) .o-head,
+:root[data-surface]:not([data-surface="board"]) .slist-head,
+:root[data-surface]:not([data-surface="board"]) .fleet-group-head {
+  background: transparent;
+  border-top: none;
+  border-bottom: none;
+}
+
+/* The title bar's buttons float over this panel's top corner: the header starts
+   past the zoom button, whose right edge the window sends
+   (cmd/fleetdeck-window/titlebar.go). In full screen there are no buttons. */
+:root[data-surface="orchestrator"] #header {
+  padding-left: max(calc(var(--gap) * 2), var(--host-inset-titlebar, 0px));
+}
+
+:root[data-surface="orchestrator"][data-fullscreen] #header {
+  padding-left: calc(var(--gap) * 2);
+}
+
+/* The terminal is the island's lower part, edge to edge, and not a rounded box
+   with margins inside it. Its ground stays dense: a terminal over glass is read
+   in both themes. The island's own corners round its bottom. */
 :root[data-surface="orchestrator"] .o-screen {
-  padding: 0 10px 10px;
+  padding: 0;
 }
 
 :root[data-surface="orchestrator"] .o-term {
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   background: var(--surface);
-  box-shadow: var(--island-shadow);
+  box-shadow: none;
+}
+
+/* The text keeps off the island's edges and its rounded bottom corners. The fit
+   addon takes this padding out of the room the terminal has. */
+:root[data-surface="orchestrator"] .o-term .xterm {
+  padding: 0 10px 6px;
+}
+
+/* No second edge down the terminal's right side. xterm's viewport scrolls
+   natively under xterm's own bar (overflow-y: scroll in web/vendor/xterm.css),
+   and WebKit draws a classic bar for it at all times, a grey strip the height of
+   the terminal. That bar is hidden, the scrolling is not. A scrollbar-width other
+   than auto makes WebKit ignore ::-webkit-scrollbar.
+
+   xterm's own bar stays, out of sight at rest and in sight under the pointer,
+   where a wheel or a trackpad scrolls the terminal. Out of sight by this sheet
+   alone: xterm hides the bar with a timer after it shows it, and on the macOS 26
+   stand that timer never ran, leaving the bar in sight for as long as the stand
+   watched. */
+:root[data-surface="orchestrator"] .o-term .xterm-viewport {
+  scrollbar-width: auto;
+}
+
+:root[data-surface="orchestrator"] .o-term .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+}
+
+:root[data-surface="orchestrator"] .o-term .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 0;
+  pointer-events: none;
+}
+
+:root[data-surface="orchestrator"] .o-term:hover .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* One head for the sessions island: the fold button and the island's name on
+   its top row, the counters under them, then the list. The two are the list's
+   first children and scroll with it in a browser tab; here they are fixed to
+   the web view's top, and the counters' row keeps the room for them. Folded,
+   the strip is the panel's whole content and stays where it is. */
+:root[data-surface="sessions"] {
+  --sessions-head: 36px;
+}
+
+:root[data-surface="sessions"] .col-sessions:not([data-folded="1"]) > .col-size {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: var(--sessions-head);
+  box-sizing: border-box;
+  align-items: center;
+  padding: 0 4px;
+  z-index: 2;
+}
+
+:root[data-surface="sessions"] .col-sessions:not([data-folded="1"]) > .slist-head {
+  position: fixed;
+  top: 0;
+  left: 30px;
+  right: 0;
+  height: var(--sessions-head);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  z-index: 2;
+}
+
+:root[data-surface="sessions"]:has(.col-sessions:not([data-folded="1"])) #header {
+  margin-top: var(--sessions-head);
+  padding: 0 20px 4px 38px;
+}
+
+:root[data-surface="sessions"] #header .counters {
+  margin-left: 0;
+}
+
+/* The list stops short of the island's rounded bottom edge, and its last card
+   keeps clear of it at the end of the scroll. Its scrollbar is thin and drawn
+   as asked: a scrollbar-width or scrollbar-color other than auto makes WebKit
+   ignore ::-webkit-scrollbar, and the classic bar macOS draws for a mouse is
+   15 px wide. */
+:root[data-surface="sessions"] main {
+  padding-bottom: 10px;
+}
+
+:root[data-surface="sessions"] .col-sessions {
+  padding-bottom: 10px;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+:root[data-surface="sessions"] .col-sessions::-webkit-scrollbar {
+  width: 6px;
+}
+
+:root[data-surface="sessions"] .col-sessions::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-surface="sessions"] .col-sessions::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* A session's name takes up to two lines, and the edit button and the badge
+   beside it give way to it: a badge wider than the room left goes to a line of
+   its own and is cut there. One line and a badge that never gave way left a long
+   name "fl…" beside "silent inside AskUserQuestion". */
+:root[data-surface="sessions"] .srow-head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+:root[data-surface="sessions"] .sname {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  /* From nothing, not from its text: the edit button stays on the name's row,
+     and only a badge wider than what is left goes to the next. */
+  flex: 1 1 0;
+  min-width: 55%;
+}
+
+:root[data-surface="sessions"] .srow-head .sbadge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :root[data-surface="sessions"] .srow,
@@ -3611,12 +3774,40 @@ body.is-resizing {
   display: none;
 }
 
+/* With its tabs and button hidden the row has no width, so the form does not
+   take one from it: it opens from the row's left edge, the board's left inset,
+   as wide as the room between the panels allows. */
+:root[data-surface="board"] .newcard {
+  top: 0;
+  left: 0;
+  right: auto;
+  width: min(28rem, calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px) - 2 * var(--gap-lg)));
+}
+
+/* The box that scrolls is the open room between the panels, so its scrollbar is
+   too: as wide as the window, it ran under both panels as a grey strip, and the
+   last column could not be scrolled out from under the sessions panel. Its right
+   edge is that panel's left edge, folded or not; the padding keeps the first
+   column where the capsules and the sheets begin, the last where a sheet ends,
+   and the cards' shadows inside the box. A scrolling box clips what is past its
+   edge, so the columns no longer run on under the sessions glass. */
 :root[data-surface="board"] #board {
+  margin-left: calc(var(--host-inset-left, 394px) - var(--gap-lg));
+  margin-right: var(--host-inset-content-right, 356px);
   padding-top: var(--host-inset-top, 64px);
-  padding-left: var(--host-inset-left, 394px);
-  padding-right: var(--host-inset-right, 0px);
+  padding-left: var(--gap-lg);
+  padding-right: var(--gap-lg);
   padding-bottom: 12px;
   gap: var(--gap-lg);
+  /* Either one other than auto makes WebKit ignore ::-webkit-scrollbar, and
+     macOS 26 then draws its own thin bar, 13 px tall. */
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+/* Thin, and never hidden: it is the one sign that the board scrolls. */
+:root[data-surface="board"] #board::-webkit-scrollbar {
+  height: 8px;
 }
 
 :root[data-surface="board"] .kcol {
