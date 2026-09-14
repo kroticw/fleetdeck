@@ -58,8 +58,9 @@ type updateRig struct {
 	lockPath string
 	// old is the window running the update, as the new one sees it; retireWait
 	// bounds the new window's wait on it (zero: the real bound).
-	old        *oldWindow
-	retireWait time.Duration
+	old         *oldWindow
+	retireWait  time.Duration
+	retireEvery time.Duration
 	// done is closed by the new window's Done, said carries what it logs, and
 	// takeoverDone is closed when its Takeover.Run has returned.
 	done         chan struct{}
@@ -78,9 +79,11 @@ type fakeRegistry struct {
 type registryCall struct {
 	op, bundle string
 	steps      string // the handover file's steps at the call
+	gone       bool   // the bundle was no longer on disk at the call
 }
 
 func (f *fakeRegistry) record(op, bundle string) error {
+	_, statErr := os.Lstat(bundle)
 	data, _ := os.ReadFile(f.handover)
 	var steps []string
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
@@ -89,7 +92,7 @@ func (f *fakeRegistry) record(op, bundle string) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, registryCall{op: op, bundle: bundle, steps: strings.Join(steps, ",")})
+	f.calls = append(f.calls, registryCall{op: op, bundle: bundle, steps: strings.Join(steps, ","), gone: os.IsNotExist(statErr)})
 	return nil
 }
 
@@ -237,6 +240,7 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 		LockPath:      r.lockPath,
 		OldWindowGone: r.old.gone,
 		RetireWait:    r.retireWait,
+		RetireEvery:   r.retireEvery,
 		Done:          func() { close(r.done) },
 		Logf: func(format string, args ...any) {
 			line := fmt.Sprintf(format, args...)
@@ -599,20 +603,34 @@ func TestTheBundleSwappedOutIsRemovedOnlyOnceTheOldWindowHasQuit(t *testing.T) {
 	}
 }
 
-// An old window that does not quit within the bound leaves the bundle it runs
-// out of where it is, and the new window says so rather than removing it
-// under a running process.
-func TestTheBundleSwappedOutStaysWhenTheOldWindowDoesNotQuit(t *testing.T) {
+// An old window that does not quit within the close watch keeps the bundle it
+// runs out of for as long as it runs, and no longer: the new window does not
+// remove it under a running process, tries again, telling LaunchServices again
+// at each try, and removes it once the old window has quit, telling
+// LaunchServices once more after the bundle has gone (T-056, v0.10.1).
+func TestTheBundleSwappedOutIsRemovedWhenTheOldWindowQuitsPastTheWait(t *testing.T) {
 	r := newUpdateRig(t)
 	r.retireWait = 300 * time.Millisecond
+	r.retireEvery = 200 * time.Millisecond
 	if err := r.update("old").Run(context.Background()); err != nil {
 		t.Fatalf("update: %v (steps %v)", err, r.steps())
 	}
-	waitClosed(t, r.takeoverDone, "the new window's takeover, past its wait for the old window")
-	waitSaid(t, r.said, "stays")
+	waitSaid(t, r.said, "try 2")
 	staged := filepath.Join(StagingDir(r.canonical), BundleName)
 	if _, err := os.Stat(staged); err != nil {
 		t.Fatalf("the bundle swapped out was removed though the old window had not quit: %v", err)
+	}
+
+	r.old.quit()
+	waitClosed(t, r.takeoverDone, "the new window's takeover, once the old window quit")
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("the bundle swapped out is still at %s once the old window quit: %v", staged, err)
+	}
+	if !toldAfterRemoval(r.registry.told(), staged, r.canonical) {
+		t.Fatalf("LaunchServices was not told again once the bundle had gone: %+v", r.registry.told())
+	}
+	if _, err := os.Stat(filepath.Join(StagingDir(r.canonical), "handover")); err != nil {
+		t.Fatalf("the handover file went with the bundle: %v", err)
 	}
 }
 
