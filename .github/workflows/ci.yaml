@@ -383,16 +383,19 @@ jobs:
       # Fails on any of: a copy drifted from the tag; the new window not reporting
       # alive, panel, swapped and done in order within v0.10.0's 2436 ms; the panel at
       # the URL not being this commit's, from /Applications/fleetdeck.app; v0.10.0 not
-      # left in /Applications/.fleetdeck-update; and, once the new window says the
-      # handover is done, LaunchServices not knowing /Applications/fleetdeck.app once
-      # and nothing in .fleetdeck-update.
+      # left in /Applications/.fleetdeck-update.
       #
-      # That last one is read while this program, the old window, is still running, so
-      # the bundle swapped out is still on disk and the new window's own check-in with
-      # LaunchServices is behind it. That is a harder order than the operator's: their
-      # v0.10.0 window quits as soon as it reads done, and the new window may well
-      # remove the bundle swapped out before its window is made. The dump taken then
-      # is kept in out/lsregister-before-retire.txt.
+      # Then, while this program -- the old window -- still runs and the bundle swapped
+      # out is still on disk, it only observes LaunchServices, for three looks: what it
+      # holds, whether that bundle is on disk as each look starts, and what
+      # dev.fleetdeck.stand and dev.fleetdeck.window open. On the operator's machine that
+      # moment lasts a fraction of a second, since their v0.10.0 window quits as soon as
+      # it reads done; here this program stretches it. LaunchServices registers the
+      # staged path again about half a second after the new window tells it where the
+      # app is (run 34867562033), so nothing is required of that moment, and a window
+      # that does not tell LaunchServices again once it is ready is no longer caught by
+      # this job: TestAWindowStartedByAnUpdateTakesThePanelOverBeforeItsWindowIsMade
+      # holds it.
       - name: Update v0.10.0 to this branch, as its Update button does
         run: |
           set -eu
@@ -409,11 +412,14 @@ jobs:
             -tag-window "$RUNNER_TEMP/v0.10.0/cmd/fleetdeck-window" \
             -out "$PWD/out"
       # With the update run gone, as the old window is once its update returns: the new
-      # window must remove the bundle swapped out within 30 s, and LaunchServices must
-      # still know /Applications/fleetdeck.app once and nothing in .fleetdeck-update, or
-      # the next "open fleetdeck" may start the version just replaced. The dump is kept
-      # in out/lsregister-after-retire.txt.
-      - name: The swapped-out bundle is gone, and LaunchServices knows the installed app once
+      # window must remove the bundle swapped out within 30 s, and then, in each of ten
+      # looks, dev.fleetdeck.stand (this build) must open /Applications/fleetdeck.app,
+      # dev.fleetdeck.window (v0.10.0) must open nothing in .fleetdeck-update, and
+      # LaunchServices must hold no record of a path in .fleetdeck-update that is on
+      # disk as the look starts -- or "open fleetdeck" may start the version just
+      # replaced. A record of a path gone from disk is printed, not failed on. The first
+      # and last dump are kept in out/.
+      - name: The swapped-out bundle is gone, and nothing opens it
         run: '"$RUNNER_TEMP/updatecheck" -launchservices -canonical /Applications/fleetdeck.app -out "$PWD/out"'
       - name: Keep what the update left, and stop its windows
         if: always()

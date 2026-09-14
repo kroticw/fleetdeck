@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -186,33 +188,75 @@ func TestATimelineWithNothingInItSaysSo(t *testing.T) {
 	}
 }
 
-func TestLaunchServicesMustKnowTheInstalledAppOnceAndNothingSwappedOut(t *testing.T) {
+func TestStagedRecordsAreToldApartByWhetherTheBundleIsOnDisk(t *testing.T) {
 	const canonical = "/Applications/fleetdeck.app"
-	entry := func(path string) string {
-		return "--------------------------------------------------------------------------------\n" +
-			"bundle id:                  dev.fleetdeck.stand\n" +
-			"path:                       " + path + " (0x1f2c)\n" +
-			"name:                       fleetdeck\n"
+	dump := "path:                       /Applications/fleetdeck.app (0x1ad0)\n" +
+		"path:                       /Applications/.fleetdeck-update/fleetdeck.app (0x1ad8)\n" +
+		"path:                       /Applications/.fleetdeck-update/older/fleetdeck.app (0x1ad9)\n" +
+		"path:                       /Applications/Safari.app (0x10)\n"
+	onDisk := map[string]bool{"/Applications/.fleetdeck-update/fleetdeck.app": true}
+	existing, gone := stagedRecords(dump, canonical, func(p string) bool { return onDisk[p] })
+	if got := strings.Join(existing, ","); got != "/Applications/.fleetdeck-update/fleetdeck.app" {
+		t.Errorf("existing %q, want the staged bundle that is on disk", got)
 	}
-	other := entry("/Applications/Safari.app")
+	if got := strings.Join(gone, ","); got != "/Applications/.fleetdeck-update/older/fleetdeck.app" {
+		t.Errorf("gone %q, want the staged path that is not on disk", got)
+	}
+	if existing, gone := stagedRecords("path: /Applications/fleetdeck.app (0x1)\n", canonical, func(string) bool { return true }); len(existing)+len(gone) != 0 {
+		t.Errorf("a dump with only the installed app gave %v and %v", existing, gone)
+	}
+}
+
+func TestWhatAnIdentifierOpensIsHeldToTheInstalledApp(t *testing.T) {
+	const canonical = "/Applications/fleetdeck.app"
 	cases := map[string]struct {
-		dump string
-		ok   bool
+		got       string
+		installed bool
+		ok        bool
 	}{
-		"the installed app, once":            {other + entry(canonical), true},
-		"a copy elsewhere is not this check": {other + entry(canonical) + entry("/Users/runner/work/new/fleetdeck.app"), true},
-		"the installed app, twice":           {entry(canonical) + entry(canonical), false},
-		"not the installed app":              {other, false},
-		"the bundle swapped out":             {entry(canonical) + entry("/Applications/.fleetdeck-update/fleetdeck.app"), false},
-		"no path lines at all":               {"bundle id: x\nname: y\n", false},
+		"the build's identifier opens the installed app":        {canonical, true, true},
+		"the build's identifier opens nothing":                  {"", true, false},
+		"the build's identifier opens the bundle swapped out":   {"/Applications/.fleetdeck-update/fleetdeck.app", true, false},
+		"the old identifier opens nothing":                      {"", false, true},
+		"the old identifier opens an app outside staging":       {"/Users/runner/work/new/fleetdeck.app", false, true},
+		"the old identifier opens a path gone, outside staging": {"/private/var/folders/x/updatecheck-1/fleetdeck.app", false, true},
+		"the old identifier opens the bundle swapped out":       {"/Applications/.fleetdeck-update/fleetdeck.app", false, false},
+		"the old identifier opens a staged path gone from disk": {"/Applications/.fleetdeck-update/gone/fleetdeck.app", false, false},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := registeredOnce(c.dump, canonical)
+			err := resolvesTo(c.got, canonical, c.installed)
 			if (err == nil) != c.ok {
-				t.Fatalf("registeredOnce: %v, want ok %v", err, c.ok)
+				t.Fatalf("resolvesTo(%q): %v, want ok %v", c.got, err, c.ok)
 			}
 		})
+	}
+}
+
+func TestTheAppsOnDiskInADirectoryAreListedWithoutGoingIntoThem(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{
+		"fleetdeck.app/Contents/MacOS",
+		"fleetdeck.app/Contents/Resources/inner.app",
+		"older/fleetdeck.app/Contents",
+		"handover-dir",
+	} {
+		if err := os.MkdirAll(filepath.Join(dir, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := appsIn(dir)
+	want := []string{filepath.Join(dir, "fleetdeck.app"), filepath.Join(dir, "older", "fleetdeck.app")}
+	if len(got) != len(want) {
+		t.Fatalf("appsIn: %v, want %v", got, want)
+	}
+	for _, p := range want {
+		if !got[p] {
+			t.Errorf("appsIn: %v, missing %s", got, p)
+		}
+	}
+	if len(appsIn(filepath.Join(dir, "not-there"))) != 0 {
+		t.Error("a directory that is not there holds apps")
 	}
 }
 

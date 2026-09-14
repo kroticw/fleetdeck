@@ -28,8 +28,8 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,31 +46,60 @@ import (
 // "path:                       /Applications/fleetdeck.app (0x3168)".
 var lsPathLine = regexp.MustCompile(`(?m)^path:[ \t]+(.+?)(?:[ \t]+\(0x[0-9a-fA-F]+\))?[ \t]*$`)
 
-// registeredOnce says whether a LaunchServices dump knows the installed app at
-// canonical exactly once and nothing in its staging directory. A path left
-// there is the version just replaced, under the app's name, which the next
-// "open fleetdeck" may start.
-func registeredOnce(dump, canonical string) error {
-	matches := lsPathLine.FindAllStringSubmatch(dump, -1)
-	if len(matches) == 0 {
-		return errors.New("the LaunchServices dump names no path at all: its format may have changed")
-	}
+// appsIn is every app bundle on disk under dir, not looking inside a bundle for
+// more: what LaunchServices could open from there at the moment it is asked.
+func appsIn(dir string) map[string]bool {
+	apps := map[string]bool{}
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && path != dir && strings.HasSuffix(path, ".app") {
+			apps[path] = true
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return apps
+}
+
+// stagedRecords are the paths a LaunchServices dump holds in canonical's
+// staging directory, told apart by whether exists finds them on disk. A record
+// of a bundle still there is one LaunchServices can open -- the version just
+// replaced, under the app's name; a record of a bundle gone is its own
+// bookkeeping.
+func stagedRecords(dump, canonical string, exists func(string) bool) (existing, gone []string) {
 	staging := supervisor.StagingDir(canonical) + string(filepath.Separator)
-	installed := 0
-	var swappedOut []string
-	for _, m := range matches {
-		switch path := m[1]; {
-		case path == canonical:
-			installed++
-		case strings.HasPrefix(path, staging):
-			swappedOut = append(swappedOut, path)
+	for _, m := range lsPathLine.FindAllStringSubmatch(dump, -1) {
+		path := m[1]
+		if !strings.HasPrefix(path, staging) {
+			continue
+		}
+		if exists(path) {
+			existing = append(existing, path)
+		} else {
+			gone = append(gone, path)
 		}
 	}
-	if len(swappedOut) > 0 {
-		return fmt.Errorf("LaunchServices still knows what the update swapped out: %s", strings.Join(swappedOut, ", "))
+	return existing, gone
+}
+
+// resolvesTo says whether what a bundle identifier opens is right. The
+// identifier of the build installed at canonical must open exactly canonical.
+// Any other -- the identifier of the version replaced -- may open anything but
+// a path in the staging directory, whether its bundle is still there or not:
+// that is opening the version replaced. A path elsewhere that is gone, such as
+// the directory this program unpacked the release into, is LaunchServices'
+// bookkeeping and not a way back to that version.
+func resolvesTo(got, canonical string, installed bool) error {
+	if installed {
+		if got != canonical {
+			return fmt.Errorf("the installed build's identifier opens %q, want %s", got, canonical)
+		}
+		return nil
 	}
-	if installed != 1 {
-		return fmt.Errorf("LaunchServices knows %s %d times, want once", canonical, installed)
+	if strings.HasPrefix(got, supervisor.StagingDir(canonical)+string(filepath.Separator)) {
+		return fmt.Errorf("the replaced version's identifier opens %s, in the staging directory", got)
 	}
 	return nil
 }
