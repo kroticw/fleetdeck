@@ -82,7 +82,16 @@ static void processGone(id self, SEL _cmd, id webView) {
 // navigation delegate weakly.
 static id delegate;
 
-void fleetdeck_observe_navigation(void *window) {
+int fleetdeck_observe_navigation(void *window) {
+  // webview_go puts its WKWebView as the window's content view; a later
+  // webview_go that does not is told apart here rather than sent messages
+  // only a WKWebView answers.
+  id webView = send0((id)window, sel("contentView"));
+  Class wk = objc_getClass("WKWebView");
+  if (!webView || !wk ||
+      !((BOOL (*)(id, SEL, Class))objc_msgSend)(webView, sel("isKindOfClass:"), wk)) {
+    return 0;
+  }
   const char *name = "FleetdeckNavigationDelegate";
   Class c = objc_getClass(name);
   if (!c) {
@@ -98,6 +107,6 @@ void fleetdeck_observe_navigation(void *window) {
     objc_registerClassPair(c);
   }
   delegate = send0(send0((id)c, sel("alloc")), sel("init"));
-  id webView = send0((id)window, sel("contentView"));
   ((void (*)(id, SEL, id))objc_msgSend)(webView, sel("setNavigationDelegate:"), delegate);
+  return 1;
 }

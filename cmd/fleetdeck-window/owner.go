@@ -132,9 +132,16 @@ type screen struct {
 	// went away to an address the window does not know yet.
 	href string
 	left bool
-	// underWay: WebKit has begun the navigation asked for (navscreen.go);
-	// retryNow: the page loaded broken, and is asked for again at the next tick.
-	underWay, retryNow bool
+	// waitFrom is when the wait running now began: the ask, the document
+	// beginning, or the failure it waits out (waitFor).
+	waitFrom time.Time
+	// committed: WebKit has committed a navigation since the window last
+	// asked, so the page's word is about a document that ask brought; navSeen,
+	// that WebKit has said anything at all (navscreen.go).
+	committed, navSeen bool
+	// retrySoon: the page failed, or loaded broken, and is asked for again once
+	// navFailedRetryPause has gone by.
+	retrySoon bool
 	// answering: a panel answers, as the keeper last reported.
 	answering bool
 	// startingUp: the starting page is on screen.
@@ -250,8 +257,9 @@ func (s *screen) on(e supervisor.Event) (navigate bool, page string) {
 // says so.
 func (s *screen) ask() bool {
 	s.showingPanel, s.startingUp, s.loading, s.left = false, false, false, false
-	s.underWay, s.retryNow = false, false
+	s.committed, s.retrySoon = false, false
 	s.asked, s.askedAt = true, s.time()
+	s.waitFrom = s.askedAt
 	s.tries++
 	return true
 }
@@ -267,7 +275,7 @@ func (s *screen) time() time.Time {
 // cover is one of the window's own pages going up.
 func (s *screen) cover() {
 	s.showingPanel, s.asked, s.startingUp, s.left = false, false, false, false
-	s.underWay, s.retryNow = false, false
+	s.committed, s.retrySoon = false, false
 }
 
 // reopen is a navigation to the panel asked for by a person or by the page
@@ -285,6 +293,13 @@ func (s *screen) pageSays(state, href string) {
 		// as it goes: not what is on screen.
 		return
 	}
+	if s.navSeen && !s.committed {
+		// A word from the document the last ask cut off, taken off the UI
+		// thread's queue after that ask: WebKit has not yet committed the
+		// navigation the window asked for. Without WebKit's word at all -- a
+		// delegate that never took -- the page's word is all there is.
+		return
+	}
 	switch state {
 	case pagePanel:
 		s.showingPanel, s.asked, s.tries, s.loading, s.left = true, false, 0, false, false
@@ -292,23 +307,25 @@ func (s *screen) pageSays(state, href string) {
 			s.href = href
 		}
 	case pageLoading:
-		// The document has begun: given pageLoadingWait, and asked for again,
-		// if it has to be, where it began.
+		// The document has begun: given pageLoadingWait from here, and asked
+		// for again, if it has to be, where it began.
 		if !s.asked {
 			return
 		}
-		s.loading = true
+		if !s.loading {
+			s.loading, s.waitFrom = true, s.time()
+		}
 		if href != "" {
 			s.href = href
 		}
 		if s.left {
 			// The page the person went to: counted from here, as a first try.
-			s.left, s.askedAt, s.tries = false, s.time(), 1
+			s.left, s.askedAt, s.waitFrom, s.tries = false, s.time(), s.time(), 1
 		}
 	case pageBroken:
-		// Not the panel, and finished: waiting mends nothing, so the next tick
-		// asks for it again.
-		s.showingPanel, s.loading, s.retryNow = false, false, true
+		// Not the panel, and finished: waiting longer mends nothing, so it is
+		// asked for again after navFailedRetryPause.
+		s.showingPanel, s.loading, s.retrySoon, s.waitFrom = false, false, true, s.time()
 	case pageLeaving:
 		if s.showingPanel {
 			// Gone to an address the window does not know until the next page
@@ -318,6 +335,7 @@ func (s *screen) pageSays(state, href string) {
 			// went. Should the next page never begin, it says so.
 			s.showingPanel, s.loading = false, false
 			s.asked, s.askedAt, s.tries, s.left = true, s.time(), pageLoadTries, true
+			s.waitFrom = s.askedAt
 		}
 	}
 }
@@ -348,7 +366,7 @@ func (s *screen) handedOver() bool {
 // given follows from what WebKit and the page have said of it (waitFor).
 func (s *screen) tick() (navigate bool, page string) {
 	wait := s.waitFor()
-	if !s.asked || s.time().Sub(s.askedAt) < wait {
+	if !s.asked || s.time().Sub(s.waitFrom) < wait {
 		return false, ""
 	}
 	if s.tries < pageLoadTries {

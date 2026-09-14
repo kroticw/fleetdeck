@@ -146,7 +146,7 @@ func TestAPageThatLoadedWithoutItsStylesOrScriptsIsNotThePanel(t *testing.T) {
 	s, c := newScreen(false)
 	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 1})
 	s.pageSays(pageBroken, testURL)
-	c.t = c.t.Add(pageLoadTick)
+	c.t = c.t.Add(navFailedRetryPause)
 	if navigate, _ := s.tick(); !navigate {
 		t.Fatal("a page that loaded broken is not asked for again")
 	}

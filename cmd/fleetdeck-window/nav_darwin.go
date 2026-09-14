@@ -89,8 +89,9 @@ func fleetdeckNavigationEvent(kind C.int, id C.uintptr_t, href *C.char, code C.l
 }
 
 // observeNavigation has f told of every navigation event of the web view in
-// window, which must be the pointer webview's Window() returns.
-func observeNavigation(window unsafe.Pointer, f func(navEvent)) {
+// window, which must be the pointer webview's Window() returns. It reports
+// false, and nothing is told, when window's content view is not a WKWebView.
+func observeNavigation(window unsafe.Pointer, f func(navEvent)) bool {
 	navigationObserver = f
-	C.fleetdeck_observe_navigation(window)
+	return C.fleetdeck_observe_navigation(window) != 0
 }

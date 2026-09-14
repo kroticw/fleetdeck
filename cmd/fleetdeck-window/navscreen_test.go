@@ -5,6 +5,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
@@ -31,34 +32,115 @@ func asked(t *testing.T) (*screen, *screenClock) {
 func TestANavigationUnderWayIsNotAskedForAgain(t *testing.T) {
 	s, c := asked(t)
 	s.navSays(navEvent{kind: navStarted, href: testURL})
-	// The measured start, and then some: every tick short of navUnderWayWait.
-	for c.t.Sub(s.askedAt)+pageLoadTick < navUnderWayWait {
+	// The measured start, and then some: every tick short of navSilentWait.
+	for c.t.Sub(s.askedAt)+pageLoadTick < navSilentWait {
 		c.t = c.t.Add(pageLoadTick)
 		if navigate, html := s.tick(); navigate || html != "" {
 			t.Fatalf("%s after the navigation began, tick = %v, %q; want it left to go on", c.t.Sub(s.askedAt), navigate, html)
 		}
 	}
 	if c.t.Sub(s.askedAt) <= measuredWebContentStart {
-		t.Fatalf("navUnderWayWait %s does not cover the measured start %s", navUnderWayWait, measuredWebContentStart)
+		t.Fatalf("navSilentWait %s does not cover the measured start %s", navSilentWait, measuredWebContentStart)
 	}
 }
 
 // WebKit that says a navigation failed before any document came -- a panel
-// not listening for a moment, say -- is asked again at once, not after a wait,
-// and the failures count towards the failure page.
-func TestANavigationThatFailsBeforeItCommitsIsAskedForAgainAtOnce(t *testing.T) {
-	s, _ := asked(t)
+// not listening for a moment, say -- is asked again after navFailedRetryPause,
+// not within the same millisecond, and the failures count towards the failure
+// page.
+func TestANavigationThatFailsBeforeItCommitsIsAskedForAgainAfterAPause(t *testing.T) {
+	s, c := asked(t)
+	refused := navEvent{kind: navFailedProvisional, href: testURL, errDomain: "NSURLErrorDomain", errCode: -1004}
 	for try := 1; try < pageLoadTries; try++ {
 		s.navSays(navEvent{kind: navStarted, href: testURL})
-		navigate, html := s.navSays(navEvent{kind: navFailedProvisional, href: testURL, errDomain: "NSURLErrorDomain", errCode: -1004})
-		if !navigate || html != "" {
-			t.Fatalf("try %d failed before it committed: navSays = %v, %q; want the page asked for again", try, navigate, html)
+		if navigate, html := s.navSays(refused); navigate || html != "" {
+			t.Fatalf("try %d failed before it committed: navSays = %v, %q; want nothing yet", try, navigate, html)
+		}
+		failedAt := c.t
+		c.t = failedAt.Add(navFailedRetryPause - pageLoadTick)
+		if navigate, html := s.tick(); navigate || html != "" {
+			t.Fatalf("try %d: tick short of the pause = %v, %q; want nothing", try, navigate, html)
+		}
+		c.t = failedAt.Add(navFailedRetryPause)
+		if navigate, html := s.tick(); !navigate || html != "" {
+			t.Fatalf("try %d: tick after the pause = %v, %q; want the page asked for again", try, navigate, html)
 		}
 	}
 	s.navSays(navEvent{kind: navStarted, href: testURL})
-	navigate, html := s.navSays(navEvent{kind: navFailedProvisional, href: testURL, errDomain: "NSURLErrorDomain", errCode: -1004})
+	navigate, html := s.navSays(refused)
 	if navigate || !strings.Contains(html, "Страница панели не загрузилась") {
 		t.Fatalf("after %d failed navigations, navSays = %v, %q; want the failure page", pageLoadTries, navigate, html)
+	}
+}
+
+// The reviewer's probe: WebKit confirms the navigation 1.2 s after it was asked
+// for -- the runner took up to 1.69 s -- and the document gets pageLoadingWait
+// from there, not from the ask.
+func TestASlowlyCommittedNavigationGetsItsLoadingWaitFromTheCommit(t *testing.T) {
+	s, c := asked(t)
+	start := c.t
+	c.t = start.Add(1100 * time.Millisecond)
+	s.navSays(navEvent{kind: navStarted, href: testURL})
+	c.t = start.Add(1200 * time.Millisecond)
+	s.navSays(navEvent{kind: navCommitted, href: testURL})
+	s.pageSays(pageLoading, testURL)
+	c.t = start.Add(1300 * time.Millisecond)
+	if navigate, html := s.tick(); navigate || html != "" {
+		t.Fatalf("tick 100 ms after the commit = %v, %q; want the document left to load", navigate, html)
+	}
+	c.t = start.Add(1200*time.Millisecond + pageLoadingWait - pageLoadTick)
+	if navigate, html := s.tick(); navigate || html != "" {
+		t.Fatalf("tick short of pageLoadingWait after the commit = %v, %q; want it left to load", navigate, html)
+	}
+	c.t = start.Add(1200*time.Millisecond + pageLoadingWait)
+	if navigate, _ := s.tick(); !navigate {
+		t.Fatal("a document that never finished within pageLoadingWait of its commit is not asked for again")
+	}
+}
+
+// The page's word goes through the UI thread's queue, and the window may have
+// asked for the page again before the last document's word is taken: that word
+// is about a document the new ask has already cut off.
+func TestALateWordFromTheDocumentBeforeTheLastAskIsIgnored(t *testing.T) {
+	s, _ := asked(t)
+	s.navSays(navEvent{kind: navStarted, href: testURL})
+	s.navSays(navEvent{kind: navCommitted, href: testURL})
+	// A panel answering again: asked for anew.
+	s.on(supervisor.Event{State: supervisor.Answering, Ours: true, PID: 2})
+	s.pageSays(pagePanel, testURL)
+	if s.showingPanel || !s.asked {
+		t.Fatalf("the cut-off document's late word left showing = %v, asked = %v; want the new ask still waited on", s.showingPanel, s.asked)
+	}
+	s.navSays(navEvent{kind: navStarted, href: testURL})
+	s.navSays(navEvent{kind: navCommitted, href: testURL})
+	s.pageSays(pagePanel, testURL)
+	if !s.showingPanel || s.asked {
+		t.Fatalf("the new document's word left showing = %v, asked = %v", s.showingPanel, s.asked)
+	}
+}
+
+// Without a word from WebKit at all -- a delegate that never took -- the page's
+// own word is taken as it was before there was one.
+func TestWithoutWebKitsWordThePagesWordIsTaken(t *testing.T) {
+	s, _ := asked(t)
+	s.pageSays(pagePanel, testURL)
+	if !s.showingPanel {
+		t.Fatal("with no navigation events ever, the page saying it loaded is not taken")
+	}
+}
+
+// With a navigation delegate set, WebKit leaves a page whose web content process
+// went away blank rather than reloading it (NavigationState::NavigationClient::
+// processDidTerminate): the window asks for it again, showing or not.
+func TestAWebContentProcessGoneUnderAShownPanelAsksForItAgain(t *testing.T) {
+	s, _ := asked(t)
+	s.navSays(navEvent{kind: navCommitted, href: testURL})
+	s.pageSays(pagePanel, testURL)
+	if navigate, html := s.navSays(navEvent{kind: navProcessGone}); !navigate || html != "" {
+		t.Fatalf("the web content process went away under the shown panel: navSays = %v, %q; want the page asked for again", navigate, html)
+	}
+	if !s.asked || s.tries != 1 {
+		t.Fatalf("after asking again, asked = %v, tries = %d; want a first try", s.asked, s.tries)
 	}
 }
 
@@ -83,10 +165,14 @@ func TestAnInterruptedNavigationIsNotTakenForAFailure(t *testing.T) {
 	}
 }
 
-func TestAWebContentProcessGoneIsAskedForAgain(t *testing.T) {
-	s, _ := asked(t)
+func TestAWebContentProcessGoneIsAskedForAgainAfterAPause(t *testing.T) {
+	s, c := asked(t)
 	s.navSays(navEvent{kind: navStarted, href: testURL})
-	if navigate, _ := s.navSays(navEvent{kind: navProcessGone}); !navigate {
+	if navigate, html := s.navSays(navEvent{kind: navProcessGone}); navigate || html != "" {
+		t.Fatalf("the web content process went away under the page asked for: navSays = %v, %q; want nothing yet", navigate, html)
+	}
+	c.t = c.t.Add(navFailedRetryPause)
+	if navigate, _ := s.tick(); !navigate {
 		t.Fatal("the web content process went away under the page asked for, and it is not asked for again")
 	}
 }
@@ -114,7 +200,7 @@ func TestNavigationEventsWithNothingAskedForAreIgnored(t *testing.T) {
 	if navigate, html := s.navSays(navEvent{kind: navFailedProvisional, href: "about:blank", errDomain: "NSURLErrorDomain", errCode: -1004}); navigate || html != "" {
 		t.Fatalf("navSays with nothing asked for = %v, %q", navigate, html)
 	}
-	c.t = c.t.Add(navUnderWayWait)
+	c.t = c.t.Add(navSilentWait)
 	if navigate, html := s.tick(); navigate || html != "" {
 		t.Fatalf("tick with nothing asked for = %v, %q", navigate, html)
 	}

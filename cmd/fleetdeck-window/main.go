@@ -179,7 +179,7 @@ func main() {
 			log.Printf("fleetdeck-window: asked for the panel's page at %s (try %d)", scr.target(), scr.tries)
 			w.Navigate(scr.target())
 		case page != "":
-			// In the log by its title: a page of the window's put up over a
+			// In the log by its heading: a page of the window's put up over a
 			// web view that never draws it looks, from outside, like none.
 			log.Printf("fleetdeck-window: put up the window's page %q", pageHeading(page))
 			w.SetHtml(page)
@@ -188,7 +188,7 @@ func main() {
 	// What WKWebView says of each navigation, in the log with the time since
 	// the page was asked for: the page's own word begins only with its
 	// document, and a navigation that is slow before that says nothing.
-	observeNavigation(w.Window(), func(e navEvent) {
+	observed := observeNavigation(w.Window(), func(e navEvent) {
 		if scr.asked {
 			log.Printf("fleetdeck-window: navigation %s, %s after the page was asked for", e, time.Since(scr.askedAt).Round(time.Millisecond))
 		} else {
@@ -197,6 +197,9 @@ func main() {
 		// WebKit calls its delegate on the UI thread, where the screen lives.
 		show(scr.navSays(e))
 	})
+	if !observed {
+		log.Printf("fleetdeck-window: the window's content view is not a WKWebView: WebKit will say nothing of navigations, and the panel's page is asked for again only every %s", navSilentWait)
+	}
 	keeper := &supervisor.Keeper{
 		URL:  *url,
 		Bin:  panelBinary(exe),

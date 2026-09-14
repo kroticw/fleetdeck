@@ -30,9 +30,10 @@ import "time"
 // And each ask past the first cut off the navigation before it, on the runner
 // some of them after that navigation had committed.
 //
-// So a navigation is asked for again when WebKit says it failed, or its web
-// content process went away -- at once, since waiting mends neither -- and
-// otherwise only after a wait that covers the web content process starting.
+// So a navigation is asked for again shortly after WebKit says it failed, or
+// its web content process went away -- waiting longer mends neither -- and
+// otherwise only after a wait that covers the web content process starting:
+// from the ask until WebKit commits the navigation, and from the commit on.
 
 const (
 	// nsURLErrorCancelled is NSURLErrorCancelled: a navigation replaced by the
@@ -49,39 +50,48 @@ const (
 	// 0.20-1.69 s; 1.38 s to the policy answer on the operator's update, and
 	// 1.57 s to the navigation starting on a stand on the operator's machine.
 	measuredWebContentStart = 1693 * time.Millisecond
-	// navSilentWait is how long a navigation WebKit says nothing of is left
-	// before it is asked for again, and navUnderWayWait one WebKit has begun:
-	// the measured start, three times over. A begun navigation is WebKit's to
-	// fail -- it reports a connection that does not come -- and this bound is
-	// only for one it never reports on.
-	navSilentWait   = measuredWebContentStart * pageLoadMargin
-	navUnderWayWait = navSilentWait
+	// navSilentWait is how long a navigation WebKit has not committed is left
+	// before it is asked for again, begun or not: the measured start, three
+	// times over. A begun navigation is WebKit's to fail -- it reports a
+	// connection that does not come -- and this bound is for one it never
+	// reports on. A window whose delegate never reports puts the failure page
+	// up after pageLoadTries of these, about 15 s.
+	navSilentWait = measuredWebContentStart * pageLoadMargin
+
+	// navFailedRetryPause is how long after a navigation failed before any
+	// document came -- a panel not listening for a moment -- it is asked for
+	// again: long enough that three tries are not spent within milliseconds.
+	navFailedRetryPause = 250 * time.Millisecond
 )
 
 // navSays takes WebKit's word about a navigation. It says whether to ask for
 // the page again now, or the failure page to put up.
 func (s *screen) navSays(e navEvent) (navigate bool, page string) {
+	s.navSeen = true
+	if e.kind == navProcessGone && s.showingPanel {
+		// With a navigation delegate set, WebKit leaves the page blank rather
+		// than reload it: NavigationState::NavigationClient::processDidTerminate
+		// reports the termination handled.
+		s.reopen()
+		return true, ""
+	}
 	if !s.asked {
 		return false, ""
 	}
 	switch e.kind {
-	case navStarted:
-		if e.href != "about:blank" {
-			s.underWay = true
-		}
 	case navCommitted:
 		if e.href != "about:blank" {
-			s.underWay, s.loading = false, true
+			s.committed = true
+			if !s.loading {
+				s.loading, s.waitFrom = true, s.time()
+			}
 		}
-	case navFinished:
-		s.underWay = false
 	case navFailedProvisional, navFailed:
-		if replaced(e) {
-			return false, ""
+		if !replaced(e) {
+			return s.failed()
 		}
-		return s.again()
 	case navProcessGone:
-		return s.again()
+		return s.failed()
 	}
 	return false, ""
 }
@@ -93,28 +103,27 @@ func replaced(e navEvent) bool {
 		(e.errDomain == "WebKitErrorDomain" && e.errCode == webKitErrorFrameLoadInterrupted)
 }
 
-// again asks for the page once more, or, past pageLoadTries, puts up the
-// failure page.
-func (s *screen) again() (navigate bool, page string) {
+// failed is the page asked for failing: asked for again once
+// navFailedRetryPause has gone by, or, past pageLoadTries, the failure page.
+func (s *screen) failed() (navigate bool, page string) {
 	if s.tries < pageLoadTries {
-		return s.ask(), ""
+		s.retrySoon, s.loading, s.waitFrom = true, false, s.time()
+		return false, ""
 	}
 	target, waited := s.target(), s.time().Sub(s.askedAt)
 	s.cover()
 	return false, pageFailedPage(target, waited)
 }
 
-// waitFor is how long the page asked for is left before tick asks for it
-// again.
+// waitFor is how long the page asked for is left, from waitFrom, before tick
+// asks for it again.
 func (s *screen) waitFor() time.Duration {
 	switch {
-	case s.retryNow:
-		return 0
+	case s.retrySoon:
+		return navFailedRetryPause
 	case s.loading || s.left:
 		// A document that has begun, or a page the person went to.
 		return pageLoadingWait
-	case s.underWay:
-		return navUnderWayWait
 	default:
 		return navSilentWait
 	}
