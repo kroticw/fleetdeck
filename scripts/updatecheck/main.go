@@ -36,6 +36,7 @@ type options struct {
 	wantRevision, wantOld  string
 	tagWindow              string
 	launchServices         bool
+	out                    string
 }
 
 // What checkLaunchServices waits for, each from the moment the one before it
@@ -61,6 +62,67 @@ const (
 // window runs.
 const windowDoneLine = "fleetdeck-window: the handover is done"
 
+// waitForWindowDone waits for the new window to say the handover is done: its
+// window is made and running, and its check-in with LaunchServices, and its
+// telling LaunchServices again where the app is, are from then on.
+func waitForWindowDone(canonical string) error {
+	windowLog := filepath.Join(supervisor.StagingDir(canonical), supervisor.NewWindowLog)
+	if err := waitFor("the new window saying the handover is done", windowReadyWait, 100*time.Millisecond, func() (bool, error) {
+		data, err := os.ReadFile(windowLog)
+		return err == nil && strings.Contains(string(data), windowDoneLine), err
+	}); err != nil {
+		return err
+	}
+	log.Printf("updatecheck: the new window says the handover is done")
+	return nil
+}
+
+// launchServicesSettled looks at LaunchServices until it knows the installed
+// app once and nothing in its staging directory, within launchServicesWait. It
+// prints the fleetdeck paths of every look, and keeps the first and the last
+// dump in out as lsregister-<name>.txt and lsregister-<name>-last.txt: the
+// first says what LaunchServices held when it was first asked, whatever it
+// came to hold after.
+func launchServicesSettled(canonical, out, name string) error {
+	staging := supervisor.StagingDir(canonical)
+	keep := func(file, dump string) {
+		if out == "" {
+			return
+		}
+		if err := os.WriteFile(filepath.Join(out, file), []byte(dump), 0o644); err != nil {
+			log.Printf("updatecheck: keep %s: %v", file, err)
+		}
+	}
+	looks := 0
+	var last string
+	err := waitFor("LaunchServices knowing "+canonical+" once and nothing in "+staging, launchServicesWait, 500*time.Millisecond, func() (bool, error) {
+		data, err := exec.Command(supervisor.LsregisterPath, "-dump").Output()
+		if err != nil {
+			return false, fmt.Errorf("lsregister -dump: %w", err)
+		}
+		looks++
+		last = string(data)
+		if looks == 1 {
+			keep("lsregister-"+name+".txt", last)
+		}
+		for _, line := range fleetdeckPaths(last) {
+			log.Printf("updatecheck: LaunchServices, %s, look %d: %s", name, looks, line)
+		}
+		if err := registeredOnce(last, canonical); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	if looks > 1 {
+		keep("lsregister-"+name+"-last.txt", last)
+	}
+	if err != nil {
+		return err
+	}
+	log.Printf("updatecheck: pass: %s, LaunchServices knows %s once and nothing in %s (look %d)", name, canonical, staging, looks)
+	return nil
+}
+
 // checkLaunchServices is what an update leaves behind once the old window has
 // gone, as this program's update run has when this runs: the bundle swapped
 // out removed, and LaunchServices knowing the installed app once and nothing
@@ -69,17 +131,10 @@ func checkLaunchServices(o options) error {
 	if os.Getenv("GITHUB_ACTIONS") != "true" {
 		return errors.New("runs on a GitHub Actions runner only: it checks an app this program installed")
 	}
-	staging := supervisor.StagingDir(o.canonical)
-	windowLog := filepath.Join(staging, supervisor.NewWindowLog)
-	if err := waitFor("the new window saying the handover is done", windowReadyWait, 100*time.Millisecond, func() (bool, error) {
-		data, err := os.ReadFile(windowLog)
-		return err == nil && strings.Contains(string(data), windowDoneLine), err
-	}); err != nil {
+	if err := waitForWindowDone(o.canonical); err != nil {
 		return err
 	}
-	log.Printf("updatecheck: the new window says the handover is done")
-
-	swappedOut := filepath.Join(staging, supervisor.BundleName)
+	swappedOut := filepath.Join(supervisor.StagingDir(o.canonical), supervisor.BundleName)
 	if err := waitFor("the new window removing the bundle swapped out at "+swappedOut, retireWait, 100*time.Millisecond, func() (bool, error) {
 		_, err := os.Lstat(swappedOut)
 		return errors.Is(err, os.ErrNotExist), nil
@@ -87,29 +142,7 @@ func checkLaunchServices(o options) error {
 		return err
 	}
 	log.Printf("updatecheck: pass: the new window removed the bundle swapped out at %s", swappedOut)
-
-	var dump string
-	err := waitFor("LaunchServices knowing "+o.canonical+" once and nothing in "+staging, launchServicesWait, 500*time.Millisecond, func() (bool, error) {
-		out, err := exec.Command(supervisor.LsregisterPath, "-dump").Output()
-		if err != nil {
-			return false, fmt.Errorf("lsregister -dump: %w", err)
-		}
-		dump = string(out)
-		if err := registeredOnce(dump, o.canonical); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
-	for _, line := range strings.Split(dump, "\n") {
-		if strings.HasPrefix(line, "path:") && strings.Contains(line, "fleetdeck") {
-			log.Printf("updatecheck: LaunchServices: %s", line)
-		}
-	}
-	if err != nil {
-		return err
-	}
-	log.Printf("updatecheck: pass: LaunchServices knows %s once and nothing in %s", o.canonical, staging)
-	return nil
+	return launchServicesSettled(o.canonical, o.out, "after-retire")
 }
 
 func main() {
@@ -123,6 +156,7 @@ func main() {
 	flag.StringVar(&o.wantOld, "want-old-version", "v0.10.0", "the version the installed app reports")
 	flag.StringVar(&o.tagWindow, "tag-window", "", "cmd/fleetdeck-window of the v0.10.0 checkout this program was built in")
 	flag.BoolVar(&o.launchServices, "launchservices", false, "once an update run of this program has gone: check the bundle swapped out is removed and LaunchServices knows the installed app once")
+	flag.StringVar(&o.out, "out", "", "a directory to keep the LaunchServices dumps in")
 	flag.Parse()
 	check := run
 	if o.launchServices {
@@ -260,7 +294,17 @@ func run(o options) error {
 		return fmt.Errorf("the bundle swapped out at %s reports %q (%v), want %s", swappedOut, v, err, o.wantOld)
 	}
 	log.Printf("updatecheck: pass: %s swapped out is at %s", o.wantOld, swappedOut)
-	return nil
+
+	// While this program -- the old window -- still runs, the new window does
+	// not remove the bundle swapped out. Once its window is made, its check-in
+	// with LaunchServices is behind it, and what LaunchServices holds then, with
+	// that bundle still on disk, is what a staged path left behind looks like.
+	// A harder order than the operator's, whose v0.10.0 window quits as soon as
+	// it reads done.
+	if err := waitForWindowDone(o.canonical); err != nil {
+		return err
+	}
+	return launchServicesSettled(o.canonical, o.out, "before-retire")
 }
 
 // install unpacks the release archive and puts its app at canonical.

@@ -75,6 +75,18 @@ func registeredOnce(dump, canonical string) error {
 	return nil
 }
 
+// fleetdeckPaths are the bundle paths in a LaunchServices dump that name
+// fleetdeck, as the dump spells them: what is printed of each look.
+func fleetdeckPaths(dump string) []string {
+	var lines []string
+	for _, line := range strings.Split(dump, "\n") {
+		if lsPathLine.MatchString(line) && strings.Contains(line, "fleetdeck") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 // waitFor asks cond every poll until it says yes. Past within it says what did
 // not happen, and why the last look said no when cond gave a reason.
 func waitFor(what string, within, poll time.Duration, cond func() (bool, error)) error {

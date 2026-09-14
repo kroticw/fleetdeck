@@ -216,6 +216,20 @@ func TestLaunchServicesMustKnowTheInstalledAppOnceAndNothingSwappedOut(t *testin
 	}
 }
 
+func TestTheDumpsFleetdeckPathsArePickedOut(t *testing.T) {
+	dump := "bundle id:  dev.fleetdeck.stand\n" +
+		"path:                       /Applications/fleetdeck.app (0x1ae0)\n" +
+		"path:                       /Applications/Safari.app (0x10)\n" +
+		"path:                       /Applications/.fleetdeck-update/fleetdeck.app (0x1ae1)\n" +
+		"claimed paths: /Applications/fleetdeck.app\n"
+	got := strings.Join(fleetdeckPaths(dump), "\n")
+	want := "path:                       /Applications/fleetdeck.app (0x1ae0)\n" +
+		"path:                       /Applications/.fleetdeck-update/fleetdeck.app (0x1ae1)"
+	if got != want {
+		t.Errorf("fleetdeckPaths:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestTheHandoverStepsAreCheckedInOrder(t *testing.T) {
 	full := []string{"check", "unpack", "handover", "handover:alive", "handover:panel", "handover:swapped", "handover:done", "done"}
 	if err := handoverInOrder(full); err != nil {
