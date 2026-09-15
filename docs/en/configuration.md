@@ -80,7 +80,7 @@ Which sessions are a fleet's is not stored anywhere: a session is in a fleet whe
 
 The fleet a tab shows is in its address, `?fleet=NAME`; no parameter is the first fleet. Switching to another fleet reloads the page: the terminals of the fleet left are closed and nothing is sent to its sessions.
 
-`fleetdeck init --fleet NAME --workspace DIR` adds a fleet — see [Getting started](getting-started.md#adding-a-second-fleet). A running panel shows it after a restart.
+`fleetdeck init --fleet NAME --workspace DIR` adds a fleet — see [Getting started](getting-started.md#adding-a-second-fleet). A running panel shows a fleet added this way after a restart. A fleet made from the panel's own start page is served at once. Any other change to this file while the panel runs — a fleet added, renamed or removed by hand included — is read at the panel's next start; the panel does not watch the file.
 
 A fleetdeck from before this key existed refuses a configuration that uses `name` or `fleets` with `unknown configuration key "fleets"`: update the app before adding a second fleet, and do not go back to an older one while the configuration has one.
 
