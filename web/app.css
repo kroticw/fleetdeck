@@ -3803,6 +3803,13 @@ body.is-resizing {
      macOS 26 then draws its own thin bar, 13 px tall. */
   scrollbar-width: auto;
   scrollbar-color: auto;
+  /* Down its height the board does not scroll: its columns do. A column longer
+     than the window scrolled the whole board, and WebKit drew the classic 15 px
+     bar at the box's right edge, the sessions glass's left edge, where it read
+     as a second, darker island behind the sessions one. Stretched, every column
+     is the board's height and scrolls inside it. */
+  overflow-y: hidden;
+  align-items: stretch;
 }
 
 /* Thin, and never hidden: it is the one sign that the board scrolls. */
@@ -3816,6 +3823,33 @@ body.is-resizing {
   border: none;
   padding: 0;
   gap: var(--gap);
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+/* A column's bar is the sessions list's: thin, drawn as asked, on no track. */
+:root[data-surface="board"] .kcol::-webkit-scrollbar {
+  width: 6px;
+}
+
+:root[data-surface="board"] .kcol::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-surface="board"] .kcol::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* The stage and its count stay at the column's top while its cards pass under
+   them, on the board's own ground. */
+:root[data-surface="board"] .kcol h5 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
 }
 
 /* The zone stripe is a shadow rather than a border, so the card keeps its
