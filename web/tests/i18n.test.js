@@ -213,9 +213,9 @@ const KEYS = [
   "terminal_font_reset",
 
   // The start page (web/js/start.js) — the screen the application opens on.
-  // start_new_text above all: it is the sentence that says the panel shows the
-  // new fleet only after it is restarted, and it is read before the button, not
-  // discovered after it.
+  // start_new_text above all: it is the sentence that says what making a fleet
+  // writes and that nothing running is touched, and it is read before the
+  // button, not discovered after it.
   "start_intro",
   "start_last",
   "start_footer",

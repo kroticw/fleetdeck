@@ -16,9 +16,9 @@
 //   - it does not repeat the wizard. Making a fleet here makes a folder and
 //     writes a line in the configuration; appointing that fleet's orchestrator
 //     is the wizard's, run from the fleet's own orchestrator column.
-//   - it does not pretend a new fleet is usable at once. The panel reads the
-//     configuration when it starts and never again, so a fleet made here is
-//     served after a restart — said before the button and again after it.
+//   - it does not open the new fleet by itself. The panel serves a fleet made
+//     here as soon as it answers, and the list takes it from the next
+//     snapshot; which fleet to work in stays the operator's choice.
 
 import { subscribe as storeSubscribe, connect } from "./store.js";
 import { t } from "./i18n.js";
@@ -263,10 +263,9 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
         return;
       }
       showSteps(steps, Array.isArray(body?.steps) ? body.steps : []);
-      // The list is deliberately not grown here. This panel read the
-      // configuration when it started and will not read it again, so the new
-      // fleet is not one this page can open — an entry for it would be a row
-      // that answers 404.
+      // The list is not grown here: the panel serves a made fleet before it
+      // answers, and the entry comes with the snapshot that names it — never
+      // a row this page invented for a fleet the panel may not have taken.
       status.textContent = body?.ok === true ? t("start_made") : t("start_failed");
     } catch (err) {
       error.textContent = String(err?.message ?? err);
