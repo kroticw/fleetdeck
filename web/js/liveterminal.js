@@ -253,16 +253,28 @@ const PANE_SETTLE_MS = 150;
 // Taking the session's size back from another attacher that made it bigger
 // (see followSize and takeSizeBack). The first time waits RECLAIM_WAIT_MS, so
 // that the rest of the screen, which arrives in the same moment, is read first.
-// After each time it waits RECLAIM_EVERY_MS before it can happen again. After
-// RECLAIM_LIMIT take-backs within RECLAIM_WINDOW_MS the terminal stops taking
-// the size back until its pane changes size, comes back into view, or its stream
-// reconnects: whatever keeps making the session bigger again is not something
-// taking it back fixes, and this bounds any loop nobody foresaw to that many
-// resizes.
+// After each time it waits RECLAIM_EVERY_MS before it can happen again.
+//
+// RECLAIM_LIMIT take-backs within RECLAIM_WINDOW_MS pause it: for the first of
+// RECLAIM_PAUSES_MS, and for each next one the next time it happens again, the
+// last repeating. A session made bigger during a pause is taken back once the
+// pause is over. A pane that changes size, comes back into view, or a stream
+// that reconnects starts over, and so do RECLAIM_CALM_MS without a take-back.
+// Whatever keeps making the session bigger again that often is not something
+// taking it back fixes, so this bounds any loop nobody foresaw, while a screen
+// broken in a pause is not left broken for good: the orchestrator's column
+// seldom changes size.
+//
+// A take-back that comes while xterm is still reading what arrived waits
+// READ_WAIT_MS at a time for it to finish, because the session's size is read
+// from the whole screen (see takeSizeBack).
 const RECLAIM_WAIT_MS = 150;
 const RECLAIM_EVERY_MS = 1000;
 const RECLAIM_WINDOW_MS = 10000;
 const RECLAIM_LIMIT = 3;
+const RECLAIM_PAUSES_MS = [10000, 30000, 60000];
+const RECLAIM_CALM_MS = 120000;
+const READ_WAIT_MS = 50;
 
 // How long the size stays over the terminal after its type last changed:
 // long enough to read a line of a dozen characters, short enough to be gone
@@ -363,12 +375,15 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // Taking the size back (see takeSizeBack): the armed timer; whether the stream
   // showed a session wider, and taller, than this terminal since the session was
   // last given a size; the take-backs still inside RECLAIM_WINDOW_MS, by the
-  // timers that let them go; and whether the terminal has stopped taking back.
+  // timers that let them go; the pause the terminal is in, if any, and which of
+  // RECLAIM_PAUSES_MS the next one is; and the timer that starts that over.
   let reclaim = null;
   let wider = false;
   let taller = false;
   const recentTakes = new Set();
-  let stoodDown = false;
+  let pause = null;
+  let pauseStep = 0;
+  let calm = null;
   // The pieces of the stream handed to xterm, the last piece xterm has finished
   // reading, and the last piece that had arrived when the session was last given
   // a size (see noticeBigger).
@@ -513,10 +528,32 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     streamLowest = null;
   };
 
-  const standUp = () => {
+  const forgetTakes = () => {
     for (const take of recentTakes) timers.clearTimeout(take);
     recentTakes.clear();
-    stoodDown = false;
+  };
+
+  // standUp starts the take-backs over: no pause, the first pause next.
+  const standUp = () => {
+    forgetTakes();
+    if (pause !== null) timers.clearTimeout(pause);
+    pause = null;
+    if (calm !== null) timers.clearTimeout(calm);
+    calm = null;
+    pauseStep = 0;
+  };
+
+  // pauseTakes stops the take-backs for the next of RECLAIM_PAUSES_MS, and
+  // takes the size back once when it is over if the session was made bigger in
+  // the meantime.
+  const pauseTakes = () => {
+    forgetTakes();
+    const ms = RECLAIM_PAUSES_MS[Math.min(pauseStep, RECLAIM_PAUSES_MS.length - 1)];
+    pauseStep += 1;
+    pause = timers.setTimeout(() => {
+      pause = null;
+      if ((wider || taller) && reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
+    }, ms);
   };
 
   // widestRow is how far across the screen anything is drawn, in cells.
@@ -524,8 +561,10 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     const buffer = terminal.buffer?.active;
     if (!buffer) return 0;
     let widest = 0;
+    // The screen the session drew, not what the viewport shows: scrolled back,
+    // the viewport shows history, which can be wider than the session is now.
     for (let y = 0; y < terminal.rows; y += 1) {
-      const line = buffer.getLine(buffer.viewportY + y);
+      const line = buffer.getLine(buffer.baseY + y);
       if (!line) continue;
       for (let x = terminal.cols - 1; x >= widest; x -= 1) {
         const cell = line.getCell(x);
@@ -581,7 +620,13 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // through, so the take-back waits for the pane to settle.
   const takeSizeBack = () => {
     reclaim = null;
-    if (!(wider || taller) || !terminal || settle !== null || stoodDown) return;
+    if (!(wider || taller) || !terminal || settle !== null || pause !== null) return;
+    // Half a screen gives half the session's size: wait for xterm to read all
+    // that has arrived.
+    if (parsed < received) {
+      reclaim = timers.setTimeout(takeSizeBack, READ_WAIT_MS);
+      return;
+    }
     unfitted = !(refit && refit());
     say.standing();
     if (unfitted) return;
@@ -593,7 +638,12 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     paneSize = [terminal.cols, terminal.rows];
     const take = timers.setTimeout(() => recentTakes.delete(take), RECLAIM_WINDOW_MS);
     recentTakes.add(take);
-    if (recentTakes.size >= RECLAIM_LIMIT) stoodDown = true;
+    if (calm !== null) timers.clearTimeout(calm);
+    calm = timers.setTimeout(() => {
+      calm = null;
+      pauseStep = 0;
+    }, RECLAIM_CALM_MS);
+    if (recentTakes.size >= RECLAIM_LIMIT) pauseTakes();
     else reclaim = timers.setTimeout(takeSizeBack, RECLAIM_EVERY_MS);
   };
 
@@ -610,11 +660,13 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   //
   // A stream that has closed takes nothing back: xterm can still be reading
   // what it sent after the close, and the next attach sets the size anyway.
+  //
+  // In a pause it is kept for when the pause is over.
   const noticeBigger = (dimension) => {
-    if (!socket || stoodDown || parsed + 1 <= staleThrough) return;
+    if (!socket || parsed + 1 <= staleThrough) return;
     if (dimension === "cols") wider = true;
     else taller = true;
-    if (reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
+    if (pause === null && reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
   };
 
   // followSize watches xterm read the stream for the two ways the daemon draws a
@@ -659,13 +711,18 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       if (col > made.cols && col <= MAX_SESSION_COLS) noticeBigger("cols");
       return false;
     };
+    // A row past MAX_SESSION_ROWS, or a move by more, is an application finding
+    // the bottom and moves nothing here; a row below this terminal's own last
+    // row is not an estimate of anything a take-back would send.
     const place = (row) => {
+      if (row > MAX_SESSION_ROWS) return;
       streamRow = row - 1;
-      if (fresh()) streamLowest = Math.max(streamLowest ?? 0, streamRow);
+      if (fresh() && streamRow <= made.rows - 1) streamLowest = Math.max(streamLowest ?? 0, streamRow);
     };
     const move = (rows) => {
+      if (Math.abs(rows) > MAX_SESSION_ROWS) return;
       streamRow = Math.max(0, streamRow + rows);
-      if (fresh() && streamLowest !== null) streamLowest = Math.max(streamLowest, streamRow);
+      if (fresh() && streamLowest !== null && streamRow <= made.rows - 1) streamLowest = Math.max(streamLowest, streamRow);
     };
     parser.registerCsiHandler({ final: "G" }, (params) => column(param(params, 0)));
     parser.registerCsiHandler({ final: "`" }, (params) => column(param(params, 0)));
@@ -691,8 +748,14 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       move(rows);
       return false;
     });
+    // A full clear starts a new screen: what the old one showed of the size is
+    // forgotten, and the new one says again whether the session is bigger.
     parser.registerCsiHandler({ final: "J" }, (params) => {
-      if (params[0] === 2 && fresh()) streamLowest = null;
+      if (params[0] === 2 && fresh()) {
+        streamLowest = null;
+        wider = false;
+        taller = false;
+      }
       return false;
     });
   };
