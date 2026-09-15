@@ -250,16 +250,19 @@ function followWheel(terminal) {
 // than a blink for the terminal to follow.
 const PANE_SETTLE_MS = 150;
 
-// Taking the session's size back from another attacher that made it wider
-// (see positionWatcher). The first time waits RECLAIM_WAIT_MS, so that the rest
-// of the wide screen, which arrives in the same moment, asks for nothing more.
-// After each time it waits RECLAIM_EVERY_MS before it can happen again. Another
-// attacher that keeps widening the session costs one resize a second at most,
-// and a terminal that is narrower than every other attacher does not take
-// turns with them: a narrower screen fits in a wider terminal, so nobody wider
-// ever takes the size back from it.
+// Taking the session's size back from another attacher that made it bigger
+// (see followSize and takeSizeBack). The first time waits RECLAIM_WAIT_MS, so
+// that the rest of the screen, which arrives in the same moment, is read first.
+// After each time it waits RECLAIM_EVERY_MS before it can happen again. After
+// RECLAIM_LIMIT take-backs within RECLAIM_WINDOW_MS the terminal stops taking
+// the size back until its pane changes size, comes back into view, or its stream
+// reconnects: whatever keeps making the session bigger again is not something
+// taking it back fixes, and this bounds any loop nobody foresaw to that many
+// resizes.
 const RECLAIM_WAIT_MS = 150;
 const RECLAIM_EVERY_MS = 1000;
+const RECLAIM_WINDOW_MS = 10000;
+const RECLAIM_LIMIT = 3;
 
 // How long the size stays over the terminal after its type last changed:
 // long enough to read a line of a dozen characters, short enough to be gone
@@ -348,24 +351,36 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // opening that was waiting finds it has been superseded and opens nothing.
   let opening = 0;
   // Following the pane: the fitter from terminalFitter, the observer watching
-  // the terminal's element, the settle timer, and the size the session was last
-  // given — at attach, then by each resize message — so a pane that settles
-  // where it started sends nothing.
+  // the terminal's element, the settle timer, and the terminal's size the last
+  // time it told the session anything — at attach, then by each resize it sent —
+  // so a pane that settles where it started sends nothing. After a take-back
+  // the session can be smaller than that (see takeSizeBack), and that is not a
+  // reason to send it again.
   let refit = null;
   let paneWatcher = null;
   let settle = null;
-  let sessionSize = null;
-  // Taking the size back (see takeSizeBack): the armed timer, and whether the
-  // stream has placed something past the terminal's edge since the session was
-  // last given this terminal's size.
+  let paneSize = null;
+  // Taking the size back (see takeSizeBack): the armed timer; whether the stream
+  // showed a session wider, and taller, than this terminal since the session was
+  // last given a size; the take-backs still inside RECLAIM_WINDOW_MS, by the
+  // timers that let them go; and whether the terminal has stopped taking back.
   let reclaim = null;
-  let widened = false;
+  let wider = false;
+  let taller = false;
+  const recentTakes = new Set();
+  let stoodDown = false;
   // The pieces of the stream handed to xterm, the last piece xterm has finished
   // reading, and the last piece that had arrived when the session was last given
-  // a size (see noticeWidened).
+  // a size (see noticeBigger).
   let received = 0;
   let parsed = 0;
   let staleThrough = 0;
+  // The row the stream means the cursor to be on, whatever this terminal clamps
+  // or wraps, and the lowest such row since the screen was last cleared or the
+  // session last given a size — null while the stream has placed the cursor on
+  // no row since (see followSize and takeSizeBack).
+  let streamRow = 0;
+  let streamLowest = null;
   // The size over the terminal (see showSize): its element, the timer that
   // hides it, and whether the next time the terminal follows its pane is one
   // a change of type asked for, which is the time to show it — and whether the
@@ -425,7 +440,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     dropReclaim();
     if (typing) typing.dispose();
     typing = null;
-    sessionSize = null;
+    paneSize = null;
     if (!socket) return;
     const ws = socket;
     socket = null;
@@ -467,48 +482,124 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // open but not yet attached can: the bridge reads the token first and the
   // rest only once it has attached, so the resize lands after the attach — the
   // order the session needs.
-  //
-  // `again` sends it even when it is the size the session was last given, which
-  // is what taking the size back from another attacher needs. It says whether it
-  // sent anything. Any size sent makes the daemon repaint this terminal at that
-  // size, so a widening noticed before it is settled.
-  const tellSession = (again = false) => {
+  const tellSession = () => {
     const open = globalThis.WebSocket?.OPEN ?? 1;
     if (!terminal || !socket || socket.readyState !== open) return false;
     const cols = terminal.cols;
     const rows = terminal.rows;
-    if (!again && sessionSize && sessionSize[0] === cols && sessionSize[1] === rows) return false;
-    socket.send(JSON.stringify({ type: "resize", cols, rows }));
-    sessionSize = [cols, rows];
-    widened = false;
-    staleThrough = received;
+    if (paneSize && paneSize[0] === cols && paneSize[1] === rows) return false;
+    sendSize(cols, rows);
+    paneSize = [cols, rows];
+    // A pane of a new size starts over: a terminal that stopped taking the size
+    // back takes it back again.
+    standUp();
     return true;
   };
 
-  // takeSizeBack gives the session this terminal's size again after the stream
-  // showed another attacher made it bigger (see followSize). The daemon
+  // sendSize puts a size into the session through the open socket. Any size
+  // sent makes the daemon repaint this terminal at that size, so what the stream
+  // showed of the size before it is forgotten: a bigger session noticed, the
+  // screens still on their way (see noticeBigger), and the lowest row the stream
+  // reached.
+  const sendSize = (cols, rows) => {
+    socket.send(JSON.stringify({ type: "resize", cols, rows }));
+    forgetSize();
+  };
+
+  const forgetSize = () => {
+    wider = false;
+    taller = false;
+    staleThrough = received;
+    streamLowest = null;
+  };
+
+  const standUp = () => {
+    for (const take of recentTakes) timers.clearTimeout(take);
+    recentTakes.clear();
+    stoodDown = false;
+  };
+
+  // widestRow is how far across the screen anything is drawn, in cells.
+  const widestRow = () => {
+    const buffer = terminal.buffer?.active;
+    if (!buffer) return 0;
+    let widest = 0;
+    for (let y = 0; y < terminal.rows; y += 1) {
+      const line = buffer.getLine(buffer.viewportY + y);
+      if (!line) continue;
+      for (let x = terminal.cols - 1; x >= widest; x -= 1) {
+        const cell = line.getCell(x);
+        const chars = cell?.getChars() ?? "";
+        if (chars !== "" && chars !== " ") {
+          widest = x + Math.max(1, cell.getWidth());
+          break;
+        }
+      }
+    }
+    return widest;
+  };
+
+  // takeSizeBack gives the session a size this terminal can show after the
+  // stream showed another attacher made it bigger (see followSize). The daemon
   // repaints every attacher for the size a session has, so the repaint that
-  // follows is drawn for this terminal. Measured against CLI 2.1.269, the screen
-  // then matched a fresh attach's exactly.
+  // follows is drawn to fit this terminal. Measured against CLI 2.1.269, the
+  // screen then matched a fresh attach's exactly.
+  //
+  // It sends not this terminal's size but the smaller of it and the session's in
+  // each dimension. Where the session is bigger, that is this terminal's own. Where
+  // it is not, sending this terminal's own would make the session bigger there,
+  // and break the screen of the attacher that is smaller there — which then takes
+  // the size back, and the two take turns for ever (a 76 × 60 terminal beside a
+  // 120 × 40 one). The session's size there is read from what it drew:
+  //
+  //   - columns: how far across the screen anything is drawn (widestRow);
+  //   - rows: the lowest row the stream placed the cursor on since the screen was
+  //     cleared (streamLowest), not the screen's last drawn row, because a screen
+  //     wider than this terminal wraps and reaches rows the session does not have
+  //     (measured: 29 rows drawn for a 24-row session).
+  //
+  // Measured on a disposable session, both matched the session's size on every
+  // complete screen, at rest and while it streamed output: Claude Code draws
+  // rules across its whole width and its status on the last row. A screen that
+  // draws neither gives less than the session's size, and the session stays
+  // smaller than it needs to be until a size is set again — a pane of this
+  // terminal that changes size, another attacher attaching, resizing or leaving,
+  // or this stream reconnecting. With no estimate at all, the terminal's own
+  // size stands for it.
+  //
+  // So a take-back never makes the session bigger in either dimension and makes
+  // it smaller in the one it was bigger in. Every take-back by every attacher that
+  // does this shrinks the session, which a session cannot do for ever: between
+  // sizes set by anything else the take-backs stop, and they stop exactly when
+  // the session fits every such attacher.
   //
   // A terminal that cannot be measured, folded or in a hidden tab, takes
   // nothing: it keeps the columns it last had, which are no longer its pane's.
-  // The widening stays noticed, and followPane takes the size back once the pane
-  // can be measured again. A pane still moving is followPane's too: taking the
-  // size back in the middle of a drag would send a size the pane only passed
+  // The bigger session stays noticed, and followPane takes the size back once the
+  // pane can be measured again. A pane still moving is followPane's too: taking
+  // the size back in the middle of a drag would send a size the pane only passed
   // through, so the take-back waits for the pane to settle.
   const takeSizeBack = () => {
     reclaim = null;
-    if (!widened || !terminal || settle !== null) return;
+    if (!(wider || taller) || !terminal || settle !== null || stoodDown) return;
     unfitted = !(refit && refit());
     say.standing();
     if (unfitted) return;
-    if (tellSession(true)) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_EVERY_MS);
+    const open = globalThis.WebSocket?.OPEN ?? 1;
+    if (!socket || socket.readyState !== open) return;
+    const cols = wider ? terminal.cols : Math.min(terminal.cols, widestRow() || terminal.cols);
+    const rows = taller || streamLowest === null ? terminal.rows : Math.min(terminal.rows, streamLowest + 1);
+    sendSize(cols, rows);
+    paneSize = [terminal.cols, terminal.rows];
+    const take = timers.setTimeout(() => recentTakes.delete(take), RECLAIM_WINDOW_MS);
+    recentTakes.add(take);
+    if (recentTakes.size >= RECLAIM_LIMIT) stoodDown = true;
+    else reclaim = timers.setTimeout(takeSizeBack, RECLAIM_EVERY_MS);
   };
 
-  // noticeWidened is xterm reading a screen drawn for a session bigger than
-  // this terminal. A timer already armed, the first wait or the pause after a
-  // take-back, covers it.
+  // noticeBigger is xterm reading a screen drawn for a session wider
+  // (`dimension` "cols") or taller ("rows") than this terminal. A timer already
+  // armed, the first wait or the pause after a take-back, covers it.
   //
   // xterm reads the stream after it arrives, not as it arrives. A screen that
   // arrived before this terminal last gave the session a size is read after
@@ -516,9 +607,13 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // it. So what xterm is reading counts only if it arrived after that size was
   // sent. Otherwise every take-back would be followed by a second one, of the
   // same size, a second later.
-  const noticeWidened = () => {
-    if (parsed + 1 <= staleThrough) return;
-    widened = true;
+  //
+  // A stream that has closed takes nothing back: xterm can still be reading
+  // what it sent after the close, and the next attach sets the size anyway.
+  const noticeBigger = (dimension) => {
+    if (!socket || stoodDown || parsed + 1 <= staleThrough) return;
+    if (dimension === "cols") wider = true;
+    else taller = true;
     if (reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
   };
 
@@ -542,26 +637,62 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // move down past MAX_SESSION_ROWS is an application finding its corner. The
   // alternate screen is not tracked, so switching to it is no reason by itself.
   //
-  // These are hooks in xterm's parser rather than a look at the bytes, because
-  // where the cursor is when a move down arrives is xterm's to know. xterm also
-  // reads a sequence cut between two pieces of the stream as one. The hooks only
-  // watch: xterm still moves the cursor. `widened` covers a taller session as
-  // well as a wider one.
+  // These are hooks in xterm's parser rather than a look at the bytes: xterm
+  // reads a sequence cut between two pieces of the stream as one, and hands the
+  // hooks each sequence in order. The hooks only watch: xterm still moves the
+  // cursor.
+  //
+  // The hooks keep the row the stream means the cursor to be on: CUP, HVP and
+  // VPA place it (counted from 1 in the sequence), CUD and CUU move it. A move
+  // down is past the last row when that row is, not when xterm's own cursor is:
+  // a screen wider than this terminal wraps, and its wrapping has already moved
+  // xterm's cursor down rows the session does not have. takeSizeBack reads the
+  // lowest such row since the last full clear (ESC[2J) or the last size sent —
+  // moving up does not undo it. The daemon moves the cursor with nothing else: no
+  // line feed in any stream measured.
   const followSize = (made) => {
     const parser = made.parser;
     if (typeof parser?.registerCsiHandler !== "function") return;
     const param = (params, i) => (typeof params[i] === "number" && params[i] > 0 ? params[i] : 1);
+    const fresh = () => parsed + 1 > staleThrough;
     const column = (col) => {
-      if (col > made.cols && col <= MAX_SESSION_COLS) noticeWidened();
+      if (col > made.cols && col <= MAX_SESSION_COLS) noticeBigger("cols");
       return false;
+    };
+    const place = (row) => {
+      streamRow = row - 1;
+      if (fresh()) streamLowest = Math.max(streamLowest ?? 0, streamRow);
+    };
+    const move = (rows) => {
+      streamRow = Math.max(0, streamRow + rows);
+      if (fresh() && streamLowest !== null) streamLowest = Math.max(streamLowest, streamRow);
     };
     parser.registerCsiHandler({ final: "G" }, (params) => column(param(params, 0)));
     parser.registerCsiHandler({ final: "`" }, (params) => column(param(params, 0)));
-    parser.registerCsiHandler({ final: "H" }, (params) => column(param(params, 1)));
-    parser.registerCsiHandler({ final: "f" }, (params) => column(param(params, 1)));
+    parser.registerCsiHandler({ final: "H" }, (params) => {
+      place(param(params, 0));
+      return column(param(params, 1));
+    });
+    parser.registerCsiHandler({ final: "f" }, (params) => {
+      place(param(params, 0));
+      return column(param(params, 1));
+    });
+    parser.registerCsiHandler({ final: "d" }, (params) => {
+      place(param(params, 0));
+      return false;
+    });
+    parser.registerCsiHandler({ final: "A" }, (params) => {
+      move(-param(params, 0));
+      return false;
+    });
     parser.registerCsiHandler({ final: "B" }, (params) => {
       const rows = param(params, 0);
-      if (rows <= MAX_SESSION_ROWS && made.buffer.active.cursorY + rows > made.rows - 1) noticeWidened();
+      if (rows <= MAX_SESSION_ROWS && streamRow + rows > made.rows - 1) noticeBigger("rows");
+      move(rows);
+      return false;
+    });
+    parser.registerCsiHandler({ final: "J" }, (params) => {
+      if (params[0] === 2 && fresh()) streamLowest = null;
       return false;
     });
   };
@@ -569,7 +700,9 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   const dropReclaim = () => {
     if (reclaim !== null) timers.clearTimeout(reclaim);
     reclaim = null;
-    widened = false;
+    wider = false;
+    taller = false;
+    standUp();
   };
 
   // followPane runs once the pane has stopped moving: refit, say whether that
@@ -577,10 +710,13 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   const followPane = () => {
     settle = null;
     if (!terminal) return;
+    const wasUnfitted = unfitted;
     unfitted = !(refit && refit());
     say.standing();
+    // A pane back in view starts over, as a pane of a new size does.
+    if (wasUnfitted && !unfitted) standUp();
     if (!unfitted) tellSession();
-    if (!unfitted && widened && reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
+    if (!unfitted && (wider || taller) && reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
     if (sizeNoteDue) {
       sizeNoteDue = false;
       showSize(sizeNoteAtLimit);
@@ -742,7 +878,12 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     const ws = new Socket(socketURL(`/api/sessions/${encodeURIComponent(short)}/pty?cols=${cols}&rows=${rows}`));
     ws.binaryType = "arraybuffer";
     socket = ws;
-    sessionSize = [cols, rows];
+    paneSize = [cols, rows];
+    // The attach gives the session this size, so whatever an earlier stream
+    // sent that xterm has not read yet is from before it, and a terminal that
+    // had stopped taking the size back starts over.
+    forgetSize();
+    standUp();
     ws.onopen = () => {
       if (socket !== ws) return;
       ws.send(JSON.stringify({ type: "auth", token }));
@@ -755,7 +896,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       }
       // Appended, never redrawn: what arrived is the session's own output, in order.
       // Each piece is numbered as it arrives and marked read once xterm has read
-      // it, which is how noticeWidened tells a screen that arrived before the
+      // it, which is how noticeBigger tells a screen that arrived before the
       // last size sent from one that arrived after.
       received += 1;
       const piece = received;
@@ -768,7 +909,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       socket = null;
       writable = false;
       readOnly = false;
-      sessionSize = null;
+      paneSize = null;
       dropReclaim();
       // The terminal stays as it was: the last thing the session said is often
       // exactly what the operator needs while reading why it stopped.
