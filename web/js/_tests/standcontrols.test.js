@@ -12,11 +12,14 @@ const LIGHT = { "--bg": "#f5f6f8", "--surface": "#ffffff", "--surface-raised": "
 
 // An element: its box, its computed style, its parent, and whether it is
 // disabled. style holds only what the report reads.
-function node({ style = {}, parent = null, rect = { top: 0, left: 0, width: 80, height: 24 }, disabled } = {}) {
+function node({ style = {}, parent = null, rect = { top: 0, left: 0, width: 80, height: 24 }, disabled, placeholder } = {}) {
   return {
     parentElement: parent,
     disabled,
-    style: { backgroundColor: "rgba(0, 0, 0, 0)", color: "rgb(0, 0, 0)", borderTopLeftRadius: "0px", backdropFilter: "none", ...style },
+    placeholder: placeholder ?? "",
+    value: "",
+    style: { backgroundColor: "rgba(0, 0, 0, 0)", color: "rgb(0, 0, 0)", borderTopLeftRadius: "0px", backdropFilter: "none", opacity: "1", ...style },
+    placeholderStyle: { color: "rgb(169, 169, 169)" },
     getBoundingClientRect: () => rect,
   };
 }
@@ -32,7 +35,9 @@ function fakeWindow({ glass = "glass", grounds = DARK, elements = {}, body } = {
   };
   return {
     document: { documentElement: root, body, querySelector: (selector) => elements[selector] ?? null },
-    getComputedStyle: (el) => (el === root ? root.style : el.style),
+    // WebKit answers an input's ::placeholder with its own style (measured on
+    // macOS 27: the colour a rule gives it, rgb(169, 169, 169) with none).
+    getComputedStyle: (el, pseudo) => (el === root ? root.style : pseudo === "::placeholder" ? el.placeholderStyle : el.style),
     addEventListener: (name, fn) => (listeners[name] = fn),
     requestAnimationFrame: (fn) => frames.push(fn),
     listeners,
@@ -147,9 +152,44 @@ test("a control not on screen is not reported, and a disabled one says so", () =
   assert.equal(report.controls[0].disabled, true);
 });
 
+// Review of #185: a stand opens the form empty, and what the title shows is its
+// placeholder, not its text.
+test("an empty field says how its placeholder reads, over the same grounds as its text", () => {
+  const body = node();
+  const form = node({ parent: body, style: { backgroundColor: "rgba(255, 255, 255, 0.8)", backdropFilter: "blur(24px) saturate(160%)" } });
+  const title = node({ parent: form, placeholder: "Card title", style: { backgroundColor: "rgba(255, 255, 255, 0.52)", color: "rgb(26, 29, 34)", borderTopLeftRadius: "999px" } });
+  const zone = node({ parent: form, style: { borderTopLeftRadius: "999px" } });
+  const win = fakeWindow({ grounds: LIGHT, elements: { ".newcard": form, ".newcard-title": title, ".newcard-zone": zone }, body });
+  const byName = Object.fromEntries(controlsReport(win, "board").controls.map((c) => [c.name, c]));
+  assert.ok(byName.newCardTitle.placeholderContrast < 4.5, `WebKit's default grey on a pale field: ${byName.newCardTitle.placeholderContrast}`);
+  title.placeholderStyle = { color: "rgb(91, 100, 112)" };
+  const muted = Object.fromEntries(controlsReport(win, "board").controls.map((c) => [c.name, c])).newCardTitle;
+  assert.ok(muted.placeholderContrast >= 4.5, `--text-muted: ${muted.placeholderContrast}`);
+  assert.equal(byName.newCardZone.placeholderContrast, null, "a select has no placeholder");
+  title.value = "T-070";
+  const typed = Object.fromEntries(controlsReport(win, "board").controls.map((c) => [c.name, c])).newCardTitle;
+  assert.equal(typed.placeholderContrast, null, "a field with text shows no placeholder");
+});
+
+// Review of #185: an element's opacity, or an ancestor's, makes its fill as
+// see-through as its colour's alpha does.
+test("opacity on a control or above it is part of how see-through it is and how its text reads", () => {
+  const body = node({ style: { opacity: "0.5" } });
+  const button = node({ parent: body, style: { backgroundColor: "rgb(255, 255, 255)", color: "rgb(0, 0, 0)", opacity: "0.8", borderTopLeftRadius: "999px" } });
+  const win = fakeWindow({ grounds: DARK, elements: { ".o-name-edit": button }, body });
+  const [dimmed] = controlsReport(win, "orchestrator").controls;
+  assert.equal(dimmed.opacity, 0.4);
+  assert.equal(dimmed.fillAlpha, 0.4);
+  body.style.opacity = "1";
+  button.style.opacity = "1";
+  const [clear] = controlsReport(win, "orchestrator").controls;
+  assert.equal(clear.fillAlpha, 1);
+  assert.ok(dimmed.contrast < clear.contrast, `${dimmed.contrast} under ${clear.contrast}`);
+});
+
 test("the board and the orchestrator surface report their own controls only", () => {
   const body = node();
-  const elements = { ".o-pick-select": node({ parent: body }), ".newcard-title": node({ parent: body }) };
+  const elements = { ".o-pick-select": node({ parent: body }), ".newcard-title": node({ parent: body }), ".col-size-unfold": node({ parent: body }) };
   assert.deepEqual(controlsReport(fakeWindow({ elements, body }), "board").controls.map((c) => c.name), ["newCardTitle"]);
   assert.deepEqual(controlsReport(fakeWindow({ elements, body }), "orchestrator").controls.map((c) => c.name), ["picker"]);
 });

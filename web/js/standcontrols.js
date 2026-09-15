@@ -21,7 +21,6 @@ const CONTROLS = {
     { name: "fontSize", selector: ".term-font-reset" },
     { name: "fontBigger", selector: ".term-font-bigger" },
     { name: "fold", selector: ".col-size-fold" },
-    { name: "unfold", selector: ".col-size-unfold" },
     { name: "fleetButton", selector: ".fleet-menu-button" },
     { name: "fleetList", selector: ".fleet-menu-list" },
   ],
@@ -95,22 +94,46 @@ function fillsUnder(win, el) {
   return fills;
 }
 
-// The worst contrast el's text has: against its fills laid over the lightest
-// and over the darkest ground the theme has.
-function worstContrast(win, el) {
-  const style = win.getComputedStyle(el);
-  const text = parseColor(style.color) ?? { r: 0, g: 0, b: 0, a: 1 };
+// How opaque el is drawn: its opacity times every ancestor's.
+function opacityOf(win, el) {
+  let product = 1;
+  for (let at = el; at; at = at.parentElement) {
+    const value = parseFloat(win.getComputedStyle(at).opacity);
+    if (Number.isFinite(value)) product *= value;
+  }
+  return product;
+}
+
+// The worst contrast colour has on el: against el's fills laid over the lightest
+// and over the darkest ground the theme has. el and everything drawn in it are
+// laid with its opacity over what lies under it.
+function worstContrast(win, el, colour) {
+  const text = parseColor(colour) ?? { r: 0, g: 0, b: 0, a: 1 };
   const fills = fillsUnder(win, el);
+  const hasOwn = (parseColor(win.getComputedStyle(el).backgroundColor)?.a ?? 0) > 0;
+  const own = hasOwn ? fills[0] : null;
+  const under = hasOwn ? fills.slice(1) : fills;
+  const opacity = opacityOf(win, el);
   const rootStyle = win.getComputedStyle(win.document.documentElement);
   const grounds = GROUNDS.map((name) => parseColor(rootStyle.getPropertyValue(name))).filter((c) => c && c.a >= 1);
   grounds.sort((x, y) => luminance(x) - luminance(y));
   const bases = grounds.length ? [grounds[0], grounds[grounds.length - 1]] : [{ r: 255, g: 255, b: 255, a: 1 }];
   let worst = Infinity;
   for (const base of bases) {
-    const ground = fills.reduceRight((under, fill) => over(fill, under), base);
-    worst = Math.min(worst, contrastRatio(text.a >= 1 ? text : over(text, ground), ground));
+    const ground = under.reduceRight((below, fill) => over(fill, below), base);
+    const face = own ? over(own, ground) : ground;
+    const ink = text.a >= 1 ? text : over(text, face);
+    const seen = (c) => over({ ...c, a: opacity }, ground);
+    worst = Math.min(worst, contrastRatio(seen(ink), seen(face)));
   }
   return hundredth(worst);
+}
+
+// An empty field shows its placeholder, not its text: how that reads, or null
+// for a control with none showing.
+function placeholderContrast(win, el) {
+  if (!el.placeholder || el.value) return null;
+  return worstContrast(win, el, win.getComputedStyle(el, "::placeholder").color);
 }
 
 // controlsReport is what surface's capsules in win say of themselves. A control
@@ -124,14 +147,17 @@ export function controlsReport(win, surface) {
     if (box.width <= 0 || box.height <= 0) continue;
     const style = win.getComputedStyle(el);
     const backdrop = backdropOf(style);
+    const opacity = opacityOf(win, el);
     controls.push({
       name,
       height: tenth(box.height),
       radius: tenth(parseFloat(style.borderTopLeftRadius) || 0),
-      fillAlpha: hundredth(parseColor(style.backgroundColor)?.a ?? 0),
+      opacity: hundredth(opacity),
+      fillAlpha: hundredth((parseColor(style.backgroundColor)?.a ?? 0) * opacity),
       backdrop,
       floating: backdrop !== "none",
-      contrast: worstContrast(win, el),
+      contrast: worstContrast(win, el, style.color),
+      placeholderContrast: placeholderContrast(win, el),
       disabled: el.disabled === true,
     });
   }
