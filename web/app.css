@@ -3677,6 +3677,16 @@ body.is-resizing {
   padding: 0 20px 4px 38px;
 }
 
+/* Folded, the island is a 48 px rail with no head. The counters are the page's
+   header, a sibling of the column, and folding hides only the column's own
+   children: on v0.10.2's dev build "0 waiting for you" and "0 stalled" wrapped
+   word by word and ran off the rail's edge. The rail's marks already say who
+   waits (red) and who stalled (dashed), and a panel that knows nothing shows an
+   em dash where their count would be. */
+:root[data-surface="sessions"]:has(.col-sessions[data-folded="1"]) #header {
+  display: none;
+}
+
 :root[data-surface="sessions"] #header .counters {
   margin-left: 0;
 }
