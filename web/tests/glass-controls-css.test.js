@@ -149,6 +149,25 @@ test("the fleet menu's button keeps an accent edge while its list is open", () =
   assert.match(ruleBody(`${OPAQUE_ORCHESTRATOR} .fleet-menu-button[aria-expanded="true"]`), /box-shadow:\s*inset 0 0 0 1px var\(--accent\)/);
 });
 
+// Run 34949576998 (#185): on the orchestrator island, 313 px wide, the fleet
+// menu's list ran 224 px on from the button's left edge, past the surface's
+// right edge, and the page scrolled sideways under the island. Anchored to the
+// header's right edge and no wider than the header less its gaps, the list keeps
+// inside the surface on both sides, wherever the button sits. The anchoring was
+// the same before #185; its stand opened the list first.
+test("the fleet menu's list in the window is anchored to the header's right edge and no wider than the surface", () => {
+  assert.match(ruleBody(`${ORCHESTRATOR} #header`), /position:\s*relative/);
+  assert.match(ruleBody(`${ORCHESTRATOR} .fleet-menu`), /position:\s*static/);
+  const list = ruleBody(`${ORCHESTRATOR} .fleet-menu-list`);
+  assert.match(list, /left:\s*auto/);
+  assert.match(list, /right:\s*var\(--gap\)/);
+  assert.match(list, /min-width:\s*min\(14rem,\s*calc\(100% - 2 \* var\(--gap\)\)\)/);
+  assert.match(list, /max-width:\s*calc\(100% - 2 \* var\(--gap\)\)/);
+  // A browser tab keeps the list under its button.
+  assert.match(ruleBody(".fleet-menu"), /position:\s*relative/);
+  assert.match(ruleBody(".fleet-menu-list"), /left:\s*0/);
+});
+
 // Review of #185: a stand's form opens empty, and what it shows is the
 // placeholder, WebKit's pale default on a frosted panel.
 test("the new card title's placeholder is read like muted text", () => {

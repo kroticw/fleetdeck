@@ -4102,7 +4102,24 @@ body.is-resizing {
   background-repeat: no-repeat;
 }
 
+/* The fleet menu's list hangs from the header's right edge, not from the
+   button's left one, and is no wider than the header less its gaps: from the
+   button's edge it ran 224 px on past the island's edge, and the page scrolled
+   sideways under the island (run 34949576998). A browser tab keeps it under the
+   button. */
+:root[data-surface="orchestrator"] #header {
+  position: relative;
+}
+
+:root[data-surface="orchestrator"] .fleet-menu {
+  position: static;
+}
+
 :root[data-surface="orchestrator"] .fleet-menu-list {
+  left: auto;
+  right: var(--gap);
+  min-width: min(14rem, calc(100% - 2 * var(--gap)));
+  max-width: calc(100% - 2 * var(--gap));
   border: none;
   border-radius: var(--radius-lg);
   background-color: var(--surface-on-glass);
