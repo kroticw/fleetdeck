@@ -15,9 +15,11 @@ const SLACK_PX = 1;
 
 const tenth = (n) => Math.round(n * 10) / 10;
 
-// describe names a box the way a stylesheet would: its tag and its classes.
+// describe names a box the way a stylesheet would: its tag and its classes. An
+// SVG element's className is not a string but an animated one.
 function describe(el) {
-  const classes = String(el.className || "").trim().split(/\s+/).filter(Boolean);
+  const name = typeof el.className === "string" ? el.className : (el.className?.baseVal ?? "");
+  const classes = name.trim().split(/\s+/).filter(Boolean);
   return [el.tagName.toLowerCase(), ...classes].join(".");
 }
 

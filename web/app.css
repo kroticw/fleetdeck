@@ -3574,6 +3574,15 @@ body.is-resizing {
   min-height: calc(var(--host-titlebar-center) * 2);
 }
 
+/* Folded, the island is a 48 px strip with no head: the window's buttons sit in
+   its corner and its unfold control is all it shows. The header is the page's,
+   a sibling of the column, and folding hides only the column's own children:
+   on v0.10.2's stand the header started past the buttons, 260 px wide, and the
+   page scrolled sideways under the strip, a scroll bar at its foot. */
+:root[data-surface="orchestrator"]:has(.col-orchestrator[data-folded="1"]) #header {
+  display: none;
+}
+
 /* The terminal is the island's lower part, edge to edge, and not a rounded box
    with margins inside it. Its ground stays dense: a terminal over glass is read
    in both themes. The island's own corners round its bottom. */

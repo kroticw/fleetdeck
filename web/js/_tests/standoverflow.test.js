@@ -99,6 +99,19 @@ test("a page wider than its web view says how wide, and a box drawn wholly past 
   assert.deepEqual(report.shown, ["header"]);
 });
 
+// Run 34940253751: the fleet menu's icon was named svg.[object.SVGAnimatedString].
+test("an SVG box is named by its classes, and one with none by its tag", () => {
+  const icon = box({ tag: "svg", left: 175, right: 195 });
+  icon.className = { baseVal: "app-icon-glyph" };
+  const bare = box({ tag: "path", left: 180, right: 190 });
+  bare.className = { baseVal: "" };
+  const { win, column } = surface({ boxes: [icon, bare] });
+  assert.deepEqual(
+    overflowReport(win, column, "orchestrator").overflowing.map((o) => o.element),
+    ["svg.app-icon-glyph", "path"],
+  );
+});
+
 // Layout rounds to fractions of a pixel; a box a fraction past the edge is not
 // cut text. Neither is a box that is not drawn at all.
 test("a fraction of a pixel and a box not drawn are not overflow", () => {
