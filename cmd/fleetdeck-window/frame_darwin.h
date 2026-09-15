@@ -52,6 +52,8 @@ int fd_increase_contrast(void);
 
 // For frame_darwin_test.go, which cannot use cgo itself.
 void *fd_test_window(double width, double height);
+// The layout pass AppKit runs on window before its next frame on screen.
+void fd_test_layout_window(void *window);
 void *fd_test_panel(void *frame, int side);
 void *fd_test_root(void *frame);
 const char *fd_test_class_name(void *view);

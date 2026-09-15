@@ -226,6 +226,37 @@ func collectCapsuleLayoutResults() {
 	}
 	resizedResult = probeCapsuleLayoutForTest(m, 1000, 1440, false)
 	standResult = probeCapsuleStandForTest(m)
+	regrowResults = []capsuleRegrowProbe{probeCapsuleRegrowForTest(m, 1000, 1728), probeCapsuleRegrowForTest(m, 1728, 1000)}
+}
+
+// regrowResults: the row drawn at one width and laid out at a much wider or
+// narrower one without a redraw, as entering and leaving full screen do.
+var regrowResults []capsuleRegrowProbe
+
+// v0.10.1 on the operator's macOS, in full screen: the theme and the limits lay
+// over the sessions panel until a panel's edge was dragged. The row's content
+// view grows in the window's layout pass, after the row has placed its capsules
+// for the new width, and a capsule kept at the row's right edge by its
+// autoresizing moved by that width a second time. A live resize moves the row a
+// point or two at a time and hid it; full screen moves it by hundreds.
+func TestARowLaidOutMuchWiderOrNarrowerKeepsItsCapsulesInsideIt(t *testing.T) {
+	if len(regrowResults) == 0 {
+		t.Fatal("no rows laid out again")
+	}
+	for _, p := range regrowResults {
+		for _, problem := range overlapping(p.capsules, p.rowWidth) {
+			t.Errorf("%v: %s", p, problem)
+		}
+		right := 0.0
+		for _, c := range p.capsules {
+			if c.visible && c.x+c.w > right {
+				right = c.x + c.w
+			}
+		}
+		if math.Abs(right-p.rowWidth) > 0.01 {
+			t.Errorf("%v: the rightmost capsule ends at %v, want at the row's right edge", p, right)
+		}
+	}
 }
 
 func allLayouts() []capsuleLayoutProbe {

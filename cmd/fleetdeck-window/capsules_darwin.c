@@ -116,6 +116,13 @@ static id rowHitTest(id self, SEL _cmd, CGPoint point) {
 
 // A window resized lays the frame out again without drawing the capsules again:
 // the row follows its width here.
+//
+// The capsules are placed only here, and none follows the row by autoresizing:
+// the glass container sizes its content view later, in the window's layout
+// pass. In v0.10.1 the theme and the limits kept to the row's right edge by
+// autoresizing: laid out wider on entering full screen, they were placed for
+// the new width here, then moved by the difference again when the content view
+// caught up, and lay over the sessions panel.
 static void rowSetFrameSize(id self, SEL _cmd, CGSize size) {
   struct objc_super up = {self, rowSuper};
   ((void (*)(struct objc_super *, SEL, CGSize))objc_msgSendSuper)(&up, _cmd, size);
@@ -172,8 +179,9 @@ static id target(void) {
 
 static const double capsuleHeight = 32, capsulePadding = 12, capsuleGap = 8;
 
-// A capsule of the row's material around content, width fitted to it.
-static id capsule(const char *mode, id content, double x, long autoresizing) {
+// A capsule of the row's material around content, width fitted to it. The row
+// places it (placeCapsules); it never moves by autoresizing.
+static id capsule(const char *mode, id content, double x) {
   CGSize fit = fittingSize(content);
   CGRect frame = CGRectMake(x, 0, fit.width + 2 * capsulePadding, capsuleHeight);
   CGRect inner = CGRectMake(capsulePadding, (capsuleHeight - fit.height) / 2, fit.width, fit.height);
@@ -225,7 +233,6 @@ static id capsule(const char *mode, id content, double x, long autoresizing) {
     sendVoid1(wrapper, sel("addSubview:"), holder);
   }
   sendVoid0(holder, sel("release"));
-  sendVoidLong(wrapper, sel("setAutoresizingMask:"), autoresizing);
   return wrapper;
 }
 
@@ -425,11 +432,11 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
       0 /* select one */, target(), sel("pressed:"));
   sendVoidLong(segmentedDrawn, sel("setTag:"), tagTabs);
   sendVoidLong(segmentedDrawn, sel("setSelectedSegment:"), selectedTab);
-  tabsCapsule = capsule(mode, segmentedDrawn, 0, 4 /* max-x margin: stays left */);
+  tabsCapsule = capsule(mode, segmentedDrawn, 0);
   adopt(into, tabsCapsule);
 
   newCardDrawn = button(newCardLabel, tagNewCard);
-  newCardCapsule = capsule(mode, newCardDrawn, 0, 4);
+  newCardCapsule = capsule(mode, newCardDrawn, 0);
   adopt(into, newCardCapsule);
 
   limitsDrawn = limitCount < maxLimits ? limitCount : maxLimits;
@@ -445,7 +452,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id views[3] = {label(limitLabels[i]), level, label(limitTexts[i])};
     id content = row(views, 3);
     sendVoid0(level, sel("release"));
-    limitCapsules[i] = capsule(mode, content, 0, 1 /* min-x margin: stays right */);
+    limitCapsules[i] = capsule(mode, content, 0);
     adopt(into, limitCapsules[i]);
   }
 
@@ -457,12 +464,12 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id colour = srgb(compactRGB);
     if (colour) sendVoid1(compactLabelDrawn, sel("setTextColor:"), colour);
     sendVoid1(compactLabelDrawn, sel("setToolTip:"), nsstring(compactTooltip));
-    compactCapsule = capsule(mode, compactLabelDrawn, 0, 1);
+    compactCapsule = capsule(mode, compactLabelDrawn, 0);
     adopt(into, compactCapsule);
   }
 
   themeDrawn = button(themeLabel, tagTheme);
-  themeCapsule = capsule(mode, themeDrawn, 0, 1);
+  themeCapsule = capsule(mode, themeDrawn, 0);
   adopt(into, themeCapsule);
 
   // The theme with no room for its label: the same press, and the label -- the
@@ -470,7 +477,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   themeIconDrawn = button("◐", tagTheme);
   sendVoid1(themeIconDrawn, sel("setToolTip:"), nsstring(themeLabel));
   sendVoid1(themeIconDrawn, sel("setAccessibilityLabel:"), nsstring(themeLabel));
-  themeIconCapsule = capsule(mode, themeIconDrawn, 0, 1);
+  themeIconCapsule = capsule(mode, themeIconDrawn, 0);
   adopt(into, themeIconCapsule);
 
   rowDrawn = rowView;

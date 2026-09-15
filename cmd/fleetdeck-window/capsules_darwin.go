@@ -10,6 +10,7 @@ package main
 import "C"
 
 import (
+	"fmt"
 	"sync"
 	"unsafe"
 )
@@ -210,6 +211,44 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 
 	clearCapsules(f.capsules())
 	out.minAfterClear = float64(C.fd_test_min_content_width(f.capsules()))
+	return out
+}
+
+// capsuleRegrowProbe is the row drawn in a window from wide, both panels
+// unfolded, and the frame then laid out for a window to wide, the capsules not
+// drawn again: what entering or leaving full screen does. Read after the layout
+// pass AppKit runs before the window's next frame on screen.
+type capsuleRegrowProbe struct {
+	from, to float64
+	rowWidth float64
+	capsules []drawnCapsule
+}
+
+func (p capsuleRegrowProbe) String() string {
+	return fmt.Sprintf("drawn at %v, laid out at %v, row %v", p.from, p.to, p.rowWidth)
+}
+
+func probeCapsuleRegrowForTest(m capsuleModel, from, to float64) capsuleRegrowProbe {
+	out := capsuleRegrowProbe{from: from, to: to}
+	const height = 700
+	widths := panelWidths{Orchestrator: 368, Sessions: 348}
+	window := C.fd_test_window(C.double(from), height)
+	f := installFrame(window)
+	f.setMode(glassModeGlass)
+	f.layout(layoutFor(from, height, widths))
+	rowMin := drawCapsules(f.capsules(), m, glassModeGlass)
+	f.layout(layoutWithRow(from, height, widths, rowMin))
+	C.fd_test_layout_window(window)
+	f.layout(layoutWithRow(to, height, widths, rowMin))
+	C.fd_test_layout_window(window)
+	out.rowWidth = float64(C.fd_test_row_width())
+	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {
+		fr := C.fd_test_capsule_slot_frame(C.int(i))
+		out.capsules = append(out.capsules, drawnCapsule{
+			name: C.GoString(C.fd_test_capsule_slot_name(C.int(i))), x: float64(fr.x), w: float64(fr.w), visible: fr.visible != 0,
+		})
+	}
+	clearCapsules(f.capsules())
 	return out
 }
 

@@ -444,6 +444,11 @@ void *fd_test_window(double width, double height) {
 
 int fd_frame_board_observed(void *frame) { return ((struct fd_frame *)frame)->boardObserved; }
 
+// The layout pass AppKit runs on a window before its next frame on screen.
+void fd_test_layout_window(void *window) {
+  sendVoid0(send0((id)window, sel("contentView")), sel("layoutSubtreeIfNeeded"));
+}
+
 // A window that counts what the band asks of it instead of doing it: a real
 // drag or zoom would run AppKit's loop or animate a window never on screen.
 static int windowCalls[4];  // drag, zoom, fill, minimize
