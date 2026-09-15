@@ -47,6 +47,23 @@ func TestTheBandLeavesThePanelsTheCapsulesAndTheBoardBelowIt(t *testing.T) {
 	}
 }
 
+// The toolbar that places the window's buttons makes the title bar reach down
+// over the content, past the capsules. Routed as the window routes a click --
+// title bar first -- a press there still lands on the band, on a capsule and on
+// the orchestrator's header row.
+func TestTheTitleBarOverTheContentTakesNoClickMeantForIt(t *testing.T) {
+	r := bandResult
+	if !r.bandFromWindow {
+		t.Error("a press 30 pt from the top, over the board, routed from the window, does not land on the band")
+	}
+	if !r.capsuleFromWindow {
+		t.Error("a press on a capsule, routed from the window, does not land on the capsule")
+	}
+	if !r.headerFromWindow {
+		t.Error("a press on the orchestrator's header row, routed from the window, does not land on its surface")
+	}
+}
+
 // The page says how much of its top is empty; what is not, the page keeps.
 func TestTheBandIsOnlyAsTallAsThePageSays(t *testing.T) {
 	r := bandResult

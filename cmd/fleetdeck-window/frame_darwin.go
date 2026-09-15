@@ -81,6 +81,10 @@ func (f *frame) setDragBand(height float64) { C.fd_frame_set_drag_band(f.p, C.do
 // window's left edge; 0 when there is none (titlebar.go).
 func (f *frame) titlebarInset() float64 { return float64(C.fd_frame_titlebar_inset(f.p)) }
 
+// titlebarCenter is the line the title bar's buttons are centred on, in points
+// from the window's top edge; 0 when there are none (titlebar.go).
+func (f *frame) titlebarCenter() float64 { return float64(C.fd_frame_titlebar_center(f.p)) }
+
 func (f *frame) capsules() unsafe.Pointer { return C.fd_frame_capsules(f.p) }
 func (f *frame) board() unsafe.Pointer    { return C.fd_frame_board(f.p) }
 
@@ -136,8 +140,15 @@ type frameProbe struct {
 	windowFrameBefore                  rect
 	windowFrame, rootFrame, boardFrame rect
 	contentWidth, contentHeight        float64
-	// Where the title bar's zoom button ends once the frame is in.
-	titlebarInset float64
+	// Where the title bar's zoom button ends once the frame is in, and the
+	// line its buttons are centred on as the window says it.
+	titlebarInset, titlebarCenter float64
+	// The close button once the frame is in, and again with the panels
+	// opaque; the toolbar the frame put in: its items, its style, and whether
+	// the title bar is transparent over it.
+	closeButton, closeButtonOpaque rect
+	toolbarItems, toolbarStyle     int
+	titlebarTransparent            bool
 }
 
 func rectOf(r C.fd_rect) rect {
@@ -156,6 +167,11 @@ func probeFrameForTest(g geometry) frameProbe {
 	out.boardFrame = rectOf(C.fd_test_frame_of(f.board()))
 	out.contentWidth, out.contentHeight = windowContentSize(window)
 	out.titlebarInset = f.titlebarInset()
+	out.titlebarCenter = f.titlebarCenter()
+	out.closeButton = rectOf(C.fd_test_window_button(window, 0))
+	out.toolbarItems = int(C.fd_test_toolbar_items(window))
+	out.toolbarStyle = int(C.fd_test_toolbar_style(window))
+	out.titlebarTransparent = C.fd_test_titlebar_transparent(window) != 0
 	out.glassAvailable = C.fd_glass_available() != 0
 	f.setMode(glassModeGlass)
 	content := f.panelContent("orchestrator")
@@ -184,6 +200,7 @@ func probeFrameForTest(g geometry) frameProbe {
 	out.vibrancyMaterial = int(C.fd_test_material(vib))
 
 	f.setMode(glassModeOpaque)
+	out.closeButtonOpaque = rectOf(C.fd_test_window_button(window, 0))
 	out.opaqueClass = C.GoString(C.fd_test_class_name(C.fd_test_panel(f.p, 0)))
 	out.contentKept = f.panelContent("orchestrator") == content
 
@@ -240,6 +257,9 @@ type bandProbe struct {
 	bandWidth float64
 	// On a 64 pt band.
 	bandTakesTheTop, boardBelowTheBand, surfaceOverTheBand, capsuleOverTheBand bool
+	// The same clicks and one on the orchestrator's header row, routed as the
+	// window routes them: from above the title bar and its toolbar.
+	bandFromWindow, capsuleFromWindow, headerFromWindow bool
 	// On a 20 pt band and on none.
 	boardBelowAShortBand, bandAboveAShortBand, boardWithNoBand bool
 	// On the band the open new card form leaves.
@@ -252,11 +272,12 @@ type bandProbe struct {
 
 func probeBandForTest(g geometry) bandProbe {
 	out := bandProbe{hasFill: C.fd_test_has_fill() != 0, doubleClick: map[string][4]int{}}
-	f := installFrame(C.fd_test_counting_window(1512, 982))
+	window := C.fd_test_counting_window(1512, 982)
+	f := installFrame(window)
 	f.layout(g)
 	f.setMode(glassModeGlass)
 	// What a surface and a capsule put where the band is.
-	C.fd_test_add_subview(f.panelContent("orchestrator"), fdRect(rect{W: g.Orchestrator.W, H: g.Orchestrator.H}))
+	surface := C.fd_test_add_subview(f.panelContent("orchestrator"), fdRect(rect{W: g.Orchestrator.W, H: g.Orchestrator.H}))
 	capsule := C.fd_test_add_subview(f.capsules(), fdRect(rect{W: 40, H: capsuleHeight}))
 	within := func(x, y float64, view unsafe.Pointer) bool {
 		return C.fd_test_hit_within(f.p, C.double(x), C.double(y), view) != 0
@@ -271,6 +292,13 @@ func probeBandForTest(g geometry) bandProbe {
 	out.boardBelowTheBand = within(boardX, boardInsetTop+6, f.board())
 	out.surfaceOverTheBand = within(g.Orchestrator.X+20, g.Orchestrator.Y+20, f.panelContent("orchestrator"))
 	out.capsuleOverTheBand = within(g.Capsules.X+20, g.Capsules.Y+capsuleHeight/2, capsule)
+	fromWindow := func(x, y float64, view unsafe.Pointer) bool {
+		return C.fd_test_window_hit_within(window, C.double(x), C.double(y), view) != 0
+	}
+	out.bandFromWindow = fromWindow(boardX, 30, band)
+	out.capsuleFromWindow = fromWindow(g.Capsules.X+20, g.Capsules.Y+capsuleHeight/2, capsule)
+	// Past the zoom button, on the header row's line.
+	out.headerFromWindow = fromWindow(g.Orchestrator.X+160, panelMargin+18, surface)
 
 	C.fd_test_reset_window_calls()
 	C.fd_test_press_band(f.p, 1)

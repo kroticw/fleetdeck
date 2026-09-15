@@ -13,6 +13,8 @@ var standValues = map[string]string{
 	standWindowSizeEnv:        "1000x700",
 	standAppearanceEnv:        "dark",
 	standOpenEnv:              "newcard",
+	standFullScreenEnv:        "on",
+	standFoldEnv:              "both",
 }
 
 // A person's window: every stand variable set, and none of it read, because
@@ -34,6 +36,26 @@ func TestAWindowOffAStandReadsNoStandSetting(t *testing.T) {
 	if w, h := s.size(); w != 1440 || h != 900 {
 		t.Fatalf("off a stand the window is %dx%d, want 1440x900", w, h)
 	}
+	loaded := panelWidths{Orchestrator: 300, Sessions: 260, SessionsFolded: true}
+	if got := panelWidthsForStand(loaded, s.fold); got != loaded || !storesWidths(s.fold) {
+		t.Fatalf("off a stand the panels open %+v, widths stored %v; want %+v as the defaults say, and stored", got, storesWidths(s.fold), loaded)
+	}
+}
+
+func TestAStandToldHowToFoldOpensSoAndKeepsNoWidths(t *testing.T) {
+	loaded := panelWidths{Orchestrator: 300, Sessions: 260, SessionsFolded: true}
+	for fold, want := range map[string]panelWidths{
+		"orchestrator": {Orchestrator: 300, Sessions: 260, OrchestratorFolded: true},
+		"sessions":     {Orchestrator: 300, Sessions: 260, SessionsFolded: true},
+		"both":         {Orchestrator: 300, Sessions: 260, OrchestratorFolded: true, SessionsFolded: true},
+	} {
+		if got := panelWidthsForStand(loaded, fold); got != want {
+			t.Errorf("fold %q: the panels open %+v, want %+v", fold, got, want)
+		}
+		if storesWidths(fold) {
+			t.Errorf("fold %q: the window stores its widths and folds", fold)
+		}
+	}
 }
 
 func TestAStandSetsTheDeadlineTheSizeAndTheAppearance(t *testing.T) {
@@ -44,7 +66,7 @@ func TestAStandSetsTheDeadlineTheSizeAndTheAppearance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.startTimeout() != 10*time.Second || s.appearance != "dark" || s.open != "newcard" {
+	if s.startTimeout() != 10*time.Second || s.appearance != "dark" || s.open != "newcard" || !s.fullScreen || s.fold != "both" {
 		t.Fatalf("settings %+v", s)
 	}
 	if w, h := s.size(); w != 1000 || h != 700 {
@@ -58,6 +80,8 @@ func TestAStandSettingThatMakesNoSenseIsRefusedByName(t *testing.T) {
 		standWindowSizeEnv:        "300x200",
 		standAppearanceEnv:        "auto",
 		standOpenEnv:              "card",
+		standFullScreenEnv:        "yes",
+		standFoldEnv:              "left",
 	} {
 		_, err := standSettingsFrom("/tmp/stand/no-daemon.sock", func(n string) (string, bool) {
 			if n == name {

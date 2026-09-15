@@ -32,6 +32,10 @@ func (f *fakeNatives) reloadBoard()                 { f.calls = append(f.calls, 
 func (f *fakeNatives) setDragBand(h float64) {
 	f.calls = append(f.calls, fmt.Sprintf("drag band %v", h))
 }
+func (f *fakeNatives) boardInsets() { f.calls = append(f.calls, "board insets") }
+func (f *fakeNatives) showToolbar(visible bool) {
+	f.calls = append(f.calls, fmt.Sprintf("toolbar %v", visible))
+}
 
 func TestCreatingSurfacesMakesBothColumnsOnTheSameAddress(t *testing.T) {
 	f := &fakeNatives{}
@@ -62,10 +66,12 @@ func TestEffectsRunInTheOrderTheControllerGaveThem(t *testing.T) {
 		focusSurface{Surface: "board"},
 		reloadBoard{},
 		setDragBand{Height: 40},
+		sendBoardInsets{},
 	})
 	want := []string{
 		"destroy", "navigate u", "external https://x", "reload sessions", "page <h1>x</h1>", "appearance dark",
 		"geometry", "save", "capsules", "frame opaque", "send board insets", "focus board", "reload board", "drag band 40",
+		"board insets",
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("calls = %v", f.calls)
