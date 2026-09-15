@@ -67,6 +67,19 @@ fd_rect fd_test_window_button(void *window, int kind);
 long fd_test_toolbar_items(void *window);
 long fd_test_toolbar_style(void *window);
 int fd_test_titlebar_transparent(void *window);
+// How much of the window's top its title bar and toolbar keep from the content.
+double fd_test_content_layout_top(void *window);
+// A view or a window that may lie over the window's content, from the window's
+// top left: its class, where it is, whether it is shown, and its alpha.
+typedef struct {
+  char kind[64];
+  fd_rect r;
+  int visible;
+  double alpha;
+} fd_overlay;
+// The window's title bar container and the app's other shown windows over the
+// window, at most n; the count.
+int fd_test_overlays(void *window, fd_overlay *out, int n);
 // Whether a click at (x, y) from the window's top left, routed as the window
 // routes one, title bar included, lands on view or inside it.
 int fd_test_window_hit_within(void *window, double x, double y, void *view);

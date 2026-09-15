@@ -5,8 +5,8 @@ package main
 import "testing"
 
 // A stand asked for full screen (standFullScreenEnv) enters it once both side
-// surfaces have loaded, and leaves it once it is in: one trip, whatever the
-// pages do after.
+// surfaces have loaded, leaves it once it is in, and goes in and out a second
+// time; then no more, whatever the pages do after.
 
 func TestAStandNotAskedForFullScreenNeverEntersIt(t *testing.T) {
 	s := newStandFullScreen(false)
@@ -34,24 +34,29 @@ func TestAStandEntersFullScreenOnceBothSurfacesHaveLoaded(t *testing.T) {
 	}
 }
 
-func TestAStandLeavesFullScreenOnceItIsInAndGoesNoMoreTrips(t *testing.T) {
+func TestAStandGoesInAndOutOfFullScreenTwiceAndNoMore(t *testing.T) {
 	s := newStandFullScreen(true)
 	s.surfaceLoaded("orchestrator")
 	s.surfaceLoaded("sessions")
 	if _, ok := s.changed(false); ok {
-		t.Fatal("a resize before entering full screen asked to leave it")
+		t.Fatal("a resize before entering full screen asked for a change")
 	}
-	after, ok := s.changed(true)
-	if !ok || after != standFullScreenLeaveAfter {
-		t.Fatalf("in full screen: leave after %v, %v; want after %v", after, ok, standFullScreenLeaveAfter)
+	for trip := 1; trip <= standFullScreenTrips; trip++ {
+		after, ok := s.changed(true)
+		if !ok || after != standFullScreenLeaveAfter {
+			t.Fatalf("trip %d, in full screen: leave after %v, %v; want after %v", trip, after, ok, standFullScreenLeaveAfter)
+		}
+		if _, ok := s.changed(true); ok {
+			t.Fatalf("trip %d: full screen said again asked for a change", trip)
+		}
+		after, ok = s.changed(false)
+		if last := trip == standFullScreenTrips; ok == last || (!last && after != standFullScreenEnterAfter) {
+			t.Fatalf("trip %d, out of full screen: enter again after %v, %v; want another trip only before the last", trip, after, ok)
+		}
 	}
-	if _, ok := s.changed(true); ok {
-		t.Fatal("full screen said again asked to leave a second time")
-	}
-	s.changed(false)
 	s.surfaceLoaded("orchestrator")
 	s.surfaceLoaded("sessions")
 	if _, ok := s.changed(true); ok {
-		t.Fatal("after the trip the stand went on another")
+		t.Fatal("after its trips the stand went on another")
 	}
 }

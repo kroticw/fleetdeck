@@ -5,18 +5,21 @@
 // measured of themselves (web/js/standheader.js, web/js/standreport.js):
 //
 //   - every capsule is inside the row and over neither panel, out of full
-//     screen, in it, and after it;
+//     screen, in it, and after each time it left;
 //   - the board meets both panels as they are laid out, and its last column
 //     comes out from under the sessions panel, in each of those;
 //   - the selected tab is a capsule, where the system has border shapes;
 //   - the window's buttons sit concentric in the orchestrator panel's corner,
-//     and the header's row and its brand are centred on their line.
+//     before full screen and after each time it left, and the header's row and
+//     its brand are centred on their line;
+//   - in full screen nothing of the title bar keeps the window's top or lies
+//     shown over the capsule row.
 //
-// The pages' own verdicts -- the board's lastColumnClear, worked out from the
-// insets the page was sent -- are not read: in v0.10.1 they said true while the
-// insets were stale. The board is held to the native panels' frames.
+// The board's own verdict on its last column -- worked out from the insets the
+// page was sent -- is not read: in v0.10.1 it said true while the insets were
+// stale. The board is held to the native panels' frames.
 //
-// Usage: standcheck -log <window.log> [-fullscreen]
+// Usage: standcheck -log <window.log> [-fullscreen-trips <n>]
 package main
 
 import (
@@ -52,6 +55,8 @@ const (
 	// A capsule's top row starts about half its height in, a rounded
 	// rectangle's a fifth.
 	minCapsuleTopInset = 0.35
+	// An overlay this transparent shows nothing.
+	clearAlpha = 0.01
 )
 
 type box struct {
@@ -64,6 +69,15 @@ type box struct {
 type capsule struct {
 	Name string `json:"name"`
 	box
+}
+
+// overlay is what may lie over the window's content at its top: the title bar's
+// container, or another window of the app over this one.
+type overlay struct {
+	Kind string `json:"kind"`
+	box
+	Visible bool    `json:"visible"`
+	Alpha   float64 `json:"alpha"`
 }
 
 // frameReport is the window's word on its frame, in points from the window's
@@ -81,6 +95,10 @@ type frameReport struct {
 	// its top row, as a share of its height.
 	SegmentBorderShape int     `json:"segmentBorderShape"`
 	SelectedTopInset   float64 `json:"selectedTopInset"`
+	// ContentLayoutTop is how much of the window's top its title bar and
+	// toolbar keep from the content; Overlays what lies over it there.
+	ContentLayoutTop float64   `json:"contentLayoutTop"`
+	Overlays         []overlay `json:"overlays"`
 }
 
 // headerReport is the orchestrator surface's word on its header, in points
@@ -114,16 +132,23 @@ type boardAfter struct {
 	boardReport
 }
 
+// run is the frames from index from to index to, all in full screen or all out
+// of it.
+type run struct {
+	from, to   int
+	fullScreen bool
+}
+
 func main() {
 	logPath := flag.String("log", "", "the window's log")
-	fullScreen := flag.Bool("fullscreen", false, "the stand asked the window for full screen (FLEETDECK_STAND_FULLSCREEN)")
+	trips := flag.Int("fullscreen-trips", 0, "how many times the stand took the window into full screen and out (FLEETDECK_STAND_FULLSCREEN)")
 	flag.Parse()
 	raw, err := os.ReadFile(*logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "standcheck: %v\n", err)
 		os.Exit(2)
 	}
-	problems := check(string(raw), *fullScreen)
+	problems := check(string(raw), *trips)
 	for _, p := range problems {
 		fmt.Println("frame: " + p)
 	}
@@ -134,46 +159,49 @@ func main() {
 }
 
 // check is what is wrong with the frame the log describes; nothing when the
-// frame keeps every property. fullScreen: the stand asked for full screen.
-func check(log string, fullScreen bool) []string {
+// frame keeps every property. trips: how many times the stand took the window
+// into full screen and out.
+func check(log string, trips int) []string {
 	l, problems := parse(log)
-	last := len(l.frames) - 1
-	if last < 0 {
+	if len(l.frames) == 0 {
 		return append(problems, "no frame report in the window's log: the window never measured its frame")
 	}
-	firstIn := -1
-	for i, f := range l.frames {
-		if f.FullScreen {
-			firstIn = i
-			break
+	runs := runsOf(l.frames)
+	if runs[0].fullScreen {
+		problems = append(problems, "no frame report out of full screen before it")
+	}
+	in, out := 0, 0
+	for i, r := range runs {
+		f := l.frames[r.to]
+		if r.fullScreen {
+			in++
+			when := fmt.Sprintf("in full screen %d: ", in)
+			problems = append(problems, capsuleProblems(when, f)...)
+			problems = append(problems, l.boardProblems(when, r)...)
+			problems = append(problems, coverProblems(when, f)...)
+			continue
+		}
+		out++
+		when := ""
+		if i > 0 {
+			when = fmt.Sprintf("after full screen %d: ", in)
+		}
+		problems = append(problems, capsuleProblems(when, f)...)
+		problems = append(problems, l.boardProblems(when, r)...)
+		problems = append(problems, buttonProblems(when, f)...)
+		if i == 0 {
+			problems = append(problems, tabProblems(f)...)
+			problems = append(problems, headerProblems(f, l.headers)...)
 		}
 	}
-	outTo := last
-	if fullScreen && firstIn >= 0 {
-		outTo = firstIn - 1
+	switch {
+	case trips == 0:
+	case in == 0:
+		problems = append(problems, "the window was asked for full screen and never entered full screen")
+	case in < trips:
+		problems = append(problems, fmt.Sprintf("the window was asked into full screen %d times and entered it %d", trips, in))
 	}
-	if i, ok := l.lastFrame(0, outTo, false); ok {
-		f := l.frames[i]
-		problems = append(problems, capsuleProblems("", f)...)
-		problems = append(problems, tabProblems(f)...)
-		problems = append(problems, buttonProblems(f, l.headers)...)
-		problems = append(problems, l.boardProblems("", 0, outTo, false)...)
-	} else {
-		problems = append(problems, "no frame report out of full screen")
-	}
-	if !fullScreen {
-		return problems
-	}
-	if firstIn < 0 {
-		return append(problems, "the window was asked for full screen and never entered full screen")
-	}
-	in, _ := l.lastFrame(firstIn, last, true)
-	problems = append(problems, capsuleProblems("in full screen: ", l.frames[in])...)
-	problems = append(problems, l.boardProblems("in full screen: ", firstIn, last, true)...)
-	if after, ok := l.lastFrame(firstIn, last, false); ok {
-		problems = append(problems, capsuleProblems("after full screen: ", l.frames[after])...)
-		problems = append(problems, l.boardProblems("after full screen: ", firstIn, last, false)...)
-	} else {
+	if trips > 0 && runs[len(runs)-1].fullScreen {
 		problems = append(problems, "the window entered full screen and never left full screen")
 	}
 	return problems
@@ -211,15 +239,17 @@ func parse(log string) (standLog, []string) {
 	return l, problems
 }
 
-// lastFrame is the last frame from index from to index to whose full screen is
-// as asked.
-func (l standLog) lastFrame(from, to int, fullScreen bool) (int, bool) {
-	for i := to; i >= from && i >= 0; i-- {
-		if l.frames[i].FullScreen == fullScreen {
-			return i, true
+// runsOf splits frames into runs in full screen and out of it, in order.
+func runsOf(frames []frameReport) []run {
+	var runs []run
+	for i, f := range frames {
+		if len(runs) > 0 && runs[len(runs)-1].fullScreen == f.FullScreen {
+			runs[len(runs)-1].to = i
+			continue
 		}
+		runs = append(runs, run{from: i, to: i, fullScreen: f.FullScreen})
 	}
-	return 0, false
+	return runs
 }
 
 func (b box) span() string { return fmt.Sprintf("%v..%v", b.X, b.X+b.W) }
@@ -246,17 +276,28 @@ func capsuleProblems(when string, f frameReport) []string {
 	return out
 }
 
-// boardProblems holds the board's last report among the frames from index from
-// to index to whose full screen is as asked to the last of those frames.
-func (l standLog) boardProblems(when string, from, to int, fullScreen bool) []string {
-	i, ok := l.lastFrame(from, to, fullScreen)
-	if !ok {
-		return nil
+// coverProblems is what of the title bar keeps the window's top or lies shown
+// over the capsule row, in full screen.
+func coverProblems(when string, f frameReport) []string {
+	var out []string
+	if f.ContentLayoutTop > lineSlack {
+		out = append(out, fmt.Sprintf("%sthe top %v pt of the window is kept by its title bar", when, f.ContentLayoutTop))
 	}
-	f := l.frames[i]
+	for _, o := range f.Overlays {
+		if o.Visible && o.Alpha > clearAlpha && overlaps(o.box, f.Row) {
+			out = append(out, fmt.Sprintf("%s%s at y %v..%v is shown over the capsule row at y %v..%v", when, o.Kind, o.Y, o.Y+o.H, f.Row.Y, f.Row.Y+f.Row.H))
+		}
+	}
+	return out
+}
+
+// boardProblems holds the board's last report among the frames of r to r's last
+// frame.
+func (l standLog) boardProblems(when string, r run) []string {
+	f := l.frames[r.to]
 	for k := len(l.boards) - 1; k >= 0; k-- {
 		b := l.boards[k]
-		if b.frame < from || b.frame > to || l.frames[b.frame].FullScreen != fullScreen {
+		if b.frame < r.from || b.frame > r.to {
 			continue
 		}
 		var out []string
@@ -289,15 +330,27 @@ func tabProblems(f frameReport) []string {
 	return out
 }
 
-func buttonProblems(f frameReport, headers []headerReport) []string {
-	if f.Close.W == 0 {
-		return []string{"no close button measured out of full screen"}
+// closeCentre is where the close button is centred, and whether one was measured.
+func closeCentre(f frameReport) (float64, float64, bool) {
+	return f.Close.X + f.Close.W/2, f.Close.Y + f.Close.H/2, f.Close.W != 0
+}
+
+func buttonProblems(when string, f frameReport) []string {
+	cx, cy, ok := closeCentre(f)
+	if !ok {
+		return []string{when + "no close button measured out of full screen"}
 	}
-	var out []string
-	cx, cy := f.Close.X+f.Close.W/2, f.Close.Y+f.Close.H/2
 	wx, wy := f.Orchestrator.X+panelRadius, f.Orchestrator.Y+panelRadius
 	if math.Abs(cx-wx) > lineSlack || math.Abs(cy-wy) > lineSlack {
-		out = append(out, fmt.Sprintf("the close button is centred at (%v, %v), want (%v, %v), concentric in the orchestrator panel's corner", cx, cy, wx, wy))
+		return []string{fmt.Sprintf("%sthe close button is centred at (%v, %v), want (%v, %v), concentric in the orchestrator panel's corner", when, cx, cy, wx, wy)}
+	}
+	return nil
+}
+
+func headerProblems(f frameReport, headers []headerReport) []string {
+	_, cy, ok := closeCentre(f)
+	if !ok {
+		return nil
 	}
 	var header *headerReport
 	for i := len(headers) - 1; i >= 0; i-- {
@@ -307,8 +360,9 @@ func buttonProblems(f frameReport, headers []headerReport) []string {
 		}
 	}
 	if header == nil {
-		return append(out, "no header report from the orchestrator surface out of full screen")
+		return []string{"no header report from the orchestrator surface out of full screen"}
 	}
+	var out []string
 	if row := f.Orchestrator.Y + header.HeaderRowCenter; math.Abs(row-cy) > lineSlack {
 		out = append(out, fmt.Sprintf("the orchestrator's header row is centred %v pt down, the window's buttons %v", row, cy))
 	}

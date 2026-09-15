@@ -14,17 +14,22 @@ const (
 	// take the frame in it before the window comes back.
 	standFullScreenEnterAfter = 6 * time.Second
 	standFullScreenLeaveAfter = 12 * time.Second
+	// Twice: coming out of full screen must leave the frame as it was, and
+	// going in again must not bring back what the first time did not show.
+	standFullScreenTrips = 2
 )
 
-// standFullScreen is a stand's one trip into full screen and out of it: v0.10.1's
+// standFullScreen is a stand's trips into full screen and out of it: v0.10.1's
 // capsules lay over the sessions panel in full screen, which no stand had
-// entered. The window enters it once both side surfaces have loaded, and
-// leaves it once it is in.
+// entered. The window enters it once both side surfaces have loaded, leaves it
+// once it is in, and goes in again until it has made its trips.
 type standFullScreen struct {
 	on     bool
 	loaded map[string]bool
-	// asked: entering was asked for; in: the window went in; done: it came out.
-	asked, in, done bool
+	// asked: the first entry was asked for; in: the window is in full screen;
+	// trips: how many times it came out.
+	asked, in bool
+	trips     int
 }
 
 func newStandFullScreen(on bool) *standFullScreen {
@@ -48,9 +53,10 @@ func (s *standFullScreen) surfaceLoaded(surface string) (time.Duration, bool) {
 }
 
 // changed is the window's full screen as it now is: once it is in, how long
-// after the window is to leave it.
+// after the window is to leave it; once it is out with trips to go, how long
+// after it is to go in again.
 func (s *standFullScreen) changed(fullscreen bool) (time.Duration, bool) {
-	if !s.on || !s.asked || s.done {
+	if !s.on || !s.asked || s.trips >= standFullScreenTrips {
 		return 0, false
 	}
 	switch {
@@ -58,7 +64,11 @@ func (s *standFullScreen) changed(fullscreen bool) (time.Duration, bool) {
 		s.in = true
 		return standFullScreenLeaveAfter, true
 	case !fullscreen && s.in:
-		s.done = true
+		s.in = false
+		s.trips++
+		if s.trips < standFullScreenTrips {
+			return standFullScreenEnterAfter, true
+		}
 	}
 	return 0, false
 }

@@ -11,7 +11,11 @@ import (
 // scripts/standcheck reads these words and these fields from the window's log;
 // its own tests write lines with the same ones.
 func TestAFrameReportLineIsWhatTheStandsCheckerReads(t *testing.T) {
-	line := frameReportLine(standFrameReport{Glass: "glass", Capsules: []measuredCapsule{{Name: "tabs", measuredBox: measuredBox{X: 278, Y: 10, W: 123, H: 32}}}})
+	line := frameReportLine(standFrameReport{
+		Glass:    "glass",
+		Capsules: []measuredCapsule{{Name: "tabs", measuredBox: measuredBox{X: 278, Y: 10, W: 123, H: 32}}},
+		Overlays: []measuredOverlay{{Kind: "NSTitlebarContainerView", measuredBox: measuredBox{W: 1000, H: 66}, Visible: true, Alpha: 1}},
+	})
 	const words = "fleetdeck-window: the frame measures "
 	if !strings.HasPrefix(line, words) {
 		t.Fatalf("line %q, want it to start %q", line, words)
@@ -20,8 +24,15 @@ func TestAFrameReportLineIsWhatTheStandsCheckerReads(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, words)), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := keys(fields), []string{"capsules", "close", "fullScreen", "glass", "orchestrator", "row", "segmentBorderShape", "selectedTopInset", "sessions"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "fullScreen", "glass", "orchestrator", "overlays", "row", "segmentBorderShape", "selectedTopInset", "sessions"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields %v, want %v", got, want)
+	}
+	var overlays []map[string]json.RawMessage
+	if err := json.Unmarshal(fields["overlays"], &overlays); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := keys(overlays[0]), []string{"alpha", "h", "kind", "visible", "w", "x", "y"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("an overlay's fields %v, want %v", got, want)
 	}
 	var capsules []map[string]json.RawMessage
 	if err := json.Unmarshal(fields["capsules"], &capsules); err != nil {
@@ -58,5 +69,17 @@ func TestTheFrameMeasuresWhereTheGeometryPutItsPanelsAndCapsules(t *testing.T) {
 	}
 	if m.Glass != "glass" || m.FullScreen {
 		t.Errorf("measured glass %q, full screen %v; want glass out of full screen", m.Glass, m.FullScreen)
+	}
+	// Out of full screen the title bar and its toolbar keep the window's top
+	// from the content, transparent over it: the measure sees them.
+	if m.ContentLayoutTop < 28 {
+		t.Errorf("the title bar keeps %v pt of the window's top, want at least a title bar's 28", m.ContentLayoutTop)
+	}
+	container := false
+	for _, o := range m.Overlays {
+		container = container || (strings.Contains(o.Kind, "Titlebar") && o.Y == 0 && o.H >= 28)
+	}
+	if !container {
+		t.Errorf("overlays %+v, want the title bar's container at the window's top", m.Overlays)
 	}
 }

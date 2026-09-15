@@ -294,7 +294,11 @@ func (g *glassWindow) windowChanged(kind string) {
 		g.run(g.ctl.titlebarButtons(g.frame.titlebarInset(), g.frame.titlebarCenter()))
 		if kind == "fullscreen" {
 			if after, ok := g.standFS.changed(fullscreen); ok {
-				log.Printf("fleetdeck-window: on this stand the window leaves full screen in %v", after)
+				verb := "leaves"
+				if !fullscreen {
+					verb = "enters again"
+				}
+				log.Printf("fleetdeck-window: on this stand the window %s full screen in %v", verb, after)
 				g.toggleFullScreenAfter(after)
 			}
 		}

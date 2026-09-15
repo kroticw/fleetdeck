@@ -502,6 +502,57 @@ long fd_test_toolbar_items(void *window) {
 long fd_test_toolbar_style(void *window) { return sendLong0((id)window, sel("toolbarStyle")); }
 int fd_test_titlebar_transparent(void *window) { return sendBool0((id)window, sel("titlebarAppearsTransparent")) != 0; }
 
+// How much of the window's top, in points, its title bar and toolbar keep from
+// the content: AppKit's content layout rect, which ends below them.
+double fd_test_content_layout_top(void *window) {
+  CGRect layout = sendRect0((id)window, sel("contentLayoutRect"));
+  return sendRect0((id)window, sel("frame")).size.height - (layout.origin.y + layout.size.height);
+}
+
+// What may lie over the window's content at its top, from the window's top left:
+// its title bar's container, and every other shown window of the app over it --
+// in full screen AppKit can move the title bar and the toolbar into a window of
+// their own. At most n of them into out; the count.
+int fd_test_overlays(void *w, fd_overlay *out, int n) {
+  id window = (id)w;
+  int count = 0;
+  CGRect ours = sendRect0(window, sel("frame"));
+  int windowShown = sendBool0(window, sel("isVisible")) != 0;
+  id close = ((id (*)(id, SEL, unsigned long))objc_msgSend)(window, sel("standardWindowButton:"), 0);
+  id container = close ? send0(send0(close, sel("superview")), sel("superview")) : (id)0;
+  if (container && count < n) {
+    CGRect bounds = sendRect0(container, sel("bounds"));
+    CGRect r;
+#if defined(__x86_64__)
+    ((void (*)(CGRect *, id, SEL, CGRect, id))objc_msgSend_stret)(&r, container, sel("convertRect:toView:"), bounds, nil);
+#else
+    r = ((CGRect (*)(id, SEL, CGRect, id))objc_msgSend)(container, sel("convertRect:toView:"), bounds, nil);
+#endif
+    fd_overlay *o = &out[count++];
+    strncpy(o->kind, class_getName(object_getClass(container)), sizeof o->kind - 1);
+    o->kind[sizeof o->kind - 1] = 0;
+    o->r = (fd_rect){r.origin.x, ours.size.height - r.origin.y - r.size.height, r.size.width, r.size.height};
+    o->visible = windowShown && !sendBool0(container, sel("isHidden"));
+    o->alpha = sendDouble0(container, sel("alphaValue"));
+  }
+  id windows = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("windows"));
+  long total = sendLong0(windows, sel("count"));
+  for (long i = 0; i < total && count < n; i++) {
+    id other = ((id (*)(id, SEL, unsigned long))objc_msgSend)(windows, sel("objectAtIndex:"), (unsigned long)i);
+    if (other == window || !sendBool0(other, sel("isVisible"))) continue;
+    CGRect f = sendRect0(other, sel("frame"));
+    if (!CGRectIntersectsRect(f, ours)) continue;
+    fd_overlay *o = &out[count++];
+    strncpy(o->kind, class_getName(object_getClass(other)), sizeof o->kind - 1);
+    o->kind[sizeof o->kind - 1] = 0;
+    o->r = (fd_rect){f.origin.x - ours.origin.x, (ours.origin.y + ours.size.height) - (f.origin.y + f.size.height), f.size.width,
+                     f.size.height};
+    o->visible = 1;
+    o->alpha = sendDouble0(other, sel("alphaValue"));
+  }
+  return count;
+}
+
 // Whether a click at (x, y), from the window's top left, lands on view or inside
 // it, hit-tested the way the window routes a mouse down: from the view that
 // holds the content view and the title bar, so the title bar and its toolbar

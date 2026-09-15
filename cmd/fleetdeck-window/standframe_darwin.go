@@ -29,6 +29,15 @@ type measuredCapsule struct {
 	measuredBox
 }
 
+// measuredOverlay is a view or window that may lie over the content: the title
+// bar's container, or another window of the app over this one.
+type measuredOverlay struct {
+	Kind string `json:"kind"`
+	measuredBox
+	Visible bool    `json:"visible"`
+	Alpha   float64 `json:"alpha"`
+}
+
 // standFrameReport is the frame as AppKit laid it out, in points from the
 // window's top left: its material and full screen, the close button, both
 // panels, the capsule row and each capsule shown, and the tabs' border shape
@@ -43,6 +52,12 @@ type standFrameReport struct {
 	Capsules           []measuredCapsule `json:"capsules"`
 	SegmentBorderShape int               `json:"segmentBorderShape"`
 	SelectedTopInset   float64           `json:"selectedTopInset"`
+	// ContentLayoutTop is how much of the window's top its title bar and
+	// toolbar keep from the content; Overlays what lies over the content
+	// there. In v0.10.2's first full screen stand the toolbar stayed as a black
+	// band over the capsule row.
+	ContentLayoutTop float64           `json:"contentLayoutTop"`
+	Overlays         []measuredOverlay `json:"overlays"`
 }
 
 func boxOf(r C.fd_rect) measuredBox {
@@ -63,6 +78,17 @@ func measureFrame(f *frame, window unsafe.Pointer, mode glassMode) standFrameRep
 		Row:                boxOf(C.fd_test_frame_of(f.capsules())),
 		SegmentBorderShape: int(C.fd_test_segment_border_shape()),
 		SelectedTopInset:   float64(C.fd_test_selected_segment_top_inset()),
+		ContentLayoutTop:   float64(C.fd_test_content_layout_top(window)),
+	}
+	var overlays [16]C.fd_overlay
+	for i, n := 0, int(C.fd_test_overlays(window, &overlays[0], C.int(len(overlays)))); i < n; i++ {
+		o := overlays[i]
+		out.Overlays = append(out.Overlays, measuredOverlay{
+			Kind:        C.GoString(&o.kind[0]),
+			measuredBox: boxOf(o.r),
+			Visible:     o.visible != 0,
+			Alpha:       float64(o.alpha),
+		})
 	}
 	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {
 		fr := C.fd_test_capsule_slot_frame(C.int(i))

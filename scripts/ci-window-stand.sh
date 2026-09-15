@@ -37,10 +37,12 @@
 #                    worked out from the insets the page was sent, is not a gate.
 #
 # FLEETDECK_STAND_FULLSCREEN=on, for content: the window goes into full screen
-# once its surfaces have loaded and comes out of it after a while
-# (cmd/fleetdeck-window/standfullscreen.go). The stand takes the frame in full
-# screen (window-fullscreen.png) and after it (window.png), and standcheck holds
-# the frame to its properties in both and before. v0.10.1's capsules lay over the
+# once its surfaces have loaded, comes out of it after a while, and goes in and
+# out a second time (cmd/fleetdeck-window/standfullscreen.go). The stand takes
+# the frame each time in full screen (window-fullscreen-1.png,
+# window-fullscreen-2.png) and after (window.png), and standcheck holds the frame
+# to its properties before, in and after each time -- in full screen, that
+# nothing of the title bar keeps the window's top or shows over the capsules. v0.10.1's capsules lay over the
 # sessions panel in full screen, which no stand had entered.
 #
 # FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
@@ -219,37 +221,44 @@ if [ "$expect" = content ]; then
 		sleep 1
 	done
 fi
-# in_full_screen: the line number of the window's first measure of its frame in
-# full screen, "" before there is one. out_of_full_screen: whether a measure out
-# of it follows that line.
-in_full_screen() {
-	grep -n 'fleetdeck-window: the frame measures .*"fullScreen":true' "$out/window.log" | head -n 1 | cut -d: -f1
+# measure_from <line> <true|false>: the number of the first line from <line> on
+# where the window measures its frame in full screen (true) or out of it
+# (false); nothing before there is one.
+measure_from() {
+	n=$(tail -n "+$1" "$out/window.log" | grep -n "fleetdeck-window: the frame measures .*\"fullScreen\":$2" | head -n 1 | cut -d: -f1)
+	if [ -n "$n" ]; then
+		echo $(($1 + n - 1))
+	fi
 }
-out_of_full_screen() {
-	tail -n "+$1" "$out/window.log" | grep -q 'fleetdeck-window: the frame measures .*"fullScreen":false'
-}
-# For a stand in full screen, its frame in full screen, then the frame after it:
-# the window goes in once its surfaces have loaded and comes out on its own.
+# For a stand in full screen, its frame each time it is in full screen, then the
+# frame after: the window goes in once its surfaces have loaded, comes out on
+# its own, and goes in and out a second time.
 fullscreen=no
+trips=0
 if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
-	went_in=
-	for _ in $(seq 45); do
-		went_in=$(in_full_screen)
-		[ -n "$went_in" ] && break
-		sleep 1
-	done
-	if [ -n "$went_in" ]; then
-		sleep 3
-		capture_screen "$out/window-fullscreen.png"
+	from=1
+	while [ "$trips" -lt 2 ]; do
+		went_in=
 		for _ in $(seq 45); do
-			if out_of_full_screen "$went_in"; then
-				fullscreen=yes
-				break
-			fi
+			went_in=$(measure_from "$from" true)
+			[ -n "$went_in" ] && break
 			sleep 1
 		done
-	fi
-	echo "--- full screen: went in at log line ${went_in:-never}, came out: $fullscreen"
+		[ -n "$went_in" ] || break
+		sleep 3
+		capture_screen "$out/window-fullscreen-$((trips + 1)).png"
+		came_out=
+		for _ in $(seq 45); do
+			came_out=$(measure_from "$went_in" false)
+			[ -n "$came_out" ] && break
+			sleep 1
+		done
+		[ -n "$came_out" ] || break
+		trips=$((trips + 1))
+		from=$came_out
+	done
+	[ "$trips" -eq 2 ] && fullscreen=yes
+	echo "--- full screen: in and out $trips times of 2"
 fi
 # The screenshot comes after every page said so: for frame, it is the frame's.
 sleep 3
@@ -316,7 +325,7 @@ fi
 frame=yes
 if [ "$expect" = content ]; then
 	if [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
-		"$stand/standcheck" -log "$out/window.log" -fullscreen >"$out/standcheck.txt" 2>&1 || frame=no
+		"$stand/standcheck" -log "$out/window.log" -fullscreen-trips 2 >"$out/standcheck.txt" 2>&1 || frame=no
 	else
 		"$stand/standcheck" -log "$out/window.log" >"$out/standcheck.txt" 2>&1 || frame=no
 	fi
