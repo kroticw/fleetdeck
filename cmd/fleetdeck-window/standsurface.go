@@ -32,6 +32,7 @@ func handleStandReports(b *bridge, onStand bool, logf func(format string, args .
 var reportSubjects = map[string]string{
 	"grounds":      "grounds",
 	"columnScroll": "column scroll",
+	"controls":     "controls",
 }
 
 // reportSubject is what a page's report is of: each kind is a log line of its

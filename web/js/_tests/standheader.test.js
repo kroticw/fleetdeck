@@ -18,13 +18,16 @@ function fakeWindow({ fullscreen = false } = {}) {
   };
 }
 
-// A header top..top+height from the surface's top, its brand likewise.
-function fakeHeader({ top, height, brand }) {
+// A header top..top+height from the surface's top, its brand and its fleet menu
+// button likewise.
+function fakeHeader({ top, height, brand, fleet }) {
+  const boxes = { ".brand": brand, ".fleet-menu-button": fleet };
   return {
     getBoundingClientRect: () => ({ top, height }),
     querySelector: (selector) => {
-      assert.equal(selector, ".brand");
-      return brand ? { getBoundingClientRect: () => ({ top: brand.top, height: brand.height }) } : null;
+      assert.ok(selector in boxes, selector);
+      const box = boxes[selector];
+      return box ? { getBoundingClientRect: () => ({ top: box.top, height: box.height }) } : null;
     },
   };
 }
@@ -33,7 +36,15 @@ function fakeHeader({ top, height, brand }) {
 // header whose brand line is 20 pt tall.
 test("the orchestrator's header says where its row and its brand are centred", () => {
   const report = headerLineReport(fakeWindow(), fakeHeader({ top: 0, height: 36, brand: { top: 8.2, height: 20 } }));
-  assert.deepEqual(report, { surface: "orchestrator", headerRowCenter: 18, brandCenter: 18.2, fullscreen: false });
+  assert.deepEqual(report, { surface: "orchestrator", headerRowCenter: 18, brandCenter: 18.2, fleetCenter: null, fullscreen: false });
+});
+
+// T-070: the fleet menu button became a capsule of glass beside the brand, and
+// a capsule taller than the brand's line could sit off the buttons' line while
+// the brand stays on it.
+test("the orchestrator's header says where its fleet menu button is centred", () => {
+  const report = headerLineReport(fakeWindow(), fakeHeader({ top: 0, height: 36, brand: { top: 8, height: 20 }, fleet: { top: 6, height: 26 } }));
+  assert.equal(report.fleetCenter, 19);
 });
 
 // v0.10.1: the header's padding put its row lower than the buttons.

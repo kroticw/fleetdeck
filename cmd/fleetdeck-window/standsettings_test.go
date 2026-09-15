@@ -74,7 +74,34 @@ func TestAStandSetsTheDeadlineTheSizeAndTheAppearance(t *testing.T) {
 	}
 }
 
+// T-070: a stand's frame shows the new card form and the fleet menu's list
+// open at once, each on its own surface.
+func TestAStandOpensTheNewCardFormTheFleetMenuOrBoth(t *testing.T) {
+	for _, value := range []string{"newcard", "fleetmenu", "newcard,fleetmenu"} {
+		s, err := standSettingsFrom("/tmp/stand/no-daemon.sock", func(n string) (string, bool) {
+			if n == standOpenEnv {
+				return value, true
+			}
+			return "", false
+		})
+		if err != nil || s.open != value {
+			t.Errorf("%s=%q: open %q, err %v; want it opened as said", standOpenEnv, value, s.open, err)
+		}
+	}
+}
+
 func TestAStandSettingThatMakesNoSenseIsRefusedByName(t *testing.T) {
+	for _, bad := range []string{"card", "newcard,card", "newcard,", ""} {
+		_, err := standSettingsFrom("/tmp/stand/no-daemon.sock", func(n string) (string, bool) {
+			if n == standOpenEnv {
+				return bad, true
+			}
+			return "", false
+		})
+		if err == nil || !strings.Contains(err.Error(), standOpenEnv) {
+			t.Errorf("%s=%q: err %v, want a refusal naming the variable", standOpenEnv, bad, err)
+		}
+	}
 	for name, value := range map[string]string{
 		standPanelStartTimeoutEnv: "ten seconds",
 		standWindowSizeEnv:        "300x200",

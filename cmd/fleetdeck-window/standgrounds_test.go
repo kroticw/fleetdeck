@@ -36,6 +36,25 @@ func TestTheBoardsReportGoesToTheLogAsTheJSONThePageSent(t *testing.T) {
 	}
 }
 
+// T-070: the orchestrator surface and the board say how their capsules read in
+// the window's material (web/js/standcontrols.js), each in a line of its own that
+// scripts/standcheck reads; it is not a report of scrolling.
+func TestTheCapsulesReportGoesToTheLogAsALineOfItsOwn(t *testing.T) {
+	report := `{"surface":"orchestrator","report":"controls","glass":"glass","controls":[{"name":"picker","height":24,"radius":999,"fillAlpha":0.09,"backdrop":"none","floating":false,"contrast":9.1,"disabled":false}]}`
+	var logged []string
+	b := newBridge()
+	handleStandReports(b, true, func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) })
+	if _, err := b.call("orchestrator", standReportBindingName, json.RawMessage(report)); err != nil {
+		t.Fatal(err)
+	}
+	if want := "fleetdeck-window: the orchestrator surface reports its controls: " + report; len(logged) != 1 || logged[0] != want {
+		t.Fatalf("logged %q, want %q", logged, want)
+	}
+	if got, want := boardStandReportLine(json.RawMessage(report)), "fleetdeck-window: the board reports its controls: "+report; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 // The board's word on a scrolled column after the panel's next snapshots is a
 // line of its own: the stand's gate on the board's scrolling reads the last
 // scrolling line, and this is not one.

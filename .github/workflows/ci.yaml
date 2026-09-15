@@ -343,13 +343,26 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_SYSTEM: light
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
-      - name: This build's window in its frame, dark, with the new card form open
+      # With the new card form and the fleet menu open: both are frosted glass
+      # over content, and the capsules around them are held to the window's
+      # material by scripts/standcheck, from what the pages measure of themselves
+      # (web/js/standcontrols.js). Glass, dark and light, here; opaque below.
+      - name: This build's window in its frame, glass, dark, with the new card form and the fleet menu open
         if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
-          FLEETDECK_STAND_OPEN: newcard
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7799 out/dark-newcard exec content
+      - name: This build's window in its frame, glass, light, with the new card form and the fleet menu open
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7825 out/light-newcard exec content
       # In full screen and after it: v0.10.1's theme and limits capsules lay over
       # the sessions panel in full screen on the operator's macOS, and no stand
       # had entered it. The window goes in once its surfaces have loaded and
@@ -378,6 +391,15 @@ jobs:
           FLEETDECK_STAND_FULLSCREEN: "on"
           FLEETDECK_STAND_FOLD: orchestrator
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7811 out/fold-orchestrator-fullscreen-glass-dark exec content
+      # Light, for the folded strip's round glass unfold control in both themes.
+      - name: This build's window with the orchestrator panel folded, glass, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_FOLD: orchestrator
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7829 out/fold-orchestrator-glass-light exec content
       # With the sessions panel folded to its strip: v0.10.2's dev build ran the
       # sessions counters off the strip's edge (the operator's frame 1368).
       # scripts/standcheck holds the strip's surface to nothing wider than the
@@ -471,6 +493,45 @@ jobs:
           defaults write com.apple.universalaccess reduceTransparency -bool true
           echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
           scripts/ci-window-stand.sh new/fleetdeck.app 7813 out/fold-orchestrator-opaque-dark exec content
+      - name: This build's window with the orchestrator panel folded, opaque, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_FOLD: orchestrator
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7831 out/fold-orchestrator-opaque-light exec content
+      # The new card form and the fleet menu open with no glass: solid, nothing
+      # blurred, both ways.
+      - name: This build's window in its frame, opaque, the system light and the app dark, with the new card form and the fleet menu open
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: light
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7827 out/opaque-dark-newcard exec content
+      - name: This build's window in its frame, opaque, the system dark and the app light, with the new card form and the fleet menu open
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: dark
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7823 out/opaque-light-newcard exec content
       # The sessions panel folded to its strip, opaque, light and dark; glass
       # above. scripts/standcheck holds the strip's surface to nothing wider
       # than the strip or past its edge, and its unfold control reached.

@@ -359,11 +359,13 @@ fi
 # window's measurements of itself and the pages' of themselves.
 frame=yes
 if [ "$expect" = content ]; then
+	trips=0
 	if [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
-		"$stand/standcheck" -log "$out/window.log" -fullscreen-trips 2 >"$out/standcheck.txt" 2>&1 || frame=no
-	else
-		"$stand/standcheck" -log "$out/window.log" >"$out/standcheck.txt" 2>&1 || frame=no
+		trips=2
 	fi
+	# What the stand opened (FLEETDECK_STAND_OPEN) is what standcheck expects to
+	# find reported open: the new card form, the fleet menu's list.
+	"$stand/standcheck" -log "$out/window.log" -fullscreen-trips "$trips" -open "${FLEETDECK_STAND_OPEN:-}" >"$out/standcheck.txt" 2>&1 || frame=no
 	echo "--- the frame's properties (scripts/standcheck)"
 	cat "$out/standcheck.txt"
 fi

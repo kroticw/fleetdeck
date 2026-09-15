@@ -10,20 +10,24 @@
 //     comes out from under the sessions panel, in each of those;
 //   - the selected tab is a capsule, where the system has border shapes;
 //   - the window's buttons sit concentric in the orchestrator panel's corner,
-//     before full screen and after each time it left, and the header's row and
-//     its brand are centred on their line;
+//     before full screen and after each time it left, and the header's row, its
+//     brand and its fleet menu button are centred on their line;
 //   - in full screen nothing of the title bar keeps the window's top or lies
 //     shown over the capsule row;
 //   - a folded strip, the orchestrator's or the sessions', has nothing wider
 //     than it or past its edge, no page scrolling sideways under it, and an
 //     unfold control inside it that a press reaches -- the orchestrator's clear
-//     of the window's buttons.
+//     of the window's buttons;
+//   - the capsules the pages draw (web/js/standcontrols.js) are of the window's
+//     material: see-through and round on glass, solid with no glass, blurring
+//     nothing but the panels that float over content, their text 4.5:1 over the
+//     worst ground under it, and what the stand opened among them.
 //
 // The board's own verdict on its last column -- worked out from the insets the
 // page was sent -- is not read: in v0.10.1 it said true while the insets were
 // stale. The board is held to the native panels' frames.
 //
-// Usage: standcheck -log <window.log> [-fullscreen-trips <n>]
+// Usage: standcheck -log <window.log> [-fullscreen-trips <n>] [-open <names>]
 package main
 
 import (
@@ -58,6 +62,8 @@ const (
 	edgeSlack  = 0.5
 	lineSlack  = 1
 	brandSlack = 2
+	// A folded strip's round unfold control is at least this wide and tall.
+	minUnfoldTarget = 36
 	// A capsule's top row starts further in than a rounded rectangle's drawn
 	// in its place, by this much at the least: 0.46 against 0.19 on a 2x
 	// screen. On the 1x runner a capsule measured 0.375, and 0.29 once the
@@ -127,7 +133,9 @@ type headerReport struct {
 	Surface         string  `json:"surface"`
 	HeaderRowCenter float64 `json:"headerRowCenter"`
 	BrandCenter     float64 `json:"brandCenter"`
-	FullScreen      bool    `json:"fullscreen"`
+	// FleetCenter is the fleet menu button's, nil before the header draws one.
+	FleetCenter *float64 `json:"fleetCenter"`
+	FullScreen  bool     `json:"fullscreen"`
 }
 
 // boardReport is the board's word on its box, in points from the window's left
@@ -225,6 +233,7 @@ type run struct {
 func main() {
 	logPath := flag.String("log", "", "the window's log")
 	trips := flag.Int("fullscreen-trips", 0, "how many times the stand took the window into full screen and out (FLEETDECK_STAND_FULLSCREEN)")
+	open := flag.String("open", "", "what the stand opened, comma-separated (FLEETDECK_STAND_OPEN)")
 	flag.Parse()
 	raw, err := os.ReadFile(*logPath)
 	if err != nil {
@@ -234,7 +243,10 @@ func main() {
 	for _, n := range revealedNotes(string(raw)) {
 		fmt.Println("frame: " + n)
 	}
-	problems := check(string(raw), *trips)
+	for _, n := range controlsNotes(string(raw)) {
+		fmt.Println("frame: not measured: " + n)
+	}
+	problems := append(check(string(raw), *trips), controlsCheck(string(raw), openList(*open))...)
 	for _, p := range problems {
 		fmt.Println("frame: " + p)
 	}
@@ -566,11 +578,46 @@ func (l standLog) stripProblems(when string, r run, buttons bool) []string {
 	var out []string
 	if orchestratorFolded(f) {
 		out = append(out, l.foldedStripProblems(when, r, "orchestrator", f.Orchestrator, buttons)...)
+	} else {
+		out = append(out, l.unfoldedOrchestratorProblems(when, r)...)
 	}
 	// The window's buttons sit in the orchestrator panel's corner, never over
 	// the sessions panel.
 	if sessionsFolded(f) {
 		out = append(out, l.foldedStripProblems(when, r, "sessions", f.Sessions, false)...)
+	}
+	return out
+}
+
+// unfoldedOrchestratorProblems is what is wrong with the unfolded orchestrator
+// surface's fit in the run r, by its last word on it up to the frame at r's end:
+// a page that scrolls sideways under the island, or the fleet menu's list past
+// either edge of the surface. Run 34949576998 (#185): the list ran from the
+// button's left edge past the surface's right one, and the page scrolled
+// sideways. A text cut with an ellipsis is no problem, and a surface that never
+// reported unfolded is not held here.
+func (l standLog) unfoldedOrchestratorProblems(when string, r run) []string {
+	var s *stripReport
+	for k := len(l.strips) - 1; k >= 0; k-- {
+		if l.strips[k].frame <= r.to && l.strips[k].Surface == "orchestrator" && !l.strips[k].Folded {
+			s = &l.strips[k].stripReport
+			break
+		}
+	}
+	if s == nil {
+		return nil
+	}
+	var out []string
+	if s.ScrollWidth > s.Width+lineSlack {
+		out = append(out, fmt.Sprintf("%sthe orchestrator surface's page is %v wide in %v: it scrolls sideways", when, s.ScrollWidth, s.Width))
+	}
+	for _, o := range s.Overflowing {
+		if !strings.HasPrefix(o.Element, "div.fleet-menu-list") {
+			continue
+		}
+		if o.Left < -lineSlack || o.Right > s.Width+lineSlack {
+			out = append(out, fmt.Sprintf("%sthe fleet menu's list at %v..%v reaches past the orchestrator surface %v wide", when, o.Left, o.Right, s.Width))
+		}
 	}
 	return out
 }
@@ -610,6 +657,14 @@ func (l standLog) foldedStripProblems(when string, r run, surface string, panel 
 		out = append(out, fmt.Sprintf("%sa press on the folded %s strip's unfold control reaches something else", when, surface))
 	case u.Left < -lineSlack || u.Right > s.Width+lineSlack:
 		out = append(out, fmt.Sprintf("%sthe folded %s strip's unfold control at %v..%v is outside the strip %v wide", when, surface, u.Left, u.Right, s.Width))
+	}
+	// The operator asked for the unfold control as a round glass button; the
+	// only way back to a folded panel keeps a target no smaller than the
+	// bordered one it replaced (26.2 by 40 on run 34949576998).
+	if u != nil {
+		if w, h := u.Right-u.Left, u.Bottom-u.Top; w < minUnfoldTarget-lineSlack || h < minUnfoldTarget-lineSlack {
+			out = append(out, fmt.Sprintf("%sthe folded %s strip's unfold control is %v by %v: its round target has to be at least %v pt each way", when, surface, math.Round(w*10)/10, math.Round(h*10)/10, minUnfoldTarget))
+		}
 	}
 	if u != nil && buttons {
 		b := box{X: panel.X + u.Left, Y: panel.Y + u.Top, W: u.Right - u.Left, H: u.Bottom - u.Top}
@@ -664,6 +719,11 @@ func headerProblems(f frameReport, headers []headerReport) []string {
 	}
 	if brand := f.Orchestrator.Y + header.BrandCenter; math.Abs(brand-cy) > brandSlack {
 		out = append(out, fmt.Sprintf("the brand is centred %v pt down, the window's buttons %v", brand, cy))
+	}
+	if header.FleetCenter != nil {
+		if fleet := f.Orchestrator.Y + *header.FleetCenter; math.Abs(fleet-cy) > brandSlack {
+			out = append(out, fmt.Sprintf("the fleet menu button is centred %v pt down, the window's buttons %v", fleet, cy))
+		}
 	}
 	return out
 }
