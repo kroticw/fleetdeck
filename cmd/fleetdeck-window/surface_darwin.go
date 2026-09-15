@@ -19,7 +19,9 @@ import (
 type surface struct {
 	p    unsafe.Pointer
 	kind string
-	url  string
+	// gen is the surface's generation: its web view is named surfaceName(kind, gen).
+	gen int
+	url string
 	// calls is the page's binding calls, answered in order (callQueue); nil
 	// until glasswindow.go gives the surface one.
 	calls *callQueue
@@ -39,13 +41,13 @@ func surfaceScripts(kind, panelURL string, glass glassMode, b *bridge) []string 
 
 // newSurface makes kind's web view in container, sharing board's process and
 // store. It loads nothing: load does.
-func newSurface(board, container unsafe.Pointer, kind, panelURL string, glass glassMode, b *bridge) *surface {
+func newSurface(board, container unsafe.Pointer, kind string, gen int, panelURL string, glass glassMode, b *bridge) *surface {
 	scripts := surfaceScripts(kind, panelURL, glass, b)
 	cScripts := make([]*C.char, len(scripts))
 	for i, s := range scripts {
 		cScripts[i] = C.CString(s)
 	}
-	name := C.CString(kind)
+	name := C.CString(surfaceName(kind, gen))
 	defer func() {
 		C.free(unsafe.Pointer(name))
 		for _, s := range cScripts {
@@ -54,7 +56,7 @@ func newSurface(board, container unsafe.Pointer, kind, panelURL string, glass gl
 	}()
 	// A Go slice's backing array may be handed to C for the length of the call.
 	p := C.fd_surface_create(board, container, name, &cScripts[0], C.int(len(cScripts)))
-	return &surface{p: p, kind: kind}
+	return &surface{p: p, kind: kind, gen: gen}
 }
 
 func (s *surface) load(url string) {
@@ -164,7 +166,7 @@ func probeSurfacesForTest() surfaceProbe {
 	surfaceEvents.Unlock()
 
 	const page = "http://127.0.0.1:7777/?fleet=work"
-	s := newSurface(f.board(), f.panelContent("sessions"), "sessions", page, glassModeGlass, b)
+	s := newSurface(f.board(), f.panelContent("sessions"), "sessions", 1, page, glassModeGlass, b)
 	webview := C.fd_test_surface_webview(s.p)
 	out.drawsBackground = C.fd_test_draws_background(webview) != 0
 	out.reportsNavigation = C.fd_test_reports_navigation(s.p) != 0
@@ -191,8 +193,8 @@ func probeSurfacesForTest() surfaceProbe {
 	// against what was alive before it.
 	out.webViewsBeforeChurn = int(C.fd_surface_live_webviews())
 	for round := 0; round < 20; round++ {
-		o := newSurface(f.board(), f.panelContent("orchestrator"), "orchestrator", page, glassModeGlass, b)
-		t := newSurface(f.board(), f.panelContent("sessions"), "sessions", page, glassModeGlass, b)
+		o := newSurface(f.board(), f.panelContent("orchestrator"), "orchestrator", 1, page, glassModeGlass, b)
+		t := newSurface(f.board(), f.panelContent("sessions"), "sessions", 1, page, glassModeGlass, b)
 		o.close()
 		t.close()
 	}
