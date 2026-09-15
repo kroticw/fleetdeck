@@ -30,8 +30,11 @@ type control struct {
 	Backdrop  string  `json:"backdrop"`
 	Contrast  float64 `json:"contrast"`
 	// PlaceholderContrast is an empty field's placeholder's, nil for a control
-	// showing none.
+	// showing none or one the page could not measure: PlaceholderMeasured is
+	// false then, for a WebKit that answers ::placeholder with the field's own
+	// style (the CI stand's macOS 26).
 	PlaceholderContrast *float64 `json:"placeholderContrast"`
+	PlaceholderMeasured *bool    `json:"placeholderMeasured"`
 	Disabled            bool     `json:"disabled"`
 }
 
@@ -66,9 +69,24 @@ func openList(v string) []string {
 	return strings.Split(v, ",")
 }
 
-// controlsCheck is what is wrong with the capsules the log's pages drew; open is
-// what the stand opened. Nothing when the log has no frame: check says so.
-func controlsCheck(log string, open []string) []string {
+// controlsNotes is what the log's pages could not measure of their capsules: said,
+// not failed, since a stand's WebKit decides it, not the page.
+func controlsNotes(log string) []string {
+	_, reports, _ := readControls(log)
+	var notes []string
+	for _, surface := range []string{"orchestrator", "board"} {
+		for _, c := range reports[surface].Controls {
+			if c.PlaceholderMeasured != nil && !*c.PlaceholderMeasured {
+				notes = append(notes, fmt.Sprintf("the %s's %s placeholder was not measured: this WebKit answers ::placeholder with the field's own style", surface, c.Name))
+			}
+		}
+	}
+	return notes
+}
+
+// readControls is the last frame the log measured, the last controls report of
+// each surface, and the reports that are not ones.
+func readControls(log string) (*frameReport, map[string]controlsReport, []string) {
 	var frame *frameReport
 	reports := map[string]controlsReport{}
 	var problems []string
@@ -92,6 +110,13 @@ func controlsCheck(log string, open []string) []string {
 			reports[surface] = r
 		}
 	}
+	return frame, reports, problems
+}
+
+// controlsCheck is what is wrong with the capsules the log's pages drew; open is
+// what the stand opened. Nothing when the log has no frame: check says so.
+func controlsCheck(log string, open []string) []string {
+	frame, reports, problems := readControls(log)
 	if frame == nil {
 		return problems
 	}

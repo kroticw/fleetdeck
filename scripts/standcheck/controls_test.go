@@ -165,6 +165,28 @@ func TestAPlaceholderUnderFourAndAHalfToOneIsAProblem(t *testing.T) {
 	}
 }
 
+// #185's stand on macOS 26: that WebKit answers ::placeholder with the field's
+// own style, and the page says it could not measure the placeholder. That is
+// said, not failed: the stand's WebKit decides it.
+func TestAnUnmeasuredPlaceholderIsSaidAndNotFailed(t *testing.T) {
+	b := goodBoardControls("glass")
+	unmeasured := false
+	b.Controls[1].PlaceholderMeasured = &unmeasured
+	log := controlsLog(t, "glass", goodOrchestratorControls("glass"), b)
+	if got := controlsCheck(log, bothOpen); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+	notes := controlsNotes(log)
+	if len(notes) != 1 || !strings.Contains(notes[0], "newCardTitle placeholder was not measured") {
+		t.Fatalf("notes %q, want one naming the title's placeholder", notes)
+	}
+	measured := true
+	b.Controls[1].PlaceholderMeasured, b.Controls[1].PlaceholderContrast = &measured, at(6.1)
+	if got := controlsNotes(controlsLog(t, "glass", goodOrchestratorControls("glass"), b)); len(got) != 0 {
+		t.Fatalf("notes %q, want none for a measured placeholder", got)
+	}
+}
+
 // A disabled capsule is dimmed on purpose (web/app.css): its fill is not held to
 // the material, as its text is not held to 4.5:1.
 func TestADimmedDisabledCapsuleIsNoProblem(t *testing.T) {

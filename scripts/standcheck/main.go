@@ -236,6 +236,9 @@ func main() {
 	for _, n := range revealedNotes(string(raw)) {
 		fmt.Println("frame: " + n)
 	}
+	for _, n := range controlsNotes(string(raw)) {
+		fmt.Println("frame: not measured: " + n)
+	}
 	problems := append(check(string(raw), *trips), controlsCheck(string(raw), openList(*open))...)
 	for _, p := range problems {
 		fmt.Println("frame: " + p)
