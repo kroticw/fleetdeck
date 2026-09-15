@@ -4,7 +4,7 @@
 // (web/js/standoverflow.js): every box drawn wider than the room it gives its
 // content, every box that reaches past the surface's edges, and whether the
 // page is wider than its web view. Folded, the surface is a 48 px strip, and it
-// says what the strip shows and where its unfold control is. v0.10.2's dev
+// says what the strip shows and where its unfold control is. v0.11.0's dev
 // build ran the sessions counters off that strip's edge and scrolled the
 // orchestrator's page sideways under its strip; a screenshot shows cut text or
 // a scroll bar, and only the page can say which box is at fault.

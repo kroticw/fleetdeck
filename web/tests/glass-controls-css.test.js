@@ -1,7 +1,7 @@
 // The page's own controls in the fleetdeck window drawn as capsules of glass
 // (web/app.css, the E layout section), and what a browser tab keeps of them.
 //
-// v0.10.2's dev build: the window's capsules over the board are the system's
+// v0.11.0's dev build: the window's capsules over the board are the system's
 // glass, and beside them the orchestrator island's head (the edit pencil, the
 // orchestrator picker, A-/size/A+, the fleet menu) and the new card form were
 // still a browser's bordered boxes. The operator asked for them as glass too.
@@ -76,7 +76,7 @@ test("in the window the island's head controls and the new card form's fields ar
   }
 });
 
-// The operator on v0.10.2's dev build: "the buttons that hide and show the
+// The operator on v0.11.0's dev build: "the buttons that hide and show the
 // panels do not look good, make them liquid glass and round". The fold button
 // in each island's head and the unfold control in each folded strip are round
 // glass buttons, as the capsules are: a see-through fill and a rim on glass,

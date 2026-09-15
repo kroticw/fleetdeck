@@ -90,7 +90,7 @@ func layoutWithRow(width, height float64, w panelWidths, rowMin float64) geometr
 // points from its left edge on the capsule row's line, 0 with none there: the
 // row begins its gap past whichever ends further right, the orchestrator panel
 // or the buttons, and the panels narrow for the row with that room taken. Only
-// the folded orchestrator strip ends short of the buttons. In v0.10.2's dev
+// the folded orchestrator strip ends short of the buttons. In v0.11.0's dev
 // build the row beside the strip began under the zoom button (the operator's
 // frame 1374).
 func layoutPastButtons(width, height float64, w panelWidths, rowMin, buttonsEnd float64) geometry {

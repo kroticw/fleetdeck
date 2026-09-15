@@ -1,7 +1,7 @@
 // Command standpointer moves the pointer to the top of the main screen and away
 // from it, for scripts/ci-window-stand.sh on a CI runner and nowhere else: in
 // full screen a pointer at the top of the screen brings the title bar out over
-// the window's content, which v0.10.2's dev build showed over the capsule row
+// the window's content, which v0.11.0's dev build showed over the capsule row
 // and which a stand cannot bring out any other way. On a person's machine the
 // pointer is theirs, so it refuses unless GITHUB_ACTIONS is true; the stand's
 // script checks the same before it runs this.

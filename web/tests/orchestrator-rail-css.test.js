@@ -1,7 +1,7 @@
 // The folded orchestrator panel in the fleetdeck window (web/app.css, the E
 // layout section), and what a browser tab keeps of the same rules.
 //
-// v0.10.2's dev build on a stand: folded, the orchestrator island is a 48 px
+// v0.11.0's dev build on a stand: folded, the orchestrator island is a 48 px
 // strip, and a scroll bar showed at its foot. The page's #header is a sibling
 // of the column, and folding hides only the column's own children; on the
 // orchestrator surface the header starts past the window's buttons, wider than

@@ -304,7 +304,7 @@ var regrowResults []capsuleRegrowProbe
 // foldResults: a stand's window in every fold of its panels (probeFoldsForTest).
 var foldResults []foldedStandFrame
 
-// v0.10.2's dev build on macOS 27 (the operator's frame 1374): with the
+// v0.11.0's dev build on macOS 27 (the operator's frame 1374): with the
 // orchestrator panel folded to its strip, the capsule row began 10 pt past the
 // strip, and the Board/Docs tabs lay under the window's buttons, which reach
 // past it. In every fold no capsule shown lies under the close, minimize or

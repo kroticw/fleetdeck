@@ -516,7 +516,7 @@ func toolbarEffects(effects []effect) []effect {
 	return out
 }
 
-// v0.10.2's dev build on a stand: in full screen a pointer at the top of the
+// v0.11.0's dev build on a stand: in full screen a pointer at the top of the
 // screen brought the title bar's strip out over the capsule row, 66 pt tall with
 // the toolbar and 32 without it. The toolbar only places the buttons out of
 // full screen: it is hidden going in, whether or not the frame is up, and shown

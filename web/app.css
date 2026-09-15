@@ -3583,7 +3583,7 @@ body.is-resizing {
 /* Folded, the island is a 48 px strip with no head: the window's buttons sit in
    its corner and its unfold control is all it shows. The header is the page's,
    a sibling of the column, and folding hides only the column's own children:
-   on v0.10.2's stand the header started past the buttons, 260 px wide, and the
+   on v0.11.0's stand the header started past the buttons, 260 px wide, and the
    page scrolled sideways under the strip, a scroll bar at its foot. */
 :root[data-surface="orchestrator"]:has(.col-orchestrator[data-folded="1"]) #header {
   display: none;
@@ -3685,7 +3685,7 @@ body.is-resizing {
 
 /* Folded, the island is a 48 px rail with no head. The counters are the page's
    header, a sibling of the column, and folding hides only the column's own
-   children: on v0.10.2's dev build "0 waiting for you" and "0 stalled" wrapped
+   children: on v0.11.0's dev build "0 waiting for you" and "0 stalled" wrapped
    word by word and ran off the rail's edge. The rail's marks already say who
    waits (red) and who stalled (dashed), and a panel that knows nothing shows an
    em dash where their count would be. */
@@ -4164,7 +4164,7 @@ body.is-resizing {
   box-shadow: var(--island-shadow), inset 0 0 0 1px var(--border-strong);
 }
 
-/* The panels' fold and unfold buttons, round glass. The operator on v0.10.2's
+/* The panels' fold and unfold buttons, round glass. The operator on v0.11.0's
    dev build: "the buttons that hide and show the panels do not look good, make
    them liquid glass and round". The unfold control is the only way back to a
    folded panel: 40 pt across, a target no smaller than the bordered one it

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The operator on v0.10.2's dev build asked for the panels' unfold control as a
+// The operator on v0.11.0's dev build asked for the panels' unfold control as a
 // round glass button; it is the only way back to a folded panel, and its target
 // is held to at least 36 pt each way, as round as it is wide. Run 34949576998
 // measured the bordered one at 26.2 by 40.

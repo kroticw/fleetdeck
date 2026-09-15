@@ -1,7 +1,7 @@
 // The folded sessions panel in the fleetdeck window (web/app.css, the E layout
 // section), and what a browser tab keeps of the same rules.
 //
-// v0.10.2's dev build on the operator's glass: folded, the sessions island is a
+// v0.11.0's dev build on the operator's glass: folded, the sessions island is a
 // 48 px rail, and the counters "0 waiting for you" and "0 stalled" wrapped word
 // by word and ran off its edge. On the sessions surface the counters are the
 // page's #header, a sibling of the column, and folding hides only the column's

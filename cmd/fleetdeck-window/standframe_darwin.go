@@ -67,7 +67,7 @@ type standFrameReport struct {
 	RoundedTopInset float64 `json:"roundedTopInset"`
 	// ContentLayoutTop is how much of the window's top its title bar and
 	// toolbar keep from the content; Overlays what lies over the content
-	// there. In v0.10.2's first full screen stand the toolbar stayed as a black
+	// there. In v0.11.0's first full screen stand the toolbar stayed as a black
 	// band over the capsule row.
 	ContentLayoutTop float64           `json:"contentLayoutTop"`
 	Overlays         []measuredOverlay `json:"overlays"`

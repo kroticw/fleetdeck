@@ -155,7 +155,7 @@ func foldedOrchestrator(f frameReport, x float64) frameReport {
 	return f
 }
 
-// v0.10.2's dev build on macOS 27 (the operator's frame 1374): beside the
+// v0.11.0's dev build on macOS 27 (the operator's frame 1374): beside the
 // folded orchestrator strip the tabs lay under the window's zoom button.
 func TestATabUnderTheWindowsButtonsIsAProblem(t *testing.T) {
 	log := logOf(t, foldedOrchestrator(goodFrame(false), 66), besideFoldedStrip(goodBoard(false)), goodHeader(false))
@@ -277,7 +277,7 @@ func TestAFoldedSessionsStripWhereEverythingFitsIsNoProblem(t *testing.T) {
 	}
 }
 
-// v0.10.2's dev build on the operator's glass (frame 1368): folded, the
+// v0.11.0's dev build on the operator's glass (frame 1368): folded, the
 // sessions strip kept the page's header, and its counters wrapped word by word
 // and ran off the strip's edge.
 func TestAFoldedSessionsStripWhoseCountersRunPastItsEdgeIsAProblem(t *testing.T) {
@@ -479,7 +479,7 @@ func TestABoardIsHeldToTheLastFrameOfItsPhase(t *testing.T) {
 	wantProblem(t, check(log, 0), "board ends at 732", "sessions panel starts at 700")
 }
 
-// v0.10.2's first full screen stand (run 34932941637): the empty toolbar stayed
+// v0.11.0's first full screen stand (run 34932941637): the empty toolbar stayed
 // in full screen as a black band 64 pt tall over the capsule row, the
 // orchestrator's brand row and the sessions island's head. The native frames
 // were right, and the checker passed.
@@ -510,10 +510,10 @@ func revealedLog(t *testing.T, revealed frameReport) string {
 	return logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, revealed, rest, goodBoard(true), goodFrame(false), goodBoard(false))
 }
 
-// v0.10.2's dev build on macOS 27 (the operator's frame 1369): in full screen,
+// v0.11.0's dev build on macOS 27 (the operator's frame 1369): in full screen,
 // the pointer at the top of the screen, the menu bar came out with the title bar
 // and its toolbar under it, a dark band over the capsule row. The operator
-// accepted it for v0.10.2 and keeps no room for them: the checker says what was
+// accepted it for v0.11.0 and keeps no room for them: the checker says what was
 // covered, and it fails nothing.
 func TestATitleBarOverTheRowWithTheMenuBarShownInFullScreenIsSaidAndAccepted(t *testing.T) {
 	shown := goodFrame(true)

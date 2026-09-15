@@ -152,7 +152,7 @@ static bool windowShouldClose(id self, SEL _cmd, id sender) {
 // In full screen the toolbar that places the window's buttons (frame_darwin.c)
 // hides with the menu bar and shows over the content when the pointer goes to
 // the top of the screen. Left as AppKit proposes, it stayed as a black band over
-// the capsule row and the panels' head rows (v0.10.2's first full screen stand).
+// the capsule row and the panels' head rows (v0.11.0's first full screen stand).
 // AppKit takes auto-hiding the toolbar only together with full screen, and full
 // screen with it only together with an auto-hiding menu bar.
 enum {
