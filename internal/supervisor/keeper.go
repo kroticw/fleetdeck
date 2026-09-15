@@ -297,7 +297,7 @@ func (k *Keeper) Run(ctx context.Context) {
 				if !ok {
 					continue // whatever is on the port is reported again
 				}
-				if _, refused = k.stoppable(ctx); refused != "" {
+				if refused = k.pressRefusal(ctx, now.PID); refused != "" {
 					continue
 				}
 				why = fmt.Sprintf("the panel at %s (pid %d, %q), which this window did not start, is replaced at a person's request", k.URL, now.PID, now.Executable)
@@ -347,7 +347,8 @@ func (k *Keeper) stoppable(ctx context.Context) (int, string) {
 	case err != nil:
 		return 0, fmt.Sprintf("who holds port %d is unknown (%v), and this dev app stops nothing", port, err)
 	case pid == 0:
-		return 0, ""
+		// Nothing found is not the dev app's own panel.
+		return 0, fmt.Sprintf("the owner of port %d is unknown: nothing is found listening on it, and this dev app stops nothing", port)
 	}
 	exe, err := executableOf(ctx, pid)
 	if err != nil {
@@ -357,6 +358,25 @@ func (k *Keeper) stoppable(ctx context.Context) (int, string) {
 		return 0, fmt.Sprintf("port %d is held by %s, not by this dev app", port, exe)
 	}
 	return pid, ""
+}
+
+// pressRefusal says why a dev keeper stops nothing at a press for the panel
+// with pid: what stoppable says, or the kernel naming another process on the
+// port than the one the press was for. A keeper with no StopsOnly is not asked
+// this, and "" is its answer.
+func (k *Keeper) pressRefusal(ctx context.Context, pid int) string {
+	if k.StopsOnly == "" {
+		return ""
+	}
+	holder, refused := k.stoppable(ctx)
+	if refused != "" {
+		return refused
+	}
+	if holder != pid {
+		port, _ := portOf(k.URL)
+		return fmt.Sprintf("port %d is held by pid %d, not by the panel (pid %d) the press was for, and this dev app stops nothing", port, holder, pid)
+	}
+	return ""
 }
 
 // realPath is p with every symlink in it resolved, as the kernel names a
