@@ -250,6 +250,9 @@ func main() {
 	w := webview.New(false)
 	startupStep("the web view is made")
 	defer w.Destroy()
+	// Deferred after Destroy, so it runs first: a panic on the main thread is
+	// logged and ends the process, rather than hanging in Destroy (panicexit.go).
+	defer panicExit{logf: log.Printf, exit: os.Exit}.guard()
 	w.SetTitle(plan.title)
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand, hostStandOpen = standSocket != "", stand.open
