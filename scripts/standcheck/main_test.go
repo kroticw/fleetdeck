@@ -509,6 +509,22 @@ func logLine(t *testing.T, clock string, r any) string {
 	return "2026/09/15 " + clock + " fleetdeck-window: " + words + string(raw) + "\n"
 }
 
+// Holding a report to the frame logged just after it changes only which frame
+// the report is compared with, never what it is compared on: a report of the
+// layout before, with that layout's insets, logged 100 ms before the window
+// measured its frame in full screen and the only one of that phase, fails the
+// board against the panels in full screen.
+func TestABoardReportOfTheLayoutBeforeJustBeforeTheNextFrameStillFails(t *testing.T) {
+	log := logLine(t, "11:00:01.000000", goodFrame(false)) +
+		logLine(t, "11:00:01.100000", goodBoard(false)) +
+		logLine(t, "11:00:01.200000", goodHeader(false)) +
+		logLine(t, "11:00:06.900000", goodBoard(false)) +
+		logLine(t, "11:00:07.000000", goodFrame(true)) +
+		logLine(t, "11:00:19.000000", goodFrame(false)) +
+		logLine(t, "11:00:19.100000", goodBoard(false))
+	wantProblem(t, check(log, 1), "in full screen 1: the board ends at 732, the sessions panel starts at 1460")
+}
+
 // A board report half a second before the next frame is the frame's before it,
 // whatever the next frame measures.
 func TestABoardReportLongBeforeTheNextFrameStaysWithTheFrameBeforeIt(t *testing.T) {
