@@ -392,7 +392,8 @@ endef
 # commit.
 DEV_PORT ?= 7778
 DEV_OPEN ?= 1
-DEV_APP = $(BINDIR)/fleetdeck-dev.app
+# Absolute, so the command dev-app prints opens it from any directory.
+DEV_APP = $(abspath $(BINDIR))/fleetdeck-dev.app
 DEV_URL = http://127.0.0.1:$(DEV_PORT)/
 DEV_LDFLAGS = $(LDFLAGS) -X 'main.devBuild=true' -X 'main.devURL=$(DEV_URL)'
 dev-app:
