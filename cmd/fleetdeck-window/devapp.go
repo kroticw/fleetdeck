@@ -101,8 +101,10 @@ func devConfigPath(home string) string {
 // a pinned orchestrator, a session's name, a fleet -- goes to the copy and not
 // to the file the installed panel reads and writes; two panels writing one
 // file could lose each other's changes. The banners are the installed panel's
-// to send.
-func copyDevConfig(operatorConfig, dev string) error {
+// to send. server.port is the dev app's port: the window hands its panel
+// --port anyway, and a dev panel ever started without it still keeps off the
+// installed panel's port.
+func copyDevConfig(operatorConfig, dev string, port int) error {
 	if _, err := os.Stat(operatorConfig); err != nil {
 		return fmt.Errorf("a dev app runs its panel on a copy of the operator's config, and there is none to copy: %w", err)
 	}
@@ -111,6 +113,7 @@ func copyDevConfig(operatorConfig, dev string) error {
 		return fmt.Errorf("read the operator's config to copy it: %w", err)
 	}
 	cfg.Notify.Waiting, cfg.Notify.Failed, cfg.Notify.Silent, cfg.Notify.CardBlocked = false, false, false, false
+	cfg.ServerPort = port
 	if err := appconfig.Save(dev, cfg); err != nil {
 		return fmt.Errorf("write the dev app's config %s: %w", dev, err)
 	}

@@ -141,8 +141,10 @@ func TestADevAppRefusesThePortOfTheInstalledPanel(t *testing.T) {
 }
 
 // The dev panel writes to a copy of the operator's config, made again at each
-// start, with every banner off: the installed panel already sends them.
-func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBanners(t *testing.T) {
+// start, with every banner off -- the installed panel already sends them --
+// and with the dev app's own port, so a dev panel started without --port
+// still keeps off the installed panel's.
+func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBannersOnItsOwnPort(t *testing.T) {
 	dir := t.TempDir()
 	operatorPath := filepath.Join(dir, "config.yaml")
 	writeFile(t, operatorPath, operatorConfig)
@@ -150,7 +152,7 @@ func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBanners(t *testing.T) {
 	// What an earlier dev app left there is replaced, not kept.
 	writeFile(t, dev, "server:\n    port: 1\n")
 
-	if err := copyDevConfig(operatorPath, dev); err != nil {
+	if err := copyDevConfig(operatorPath, dev, 7778); err != nil {
 		t.Fatal(err)
 	}
 	want, err := appconfig.Load(operatorPath)
@@ -158,6 +160,7 @@ func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBanners(t *testing.T) {
 		t.Fatal(err)
 	}
 	want.Notify.Waiting, want.Notify.Failed, want.Notify.Silent, want.Notify.CardBlocked = false, false, false, false
+	want.ServerPort = 7778
 	got, err := appconfig.Load(dev)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +178,7 @@ func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBanners(t *testing.T) {
 func TestADevAppWithNoOperatorConfigRefuses(t *testing.T) {
 	dir := t.TempDir()
 	dev := devConfigPath(dir)
-	if err := copyDevConfig(filepath.Join(dir, "none.yaml"), dev); err == nil {
+	if err := copyDevConfig(filepath.Join(dir, "none.yaml"), dev, 7778); err == nil {
 		t.Fatal("copyDevConfig with no operator's config: want a refusal")
 	}
 	if _, err := os.Stat(dev); err == nil {

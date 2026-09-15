@@ -147,7 +147,7 @@ func main() {
 			log.Fatalf("fleetdeck-window: %v", err)
 		}
 		panelConfig = devConfigPath(home)
-		if err := copyDevConfig(appconfig.DefaultPath(), panelConfig); err != nil {
+		if err := copyDevConfig(appconfig.DefaultPath(), panelConfig, port); err != nil {
 			log.Fatalf("fleetdeck-window: %v", err)
 		}
 		log.Printf("fleetdeck-window: a dev app on %s; its panel runs on %s, a copy of the operator's config with banners off", *url, panelConfig)
