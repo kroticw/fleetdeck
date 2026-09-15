@@ -148,7 +148,7 @@ func TestAFoldedPanelIsNotWidenedOrNarrowedForTheRow(t *testing.T) {
 	}
 }
 
-// v0.10.2's dev build on macOS 27 (the operator's frame 1374): with the
+// v0.11.0's dev build on macOS 27 (the operator's frame 1374): with the
 // orchestrator panel folded to its strip, the capsule row began 10 pt past the
 // strip, under the window's buttons, which end 79 pt in. The row begins its gap
 // past the buttons; the strip and the board stay where they were.

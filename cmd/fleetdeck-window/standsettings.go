@@ -36,7 +36,7 @@ const (
 	standFullScreenEnv = "FLEETDECK_STAND_FULLSCREEN"
 	// "orchestrator", "sessions" or "both": the window opens with those panels
 	// folded and the others unfolded, whatever the stand's defaults say, and
-	// keeps no widths or folds (panelWidthsForStand, storesWidths). v0.10.2's
+	// keeps no widths or folds (panelWidthsForStand, storesWidths). v0.11.0's
 	// capsule row lay under the window's buttons beside the folded
 	// orchestrator strip, which no stand had opened.
 	standFoldEnv = "FLEETDECK_STAND_FOLD"

@@ -4,7 +4,7 @@
 // stand, and nowhere else (window.fleetdeckHost.stand): which of its boxes do
 // not fit, and whether the page itself is wider than its web view. Folded, the
 // surface is a 48 px strip, and it says too what the strip shows and where its
-// unfold control is. v0.10.2's dev build ran the sessions counters off that
+// unfold control is. v0.11.0's dev build ran the sessions counters off that
 // strip's edge, and scrolled the orchestrator's page sideways under its strip;
 // a screenshot shows cut text or a scroll bar, and only the page can say which
 // box is at fault.

@@ -199,7 +199,7 @@ func TestInstallCloseToHideRefusesTheCloseAndHidesTheWindow(t *testing.T) {
 	}
 }
 
-// v0.10.2's first full screen stand (run 34932941637): the empty toolbar that
+// v0.11.0's first full screen stand (run 34932941637): the empty toolbar that
 // places the window's buttons stayed in full screen as a black band over the
 // capsule row and the panels' head rows. The window's delegate asks AppKit to
 // hide the toolbar with the menu bar in full screen, keeping what AppKit

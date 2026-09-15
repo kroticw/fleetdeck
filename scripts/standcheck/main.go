@@ -429,7 +429,7 @@ func coverProblems(when string, f frameReport) []string {
 // revealedNotes is what a pointer at the top of the screen brought out over the
 // capsule row in each time in full screen, as the window measured its frame
 // after it settled, the menu bar hidden: the stand brings the pointer there
-// meanwhile. The operator accepted it for v0.10.2 — in full screen the menu bar
+// meanwhile. The operator accepted it for v0.11.0 — in full screen the menu bar
 // and the title bar's strip lie over the capsule row, and no room is kept for
 // them — so it is said, and never a problem.
 func revealedNotes(log string) []string {
@@ -569,7 +569,7 @@ func sessionsFolded(f frameReport) bool {
 
 // stripProblems is what is wrong with each folded strip at the end of r: the
 // orchestrator's, whose unfold control is also held clear of the window's
-// buttons out of full screen, and the sessions'. v0.10.2's dev build scrolled
+// buttons out of full screen, and the sessions'. v0.11.0's dev build scrolled
 // the orchestrator's page sideways under its strip, and ran the sessions
 // counters off the sessions strip's edge (the operator's frame 1368). Nothing
 // for a panel that is not folded.
@@ -681,7 +681,7 @@ func (l standLog) foldedStripProblems(when string, r run, surface string, panel 
 }
 
 // underButtonProblems is each capsule that lies under one of the window's
-// buttons, out of full screen. v0.10.2's dev build laid the tabs under the zoom
+// buttons, out of full screen. v0.11.0's dev build laid the tabs under the zoom
 // button beside the folded orchestrator strip (the operator's frame 1374).
 func underButtonProblems(when string, f frameReport) []string {
 	var out []string
