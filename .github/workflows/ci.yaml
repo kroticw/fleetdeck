@@ -349,6 +349,7 @@ jobs:
       # properties before, in and after full screen, by the window's own
       # measurements. Glass here, opaque below.
       - name: This build's window in full screen and after it, glass, dark
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
@@ -402,6 +403,7 @@ jobs:
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7805 out/opaque-system-light-app-dark exec content
       - name: This build's window in full screen and after it, opaque, dark
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
