@@ -46,12 +46,43 @@ int fd_frame_board_observed(void *frame);
 // hidden.
 double fd_frame_titlebar_inset(void *frame);
 
+// fd_frame_titlebar_center is the line the window's buttons are centred on, in
+// points from the window's top edge: 0 when the window has no close button or it
+// is hidden.
+double fd_frame_titlebar_center(void *frame);
+
 int fd_glass_available(void);
 int fd_reduce_transparency(void);
 int fd_increase_contrast(void);
 
 // For frame_darwin_test.go, which cannot use cgo itself.
 void *fd_test_window(double width, double height);
+// The layout pass AppKit runs on window before its next frame on screen.
+void fd_test_layout_window(void *window);
+// A standard window button's frame (kind 0 close, 1 minimize, 2 zoom) from the
+// window's top left; all zero when there is none.
+fd_rect fd_test_window_button(void *window, int kind);
+// The toolbar's item count, -1 with no toolbar; its style; whether the title
+// bar is transparent.
+long fd_test_toolbar_items(void *window);
+long fd_test_toolbar_style(void *window);
+int fd_test_titlebar_transparent(void *window);
+// How much of the window's top its title bar and toolbar keep from the content.
+double fd_test_content_layout_top(void *window);
+// A view or a window that may lie over the window's content, from the window's
+// top left: its class, where it is, whether it is shown, and its alpha.
+typedef struct {
+  char kind[64];
+  fd_rect r;
+  int visible;
+  double alpha;
+} fd_overlay;
+// The window's title bar container and the app's other shown windows over the
+// window, at most n; the count.
+int fd_test_overlays(void *window, fd_overlay *out, int n);
+// Whether a click at (x, y) from the window's top left, routed as the window
+// routes one, title bar included, lands on view or inside it.
+int fd_test_window_hit_within(void *window, double x, double y, void *view);
 void *fd_test_panel(void *frame, int side);
 void *fd_test_root(void *frame);
 const char *fd_test_class_name(void *view);

@@ -10,6 +10,7 @@ package main
 import "C"
 
 import (
+	"fmt"
 	"sync"
 	"unsafe"
 )
@@ -92,21 +93,30 @@ func fleetdeckCapsulePressed(action *C.char) {
 // What capsules_darwin_test.go reads; Go test files cannot use cgo.
 
 type capsulesProbe struct {
-	segmentLabels    [2]string
-	selectedSegment  int
-	newCardTitle     string
-	themeTitle       string
-	levelValue       float64
-	capsuleCount     int
-	countAfterRedraw int
-	rowPassesThrough bool
-	presses          []string
+	segmentLabels   [2]string
+	selectedSegment int
+	// The tabs' border shape (-1 before macOS 26), where the selected
+	// segment's fill starts in its top row as a share of its height, and the
+	// room around the tabs in their capsule: left, right, top, bottom.
+	segmentBorderShape int
+	selectedTopInset   float64
+	roundedTopInset    float64
+	tabsInsets         [4]float64
+	newCardTitle       string
+	themeTitle         string
+	levelValue         float64
+	capsuleCount       int
+	countAfterRedraw   int
+	rowPassesThrough   bool
+	presses            []string
 	// clicksReach: a click at the middle of the tabs, the new card button and
 	// the theme button, drawn on glass, reaches that control.
 	clicksReach [3]bool
 	// insideGlass: each of those controls, drawn on glass, is its glass's
 	// content -- the one place a glass draws a view inside itself.
 	insideGlass [3]bool
+	// measured: the frame as a stand measures it (standframe_darwin.go).
+	measured standFrameReport
 }
 
 func probeCapsulesForTest(m capsuleModel) capsulesProbe {
@@ -120,6 +130,11 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	drawCapsules(f.capsules(), m, glassModeGlass)
 	out.segmentLabels = [2]string{C.GoString(C.fd_test_segment_label(0)), C.GoString(C.fd_test_segment_label(1))}
 	out.selectedSegment = int(C.fd_test_selected_segment())
+	out.segmentBorderShape = int(C.fd_test_segment_border_shape())
+	out.selectedTopInset = float64(C.fd_test_selected_segment_top_inset())
+	out.roundedTopInset = float64(C.fd_test_rounded_segment_top_inset())
+	insets := C.fd_test_tabs_insets()
+	out.tabsInsets = [4]float64{float64(insets.left), float64(insets.right), float64(insets.top), float64(insets.bottom)}
 	out.newCardTitle = C.GoString(C.fd_test_new_card_title())
 	out.themeTitle = C.GoString(C.fd_test_theme_title())
 	out.levelValue = float64(C.fd_test_level_value(0))
@@ -129,6 +144,7 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 		out.insideGlass[which] = C.fd_test_capsule_inside_glass(C.int(which)) != 0
 		out.clicksReach[which] = C.fd_test_click_reaches_capsule(C.int(which)) != 0
 	}
+	out.measured = measureFrame(f, window, glassModeGlass)
 	C.fd_test_press_segment(1)
 	C.fd_test_press_new_card()
 
@@ -210,6 +226,44 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 
 	clearCapsules(f.capsules())
 	out.minAfterClear = float64(C.fd_test_min_content_width(f.capsules()))
+	return out
+}
+
+// capsuleRegrowProbe is the row drawn in a window from wide, both panels
+// unfolded, and the frame then laid out for a window to wide, the capsules not
+// drawn again: what entering or leaving full screen does. Read after the layout
+// pass AppKit runs before the window's next frame on screen.
+type capsuleRegrowProbe struct {
+	from, to float64
+	rowWidth float64
+	capsules []drawnCapsule
+}
+
+func (p capsuleRegrowProbe) String() string {
+	return fmt.Sprintf("drawn at %v, laid out at %v, row %v", p.from, p.to, p.rowWidth)
+}
+
+func probeCapsuleRegrowForTest(m capsuleModel, from, to float64) capsuleRegrowProbe {
+	out := capsuleRegrowProbe{from: from, to: to}
+	const height = 700
+	widths := panelWidths{Orchestrator: 368, Sessions: 348}
+	window := C.fd_test_window(C.double(from), height)
+	f := installFrame(window)
+	f.setMode(glassModeGlass)
+	f.layout(layoutFor(from, height, widths))
+	rowMin := drawCapsules(f.capsules(), m, glassModeGlass)
+	f.layout(layoutWithRow(from, height, widths, rowMin))
+	C.fd_test_layout_window(window)
+	f.layout(layoutWithRow(to, height, widths, rowMin))
+	C.fd_test_layout_window(window)
+	out.rowWidth = float64(C.fd_test_row_width())
+	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {
+		fr := C.fd_test_capsule_slot_frame(C.int(i))
+		out.capsules = append(out.capsules, drawnCapsule{
+			name: C.GoString(C.fd_test_capsule_slot_name(C.int(i))), x: float64(fr.x), w: float64(fr.w), visible: fr.visible != 0,
+		})
+	}
+	clearCapsules(f.capsules())
 	return out
 }
 
