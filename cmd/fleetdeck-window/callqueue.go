@@ -19,7 +19,10 @@ type callQueue struct {
 
 func newCallQueue(answer func(message string)) *callQueue {
 	q := &callQueue{wake: make(chan struct{}, 1), done: make(chan struct{})}
-	go q.run(answer)
+	go func() {
+		defer panics.in("in a side surface's call queue").guard()
+		q.run(answer)
+	}()
 	return q
 }
 

@@ -8,7 +8,7 @@ import "encoding/json"
 // views. glasswindow.go is the real one; effects_test.go has a recording one.
 // Every method runs on the main thread.
 type natives interface {
-	createSurface(kind, url string, glass glassMode)
+	createSurface(kind, url string, glass glassMode, gen int)
 	destroySurfaces()
 	send(surface string, msg map[string]any)
 	focus(surface string)
@@ -35,7 +35,7 @@ func runEffects(n natives, effects []effect) {
 		switch e := e.(type) {
 		case createSurfaces:
 			for _, kind := range sideSurfaces {
-				n.createSurface(kind, e.URL, e.Glass)
+				n.createSurface(kind, e.URL, e.Glass, e.Gen)
 			}
 		case destroySurfaces:
 			n.destroySurfaces()

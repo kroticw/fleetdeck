@@ -14,6 +14,10 @@
 //     brand and its fleet menu button are centred on their line;
 //   - in full screen nothing of the title bar keeps the window's top or lies
 //     shown over the capsule row;
+//   - a folded strip, the orchestrator's or the sessions', has nothing wider
+//     than it or past its edge, no page scrolling sideways under it, and an
+//     unfold control inside it that a press reaches -- the orchestrator's clear
+//     of the window's buttons;
 //   - the capsules the pages draw (web/js/standcontrols.js) are of the window's
 //     material: see-through and round on glass, solid with no glass, blurring
 //     nothing but the panels that float over content, their text 4.5:1 over the
@@ -37,9 +41,10 @@ import (
 )
 
 const (
-	framePrefix  = "fleetdeck-window: the frame measures "
-	headerPrefix = "fleetdeck-window: the orchestrator surface reports its scrolling: "
-	boardPrefix  = "fleetdeck-window: the board reports its scrolling: "
+	framePrefix    = "fleetdeck-window: the frame measures "
+	headerPrefix   = "fleetdeck-window: the orchestrator surface reports its scrolling: "
+	sessionsPrefix = "fleetdeck-window: the sessions surface reports its scrolling: "
+	boardPrefix    = "fleetdeck-window: the board reports its scrolling: "
 )
 
 const (
@@ -140,10 +145,10 @@ type boardReport struct {
 	LastColumnRightAtEnd *float64 `json:"lastColumnRightAtEnd"`
 }
 
-// stripReport is the orchestrator surface's word on its fit
-// (web/js/standoverflow.js), in points from the surface's top left: whether it
-// is folded, how wide it and its page are, every box that does not fit, and,
-// folded, what it shows and its unfold control.
+// stripReport is a side surface's word on its fit, the orchestrator's or the
+// sessions' (web/js/standoverflow.js), in points from the surface's top left:
+// whether it is folded, how wide it and its page are, every box that does not
+// fit, and, folded, what it shows and its unfold control.
 type stripReport struct {
 	Surface     string `json:"surface"`
 	Report      string `json:"report"`
@@ -173,8 +178,8 @@ type stripAfter struct {
 }
 
 // standLog is what the log says, in order: the frames, the header's reports,
-// the board's and the orchestrator strip's, each of the last two with the frame
-// last measured before it (-1 for none).
+// the board's and the side surfaces' words on their fit, each of the last two
+// with the frame last measured before it (-1 for none).
 type standLog struct {
 	frames []frameReport
 	// frameTimes is when the window logged each frame; zero for a line
@@ -326,9 +331,15 @@ func parse(log string) (standLog, []string) {
 			}
 			l.headers = append(l.headers, h)
 		}
-		if i := strings.Index(line, headerPrefix); i >= 0 && strings.Contains(line, `"report":"overflow"`) {
+		// A side surface's word on its fit comes through its own line: the
+		// orchestrator's or the sessions'.
+		for _, prefix := range []string{headerPrefix, sessionsPrefix} {
+			i := strings.Index(line, prefix)
+			if i < 0 || !strings.Contains(line, `"report":"overflow"`) {
+				continue
+			}
 			var s stripReport
-			if err := json.Unmarshal([]byte(line[i+len(headerPrefix):]), &s); err != nil {
+			if err := json.Unmarshal([]byte(line[i+len(prefix):]), &s); err != nil {
 				problems = append(problems, fmt.Sprintf("an overflow report that is not one: %v", err))
 				continue
 			}
@@ -550,55 +561,74 @@ func orchestratorFolded(f frameReport) bool {
 	return f.Orchestrator.W <= foldedStripWidth+lineSlack
 }
 
-// stripProblems is what is wrong with the folded orchestrator strip at the end
-// of r, by the surface's last word on its fit up to then: a box wider than the
-// strip or past its edge, a page that scrolls sideways under it, or an unfold
-// control not shown, not reached by a press, outside the strip or, with
-// buttons (out of full screen), under one of the window's. v0.10.2's dev build
-// scrolled the orchestrator's page sideways under its strip, a scroll bar at
-// the strip's foot. Nothing when the orchestrator panel is not folded.
+func sessionsFolded(f frameReport) bool {
+	return f.Sessions.W <= foldedStripWidth+lineSlack
+}
+
+// stripProblems is what is wrong with each folded strip at the end of r: the
+// orchestrator's, whose unfold control is also held clear of the window's
+// buttons out of full screen, and the sessions'. v0.10.2's dev build scrolled
+// the orchestrator's page sideways under its strip, and ran the sessions
+// counters off the sessions strip's edge (the operator's frame 1368). Nothing
+// for a panel that is not folded.
 func (l standLog) stripProblems(when string, r run, buttons bool) []string {
 	f := l.frames[r.to]
-	if !orchestratorFolded(f) {
-		return nil
+	var out []string
+	if orchestratorFolded(f) {
+		out = append(out, l.foldedStripProblems(when, r, "orchestrator", f.Orchestrator, buttons)...)
 	}
+	// The window's buttons sit in the orchestrator panel's corner, never over
+	// the sessions panel.
+	if sessionsFolded(f) {
+		out = append(out, l.foldedStripProblems(when, r, "sessions", f.Sessions, false)...)
+	}
+	return out
+}
+
+// foldedStripProblems is what is wrong with surface's folded strip, panel in
+// the frame at the end of r, by the surface's last word on its fit up to then:
+// a box wider than the strip or past its edge, a page that scrolls sideways
+// under it, or an unfold control not shown, not reached by a press, outside
+// the strip or, with buttons, under one of the window's.
+func (l standLog) foldedStripProblems(when string, r run, surface string, panel box, buttons bool) []string {
+	f := l.frames[r.to]
 	var s *stripReport
 	for k := len(l.strips) - 1; k >= 0; k-- {
-		if l.strips[k].frame <= r.to && l.strips[k].Surface == "orchestrator" {
+		if l.strips[k].frame <= r.to && l.strips[k].Surface == surface {
 			s = &l.strips[k].stripReport
 			break
 		}
 	}
 	if s == nil {
-		return []string{when + "no overflow report from the folded orchestrator strip"}
+		return []string{fmt.Sprintf("%sno overflow report from the folded %s strip", when, surface)}
 	}
 	if !s.Folded {
-		return []string{fmt.Sprintf("%sthe orchestrator surface says it is not folded, its panel %v wide", when, f.Orchestrator.W)}
+		return []string{fmt.Sprintf("%sthe %s surface says it is not folded, its panel %v wide", when, surface, panel.W)}
 	}
 	var out []string
 	for _, o := range s.Overflowing {
-		out = append(out, fmt.Sprintf("%sin the folded orchestrator strip %s is %v wide for %v, from %v to %v", when, o.Element, o.ScrollWidth, o.ClientWidth, o.Left, o.Right))
+		out = append(out, fmt.Sprintf("%sin the folded %s strip %s is %v wide for %v, from %v to %v", when, surface, o.Element, o.ScrollWidth, o.ClientWidth, o.Left, o.Right))
 	}
 	if s.ScrollWidth > s.Width+lineSlack {
-		out = append(out, fmt.Sprintf("%sthe folded orchestrator strip's page is %v wide in %v: it scrolls sideways", when, s.ScrollWidth, s.Width))
+		out = append(out, fmt.Sprintf("%sthe folded %s strip's page is %v wide in %v: it scrolls sideways", when, surface, s.ScrollWidth, s.Width))
 	}
 	u := s.Unfold
 	switch {
 	case u == nil:
-		out = append(out, when+"the folded orchestrator strip shows no unfold control")
+		out = append(out, fmt.Sprintf("%sthe folded %s strip shows no unfold control", when, surface))
 	case !u.Reachable:
-		out = append(out, when+"a press on the folded orchestrator strip's unfold control reaches something else")
+		out = append(out, fmt.Sprintf("%sa press on the folded %s strip's unfold control reaches something else", when, surface))
 	case u.Left < -lineSlack || u.Right > s.Width+lineSlack:
-		out = append(out, fmt.Sprintf("%sthe folded orchestrator strip's unfold control at %v..%v is outside the strip %v wide", when, u.Left, u.Right, s.Width))
+		out = append(out, fmt.Sprintf("%sthe folded %s strip's unfold control at %v..%v is outside the strip %v wide", when, surface, u.Left, u.Right, s.Width))
 	}
 	if u != nil && buttons {
-		b := box{X: f.Orchestrator.X + u.Left, Y: f.Orchestrator.Y + u.Top, W: u.Right - u.Left, H: u.Bottom - u.Top}
+		b := box{X: panel.X + u.Left, Y: panel.Y + u.Top, W: u.Right - u.Left, H: u.Bottom - u.Top}
 		for _, button := range []struct {
 			name string
 			b    box
 		}{{"close", f.Close}, {"minimize", f.Minimize}, {"zoom", f.Zoom}} {
 			if overlaps(b, button.b) {
-				out = append(out, fmt.Sprintf("%sthe folded orchestrator strip's unfold control at %s lies under the window's %s button at %s", when, b.span(), button.name, button.b.span()))
+				out = append(out, fmt.Sprintf("%sthe folded %s strip's unfold control at %s lies under the window's %s button at %s", when, surface, b.span(), button.name, button.b.span()))
 			}
 		}
 	}

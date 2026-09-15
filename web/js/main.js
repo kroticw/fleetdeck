@@ -272,6 +272,8 @@ if (host) {
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the grounds the sessions list lies on, which a screenshot of glass cannot tell from the glass.
   if (host.stand && host.surface === "sessions" && column) watchGrounds(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And which of the sessions surface's boxes do not fit, folded to a rail or not.
+  if (host.stand && host.surface === "sessions" && column) watchOverflow(window, column, "sessions", (report) => callHost(window, "fleetdeckStandReport", report));
   // And the edges down the orchestrator's terminal, from the orchestrator surface.
   if (host.stand && host.surface === "orchestrator" && column) watchTerminalScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And which of the orchestrator surface's boxes do not fit, folded to a strip or not.

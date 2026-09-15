@@ -203,10 +203,12 @@ func (g *glassWindow) tick() { g.run(g.ctl.tick()) }
 // thread.
 func (g *glassWindow) surfaceMessage(surface, message, origin string, mainFrame bool) {
 	if !acceptSurfaceMessage(g.panelURL, origin, mainFrame) {
-		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surface, origin, mainFrame)
+		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surfaceKind(surface), origin, mainFrame)
 		return
 	}
-	if s := g.surfaces[surface]; s != nil && s.calls != nil {
+	// Only into the queue of the surface of its generation: a call from a
+	// surface taken down is not the one shown now's (surfacename.go).
+	if s := surfaceNamed(g.surfaces, surface); s != nil && s.calls != nil {
 		s.calls.push(message)
 	}
 }
@@ -215,7 +217,9 @@ func (g *glassWindow) surfaceMessage(surface, message, origin string, mainFrame 
 // settles its promise in that same web view, if it is still the one shown.
 func (g *glassWindow) answerCalls(kind string, s *surface) func(message string) {
 	return func(message string) {
-		reply := answerSurfaceCall(g.bridge, kind, message)
+		// Under the surface's name, so a binding tells its generation
+		// (pageLoaded).
+		reply := answerSurfaceCall(g.bridge, surfaceName(kind, s.gen), message)
 		if reply == "" {
 			return
 		}
@@ -227,15 +231,23 @@ func (g *glassWindow) answerCalls(kind string, s *surface) func(message string) 
 	}
 }
 
-func (g *glassWindow) surfaceNavigation(_, target string, mainFrame bool) bool {
-	allow, effects := g.ctl.navigate(target, mainFrame)
+func (g *glassWindow) surfaceNavigation(surface, target string, mainFrame bool) bool {
+	allow, effects := g.ctl.navigateFrom(surface, target, mainFrame)
 	g.later(effects)
 	return allow
 }
 
-func (g *glassWindow) pageLoaded(surface, state string) {
+// pageLoaded is a side surface's page saying where its load is. A word from a
+// surface not shown now is not about the page shown now: it is not logged as
+// that page's, which scripts/ci-window-stand.sh waits for, and a stand does not
+// count it toward entering full screen.
+func (g *glassWindow) pageLoaded(name, state string) {
+	surface, shown := g.ctl.current(name)
+	if !shown {
+		return
+	}
 	log.Printf("fleetdeck-window: %s", surfacePageSays(surface, state))
-	g.run(g.ctl.pageLoaded(surface, state))
+	g.run(g.ctl.pageLoadedFrom(name, state))
 	if state != pagePanel {
 		return
 	}
@@ -298,9 +310,9 @@ func surfacePageSays(surface, state string) string {
 
 // surfaceNavigated is WebKit's word about a surface's navigation, from inside
 // its delegate: carried out later, since it may take that web view down.
-func (g *glassWindow) surfaceNavigated(surface string, e navEvent) {
-	log.Printf("fleetdeck-window: the %s surface's navigation %s", surface, e)
-	g.later(g.ctl.surfaceNavigated(surface, e))
+func (g *glassWindow) surfaceNavigated(name string, e navEvent) {
+	log.Printf("fleetdeck-window: the %s surface's navigation %s", surfaceKind(name), e)
+	g.later(g.ctl.surfaceNavigatedFrom(name, e))
 }
 
 func (g *glassWindow) windowChanged(kind string) {
@@ -353,11 +365,11 @@ func (g *glassWindow) resize(side string, phase int, x float64) {
 
 // --- natives ---------------------------------------------------------------------
 
-func (g *glassWindow) createSurface(kind, url string, glass glassMode) {
+func (g *glassWindow) createSurface(kind, url string, glass glassMode, gen int) {
 	if old := g.surfaces[kind]; old != nil {
 		old.close()
 	}
-	s := newSurface(g.frame.board(), g.frame.panelContent(kind), kind, g.panelURL, glass, g.bridge)
+	s := newSurface(g.frame.board(), g.frame.panelContent(kind), kind, gen, g.panelURL, glass, g.bridge)
 	s.calls = newCallQueue(g.answerCalls(kind, s))
 	g.surfaces[kind] = s
 	g.framed = true

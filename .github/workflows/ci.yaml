@@ -362,7 +362,7 @@ jobs:
           FLEETDECK_STAND_APPEARANCE: light
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_OPEN: newcard,fleetmenu
-        run: scripts/ci-window-stand.sh new/fleetdeck.app 7815 out/light-newcard exec content
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7825 out/light-newcard exec content
       # In full screen and after it: v0.10.1's theme and limits capsules lay over
       # the sessions panel in full screen on the operator's macOS, and no stand
       # had entered it. The window goes in once its surfaces have loaded and
@@ -391,6 +391,28 @@ jobs:
           FLEETDECK_STAND_FULLSCREEN: "on"
           FLEETDECK_STAND_FOLD: orchestrator
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7811 out/fold-orchestrator-fullscreen-glass-dark exec content
+      # With the sessions panel folded to its strip: v0.10.2's dev build ran the
+      # sessions counters off the strip's edge (the operator's frame 1368).
+      # scripts/standcheck holds the strip's surface to nothing wider than the
+      # strip or past its edge, and its unfold control reached. Glass here, light
+      # and dark, before any stand below turns reduced transparency on; opaque
+      # below.
+      - name: This build's window with the sessions panel folded, glass, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_FOLD: sessions
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7815 out/fold-sessions-glass-light exec content
+      - name: This build's window with the sessions panel folded, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_FOLD: sessions
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7817 out/fold-sessions-glass-dark exec content
       # The capsules take the theme chosen in fleetdeck, whatever the system's
       # (capsules_darwin.c). With a theme other than the system's they were dark
       # on dark or light on light on glass (run 34868250061), and white on white
@@ -476,7 +498,7 @@ jobs:
           defaults write com.apple.universalaccess reduceTransparency -bool true
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
-          scripts/ci-window-stand.sh new/fleetdeck.app 7817 out/opaque-dark-newcard exec content
+          scripts/ci-window-stand.sh new/fleetdeck.app 7827 out/opaque-dark-newcard exec content
       - name: This build's window in its frame, opaque, the system dark and the app light, with the new card form and the fleet menu open
         if: ${{ !cancelled() }}
         env:
@@ -489,7 +511,32 @@ jobs:
           defaults write com.apple.universalaccess reduceTransparency -bool true
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
-          scripts/ci-window-stand.sh new/fleetdeck.app 7819 out/opaque-light-newcard exec content
+          scripts/ci-window-stand.sh new/fleetdeck.app 7823 out/opaque-light-newcard exec content
+      # The sessions panel folded to its strip, opaque, light and dark; glass
+      # above. scripts/standcheck holds the strip's surface to nothing wider
+      # than the strip or past its edge, and its unfold control reached.
+      - name: This build's window with the sessions panel folded, opaque, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_FOLD: sessions
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7819 out/fold-sessions-opaque-light exec content
+      - name: This build's window with the sessions panel folded, opaque, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_FOLD: sessions
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7821 out/fold-sessions-opaque-dark exec content
       - name: The system light again
         if: always()
         run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true

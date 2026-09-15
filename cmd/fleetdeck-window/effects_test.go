@@ -11,8 +11,8 @@ import (
 
 type fakeNatives struct{ calls []string }
 
-func (f *fakeNatives) createSurface(kind, url string, glass glassMode) {
-	f.calls = append(f.calls, "create "+kind+" "+url+" "+string(glass))
+func (f *fakeNatives) createSurface(kind, url string, glass glassMode, gen int) {
+	f.calls = append(f.calls, fmt.Sprintf("create %s %s %s %d", kind, url, glass, gen))
 }
 func (f *fakeNatives) destroySurfaces() { f.calls = append(f.calls, "destroy") }
 func (f *fakeNatives) send(surface string, msg map[string]any) {
@@ -39,10 +39,11 @@ func (f *fakeNatives) showToolbar(visible bool) {
 
 func TestCreatingSurfacesMakesBothColumnsOnTheSameAddress(t *testing.T) {
 	f := &fakeNatives{}
-	runEffects(f, []effect{createSurfaces{Fleet: "work", URL: "http://127.0.0.1:7777/?fleet=work", Glass: glassModeGlass}})
+	runEffects(f, []effect{createSurfaces{Fleet: "work", URL: "http://127.0.0.1:7777/?fleet=work", Glass: glassModeGlass, Gen: 3}})
+	// Both of a pair are of the generation the controller gave them.
 	want := []string{
-		"create orchestrator http://127.0.0.1:7777/?fleet=work glass",
-		"create sessions http://127.0.0.1:7777/?fleet=work glass",
+		"create orchestrator http://127.0.0.1:7777/?fleet=work glass 3",
+		"create sessions http://127.0.0.1:7777/?fleet=work glass 3",
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("calls = %v", f.calls)

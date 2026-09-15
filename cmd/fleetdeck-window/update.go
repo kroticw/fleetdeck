@@ -195,6 +195,7 @@ func launchNewWindow(url string) func(staged, canonical, handover string) (func(
 		}
 		done := make(chan struct{})
 		go func() {
+			defer panics.in("in the goroutine waiting for the new window").guard()
 			_ = cmd.Wait()
 			_ = log.Close()
 			close(done)
