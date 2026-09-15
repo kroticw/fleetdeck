@@ -134,6 +134,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("fleetdeck-window: locate home directory: %v", err)
 	}
+	// What a panic anywhere in the window says and where it is kept, before
+	// the first goroutine starts (panicexit.go).
+	panics = panicExit{logf: log.Printf, exit: os.Exit, file: panicLogPath(home, dev), build: ownBuild(), exe: exe, now: time.Now}
 	// A stand's socket, when this window runs on a stand, handed to every panel
 	// it starts; a stand that names none is refused before anything starts.
 	standSocket, err := standIsolation(os.LookupEnv)
@@ -251,8 +254,8 @@ func main() {
 	startupStep("the web view is made")
 	defer w.Destroy()
 	// Deferred after Destroy, so it runs first: a panic on the main thread is
-	// logged and ends the process, rather than hanging in Destroy (panicexit.go).
-	defer panicExit{logf: log.Printf, exit: os.Exit}.guard()
+	// kept and ends the process, rather than hanging in Destroy (panicexit.go).
+	defer panics.in("on the main thread").guard()
 	w.SetTitle(plan.title)
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand, hostStandOpen = standSocket != "", stand.open
@@ -344,7 +347,10 @@ func main() {
 		})
 	}
 	// The keeper's word, in order, now that the window can act on it.
-	go keeperEvents.Run(context.Background(), handleKeeperEvent)
+	go func() {
+		defer panics.in("in the goroutine handing the keeper's events to the window").guard()
+		keeperEvents.Run(context.Background(), handleKeeperEvent)
+	}()
 
 	// Bound before the first navigation, so the page finds them from its very
 	// first load. A reload the page or a person asks for is a navigation the
@@ -452,6 +458,7 @@ func main() {
 	// have, and the answer kept for the version before it does not apply.
 	var watching atomic.Pointer[updateWatch]
 	go func() {
+		defer panics.in("in the goroutine watching for an update").guard()
 		how := updateWayOf()
 		if how.Source == nil {
 			return
@@ -494,6 +501,7 @@ func main() {
 			return
 		}
 		go func() {
+			defer panics.in("in the goroutine running an update").guard()
 			defer updating.Store(false)
 			how := updateWayOf()
 			if how.Refusal != "" {
@@ -526,9 +534,12 @@ func main() {
 	// the start, unless an update runs or something still runs out of it
 	// (supervisor.RetireLeftover, leftoverstart.go).
 	if plan.retiresLeftover {
-		go supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
-			supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
-			func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })
+		go func() {
+			defer panics.in("in the goroutine retiring a leftover bundle").guard()
+			supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
+				supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
+				func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })
+		}()
 	}
 
 	// Time going by for a page asked for and not loaded (screen.tick), the
@@ -536,6 +547,7 @@ func main() {
 	ticking, stopTicking := context.WithCancel(context.Background())
 	ticked := make(chan struct{})
 	go func() {
+		defer panics.in("in the page load ticker").guard()
 		defer close(ticked)
 		tick := time.NewTicker(pageLoadTick)
 		defer tick.Stop()
@@ -658,6 +670,7 @@ func (r *keeperRun) start() {
 	done := make(chan struct{})
 	r.cancel, r.done = cancel, done
 	go func() {
+		defer panics.in("in the keeper's goroutine").guard()
 		r.k.Run(ctx)
 		close(done)
 	}()

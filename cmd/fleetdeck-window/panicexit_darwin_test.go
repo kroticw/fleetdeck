@@ -10,31 +10,108 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
-// mainQueuePanicEnv makes this test binary the window's main thread in
-// miniature instead of running tests: a panic inside a block on the main
-// dispatch queue, with webview's Destroy waiting below it.
-const mainQueuePanicEnv = "FLEETDECK_WINDOW_TEST_MAIN_QUEUE_PANIC"
+// panicChildEnv makes this test binary a window in miniature instead of running
+// tests, panicking where its value says: "main", inside a block on the main
+// dispatch queue with webview's Destroy waiting below it; "callqueue", in a
+// side surface's call queue answering a call.
+const panicChildEnv = "FLEETDECK_WINDOW_TEST_PANIC"
+
+// The build a panicking child says it is.
+var testPanicBuild = build{Version: "9.9.9-test", Revision: "0123abcd", Modified: true}
 
 // Package initialisation runs on the process's main thread, which a block on
 // the main dispatch queue needs; TestMain is never reached.
 func init() {
-	if os.Getenv(mainQueuePanicEnv) == "" {
+	where := os.Getenv(panicChildEnv)
+	if where == "" {
 		return
 	}
 	log.SetFlags(0)
-	// main.go's order: the web view's Destroy deferred first, the guard after
-	// it, so the guard runs first.
-	defer testWaitLikeDestroy()
-	defer panicExit{logf: log.Printf, exit: os.Exit}.guard()
-	testPostPanicBlock()
-	testRunMainLoop(10)
-	log.Print("the run loop returned without running the block")
+	home, _ := os.UserHomeDir()
+	// As main.go sets it, before anything that can panic starts.
+	panics = panicExit{
+		logf:  log.Printf,
+		exit:  os.Exit,
+		file:  panicLogPath(home, false),
+		build: testPanicBuild,
+		exe:   os.Args[0],
+		now:   time.Now,
+	}
+	switch where {
+	case "main":
+		// main.go's order: the web view's Destroy deferred first, the guard
+		// after it, so the guard runs first.
+		defer testWaitLikeDestroy()
+		defer panics.in("on the main thread").guard()
+		testPostPanicBlock()
+		testRunMainLoop(10)
+		log.Print("the run loop returned without running the block")
+	case "callqueue":
+		q := newCallQueue(func(string) { panic(testPanicValue) })
+		q.push("a call")
+		time.Sleep(10 * time.Second)
+		log.Print("the call queue did not end the process")
+	}
 	os.Exit(5)
+}
+
+// runPanickingChild runs the child panicking where says, with home as its HOME,
+// and returns what it said and how it exited; a child still running after 20
+// seconds has hung.
+func runPanickingChild(t *testing.T, where, home string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	cmd.Env = append(os.Environ(), panicChildEnv+"="+where, "HOME="+home)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		return out.String(), err
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+		t.Fatalf("the window hung after a panic %s instead of exiting; it said:\n%s", where, out.String())
+		return "", nil
+	}
+}
+
+func wantExitStatus2(t *testing.T, err error, said string) {
+	t.Helper()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 2 {
+		t.Fatalf("exit = %v, want exit status 2; it said:\n%s", err, said)
+	}
+}
+
+func readPanicFile(t *testing.T, home, said string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(home, "Library", "Logs", "fleetdeck-window-panic.log"))
+	if err != nil {
+		t.Fatalf("no panic file: %v; the child said:\n%s", err, said)
+	}
+	return string(raw)
+}
+
+func wantAll(t *testing.T, what, in string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(in, want) {
+			t.Fatalf("%s does not say %q:\n%s", what, want, in)
+		}
+	}
 }
 
 // A panic in a block on the main queue unwinds into main's deferred calls. The
@@ -44,59 +121,166 @@ func init() {
 // The guard deferred after Destroy says what panicked and ends the process
 // before Destroy is reached.
 func TestAPanicOnTheMainQueueIsLoggedAndEndsTheWindow(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
-	cmd.Env = append(os.Environ(), mainQueuePanicEnv+"=1")
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	said, err := runPanickingChild(t, "main", t.TempDir())
+	wantExitStatus2(t, err, said)
+	wantAll(t, "the log", said, "panic on the main thread", testPanicValue, "goroutine ", "fleetdeckTestPanicInBlock")
+}
 
-	var err error
-	select {
-	case err = <-done:
-	case <-time.After(20 * time.Second):
-		_ = cmd.Process.Kill()
-		<-done
-		t.Fatalf("the window's main thread hung after a panic on the main queue instead of exiting; it said:\n%s", out.String())
+// An app opened from the Dock writes its stderr to /dev/null, so the log alone
+// keeps nothing of a panic there: the panic goes to a file under the home's
+// Library/Logs, with when, which build, which binary, where, what, and every
+// goroutine's stack.
+func TestAPanicOnTheMainQueueIsKeptInTheWindowsPanicFile(t *testing.T) {
+	home := t.TempDir()
+	said, err := runPanickingChild(t, "main", home)
+	wantExitStatus2(t, err, said)
+	kept := readPanicFile(t, home, said)
+	if !regexp.MustCompile(`(?m)^=== \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`).MatchString(kept) {
+		t.Fatalf("the record does not start with when it happened:\n%s", kept)
 	}
+	wantAll(t, "the panic file", kept,
+		"version: 9.9.9-test",
+		"revision: 0123abcd (modified)",
+		"binary: "+os.Args[0],
+		"where: on the main thread",
+		"panic: "+testPanicValue,
+		"goroutine ",
+		"fleetdeckTestPanicInBlock",
+	)
+}
 
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 2 {
-		t.Fatalf("exit = %v, want exit status 2; it said:\n%s", err, out.String())
-	}
-	said := out.String()
-	for _, want := range []string{"panic on the main thread", testPanicValue, "goroutine ", "fleetdeckTestPanicInBlock"} {
-		if !strings.Contains(said, want) {
-			t.Fatalf("the log does not say %q:\n%s", want, said)
-		}
+// A panic on a goroutine of the window's own ends the process at once, as it
+// always did, but with the same record: from the Dock nothing else of it is
+// kept. The call queue here is the side surfaces' own, as glasswindow.go makes
+// it.
+func TestAPanicOnAWindowGoroutineIsKeptAndEndsTheWindow(t *testing.T) {
+	home := t.TempDir()
+	said, err := runPanickingChild(t, "callqueue", home)
+	wantExitStatus2(t, err, said)
+	wantAll(t, "the log", said, "panic in a side surface's call queue", testPanicValue)
+	wantAll(t, "the panic file", readPanicFile(t, home, said), "where: in a side surface's call queue", "panic: "+testPanicValue, "goroutine ")
+}
+
+// A panic file that cannot be written does not keep the window from saying
+// the panic and exiting, and does not panic a second time.
+func TestAPanicTheFileCannotKeepIsStillLoggedAndEndsTheWindow(t *testing.T) {
+	said, err := runPanickingChild(t, "main", "/dev/null")
+	wantExitStatus2(t, err, said)
+	wantAll(t, "the log", said, "panic on the main thread", testPanicValue, "could not be kept")
+	if strings.Count(said, "panic on the main thread") != 1 {
+		t.Fatalf("the panic was said more than once:\n%s", said)
 	}
 }
 
-// The guard only helps in main's deferred calls after the web view's Destroy:
-// deferred before it, it runs after Destroy has already hung.
-func TestMainGuardsAgainstPanicsAfterDeferringTheWebViewsDestroy(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+// The file is appended to and never grows by more than one record a process:
+// a panic while the first is being kept adds nothing.
+func TestAProcessKeepsOnePanicRecord(t *testing.T) {
+	panicRecorded.Store(false)
+	t.Cleanup(func() { panicRecorded.Store(false) })
+	file := filepath.Join(t.TempDir(), "Library", "Logs", "fleetdeck-window-panic.log")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("an earlier record\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	p := panicExit{
+		file:  file,
+		build: build{Version: "0.10.2"},
+		exe:   "/Applications/fleetdeck.app/Contents/MacOS/fleetdeck-window",
+		now:   func() time.Time { return at },
+	}.in("on the main thread")
+	if err := p.record("the first", []byte("goroutine 1 [running]:\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.record("the second", []byte("goroutine 1 [running]:\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
+	kept := string(raw)
+	wantAll(t, "the file", kept,
+		"an earlier record\n",
+		"=== 2026-09-15T12:00:00Z fleetdeck-window panic\n",
+		"version: 0.10.2\n",
+		"revision: unknown\n",
+		"binary: /Applications/fleetdeck.app/Contents/MacOS/fleetdeck-window\n",
+		"where: on the main thread\n",
+		"panic: the first\n",
+	)
+	if strings.Contains(kept, "the second") {
+		t.Fatalf("a second record was kept in the same process:\n%s", kept)
+	}
+}
+
+// A goroutine that ends without panicking, by returning or by runtime.Goexit,
+// passes its guard: nothing is said and nothing exits.
+func TestAGuardLetsAGoroutineEndWithoutAPanic(t *testing.T) {
+	exited := make(chan int, 2)
+	p := panicExit{
+		logf: func(format string, args ...any) { t.Errorf("the guard said: "+format, args...) },
+		exit: func(code int) { exited <- code },
+	}
+	for _, end := range []func(){func() {}, runtime.Goexit} {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			defer p.in("in a test goroutine").guard()
+			end()
+		}()
+		<-done
+	}
+	select {
+	case code := <-exited:
+		t.Fatalf("the guard exited with %d on a goroutine that did not panic", code)
+	default:
+	}
+}
+
+// A dev app keeps its panics apart from the installed app's, as it keeps its
+// logs.
+func TestADevAppKeepsItsPanicsInAFileOfItsOwn(t *testing.T) {
+	if got := panicLogPath("/Users/o", false); got != "/Users/o/Library/Logs/fleetdeck-window-panic.log" {
+		t.Fatalf("installed: %s", got)
+	}
+	if got := panicLogPath("/Users/o", true); got != "/Users/o/Library/Logs/fleetdeck-dev-window-panic.log" {
+		t.Fatalf("dev: %s", got)
+	}
+}
+
+func isGuard(call ast.Expr) bool {
+	s := types.ExprString(call)
+	return strings.HasPrefix(s, "panics.in(") && strings.HasSuffix(s, ".guard")
+}
+
+func parseWindowFile(t *testing.T, name string) *ast.File {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+// The main thread's guard only helps in main's deferred calls after the web
+// view's Destroy: deferred before it, it runs after Destroy has already hung.
+func TestMainGuardsAgainstPanicsAfterDeferringTheWebViewsDestroy(t *testing.T) {
 	destroy, guard := -1, -1
-	for _, decl := range file.Decls {
+	for _, decl := range parseWindowFile(t, "main.go").Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "main" || fn.Recv != nil {
 			continue
 		}
 		for i, stmt := range fn.Body.List {
 			d, ok := stmt.(*ast.DeferStmt)
-			if !ok {
-				continue
-			}
-			switch call := types.ExprString(d.Call.Fun); {
-			case call == "w.Destroy":
+			switch {
+			case !ok:
+			case types.ExprString(d.Call.Fun) == "w.Destroy":
 				destroy = i
-			case strings.HasPrefix(call, "panicExit{") && strings.HasSuffix(call, ".guard"):
+			case isGuard(d.Call.Fun):
 				guard = i
 			}
 		}
@@ -105,8 +289,36 @@ func TestMainGuardsAgainstPanicsAfterDeferringTheWebViewsDestroy(t *testing.T) {
 	case destroy < 0:
 		t.Fatal("main no longer defers w.Destroy(): this test no longer knows where the guard belongs")
 	case guard < 0:
-		t.Fatal("main defers no panicExit guard")
+		t.Fatal("main defers no panic guard")
 	case guard < destroy:
 		t.Fatalf("main defers the panic guard (statement %d) before w.Destroy() (statement %d): it would run after Destroy hung", guard, destroy)
+	}
+}
+
+// Every goroutine the window starts begins with its guard, so a panic on any of
+// them is kept before the process ends.
+func TestEveryWindowGoroutineStartsWithAPanicGuard(t *testing.T) {
+	for _, name := range []string{"main.go", "handoverstart.go", "callqueue.go"} {
+		file := parseWindowFile(t, name)
+		found := 0
+		ast.Inspect(file, func(n ast.Node) bool {
+			g, ok := n.(*ast.GoStmt)
+			if !ok {
+				return true
+			}
+			found++
+			lit, ok := g.Call.Fun.(*ast.FuncLit)
+			if !ok || len(lit.Body.List) == 0 {
+				t.Errorf("%s: `go %s` does not start a function literal that begins with its guard", name, types.ExprString(g.Call.Fun))
+				return true
+			}
+			if d, ok := lit.Body.List[0].(*ast.DeferStmt); !ok || !isGuard(d.Call.Fun) {
+				t.Errorf("%s: a goroutine does not begin with `defer panics.in(...).guard()`", name)
+			}
+			return true
+		})
+		if found == 0 {
+			t.Errorf("%s starts no goroutine: this test no longer knows what it guards", name)
+		}
 	}
 }
