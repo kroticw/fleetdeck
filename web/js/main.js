@@ -8,6 +8,7 @@ import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
 import { watchBoardScroll, watchListScroll, watchTerminalScroll } from "./standreport.js";
+import { watchHeaderLine } from "./standheader.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -265,6 +266,10 @@ if (host) {
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the edges down the orchestrator's terminal, from the orchestrator surface.
   if (host.stand && host.surface === "orchestrator" && column) watchTerminalScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And where its header's row and brand are centred, against the line the
+  // window's buttons are centred on (web/js/standheader.js).
+  const standHeader = host.stand && host.surface === "orchestrator" ? document.getElementById("header") : null;
+  if (standHeader) watchHeaderLine(window, standHeader, (report) => callHost(window, "fleetdeckStandReport", report));
   // The window's panel folds with the column: a fold the column makes itself
   // (its own button) is passed on, and one the window sends is not passed back.
   let panelFolded = column?.dataset.folded === "1";

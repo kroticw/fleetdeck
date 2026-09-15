@@ -150,6 +150,10 @@ func windowContentSize(window unsafe.Pointer) (width, height float64) {
 
 func windowIsFullscreen(window unsafe.Pointer) bool { return C.fd_window_is_fullscreen(window) != 0 }
 
+// toggleFullScreen puts the window into full screen or out of it, as its green
+// button does; a stand's only (standfullscreen.go).
+func toggleFullScreen(window unsafe.Pointer) { C.fd_window_toggle_fullscreen(window) }
+
 // windowEvents is where word of the window changing goes: glasswindow.go.
 var windowEvents = struct {
 	sync.Mutex

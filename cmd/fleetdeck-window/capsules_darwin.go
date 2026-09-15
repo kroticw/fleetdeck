@@ -114,6 +114,8 @@ type capsulesProbe struct {
 	// insideGlass: each of those controls, drawn on glass, is its glass's
 	// content -- the one place a glass draws a view inside itself.
 	insideGlass [3]bool
+	// measured: the frame as a stand measures it (standframe_darwin.go).
+	measured standFrameReport
 }
 
 func probeCapsulesForTest(m capsuleModel) capsulesProbe {
@@ -140,6 +142,7 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 		out.insideGlass[which] = C.fd_test_capsule_inside_glass(C.int(which)) != 0
 		out.clicksReach[which] = C.fd_test_click_reaches_capsule(C.int(which)) != 0
 	}
+	out.measured = measureFrame(f, window, glassModeGlass)
 	C.fd_test_press_segment(1)
 	C.fd_test_press_new_card()
 

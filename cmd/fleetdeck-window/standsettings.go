@@ -28,6 +28,11 @@ const (
 	// "newcard": the board opens its new card form as it loads, so a stand's
 	// screenshot shows the form without anyone pressing its capsule.
 	standOpenEnv = "FLEETDECK_STAND_OPEN"
+	// "on": once its surfaces have loaded, the window enters full screen, and
+	// after a while leaves it (standfullscreen.go), so a stand measures and
+	// shows the frame in full screen and after it. v0.10.1's capsules lay over
+	// the sessions panel in full screen, which no stand had entered.
+	standFullScreenEnv = "FLEETDECK_STAND_FULLSCREEN"
 )
 
 // standSettings is what a stand set; the zero value is a person's window.
@@ -36,6 +41,7 @@ type standSettings struct {
 	width, height     int
 	appearance        string
 	open              string
+	fullScreen        bool
 }
 
 // Smaller than this the frame has no room for both panels and the board.
@@ -74,6 +80,12 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 			return standSettings{}, fmt.Errorf("%s=%q is not newcard", standOpenEnv, v)
 		}
 		s.open = v
+	}
+	if v, set := lookup(standFullScreenEnv); set {
+		if v != "on" {
+			return standSettings{}, fmt.Errorf("%s=%q is not on", standFullScreenEnv, v)
+		}
+		s.fullScreen = true
 	}
 	return s, nil
 }

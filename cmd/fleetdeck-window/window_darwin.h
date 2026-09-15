@@ -30,5 +30,7 @@ void fd_defaults_use_suite(const char *name);
 void fd_observe_window(void *window);
 void fd_window_content_size(void *window, double *width, double *height);
 int fd_window_is_fullscreen(void *window);
+// Puts window into full screen or out of it, as its green button does.
+void fd_window_toggle_fullscreen(void *window);
 
 #endif

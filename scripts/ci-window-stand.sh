@@ -26,7 +26,21 @@
 #                    one waiting and one stopped, and the orchestrator's terminal
 #                    has long lines and a status line. The panel's snapshot has to
 #                    list the daemon's sessions and the stopped card before the
-#                    screenshot is taken.
+#                    screenshot is taken. And the frame has to keep its properties
+#                    as scripts/standcheck reads them off the window's own
+#                    measurements: every capsule in the row and over neither
+#                    panel, the board meeting both panels as they are laid out
+#                    and its last column out from under the sessions panel, the
+#                    selected tab a capsule, the window's buttons concentric in
+#                    the orchestrator panel's corner with the header's row on
+#                    their line. The pages' own verdicts are not a gate.
+#
+# FLEETDECK_STAND_FULLSCREEN=on, for content: the window goes into full screen
+# once its surfaces have loaded and comes out of it after a while
+# (cmd/fleetdeck-window/standfullscreen.go). The stand takes the frame in full
+# screen (window-fullscreen.png) and after it (window.png), and standcheck holds
+# the frame to its properties in both and before. v0.10.1's capsules lay over the
+# sessions panel in full screen, which no stand had entered.
 #
 # FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
 # it is drawn in NSAppearanceNameDarkAqua for dark, NSAppearanceNameAqua for light.
@@ -98,6 +112,7 @@ case $expect in
 		printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n    orchestrator:\n      session: 0c7e1a2b\n' "$port" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
 		url="http://127.0.0.1:$port/?fleet=stand"
 		(cd "$(dirname "$0")/.." && go build -o "$stand/standdaemon" ./scripts/standdaemon)
+		(cd "$(dirname "$0")/.." && go build -o "$stand/standcheck" ./scripts/standcheck)
 		socket="$stand/daemon.sock"
 		"$stand/standdaemon" -socket "$socket" -home "$stand/home" -board "$stand/board" >"$out/standdaemon.log" 2>&1 &
 		daemon=$!
@@ -190,7 +205,7 @@ fi
 # its terminal is in sight -- no native bar under xterm's viewport, and xterm's
 # own bar faded out (web/js/standreport.js). It sets native and own.
 terminal_at_rest() {
-	terminal=$(grep 'the orchestrator surface reports its scrolling' "$out/window.log" | tail -n 1)
+	terminal=$(grep 'the orchestrator surface reports its scrolling' "$out/window.log" | grep 'viewportScrollbarWidth' | tail -n 1)
 	native=$(printf '%s\n' "$terminal" | sed -n 's/.*"viewportScrollbarWidth":\([0-9]*\).*/\1/p')
 	own=$(printf '%s\n' "$terminal" | sed -n 's/.*"ownBarOpacity":\([0-9.]*\).*/\1/p')
 	[ "$native" = 0 ] && [ "$own" = 0 ]
@@ -202,6 +217,38 @@ if [ "$expect" = content ]; then
 		terminal_at_rest && break
 		sleep 1
 	done
+fi
+# in_full_screen: the line number of the window's first measure of its frame in
+# full screen, "" before there is one. out_of_full_screen: whether a measure out
+# of it follows that line.
+in_full_screen() {
+	grep -n 'fleetdeck-window: the frame measures .*"fullScreen":true' "$out/window.log" | head -n 1 | cut -d: -f1
+}
+out_of_full_screen() {
+	tail -n "+$1" "$out/window.log" | grep -q 'fleetdeck-window: the frame measures .*"fullScreen":false'
+}
+# For a stand in full screen, its frame in full screen, then the frame after it:
+# the window goes in once its surfaces have loaded and comes out on its own.
+fullscreen=no
+if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
+	went_in=
+	for _ in $(seq 45); do
+		went_in=$(in_full_screen)
+		[ -n "$went_in" ] && break
+		sleep 1
+	done
+	if [ -n "$went_in" ]; then
+		sleep 3
+		capture_screen "$out/window-fullscreen.png"
+		for _ in $(seq 45); do
+			if out_of_full_screen "$went_in"; then
+				fullscreen=yes
+				break
+			fi
+			sleep 1
+		done
+	fi
+	echo "--- full screen: went in at log line ${went_in:-never}, came out: $fullscreen"
 fi
 # The screenshot comes after every page said so: for frame, it is the frame's.
 sleep 3
@@ -263,6 +310,19 @@ if [ "$expect" = content ]; then
 	fi
 fi
 
+# For content, the frame's properties as scripts/standcheck reads them off the
+# window's measurements of itself and the pages' of themselves.
+frame=yes
+if [ "$expect" = content ]; then
+	if [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
+		"$stand/standcheck" -log "$out/window.log" -fullscreen >"$out/standcheck.txt" 2>&1 || frame=no
+	else
+		"$stand/standcheck" -log "$out/window.log" >"$out/standcheck.txt" 2>&1 || frame=no
+	fi
+	echo "--- the frame's properties (scripts/standcheck)"
+	cat "$out/standcheck.txt"
+fi
+
 # The appearance the stand asked for, as AppKit reports the window drawn
 # (window_darwin.go).
 appearance=yes
@@ -304,5 +364,9 @@ if [ -n "${FLEETDECK_STAND_SYSTEM:-}" ]; then
 	[ "$system_said" = "$system_want" ] || system=no
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the frame's properties: $frame, full screen ${FLEETDECK_STAND_FULLSCREEN:-off}: $fullscreen, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
+full_screen_ok=yes
+if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ] && [ "$fullscreen" = no ]; then
+	full_screen_ok=no
+fi
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$frame" = yes ] && [ "$full_screen_ok" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]

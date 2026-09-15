@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	webview "github.com/webview/webview_go"
 )
@@ -37,6 +38,11 @@ type glassWindow struct {
 	dragSide  string
 	dragWidth float64
 	dragX     float64
+
+	// On a stand: its trip into full screen, and the frame as the window last
+	// said it measured it.
+	standFS   *standFullScreen
+	frameSaid string
 }
 
 func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp func(page string)) *glassWindow {
@@ -50,6 +56,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		surfaces: map[string]*surface{},
 		askBoard: askBoard,
 		putUp:    putUp,
+		standFS:  newStandFullScreen(hostOnStand && standFullScreenOn),
 	}
 	g.ctl = newController(panelURL, loadPanelWidths(), mode)
 	g.frame.setMode(mode)
@@ -229,6 +236,37 @@ func (g *glassWindow) surfaceNavigation(_, target string, mainFrame bool) bool {
 func (g *glassWindow) pageLoaded(surface, state string) {
 	log.Printf("fleetdeck-window: %s", surfacePageSays(surface, state))
 	g.run(g.ctl.pageLoaded(surface, state))
+	if state != pagePanel {
+		return
+	}
+	if after, ok := g.standFS.surfaceLoaded(surface); ok {
+		log.Printf("fleetdeck-window: on this stand the window enters full screen in %v", after)
+		g.toggleFullScreenAfter(after)
+	}
+}
+
+func (g *glassWindow) toggleFullScreenAfter(after time.Duration) {
+	time.AfterFunc(after, func() { g.w.Dispatch(func() { toggleFullScreen(g.w.Window()) }) })
+}
+
+// reportFrame puts what the frame measures natively in the window's log, on a
+// stand only: once AppKit has laid the window out, and only when it changed
+// (standframe_darwin.go).
+func (g *glassWindow) reportFrame() {
+	if !hostOnStand {
+		return
+	}
+	g.w.Dispatch(func() {
+		if !g.framed {
+			return
+		}
+		line := frameReportLine(measureFrame(g.frame, g.w.Window(), g.mode))
+		if line == g.frameSaid {
+			return
+		}
+		g.frameSaid = line
+		log.Print(line)
+	})
 }
 
 // surfacePageSays is the window's log line for a surface's page's word about
@@ -251,8 +289,16 @@ func (g *glassWindow) windowChanged(kind string) {
 		g.run(g.ctl.glassChanged(currentGlassMode()))
 	default:
 		width, height := windowContentSize(g.w.Window())
-		g.run(g.ctl.resized(width, height, windowIsFullscreen(g.w.Window())))
+		fullscreen := windowIsFullscreen(g.w.Window())
+		g.run(g.ctl.resized(width, height, fullscreen))
 		g.run(g.ctl.titlebarButtons(g.frame.titlebarInset(), g.frame.titlebarCenter()))
+		if kind == "fullscreen" {
+			if after, ok := g.standFS.changed(fullscreen); ok {
+				log.Printf("fleetdeck-window: on this stand the window leaves full screen in %v", after)
+				g.toggleFullScreenAfter(after)
+			}
+		}
+		g.reportFrame()
 	}
 }
 
@@ -344,6 +390,7 @@ func (g *glassWindow) setAppearance(choice string) {
 func (g *glassWindow) applyGeometry(geo geometry) {
 	g.frame.layout(geo)
 	g.run(g.ctl.laidOut(geo))
+	g.reportFrame()
 }
 func (g *glassWindow) saveWidths(w panelWidths) { storePanelWidths(w) }
 
@@ -377,6 +424,7 @@ func (g *glassWindow) redrawCapsules() {
 		return
 	}
 	drawCapsuleRow(g.frame, g.model, g.mode, g.ctl, g.run)
+	g.reportFrame()
 }
 
 // drawCapsuleRow draws the board's capsule model into the frame's row and gives

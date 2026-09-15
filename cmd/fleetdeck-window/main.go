@@ -62,6 +62,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -163,8 +164,8 @@ func main() {
 	}
 	width, height := stand.size()
 	if stand != (standSettings{}) {
-		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q",
-			stand.startTimeout(), width, height, stand.appearance)
+		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q, full screen %v",
+			stand.startTimeout(), width, height, stand.appearance, stand.fullScreen)
 	}
 
 	// The keeper's word waits in keeperEvents until the window can act on it:
@@ -236,6 +237,7 @@ func main() {
 	w.SetTitle("fleetdeck")
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand, hostStandOpen = standSocket != "", stand.open
+	standFullScreenOn = stand.fullScreen
 	if stand.appearance != "" {
 		standAppearance = stand.appearance
 		applyAppearance("auto")
@@ -358,8 +360,10 @@ func main() {
 	}
 	// On a stand the board says what a screenshot cannot (web/js/standreport.js).
 	if hostOnStand {
-		if err := w.Bind("fleetdeckStandReport", func(report map[string]any) {
-			log.Printf("fleetdeck-window: the board reports its scrolling: %v", report)
+		// The JSON the page sent, as it sent it: scripts/standcheck reads its
+		// fields against the frame the window measured.
+		if err := w.Bind("fleetdeckStandReport", func(report json.RawMessage) {
+			log.Printf("fleetdeck-window: the board reports its scrolling: %s", report)
 		}); err != nil {
 			log.Printf("fleetdeck-window: the board will not report its scrolling: %v", err)
 		}

@@ -181,6 +181,10 @@ void fd_window_content_size(void *window, double *width, double *height) {
   *height = r.size.height;
 }
 
+// A stand's trip into full screen and out (standfullscreen.go): what the
+// window's green button does.
+void fd_window_toggle_fullscreen(void *window) { sendVoid1((id)window, sel("toggleFullScreen:"), (id)0); }
+
 int fd_window_is_fullscreen(void *window) {
   unsigned long mask = ((unsigned long (*)(id, SEL))objc_msgSend)((id)window, sel("styleMask"));
   return (mask & (1UL << 14)) != 0;  // NSWindowStyleMaskFullScreen
