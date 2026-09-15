@@ -390,6 +390,9 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   let received = 0;
   let parsed = 0;
   let staleThrough = 0;
+  // The pieces a take-back waiting for xterm to read waits for: those that had
+  // arrived when it first had to wait, not those that keep arriving after.
+  let readUntil = null;
   // The row the stream means the cursor to be on, whatever this terminal clamps
   // or wraps, and the lowest such row since the screen was last cleared or the
   // session last given a size — null while the stream has placed the cursor on
@@ -622,11 +625,15 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     reclaim = null;
     if (!(wider || taller) || !terminal || settle !== null || pause !== null) return;
     // Half a screen gives half the session's size: wait for xterm to read all
-    // that has arrived.
-    if (parsed < received) {
+    // that had arrived when the take-back fell due. Only that: a session that
+    // keeps writing always has another piece on its way, and waiting for the
+    // stream to stop would take nothing back for as long as it writes.
+    if (readUntil === null && parsed < received) readUntil = received;
+    if (readUntil !== null && parsed < readUntil) {
       reclaim = timers.setTimeout(takeSizeBack, READ_WAIT_MS);
       return;
     }
+    readUntil = null;
     unfitted = !(refit && refit());
     say.standing();
     if (unfitted) return;
@@ -763,6 +770,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   const dropReclaim = () => {
     if (reclaim !== null) timers.clearTimeout(reclaim);
     reclaim = null;
+    readUntil = null;
     wider = false;
     taller = false;
     standUp();

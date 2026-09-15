@@ -821,6 +821,58 @@ test("a take-back that falls due while a screen is still being read waits for th
   assert.deepEqual(resizes(column.socket), [{ type: "resize", cols: 76, rows: 24 }]);
 });
 
+// A session that keeps writing always has a piece on its way when the take-back
+// falls due. Waiting for the stream to stop would take nothing back while it
+// writes.
+test("a take-back waits for what had arrived when it fell due, not for a stream that keeps arriving", async () => {
+  const clock = clockTimers();
+  const daemon = fakeDaemon();
+  const column = await attach(daemon, { cols: 76, rows: 40 }, { timers: clock });
+  daemon.another(120, 40);
+  await drawn(column.terminal);
+  let elapsed = 0;
+  while (resizes(column.socket).length === 0 && elapsed < 3000) {
+    column.socket.serverSend(frame("\x1b[?25l"));
+    await clock.advance(50);
+    elapsed += 50;
+    await drawn(column.terminal);
+  }
+  assert.deepEqual(resizes(column.socket), [{ type: "resize", cols: 76, rows: 40 }], `nothing was taken back in ${elapsed} ms of a stream always a piece ahead`);
+  assert.ok(elapsed <= 500, `taken back only after ${elapsed} ms`);
+});
+
+// Two minutes without a take-back mean whatever kept making the session bigger
+// has stopped: the next pause is the first one again.
+test("two minutes without a take-back start the pauses over at 10 seconds, and less than two do not", async () => {
+  for (const [quiet, pause] of [
+    [110, 60],
+    [125, 10],
+  ]) {
+    const clock = clockTimers();
+    const daemon = fakeDaemon();
+    const column = await attach(daemon, { cols: 76, rows: 40 }, { timers: clock });
+    const second = async (widen) => {
+      if (widen) {
+        daemon.another(120, 40);
+        await drawn(column.terminal);
+      }
+      await clock.advance(1000);
+      daemon.pump();
+      await drawn(column.terminal);
+      return resizes(column.socket).length;
+    };
+    for (let i = 0; i < 15; i++) await second(true);
+    assert.equal(resizes(column.socket).length, 6, "two rounds of three take-backs, paused after each");
+    for (let i = 0; i < quiet; i++) await second(false);
+    const counts = [];
+    for (let i = 0; i < 80; i++) counts.push(await second(true));
+    const said = `after ${quiet} s without a take-back, resizes by second: ${counts.join(", ")}`;
+    assert.deepEqual(counts.slice(0, 3), [7, 8, 9], said);
+    assert.equal(counts.indexOf(10) - counts.indexOf(9), pause, said);
+    column.live.stop();
+  }
+});
+
 // Scrolled back, the viewport shows history, which a wide screen wrapped earlier
 // made as wide as the terminal.
 test("the columns a take-back reads are the session's screen, not history the view is scrolled back to", async () => {
