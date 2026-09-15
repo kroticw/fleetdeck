@@ -166,7 +166,7 @@ func TestATabUnderTheWindowsButtonsIsAProblem(t *testing.T) {
 // fits: its unfold control inside it, below the window's buttons.
 func goodStrip() stripReport {
 	var s stripReport
-	if err := json.Unmarshal([]byte(`{"surface":"orchestrator","report":"overflow","folded":true,"width":48,"scrollWidth":48,"overflowing":[],"shown":["main","section.col.col-orchestrator","div.col-size.col-size-left","button.col-size-btn.col-size-unfold"],"unfold":{"left":7,"top":78,"right":41,"bottom":112,"reachable":true}}`), &s); err != nil {
+	if err := json.Unmarshal([]byte(`{"surface":"orchestrator","report":"overflow","folded":true,"width":48,"scrollWidth":48,"overflowing":[],"shown":["main","section.col.col-orchestrator","div.col-size.col-size-left","button.col-size-btn.col-size-unfold"],"unfold":{"left":4,"top":78,"right":44,"bottom":118,"reachable":true}}`), &s); err != nil {
 		panic(err)
 	}
 	return s
@@ -264,7 +264,7 @@ func besideFoldedSessions(b boardReport) boardReport {
 // everything fits: no head, its unfold control and its marks inside it.
 func goodSessionsStrip() stripReport {
 	var s stripReport
-	if err := json.Unmarshal([]byte(`{"surface":"sessions","report":"overflow","folded":true,"width":48,"scrollWidth":48,"overflowing":[],"shown":["main","aside.col.col-sessions","div.col-size.col-size-right","button.col-size-btn.col-size-unfold","div.sfold","div.sfold-count","button.sfold-mark"],"unfold":{"left":7,"top":8,"right":41,"bottom":42,"reachable":true}}`), &s); err != nil {
+	if err := json.Unmarshal([]byte(`{"surface":"sessions","report":"overflow","folded":true,"width":48,"scrollWidth":48,"overflowing":[],"shown":["main","aside.col.col-sessions","div.col-size.col-size-right","button.col-size-btn.col-size-unfold","div.sfold","div.sfold-count","button.sfold-mark"],"unfold":{"left":4,"top":8,"right":44,"bottom":48,"reachable":true}}`), &s); err != nil {
 		panic(err)
 	}
 	return s

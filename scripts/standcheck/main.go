@@ -62,6 +62,8 @@ const (
 	edgeSlack  = 0.5
 	lineSlack  = 1
 	brandSlack = 2
+	// A folded strip's round unfold control is at least this wide and tall.
+	minUnfoldTarget = 36
 	// A capsule's top row starts further in than a rounded rectangle's drawn
 	// in its place, by this much at the least: 0.46 against 0.19 on a 2x
 	// screen. On the 1x runner a capsule measured 0.375, and 0.29 once the
@@ -655,6 +657,14 @@ func (l standLog) foldedStripProblems(when string, r run, surface string, panel 
 		out = append(out, fmt.Sprintf("%sa press on the folded %s strip's unfold control reaches something else", when, surface))
 	case u.Left < -lineSlack || u.Right > s.Width+lineSlack:
 		out = append(out, fmt.Sprintf("%sthe folded %s strip's unfold control at %v..%v is outside the strip %v wide", when, surface, u.Left, u.Right, s.Width))
+	}
+	// The operator asked for the unfold control as a round glass button; the
+	// only way back to a folded panel keeps a target no smaller than the
+	// bordered one it replaced (26.2 by 40 on run 34949576998).
+	if u != nil {
+		if w, h := u.Right-u.Left, u.Bottom-u.Top; w < minUnfoldTarget-lineSlack || h < minUnfoldTarget-lineSlack {
+			out = append(out, fmt.Sprintf("%sthe folded %s strip's unfold control is %v by %v: its round target has to be at least %v pt each way", when, surface, math.Round(w*10)/10, math.Round(h*10)/10, minUnfoldTarget))
+		}
 	}
 	if u != nil && buttons {
 		b := box{X: panel.X + u.Left, Y: panel.Y + u.Top, W: u.Right - u.Left, H: u.Bottom - u.Top}
