@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -53,6 +54,16 @@ var panics panicExit
 // panicRecorded holds the panic file to one record a process.
 var panicRecorded atomic.Bool
 
+// panicMu is taken by the first guard a panic reaches and never let go. A
+// second panic meanwhile, on another goroutine, waits on it instead of exiting
+// while the first is still keeping its record, which would end the process
+// with the record cut short or not written.
+var panicMu sync.Mutex
+
+// panicFileLimit is how large the panic file grows before the next record sets
+// it aside as .1, over the one set aside before.
+const panicFileLimit = 1 << 20
+
 // in is p for the part of the window named by where.
 func (p panicExit) in(where string) panicExit {
 	p.where = where
@@ -67,6 +78,8 @@ func (p panicExit) guard() {
 	if r == nil {
 		return
 	}
+	// Never unlocked: the process ends under it (panicMu).
+	panicMu.Lock()
 	logf, exit, where := p.logf, p.exit, p.where
 	if logf == nil {
 		logf = log.Printf
@@ -103,6 +116,10 @@ func (p panicExit) record(r any, stacks []byte) (err error) {
 	}()
 	if err := os.MkdirAll(filepath.Dir(p.file), 0o755); err != nil {
 		return err
+	}
+	if info, err := os.Stat(p.file); err == nil && info.Size() > panicFileLimit {
+		// Set aside rather than cut: the record is still kept if this fails.
+		_ = os.Rename(p.file, p.file+".1")
 	}
 	f, err := os.OpenFile(p.file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {

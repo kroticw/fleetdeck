@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -21,7 +22,8 @@ import (
 // panicChildEnv makes this test binary a window in miniature instead of running
 // tests, panicking where its value says: "main", inside a block on the main
 // dispatch queue with webview's Destroy waiting below it; "callqueue", in a
-// side surface's call queue answering a call.
+// side surface's call queue answering a call; "twice", on two goroutines at
+// once, the record kept slowly.
 const panicChildEnv = "FLEETDECK_WINDOW_TEST_PANIC"
 
 // The build a panicking child says it is.
@@ -59,6 +61,24 @@ func init() {
 		q.push("a call")
 		time.Sleep(10 * time.Second)
 		log.Print("the call queue did not end the process")
+	case "twice":
+		// Whichever keeps its record takes its time over it, as a slow disk
+		// would: the other must not end the process meanwhile.
+		panics.now = func() time.Time {
+			time.Sleep(500 * time.Millisecond)
+			return time.Now()
+		}
+		start := make(chan struct{})
+		for i := range 2 {
+			go func() {
+				defer panics.in(fmt.Sprintf("in test goroutine %d", i)).guard()
+				<-start
+				panic(testPanicValue)
+			}()
+		}
+		close(start)
+		time.Sleep(10 * time.Second)
+		log.Print("neither panic ended the process")
 	}
 	os.Exit(5)
 }
@@ -161,6 +181,26 @@ func TestAPanicOnAWindowGoroutineIsKeptAndEndsTheWindow(t *testing.T) {
 	wantAll(t, "the panic file", readPanicFile(t, home, said), "where: in a side surface's call queue", "panic: "+testPanicValue, "goroutine ")
 }
 
+// Two goroutines panicking at once: the one that keeps its record finishes it
+// before the process ends, however slowly, and the other says nothing and
+// exits nothing — ended with it, not before it.
+func TestTwoPanicsAtOnceLeaveOneWholeRecord(t *testing.T) {
+	home := t.TempDir()
+	said, err := runPanickingChild(t, "twice", home)
+	wantExitStatus2(t, err, said)
+	kept := readPanicFile(t, home, said)
+	if n := strings.Count(kept, "=== "); n != 1 {
+		t.Fatalf("the panic file holds %d records, want one whole record:\n%s", n, kept)
+	}
+	wantAll(t, "the panic file", kept, "where: in test goroutine ", "panic: "+testPanicValue, "goroutine ")
+	if !strings.HasSuffix(kept, "\n") {
+		t.Fatalf("the record was cut short:\n%s", kept)
+	}
+	if n := strings.Count(said, "the window exits"); n != 1 {
+		t.Fatalf("%d panics were said, want the one kept:\n%s", n, said)
+	}
+}
+
 // A panic file that cannot be written does not keep the window from saying
 // the panic and exiting, and does not panic a second time.
 func TestAPanicTheFileCannotKeepIsStillLoggedAndEndsTheWindow(t *testing.T) {
@@ -172,11 +212,27 @@ func TestAPanicTheFileCannotKeepIsStillLoggedAndEndsTheWindow(t *testing.T) {
 	}
 }
 
+// recordAt is a guard for tests of the file: a fixed build, binary and time.
+func recordAt(file string) panicExit {
+	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	return panicExit{
+		file:  file,
+		build: build{Version: "0.10.2"},
+		exe:   "/Applications/fleetdeck.app/Contents/MacOS/fleetdeck-window",
+		now:   func() time.Time { return at },
+	}.in("on the main thread")
+}
+
+func freshRecord(t *testing.T) {
+	t.Helper()
+	panicRecorded.Store(false)
+	t.Cleanup(func() { panicRecorded.Store(false) })
+}
+
 // The file is appended to and never grows by more than one record a process:
 // a panic while the first is being kept adds nothing.
 func TestAProcessKeepsOnePanicRecord(t *testing.T) {
-	panicRecorded.Store(false)
-	t.Cleanup(func() { panicRecorded.Store(false) })
+	freshRecord(t)
 	file := filepath.Join(t.TempDir(), "Library", "Logs", "fleetdeck-window-panic.log")
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		t.Fatal(err)
@@ -184,13 +240,7 @@ func TestAProcessKeepsOnePanicRecord(t *testing.T) {
 	if err := os.WriteFile(file, []byte("an earlier record\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
-	p := panicExit{
-		file:  file,
-		build: build{Version: "0.10.2"},
-		exe:   "/Applications/fleetdeck.app/Contents/MacOS/fleetdeck-window",
-		now:   func() time.Time { return at },
-	}.in("on the main thread")
+	p := recordAt(file)
 	if err := p.record("the first", []byte("goroutine 1 [running]:\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +263,60 @@ func TestAProcessKeepsOnePanicRecord(t *testing.T) {
 	)
 	if strings.Contains(kept, "the second") {
 		t.Fatalf("a second record was kept in the same process:\n%s", kept)
+	}
+}
+
+// A file grown past panicFileLimit is set aside as .1, over the one set aside
+// before, and the record starts a new file: the file never grows without end.
+func TestAPanicFileOverTheLimitIsSetAsideBeforeTheRecord(t *testing.T) {
+	freshRecord(t)
+	file := filepath.Join(t.TempDir(), "fleetdeck-window-panic.log")
+	if err := os.WriteFile(file+".1", []byte("the oldest records\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := append([]byte("the old records\n"), bytes.Repeat([]byte("x"), panicFileLimit)...)
+	if err := os.WriteFile(file, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordAt(file).record("the new one", []byte("goroutine 1 [running]:\n")); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(kept, []byte("the old records")) || !bytes.Contains(kept, []byte("panic: the new one\n")) {
+		t.Fatalf("the file after setting the old one aside:\n%.200s", kept)
+	}
+	aside, err := os.ReadFile(file + ".1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(aside, []byte("the old records\n")) || bytes.Contains(aside, []byte("the oldest records")) {
+		t.Fatalf("the file set aside:\n%.200s", aside)
+	}
+}
+
+// A file of exactly panicFileLimit is not over it: the record is appended.
+func TestAPanicFileAtTheLimitIsAppendedTo(t *testing.T) {
+	freshRecord(t)
+	file := filepath.Join(t.TempDir(), "fleetdeck-window-panic.log")
+	old := bytes.Repeat([]byte("x"), panicFileLimit)
+	if err := os.WriteFile(file, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordAt(file).record("the new one", []byte("goroutine 1 [running]:\n")); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(kept, old) || !bytes.Contains(kept, []byte("panic: the new one\n")) {
+		t.Fatalf("a file at the limit was not appended to (%d bytes)", len(kept))
+	}
+	if _, err := os.Stat(file + ".1"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a file at the limit was set aside: %v", err)
 	}
 }
 
@@ -265,10 +369,11 @@ func parseWindowFile(t *testing.T, name string) *ast.File {
 	return file
 }
 
-// The main thread's guard only helps in main's deferred calls after the web
-// view's Destroy: deferred before it, it runs after Destroy has already hung.
-func TestMainGuardsAgainstPanicsAfterDeferringTheWebViewsDestroy(t *testing.T) {
-	destroy, guard := -1, -1
+// The main thread's guard is main's last deferred call, so it runs first: before
+// the web view's Destroy, which would hang, and before anything else deferred
+// after Destroy that a panic could reach.
+func TestMainsLastDeferredCallIsThePanicGuard(t *testing.T) {
+	destroy, guard, last := -1, -1, -1
 	for _, decl := range parseWindowFile(t, "main.go").Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "main" || fn.Recv != nil {
@@ -276,8 +381,11 @@ func TestMainGuardsAgainstPanicsAfterDeferringTheWebViewsDestroy(t *testing.T) {
 		}
 		for i, stmt := range fn.Body.List {
 			d, ok := stmt.(*ast.DeferStmt)
+			if !ok {
+				continue
+			}
+			last = i
 			switch {
-			case !ok:
 			case types.ExprString(d.Call.Fun) == "w.Destroy":
 				destroy = i
 			case isGuard(d.Call.Fun):
@@ -290,18 +398,25 @@ func TestMainGuardsAgainstPanicsAfterDeferringTheWebViewsDestroy(t *testing.T) {
 		t.Fatal("main no longer defers w.Destroy(): this test no longer knows where the guard belongs")
 	case guard < 0:
 		t.Fatal("main defers no panic guard")
-	case guard < destroy:
-		t.Fatalf("main defers the panic guard (statement %d) before w.Destroy() (statement %d): it would run after Destroy hung", guard, destroy)
+	case guard != last:
+		t.Fatalf("main's panic guard is statement %d, and its last deferred call is statement %d: a call deferred after the guard runs before it", guard, last)
 	}
 }
 
-// Every goroutine the window starts begins with its guard, so a panic on any of
-// them is kept before the process ends.
+// Every goroutine the window's own code starts begins with its guard, so a panic
+// on any of them is kept before the process ends. Every file of the package is
+// read, not a list: a goroutine added anywhere is held to it.
 func TestEveryWindowGoroutineStartsWithAPanicGuard(t *testing.T) {
-	for _, name := range []string{"main.go", "handoverstart.go", "callqueue.go"} {
-		file := parseWindowFile(t, name)
-		found := 0
-		ast.Inspect(file, func(n ast.Node) bool {
+	names, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		ast.Inspect(parseWindowFile(t, name), func(n ast.Node) bool {
 			g, ok := n.(*ast.GoStmt)
 			if !ok {
 				return true
@@ -317,8 +432,8 @@ func TestEveryWindowGoroutineStartsWithAPanicGuard(t *testing.T) {
 			}
 			return true
 		})
-		if found == 0 {
-			t.Errorf("%s starts no goroutine: this test no longer knows what it guards", name)
-		}
+	}
+	if found == 0 {
+		t.Error("the package starts no goroutine: this test no longer knows what it guards")
 	}
 }
