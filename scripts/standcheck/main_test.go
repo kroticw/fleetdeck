@@ -344,7 +344,16 @@ func TestATitleBarOverTheRowWithTheMenuBarShownInFullScreenIsAProblem(t *testing
 	shown.ContentLayoutTop = 0
 	shown.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: 21, W: 1024, H: 52}, Visible: true, Alpha: 1}}
 	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, shown, rest, goodBoard(true), goodFrame(false), goodBoard(false))
-	wantProblem(t, check(log, 1), "in full screen 1, the menu bar shown", "NSToolbarFullScreenWindow", "capsule row")
+	wantProblem(t, check(log, 1), "in full screen 1, a frame after it settled", "NSToolbarFullScreenWindow", "capsule row")
+}
+
+// A pointer at the top of the screen brings the title bar out without the
+// menu bar reported shown: the frame in between is held all the same.
+func TestATitleBarBroughtOutOverTheRowByThePointerIsAProblem(t *testing.T) {
+	rest, revealed := goodFrame(true), goodFrame(true)
+	revealed.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: 0, W: 1024, H: 32}, Visible: true, Alpha: 1}}
+	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, revealed, rest, goodBoard(true), goodFrame(false), goodBoard(false))
+	wantProblem(t, check(log, 1), "in full screen 1, a frame after it settled", "NSToolbarFullScreenWindow")
 }
 
 // Run 34936628225: the window goes into full screen with the menu bar still

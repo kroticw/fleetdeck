@@ -181,13 +181,8 @@ void fd_window_content_size(void *window, double *width, double *height) {
   *height = r.size.height;
 }
 
-// A stand's look at full screen with the menu bar shown (standfullscreen.go):
-// what a pointer at the top of the screen brings out, which a stand cannot move
-// a pointer to do.
-void fd_window_set_menu_bar_visible(int visible) {
-  ((void (*)(id, SEL, signed char))objc_msgSend)(cls("NSMenu"), sel("setMenuBarVisible:"), (signed char)(visible != 0));
-}
-
+// Whether the menu bar is shown (standframe_darwin.go): it hides as the window
+// settles in full screen.
 int fd_window_menu_bar_visible(void) {
   return ((signed char (*)(id, SEL))objc_msgSend)(cls("NSMenu"), sel("menuBarVisible")) != 0;
 }

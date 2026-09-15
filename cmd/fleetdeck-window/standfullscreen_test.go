@@ -11,11 +11,10 @@ import (
 // surfaces have loaded, leaves it once it is in, and goes in and out a second
 // time; then no more, whatever the pages do after.
 
-// The menu bar is shown, the frame measured with it and the menu bar hidden
-// again while the window is in full screen, the toolbar hidden around it on the
-// second trip, all before the window leaves.
-func TestAStandShowsTheMenuBarInFullScreenBeforeItLeaves(t *testing.T) {
-	steps := []time.Duration{standRevealToolbarOff, standRevealShow, standRevealMeasure, standRevealHide, standRevealToolbarOn, standFullScreenLeaveAfter}
+// The frame is measured while the window is in full screen, the toolbar hidden
+// around the measures on the second trip, all before the window leaves.
+func TestAStandMeasuresTheFrameInFullScreenBeforeItLeaves(t *testing.T) {
+	steps := append(append([]time.Duration{standRevealToolbarOff}, standRevealMeasures...), standRevealToolbarOn, standFullScreenLeaveAfter)
 	for i := 1; i < len(steps); i++ {
 		if steps[i] <= steps[i-1] {
 			t.Fatalf("step %d at %v comes no later than step %d at %v: %v", i, steps[i], i-1, steps[i-1], steps)

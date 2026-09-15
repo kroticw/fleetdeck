@@ -191,12 +191,17 @@ func check(log string, trips int) []string {
 			problems = append(problems, tabProblems(when, f)...)
 			problems = append(problems, l.boardProblems(when, r)...)
 			problems = append(problems, coverProblems(when, f)...)
-			// With the menu bar shown again after it hid: what a pointer at the
-			// top of the screen brings out over the content. The window goes
-			// in with the menu bar still shown from before, under the
-			// transition's overlay, which is not that.
-			if k, ok := menuBarShownAgain(l.frames, r); ok {
-				problems = append(problems, coverProblems(fmt.Sprintf("in full screen %d, the menu bar shown: ", in), l.frames[k])...)
+			// Every frame after the window settled, the menu bar hidden: the
+			// stand brings the pointer to the top of the screen meanwhile, and
+			// what that brings out over the content need not change anything
+			// else the window says. The window goes in with the menu bar still
+			// shown from before, under the transition's overlay, which is not
+			// that. The first frame with a problem is enough.
+			for _, k := range settledFrames(l.frames, r) {
+				if p := coverProblems(fmt.Sprintf("in full screen %d, a frame after it settled: ", in), l.frames[k]); len(p) > 0 {
+					problems = append(problems, p...)
+					break
+				}
 			}
 			continue
 		}
@@ -313,25 +318,18 @@ func coverProblems(when string, f frameReport) []string {
 
 // boardProblems holds the board's last report among the frames of r to r's last
 // frame.
-// menuBarShownAgain is the last frame of r with the menu bar shown after a frame
-// of r with it hidden.
-func menuBarShownAgain(frames []frameReport, r run) (int, bool) {
-	hidden := -1
-	for k := r.from; k <= r.to; k++ {
-		if !frames[k].MenuBarVisible {
-			hidden = k
-			break
+// settledFrames is the frames of r after the first with the menu bar hidden,
+// short of r's last, which is held to the cover property on its own.
+func settledFrames(frames []frameReport, r run) []int {
+	var out []int
+	settled := false
+	for k := r.from; k < r.to; k++ {
+		if settled {
+			out = append(out, k)
 		}
+		settled = settled || !frames[k].MenuBarVisible
 	}
-	if hidden < 0 {
-		return 0, false
-	}
-	for k := r.to; k > hidden; k-- {
-		if frames[k].MenuBarVisible {
-			return k, true
-		}
-	}
-	return 0, false
+	return out
 }
 
 func (l standLog) boardProblems(when string, r run) []string {

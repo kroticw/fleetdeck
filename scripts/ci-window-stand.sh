@@ -122,6 +122,7 @@ case $expect in
 		url="http://127.0.0.1:$port/?fleet=stand"
 		(cd "$(dirname "$0")/.." && go build -o "$stand/standdaemon" ./scripts/standdaemon)
 		(cd "$(dirname "$0")/.." && go build -o "$stand/standcheck" ./scripts/standcheck)
+		(cd "$(dirname "$0")/.." && go build -o "$stand/standpointer" ./scripts/standpointer)
 		socket="$stand/daemon.sock"
 		"$stand/standdaemon" -socket "$socket" -home "$stand/home" -board "$stand/board" >"$out/standdaemon.log" 2>&1 &
 		daemon=$!
@@ -253,22 +254,25 @@ if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
 		[ -n "$went_in" ] || break
 		sleep 3
 		capture_screen "$out/window-fullscreen-$((trips + 1)).png"
-		# The frame with the menu bar shown, as a pointer at the top of the
-		# screen shows it: the window shows it on its own a while after it went in.
-		# Only after the menu bar hid in full screen: the window goes in with it
-		# still shown from before.
-		shown=
-		for _ in $(seq 20); do
+		# The pointer at the top of the screen, as a person's brings the title bar
+		# out over the content, once the window has settled with the menu bar
+		# hidden; the window measures its frame meanwhile (revealOnStand).
+		# Only on a CI runner: the pointer on a person's machine is theirs, and
+		# standpointer refuses off a runner too.
+		rest=
+		for _ in $(seq 10); do
 			rest=$(measure_from "$went_in" 'true,"menuBarVisible":false')
-			[ -n "$rest" ] && shown=$(measure_from "$rest" 'true,"menuBarVisible":true')
-			[ -n "$shown" ] && break
+			[ -n "$rest" ] && break
 			sleep 1
 		done
-		if [ -n "$shown" ]; then
+		if [ -n "$rest" ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+			"$stand/standpointer" -to top || echo "--- full screen $((trips + 1)): the pointer did not reach the top of the screen"
 			sleep 1
 			capture_screen "$out/window-fullscreen-revealed-$((trips + 1)).png"
+			sleep 2
+			"$stand/standpointer" -to away || true
 		fi
-		echo "--- full screen $((trips + 1)): the menu bar shown at log line ${shown:-never}"
+		echo "--- full screen $((trips + 1)): settled at log line ${rest:-never}"
 		came_out=
 		for _ in $(seq 45); do
 			came_out=$(measure_from "$went_in" false)
