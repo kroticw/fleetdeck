@@ -343,13 +343,26 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_SYSTEM: light
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
-      - name: This build's window in its frame, dark, with the new card form open
+      # With the new card form and the fleet menu open: both are frosted glass
+      # over content, and the capsules around them are held to the window's
+      # material by scripts/standcheck, from what the pages measure of themselves
+      # (web/js/standcontrols.js). Glass, dark and light, here; opaque below.
+      - name: This build's window in its frame, glass, dark, with the new card form and the fleet menu open
         if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
-          FLEETDECK_STAND_OPEN: newcard
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7799 out/dark-newcard exec content
+      - name: This build's window in its frame, glass, light, with the new card form and the fleet menu open
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7815 out/light-newcard exec content
       # In full screen and after it: v0.10.1's theme and limits capsules lay over
       # the sessions panel in full screen on the operator's macOS, and no stand
       # had entered it. The window goes in once its surfaces have loaded and
@@ -449,6 +462,34 @@ jobs:
           defaults write com.apple.universalaccess reduceTransparency -bool true
           echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
           scripts/ci-window-stand.sh new/fleetdeck.app 7813 out/fold-orchestrator-opaque-dark exec content
+      # The new card form and the fleet menu open with no glass: solid, nothing
+      # blurred, both ways.
+      - name: This build's window in its frame, opaque, the system light and the app dark, with the new card form and the fleet menu open
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: light
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7817 out/opaque-dark-newcard exec content
+      - name: This build's window in its frame, opaque, the system dark and the app light, with the new card form and the fleet menu open
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: dark
+          FLEETDECK_STAND_OPEN: newcard,fleetmenu
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7819 out/opaque-light-newcard exec content
       - name: The system light again
         if: always()
         run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true

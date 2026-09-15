@@ -13,13 +13,17 @@
 //     before full screen and after each time it left, and the header's row, its
 //     brand and its fleet menu button are centred on their line;
 //   - in full screen nothing of the title bar keeps the window's top or lies
-//     shown over the capsule row.
+//     shown over the capsule row;
+//   - the capsules the pages draw (web/js/standcontrols.js) are of the window's
+//     material: see-through and round on glass, solid with no glass, blurring
+//     nothing but the panels that float over content, their text 4.5:1 over the
+//     worst ground under it, and what the stand opened among them.
 //
 // The board's own verdict on its last column -- worked out from the insets the
 // page was sent -- is not read: in v0.10.1 it said true while the insets were
 // stale. The board is held to the native panels' frames.
 //
-// Usage: standcheck -log <window.log> [-fullscreen-trips <n>]
+// Usage: standcheck -log <window.log> [-fullscreen-trips <n>] [-open <names>]
 package main
 
 import (
@@ -222,6 +226,7 @@ type run struct {
 func main() {
 	logPath := flag.String("log", "", "the window's log")
 	trips := flag.Int("fullscreen-trips", 0, "how many times the stand took the window into full screen and out (FLEETDECK_STAND_FULLSCREEN)")
+	open := flag.String("open", "", "what the stand opened, comma-separated (FLEETDECK_STAND_OPEN)")
 	flag.Parse()
 	raw, err := os.ReadFile(*logPath)
 	if err != nil {
@@ -231,7 +236,7 @@ func main() {
 	for _, n := range revealedNotes(string(raw)) {
 		fmt.Println("frame: " + n)
 	}
-	problems := check(string(raw), *trips)
+	problems := append(check(string(raw), *trips), controlsCheck(string(raw), openList(*open))...)
 	for _, p := range problems {
 		fmt.Println("frame: " + p)
 	}
