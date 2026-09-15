@@ -34,7 +34,7 @@ func (n *standNatives) redraw() {
 	}
 }
 
-func (n *standNatives) createSurface(string, string, glassMode) {
+func (n *standNatives) createSurface(string, string, glassMode, int) {
 	n.framed = true
 	n.redraw()
 }

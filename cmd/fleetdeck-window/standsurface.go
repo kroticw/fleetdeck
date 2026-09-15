@@ -22,7 +22,7 @@ func handleStandReports(b *bridge, onStand bool, logf func(format string, args .
 		return
 	}
 	b.handle(standReportBindingName, func(surface string, args json.RawMessage) (any, error) {
-		logf("fleetdeck-window: the %s surface reports its %s: %s", surface, reportSubject(args), args)
+		logf("fleetdeck-window: the %s surface reports its %s: %s", surfaceKind(surface), reportSubject(args), args)
 		return nil, nil
 	})
 }
