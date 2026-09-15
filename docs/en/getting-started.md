@@ -95,9 +95,11 @@ fleetdeck init --fleet clining --workspace ~/clining-fleet
 
 Both do the same thing: they make the workspace — a board and docs, as above — add the fleet to `fleets` in the configuration only once its board exists, and let Claude Code sessions write in the new folder. `--board <path>` makes a board alone instead. A name or a board another fleet already has is refused before anything is made; running the same command again keeps what the first run added.
 
-Either way the panel serves the new fleet only after it is restarted. The panel reads the configuration when it starts and not again, and the page says so before the button and after it.
+A fleet made from the start page is served at once: the panel that made it adds it to what it runs, and the fleet is on the start page and in the header's menu, with how many of its sessions wait for an answer. Nothing already running is restarted. If the running panel cannot take the fleet — most often because the configuration was edited by hand and now disagrees with what the panel serves — the report says so in its `panel` step, and the fleet is not called made; restarting the panel reads the file again.
 
-Restart the panel, and the new fleet is on the start page and in the header's menu, with how many of its sessions wait for an answer. Appoint its orchestrator from its own tab: the wizard opened from a fleet's orchestrator column writes that fleet's working order and pins that fleet's orchestrator. See [Several fleets](configuration.md#several-fleets) for what the fleets share and how a session comes to be in one.
+A fleet added with `fleetdeck init --fleet` from a terminal is written by another process, and the running panel does not read the configuration again: it shows that fleet after it is restarted.
+
+Appoint the new fleet's orchestrator from its own tab: the wizard opened from a fleet's orchestrator column writes that fleet's working order and pins that fleet's orchestrator. See [Several fleets](configuration.md#several-fleets) for what the fleets share and how a session comes to be in one.
 
 ## The start page
 
