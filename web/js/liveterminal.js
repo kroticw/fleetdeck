@@ -135,15 +135,82 @@ function defaultTerminalFactory(host, fontSize) {
 // layout — in which case proposeDimensions answers nothing and fit() on its own
 // would return without a word, leaving the terminal at whatever size it had in
 // a pane that no longer matches it.
+//
+// Two more answers are also nothing to measure, read from the addon's source
+// rather than measured in a browser. An element with display: none has "auto"
+// for its computed width and height, which the addon turns into NaN columns and
+// rows; fit() then changes nothing. An element with no room at all gets the
+// addon's floor, 2 columns by 1 row. Neither is a size to give a session that
+// others are watching.
 function terminalFitter(terminal) {
   const Fit = globalThis.FitAddon?.FitAddon;
   if (typeof Fit !== "function") return null;
   const addon = new Fit();
   terminal.loadAddon(addon);
   return () => {
-    if (!addon.proposeDimensions()) return false;
+    const proposed = addon.proposeDimensions();
+    if (!proposed || !(proposed.cols > 2 && proposed.rows > 1)) return false;
     addon.fit();
     return true;
+  };
+}
+
+// The widest a session can be: the bridge refuses a geometry past it
+// (maxTerminalCols in internal/server/pty.go). A column past it is not a size
+// someone gave the session but an application finding the corner of its
+// terminal, `ESC[999;999H` followed by a cursor report.
+const MAX_SESSION_COLS = 500;
+
+// The longest control sequence worth holding over from one piece of the stream
+// to the next: ESC [ and two numbers of three digits.
+const MAX_HELD_SEQUENCE = 16;
+
+// positionWatcher reads the session's bytes on their way into the terminal and
+// says whether any of them places the cursor at an absolute column past `cols`:
+// CHA (ESC[<col>G), HPA (ESC[<col>`) or CUP (ESC[<row>;<col>H or f).
+//
+// That is how the daemon draws a screen for a session wider than this terminal.
+// It clears the screen and places every word at its column, and xterm clamps a
+// column past its edge to the last one, so the words run into each other.
+// Nothing else is taken for it. A column equal to the last one fits. A row past
+// the bottom, a relative move, a wide character at the edge and the alternate
+// screen are all things a terminal of the right size is sent too.
+//
+// A sequence cut between two pieces of the stream is held until the next piece.
+function positionWatcher() {
+  let held = null;
+  return (bytes, cols) => {
+    let data = bytes;
+    if (held) {
+      data = new Uint8Array(held.length + bytes.length);
+      data.set(held);
+      data.set(bytes, held.length);
+      held = null;
+    }
+    let past = false;
+    for (let i = 0; i < data.length; i += 1) {
+      if (data[i] !== 0x1b) continue;
+      if (i + 1 < data.length && data[i + 1] !== 0x5b) continue;
+      const params = [0];
+      let j = i + 2;
+      for (; j < data.length && j - i < MAX_HELD_SEQUENCE; j += 1) {
+        const b = data[j];
+        if (b >= 0x30 && b <= 0x39) params[params.length - 1] = params[params.length - 1] * 10 + (b - 0x30);
+        else if (b === 0x3b) params.push(0);
+        else break;
+      }
+      if (j >= data.length) {
+        if (data.length - i < MAX_HELD_SEQUENCE) held = data.slice(i);
+        break;
+      }
+      const final = data[j];
+      let col = 0;
+      if (final === 0x47 || final === 0x60) col = params[0] || 1;
+      else if (final === 0x48 || final === 0x66) col = params[1] || 1;
+      if (col > cols && col <= MAX_SESSION_COLS) past = true;
+      i = j;
+    }
+    return past;
   };
 }
 
@@ -230,6 +297,17 @@ function followWheel(terminal) {
 // never goes that long between events, and a person who has let go waits less
 // than a blink for the terminal to follow.
 const PANE_SETTLE_MS = 150;
+
+// Taking the session's size back from another attacher that made it wider
+// (see positionWatcher). The first time waits RECLAIM_WAIT_MS, so that the rest
+// of the wide screen, which arrives in the same moment, asks for nothing more.
+// After each time it waits RECLAIM_EVERY_MS before it can happen again. Another
+// attacher that keeps widening the session costs one resize a second at most,
+// and a terminal that is narrower than every other attacher does not take
+// turns with them: a narrower screen fits in a wider terminal, so nobody wider
+// ever takes the size back from it.
+const RECLAIM_WAIT_MS = 150;
+const RECLAIM_EVERY_MS = 1000;
 
 // How long the size stays over the terminal after its type last changed:
 // long enough to read a line of a dozen characters, short enough to be gone
@@ -325,6 +403,11 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   let paneWatcher = null;
   let settle = null;
   let sessionSize = null;
+  // Taking the size back (see takeSizeBack): the armed timer, and whether the
+  // stream has placed something past the terminal's edge since the session was
+  // last given this terminal's size.
+  let reclaim = null;
+  let widened = false;
   // The size over the terminal (see showSize): its element, the timer that
   // hides it, and whether the next time the terminal follows its pane is one
   // a change of type asked for, which is the time to show it — and whether the
@@ -381,6 +464,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     opening += 1;
     if (retry !== null) timers.clearTimeout(retry);
     retry = null;
+    dropReclaim();
     if (typing) typing.dispose();
     typing = null;
     sessionSize = null;
@@ -424,14 +508,51 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // open but not yet attached can: the bridge reads the token first and the
   // rest only once it has attached, so the resize lands after the attach — the
   // order the session needs.
-  const tellSession = () => {
+  //
+  // `again` sends it even when it is the size the session was last given, which
+  // is what taking the size back from another attacher needs. It says whether it
+  // sent anything. Any size sent makes the daemon repaint this terminal at that
+  // size, so a widening noticed before it is settled.
+  const tellSession = (again = false) => {
     const open = globalThis.WebSocket?.OPEN ?? 1;
-    if (!terminal || !socket || socket.readyState !== open) return;
+    if (!terminal || !socket || socket.readyState !== open) return false;
     const cols = terminal.cols;
     const rows = terminal.rows;
-    if (sessionSize && sessionSize[0] === cols && sessionSize[1] === rows) return;
+    if (!again && sessionSize && sessionSize[0] === cols && sessionSize[1] === rows) return false;
     socket.send(JSON.stringify({ type: "resize", cols, rows }));
     sessionSize = [cols, rows];
+    widened = false;
+    return true;
+  };
+
+  // takeSizeBack gives the session this terminal's size again after the stream
+  // showed another attacher made it wider (see positionWatcher). The daemon
+  // repaints every attacher for the size a session has, so the repaint that
+  // follows is drawn for this terminal. Measured against CLI 2.1.269, the screen
+  // then matched a fresh attach's exactly.
+  //
+  // A terminal that cannot be measured, folded or in a hidden tab, takes
+  // nothing: it keeps the columns it last had, which are no longer its pane's.
+  // The widening stays noticed, and followPane takes the size back once the pane
+  // can be measured again.
+  const takeSizeBack = () => {
+    reclaim = null;
+    if (!widened || !terminal || !(refit && refit())) return;
+    if (tellSession(true)) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_EVERY_MS);
+  };
+
+  // noticeWidened is the stream having placed something past the terminal's
+  // edge. A timer already armed, the first wait or the pause after a take-back,
+  // covers it.
+  const noticeWidened = () => {
+    widened = true;
+    if (reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
+  };
+
+  const dropReclaim = () => {
+    if (reclaim !== null) timers.clearTimeout(reclaim);
+    reclaim = null;
+    widened = false;
   };
 
   // followPane runs once the pane has stopped moving: refit, say whether that
@@ -442,6 +563,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     unfitted = !(refit && refit());
     say.standing();
     if (!unfitted) tellSession();
+    if (!unfitted && widened && reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
     if (sizeNoteDue) {
       sizeNoteDue = false;
       showSize(sizeNoteAtLimit);
@@ -604,6 +726,9 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     ws.binaryType = "arraybuffer";
     socket = ws;
     sessionSize = [cols, rows];
+    // Per socket: a sequence held over from a stream that ended is not the start
+    // of the next one's.
+    const pastEdge = positionWatcher();
     ws.onopen = () => {
       if (socket !== ws) return;
       ws.send(JSON.stringify({ type: "auth", token }));
@@ -615,7 +740,9 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
         return;
       }
       // Appended, never redrawn: what arrived is the session's own output, in order.
-      term.write(new Uint8Array(event.data));
+      const bytes = new Uint8Array(event.data);
+      if (pastEdge(bytes, term.cols)) noticeWidened();
+      term.write(bytes);
     };
     ws.onclose = (event) => {
       if (socket !== ws) return;
@@ -623,6 +750,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
       writable = false;
       readOnly = false;
       sessionSize = null;
+      dropReclaim();
       // The terminal stays as it was: the last thing the session said is often
       // exactly what the operator needs while reading why it stopped.
       if (reconnect && !FINAL_ENDINGS.has(event.code)) tryAgain(t(RETRIED_ENDINGS[event.code] ?? "terminal_link_lost"));
