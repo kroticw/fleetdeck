@@ -370,6 +370,8 @@ func (g *glassWindow) reloadBoard() { g.askBoard() }
 
 func (g *glassWindow) setDragBand(height float64) { g.frame.setDragBand(height) }
 
+func (g *glassWindow) boardInsets() { g.run(g.ctl.boardInsetsNow()) }
+
 func (g *glassWindow) redrawCapsules() {
 	if !g.framed || g.model == nil {
 		return

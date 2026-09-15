@@ -23,8 +23,31 @@ func loadedFrame() *controller {
 	return c
 }
 
-func boardInsets() sendTo {
-	return sendTo{Surface: "board", Message: map[string]any{"type": "insets", "top": 64.0, "left": 394.0, "right": 0.0, "contentRight": 356.0}}
+// boardInsets is the board told its insets once the effects before it have
+// been carried out; insetsMessage the message that then goes to the board.
+func boardInsets() effect { return sendBoardInsets{} }
+
+func insetsMessage(left, contentRight float64) []effect {
+	return []effect{sendTo{Surface: "board", Message: map[string]any{"type": "insets", "top": 64.0, "left": left, "right": 0.0, "contentRight": contentRight}}}
+}
+
+// The insets go to the board as the frame is when they are sent, and not at
+// all while the frame is down.
+func TestTheBoardsInsetsAreThoseOfTheFrameAsItIsNow(t *testing.T) {
+	c := started()
+	if got := c.boardInsetsNow(); len(got) != 0 {
+		t.Fatalf("before the frame is up: %#v, want nothing", got)
+	}
+	c.layout(1, "panel", "work")
+	if got, want := c.boardInsetsNow(), insetsMessage(394, 356); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the frame up: %#v, want %#v", got, want)
+	}
+	// The capsule row drawn after the insets were asked for narrows the panels.
+	c.capsuleRow(900)
+	g := c.geometry()
+	if got, want := c.boardInsetsNow(), insetsMessage(g.Board.Left, g.Board.ContentRight); !reflect.DeepEqual(got, want) || g.Board.Left == 394 {
+		t.Fatalf("after the row narrowed the panels: %#v, want %#v", got, want)
+	}
 }
 
 func TestAPageThatReportsTheCurrentVersionGetsItsSurfaces(t *testing.T) {
@@ -392,16 +415,20 @@ func TestASurfaceLoadingItsOwnPageIsLetThrough(t *testing.T) {
 }
 
 func TestFoldingSavesTheWidthsAndTellsTheSurface(t *testing.T) {
-	got := loadedFrame().panel("sessions", true)
+	c := loadedFrame()
+	got := c.panel("sessions", true)
 	w := panelWidths{Orchestrator: 368, Sessions: 348, SessionsFolded: true}
 	want := []effect{
 		saveWidths{W: w},
 		applyGeometry{G: layoutFor(1512, 982, w)},
-		sendTo{Surface: "board", Message: map[string]any{"type": "insets", "top": 64.0, "left": 394.0, "right": 0.0, "contentRight": 56.0}},
+		boardInsets(),
 		sendTo{Surface: "sessions", Message: map[string]any{"type": "folded", "folded": true}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("effects = %#v", got)
+	}
+	if got, want := c.boardInsetsNow(), insetsMessage(394, 56); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the board's insets once folded: %#v, want %#v", got, want)
 	}
 }
 
@@ -417,12 +444,12 @@ func TestDraggingAPanelsEdgeMovesTheFrameAndGivesTheBoardItsInsetsOnRelease(t *t
 		t.Fatalf("during the drag: %#v; want only the frame laid out again", got)
 	}
 	got = c.resizeEnd()
-	want := []effect{
-		saveWidths{W: w},
-		sendTo{Surface: "board", Message: map[string]any{"type": "insets", "top": 64.0, "left": 434.0, "right": 0.0, "contentRight": 356.0}},
-	}
+	want := []effect{saveWidths{W: w}, boardInsets()}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("on release: %#v", got)
+	}
+	if got, want := c.boardInsetsNow(), insetsMessage(434, 356); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the board's insets on release: %#v, want %#v", got, want)
 	}
 	if got := c.resizeEnd(); len(got) != 0 {
 		t.Fatalf("a release with no drag: %#v, want none", got)
@@ -561,9 +588,12 @@ func geometryOf(t *testing.T, effects []effect) geometry {
 func TestTheCapsuleRowsMinimumLaysTheFrameOutAgainOnce(t *testing.T) {
 	c := loadedFrame()
 	g := layoutWithRow(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
-	want := append([]effect{applyGeometry{G: g}}, c.insets(g)...)
+	want := []effect{applyGeometry{G: g}, boardInsets()}
 	if got := c.capsuleRow(360); !reflect.DeepEqual(got, want) {
 		t.Fatalf("effects = %#v\nwant      %#v", got, want)
+	}
+	if got, want := c.boardInsetsNow(), insetsMessage(g.Board.Left, g.Board.ContentRight); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the board's insets: %#v, want %#v", got, want)
 	}
 	if got := c.capsuleRow(360); len(got) != 0 {
 		t.Fatalf("the same minimum again: %#v, want none", got)
@@ -602,9 +632,12 @@ func TestAFrameLaidOutBeforeTheRowGaveItsMinimumIsLaidOutAgain(t *testing.T) {
 	c.capsuleRow(360)
 	c.pageLoaded("orchestrator", "panel")
 	now := layoutWithRow(1000, 700, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
-	want := append([]effect{applyGeometry{G: now}}, c.insets(now)...)
+	want := []effect{applyGeometry{G: now}, boardInsets()}
 	if got := c.laidOut(stale); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after the stale geometry: %#v\nwant %#v", got, want)
+	}
+	if got, want := c.boardInsetsNow(), insetsMessage(now.Board.Left, now.Board.ContentRight); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the board's insets after the stale geometry: %#v, want %#v", got, want)
 	}
 	if got := c.laidOut(now); len(got) != 0 {
 		t.Fatalf("after the frame as it is: %#v, want none", got)

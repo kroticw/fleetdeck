@@ -211,6 +211,38 @@ func TestOnAStandsPathThePanelsNarrowAndNoCapsuleOverlaps(t *testing.T) {
 	}
 }
 
+// v0.10.1's stands, all six alike (run 34930674108): the panels narrowed for the
+// capsule row, and the board kept the insets of panels at their widths -- 394
+// on the left, 356 on the right -- and ended 61 pt short of the sessions glass.
+// At the start the board heard the insets decided before the row was drawn
+// after the ones decided after it. After every stage the last insets the board
+// heard are those of the native panels as laid out.
+func TestOnAStandsPathTheBoardsLastInsetsMeetTheNativePanelsAfterEveryStage(t *testing.T) {
+	for _, s := range []struct {
+		when string
+		f    standFrame
+	}{
+		{"after the board's layout", standResult.afterLayout},
+		{"after the window's resize", standResult.afterResize},
+		{"after the frame came up again", standResult.afterReframe},
+		{"after longer labels", standResult.afterLongerLabels},
+		{"in full screen", standResult.afterFullScreen},
+		{"after a drag on the sessions panel's edge was let go", standResult.afterDragRelease},
+		{"with the sessions panel folded", standResult.afterFold},
+	} {
+		if !s.f.insetsSent {
+			t.Errorf("%s: the board was sent no insets", s.when)
+			continue
+		}
+		if want := s.f.orchestratorRight + boardGapLeft; math.Abs(s.f.insetsLeft-want) > 1 {
+			t.Errorf("%s: the board's left inset is %v, want %v, %v past the orchestrator panel's edge at %v", s.when, s.f.insetsLeft, want, boardGapLeft, s.f.orchestratorRight)
+		}
+		if want := s.f.width - s.f.sessionsLeft; math.Abs(s.f.insetsContentRight-want) > 1 {
+			t.Errorf("%s: the board's right inset is %v, want %v, up to the sessions panel's edge at %v of %v", s.when, s.f.insetsContentRight, want, s.f.sessionsLeft, s.f.width)
+		}
+	}
+}
+
 // overlapping says which shown capsules lie outside a row rowWidth wide or over
 // one another.
 func overlapping(capsules []drawnCapsule, rowWidth float64) []string {

@@ -40,6 +40,12 @@ type (
 	setFrameMode   struct{ Mode glassMode }
 	reloadBoard    struct{}
 	setDragBand    struct{ Height float64 }
+	// sendBoardInsets is the board told its insets for the frame as it is when
+	// the effect is carried out (boardInsetsNow), not as it was when the effect
+	// was decided: a capsule row drawn in between narrows the panels. In
+	// v0.10.1 the insets decided before the row was drawn reached the board
+	// after the ones decided after it, and the board kept the panels' widths.
+	sendBoardInsets struct{}
 )
 
 // hostVersion is the layout report's version this window frames; a page of
@@ -107,7 +113,21 @@ func (c *controller) to(surface string, message map[string]any) []effect {
 	return []effect{sendTo{Surface: surface, Message: message}}
 }
 
-func (c *controller) insets(g geometry) []effect {
+// boardInsets is the board to be told its insets, once the effects before it
+// have been carried out; nothing while the frame is down.
+func (c *controller) boardInsets() []effect {
+	if !c.framed {
+		return nil
+	}
+	return []effect{sendBoardInsets{}}
+}
+
+// boardInsetsNow is the board's insets for the frame as it is now: what
+// sendBoardInsets becomes when it is carried out.
+func (c *controller) boardInsetsNow() []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	g := c.geometry()
 	return c.to("board", map[string]any{
 		"type": "insets", "top": g.Board.Top, "left": g.Board.Left, "right": g.Board.Right, "contentRight": g.Board.ContentRight,
 	})
@@ -141,11 +161,10 @@ func (c *controller) layout(version int, mode, fleet string) []effect {
 		c.takeDown()
 		return []effect{destroySurfaces{}}
 	}
-	g := c.geometry()
 	if c.framed && fleet == c.fleet {
 		// The same page loaded again: a new document, which needs its insets
 		// and glass again. The surfaces are still there.
-		return append(c.insets(g), c.glassMessage("board")...)
+		return append(c.boardInsets(), c.glassMessage("board")...)
 	}
 	var out []effect
 	if c.framed {
@@ -157,8 +176,8 @@ func (c *controller) layout(version int, mode, fleet string) []effect {
 		c.loads[side] = &pageWatch{}
 		c.loads[side].ask(c.now())
 	}
-	out = append(out, createSurfaces{Fleet: fleet, URL: c.pageURL(fleet), Glass: c.glass}, applyGeometry{G: g})
-	out = append(out, c.insets(g)...)
+	out = append(out, createSurfaces{Fleet: fleet, URL: c.pageURL(fleet), Glass: c.glass}, applyGeometry{G: c.geometry()})
+	out = append(out, c.boardInsets()...)
 	return append(out, c.glassMessage("board")...)
 }
 
@@ -281,9 +300,8 @@ func (c *controller) panel(side string, folded bool) []effect {
 	if !c.framed {
 		return out
 	}
-	g := c.geometry()
-	out = append(out, applyGeometry{G: g})
-	out = append(out, c.insets(g)...)
+	out = append(out, applyGeometry{G: c.geometry()})
+	out = append(out, c.boardInsets()...)
 	return append(out, c.to(side, map[string]any{"type": "folded", "folded": folded})...)
 }
 
@@ -330,7 +348,7 @@ func (c *controller) resizeEnd() []effect {
 	}
 	c.dragging = ""
 	out := []effect{saveWidths{W: c.widths}}
-	return append(out, c.insets(c.geometry())...)
+	return append(out, c.boardInsets()...)
 }
 
 // theme is the board reporting the theme it cycled to.
@@ -362,8 +380,7 @@ func (c *controller) capsuleRow(rowMin float64) []effect {
 	if !c.framed {
 		return nil
 	}
-	g := c.geometry()
-	return append([]effect{applyGeometry{G: g}}, c.insets(g)...)
+	return append([]effect{applyGeometry{G: c.geometry()}}, c.boardInsets()...)
 }
 
 // geometry is the frame for the window as it is, keeping the capsule row its
@@ -395,7 +412,7 @@ func (c *controller) laidOut(g geometry) []effect {
 	if g == now {
 		return nil
 	}
-	return append([]effect{applyGeometry{G: now}}, c.insets(now)...)
+	return append([]effect{applyGeometry{G: now}}, c.boardInsets()...)
 }
 
 func (c *controller) capsuleAction(action string) []effect {
@@ -433,8 +450,7 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	c.width, c.height, c.fullscreen = width, height, fullscreen
 	var out []effect
 	if c.framed {
-		g := c.geometry()
-		out = append([]effect{applyGeometry{G: g}}, c.insets(g)...)
+		out = append([]effect{applyGeometry{G: c.geometry()}}, c.boardInsets()...)
 	}
 	if !changed {
 		return out
