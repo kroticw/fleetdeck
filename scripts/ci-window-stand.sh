@@ -33,7 +33,8 @@
 #                    and its last column out from under the sessions panel, the
 #                    selected tab a capsule, the window's buttons concentric in
 #                    the orchestrator panel's corner with the header's row on
-#                    their line. The pages' own verdicts are not a gate.
+#                    their line. The board's own verdict on its last column,
+#                    worked out from the insets the page was sent, is not a gate.
 #
 # FLEETDECK_STAND_FULLSCREEN=on, for content: the window goes into full screen
 # once its surfaces have loaded and comes out of it after a while
