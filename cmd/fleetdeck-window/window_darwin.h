@@ -34,6 +34,8 @@ int fd_window_is_fullscreen(void *window);
 void fd_window_toggle_fullscreen(void *window);
 // Whether the menu bar is shown.
 int fd_window_menu_bar_visible(void);
+// The menu bar's height in points, 0 with no main menu.
+double fd_window_menu_bar_height(void);
 // window's toolbar shown or hidden; whether it is shown, 0 with no toolbar.
 void fd_window_set_toolbar_visible(void *window, int visible);
 int fd_window_toolbar_visible(void *window);

@@ -30,7 +30,7 @@ func TestAFrameReportLineIsWhatTheStandsCheckerReads(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, words)), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "fullScreen", "glass", "menuBarVisible", "minimize", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions", "toolbarVisible", "zoom"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "fullScreen", "glass", "menuBarHeight", "menuBarVisible", "minimize", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions", "toolbarVisible", "zoom"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields %v, want %v", got, want)
 	}
 	var overlays []map[string]json.RawMessage
@@ -75,6 +75,11 @@ func TestTheFrameMeasuresWhereTheGeometryPutItsPanelsAndCapsules(t *testing.T) {
 	}
 	if m.Glass != "glass" || m.FullScreen {
 		t.Errorf("measured glass %q, full screen %v; want glass out of full screen", m.Glass, m.FullScreen)
+	}
+	// The menu bar comes out over the top of the window in full screen as tall
+	// as it is anywhere: a menu bar's height, never none.
+	if m.MenuBarHeight < 20 || m.MenuBarHeight > 60 {
+		t.Errorf("the menu bar measures %v pt tall, want a menu bar's height", m.MenuBarHeight)
 	}
 	// Out of full screen the title bar and its toolbar keep the window's top
 	// from the content, transparent over it: the measure sees them.

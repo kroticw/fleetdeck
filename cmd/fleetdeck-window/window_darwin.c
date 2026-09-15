@@ -181,6 +181,13 @@ void fd_window_content_size(void *window, double *width, double *height) {
   *height = r.size.height;
 }
 
+// The menu bar's height in points (standframe_darwin.go), whether or not it
+// is shown: in full screen it comes out over the top of the window.
+double fd_window_menu_bar_height(void) {
+  id menu = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("mainMenu"));
+  return menu ? ((double (*)(id, SEL))objc_msgSend)(menu, sel("menuBarHeight")) : 0;
+}
+
 // Whether the menu bar is shown (standframe_darwin.go): it hides as the window
 // settles in full screen.
 int fd_window_menu_bar_visible(void) {

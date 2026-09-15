@@ -49,6 +49,9 @@ type standFrameReport struct {
 	// screen shows it in full screen; ToolbarVisible: the window's toolbar is.
 	MenuBarVisible bool `json:"menuBarVisible"`
 	ToolbarVisible bool `json:"toolbarVisible"`
+	// MenuBarHeight is how far down the menu bar comes over the window's top
+	// in full screen when a pointer at the top of the screen brings it out.
+	MenuBarHeight float64 `json:"menuBarHeight"`
 	// The window's three buttons; zero-sized when there is no such button.
 	Close              measuredBox       `json:"close"`
 	Minimize           measuredBox       `json:"minimize"`
@@ -84,6 +87,7 @@ func measureFrame(f *frame, window unsafe.Pointer, mode glassMode) standFrameRep
 		FullScreen:         windowIsFullscreen(window),
 		MenuBarVisible:     menuBarVisible(),
 		ToolbarVisible:     toolbarVisible(window),
+		MenuBarHeight:      menuBarHeight(),
 		Close:              boxOf(C.fd_test_window_button(window, 0)),
 		Minimize:           boxOf(C.fd_test_window_button(window, 1)),
 		Zoom:               boxOf(C.fd_test_window_button(window, 2)),
