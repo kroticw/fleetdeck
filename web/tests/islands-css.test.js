@@ -51,6 +51,16 @@ test("the orchestrator's header starts past the title bar's buttons, except in f
   assert.match(ruleBody(':root[data-surface="orchestrator"][data-fullscreen] #header'), /padding-left:\s*calc\(var\(--gap\) \* 2\)/);
 });
 
+// v0.10.1 on the operator's macOS: the brand and the fleet picker sat lower than
+// the title bar's buttons. The window sends the line the buttons are centred on,
+// from the panel's top; out of full screen the header is twice that tall with no
+// padding above or below, so its row is centred on the same line.
+test("the orchestrator's header row is centred on the title bar's buttons, except in full screen", () => {
+  const body = ruleBody(':root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) #header');
+  assert.match(body, /padding-block:\s*0/);
+  assert.match(body, /min-height:\s*calc\(var\(--host-titlebar-center\) \* 2\)/);
+});
+
 test("the orchestrator's terminal is the island's lower part, not a box inside it", () => {
   assert.match(ruleBody(':root[data-surface="orchestrator"] .o-screen'), /padding:\s*0;/);
   const term = ruleBody(':root[data-surface="orchestrator"] .o-term');
@@ -149,7 +159,7 @@ test("in a browser tab the columns keep their rows, rules, terminal and names", 
   assert.match(ruleBody(".o-screen"), /padding:\s*4px/);
   assert.match(ruleBody(".sname"), /white-space:\s*nowrap/);
   for (const [, selector, body] of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (!/--host-inset-titlebar|--sessions-head/.test(body)) continue;
+    if (!/--host-inset-titlebar|--host-titlebar-center|--sessions-head/.test(body)) continue;
     for (const one of selector.split(",")) {
       assert.match(one.trim(), /^:root\[data-surface/, `${one.trim()} reaches a browser tab`);
     }

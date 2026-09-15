@@ -91,6 +91,41 @@ func TestCapsulesDrawThePagesModel(t *testing.T) {
 	}
 }
 
+// v0.10.1 on the operator's macOS: the selected tab was a rounded rectangle in
+// its round capsule. From macOS 26 a segmented control has a border shape, and
+// left automatic it draws a rounded rectangle at this size. Asked for a capsule,
+// its selected segment is one too, and with the same room on every side the two
+// capsules share their centres of curvature.
+// capsuleOverRoundedInset is how much further in a capsule's top row starts than
+// a rounded rectangle's, at the least: 0.46 against 0.19 on a 2x screen.
+const capsuleOverRoundedInset = 0.05
+
+func TestTheSelectedTabIsACapsuleInsideItsCapsule(t *testing.T) {
+	r := capsulesResult
+	if r.segmentBorderShape < 0 {
+		t.Skip("NSControl.borderShape is not on this system (before macOS 26)")
+	}
+	if r.segmentBorderShape != 1 {
+		t.Errorf("the tabs' border shape is %d, want 1 (NSControlBorderShapeCapsule)", r.segmentBorderShape)
+	}
+	if r.roundedTopInset <= 0 || r.selectedTopInset < r.roundedTopInset+capsuleOverRoundedInset {
+		t.Errorf("the selected segment's fill starts %.2f of its height in at its top, a rounded rectangle's drawn in its place %.2f: want a capsule's, at least %.2f further in", r.selectedTopInset, r.roundedTopInset, capsuleOverRoundedInset)
+	}
+}
+
+func TestTheTabsHaveTheSameRoomOnEverySideOfTheirCapsule(t *testing.T) {
+	r := capsulesResult
+	if r.segmentBorderShape < 0 {
+		t.Skip("NSControl.borderShape is not on this system (before macOS 26): the tabs are no capsule to keep concentric")
+	}
+	in := r.tabsInsets
+	for i, side := range []string{"right", "top", "bottom"} {
+		if math.Abs(in[i+1]-in[0]) > 0.5 {
+			t.Errorf("the tabs have %v pt of room on the left and %v on the %s, want the same", in[0], in[i+1], side)
+		}
+	}
+}
+
 func TestADrawnAgainRowReplacesTheCapsulesInsteadOfAddingThem(t *testing.T) {
 	if capsulesResult.countAfterRedraw != 4 {
 		t.Fatalf("after a second draw: %d, want the same four capsules in one row", capsulesResult.countAfterRedraw)
@@ -180,6 +215,38 @@ func TestOnAStandsPathThePanelsNarrowAndNoCapsuleOverlaps(t *testing.T) {
 	}
 }
 
+// v0.10.1's stands, all six alike (run 34930674108): the panels narrowed for the
+// capsule row, and the board kept the insets of panels at their widths -- 394
+// on the left, 356 on the right -- and ended 61 pt short of the sessions glass.
+// At the start the board heard the insets decided before the row was drawn
+// after the ones decided after it. After every stage the last insets the board
+// heard are those of the native panels as laid out.
+func TestOnAStandsPathTheBoardsLastInsetsMeetTheNativePanelsAfterEveryStage(t *testing.T) {
+	for _, s := range []struct {
+		when string
+		f    standFrame
+	}{
+		{"after the board's layout", standResult.afterLayout},
+		{"after the window's resize", standResult.afterResize},
+		{"after the frame came up again", standResult.afterReframe},
+		{"after longer labels", standResult.afterLongerLabels},
+		{"in full screen", standResult.afterFullScreen},
+		{"after a drag on the sessions panel's edge was let go", standResult.afterDragRelease},
+		{"with the sessions panel folded", standResult.afterFold},
+	} {
+		if !s.f.insetsSent {
+			t.Errorf("%s: the board was sent no insets", s.when)
+			continue
+		}
+		if want := s.f.orchestratorRight + boardGapLeft; math.Abs(s.f.insetsLeft-want) > 1 {
+			t.Errorf("%s: the board's left inset is %v, want %v, %v past the orchestrator panel's edge at %v", s.when, s.f.insetsLeft, want, boardGapLeft, s.f.orchestratorRight)
+		}
+		if want := s.f.width - s.f.sessionsLeft; math.Abs(s.f.insetsContentRight-want) > 1 {
+			t.Errorf("%s: the board's right inset is %v, want %v, up to the sessions panel's edge at %v of %v", s.when, s.f.insetsContentRight, want, s.f.sessionsLeft, s.f.width)
+		}
+	}
+}
+
 // overlapping says which shown capsules lie outside a row rowWidth wide or over
 // one another.
 func overlapping(capsules []drawnCapsule, rowWidth float64) []string {
@@ -226,6 +293,79 @@ func collectCapsuleLayoutResults() {
 	}
 	resizedResult = probeCapsuleLayoutForTest(m, 1000, 1440, false)
 	standResult = probeCapsuleStandForTest(m)
+	foldResults = probeFoldsForTest(m)
+	regrowResults = []capsuleRegrowProbe{probeCapsuleRegrowForTest(m, 1000, 1728), probeCapsuleRegrowForTest(m, 1728, 1000)}
+}
+
+// regrowResults: the row drawn at one width and laid out at a much wider or
+// narrower one without a redraw, as entering and leaving full screen do.
+var regrowResults []capsuleRegrowProbe
+
+// foldResults: a stand's window in every fold of its panels (probeFoldsForTest).
+var foldResults []foldedStandFrame
+
+// v0.11.0's dev build on macOS 27 (the operator's frame 1374): with the
+// orchestrator panel folded to its strip, the capsule row began 10 pt past the
+// strip, and the Board/Docs tabs lay under the window's buttons, which reach
+// past it. In every fold no capsule shown lies under the close, minimize or
+// zoom button.
+func TestNoCapsuleLiesUnderTheWindowsButtonsInAnyFold(t *testing.T) {
+	if len(foldResults) != 5 {
+		t.Fatalf("%d folds measured, want 5", len(foldResults))
+	}
+	for _, r := range foldResults {
+		f := r.frame
+		buttons := []struct {
+			name string
+			b    measuredBox
+		}{{"close", f.Close}, {"minimize", f.Minimize}, {"zoom", f.Zoom}}
+		for _, button := range buttons {
+			if button.b.W == 0 {
+				t.Errorf("%s: no %s button measured", r.when, button.name)
+			}
+		}
+		if len(f.Capsules) == 0 {
+			t.Errorf("%s: no capsule shown", r.when)
+		}
+		for _, c := range f.Capsules {
+			for _, button := range buttons {
+				if boxesOverlap(c.measuredBox, button.b) {
+					t.Errorf("%s: %s at %v..%v lies under the %s button at %v..%v", r.when, c.Name, c.X, c.X+c.W, button.name, button.b.X, button.b.X+button.b.W)
+				}
+			}
+		}
+	}
+}
+
+func boxesOverlap(a, b measuredBox) bool {
+	const slack = 0.01
+	return a.X < b.X+b.W-slack && b.X < a.X+a.W-slack && a.Y < b.Y+b.H-slack && b.Y < a.Y+a.H-slack
+}
+
+// v0.10.1 on the operator's macOS, in full screen: the theme and the limits lay
+// over the sessions panel until a panel's edge was dragged. The row's content
+// view grows in the window's layout pass, after the row has placed its capsules
+// for the new width, and a capsule kept at the row's right edge by its
+// autoresizing moved by that width a second time. A live resize moves the row a
+// point or two at a time and hid it; full screen moves it by hundreds.
+func TestARowLaidOutMuchWiderOrNarrowerKeepsItsCapsulesInsideIt(t *testing.T) {
+	if len(regrowResults) == 0 {
+		t.Fatal("no rows laid out again")
+	}
+	for _, p := range regrowResults {
+		for _, problem := range overlapping(p.capsules, p.rowWidth) {
+			t.Errorf("%v: %s", p, problem)
+		}
+		right := 0.0
+		for _, c := range p.capsules {
+			if c.visible && c.x+c.w > right {
+				right = c.x + c.w
+			}
+		}
+		if math.Abs(right-p.rowWidth) > 0.01 {
+			t.Errorf("%v: the rightmost capsule ends at %v, want at the row's right edge", p, right)
+		}
+	}
 }
 
 func allLayouts() []capsuleLayoutProbe {

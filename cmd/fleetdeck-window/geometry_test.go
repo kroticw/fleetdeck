@@ -12,7 +12,9 @@ func TestTheDefaultLayoutMatchesTheChosenDesign(t *testing.T) {
 	want := geometry{
 		Orchestrator: rect{X: 8, Y: 8, W: 368, H: 966},
 		Sessions:     rect{X: 1156, Y: 8, W: 348, H: 966},
-		Capsules:     rect{X: 386, Y: 12, W: 758, H: 32},
+		// Centred 26 from the top, on the line of the window's buttons and of
+		// both panels' head rows.
+		Capsules: rect{X: 386, Y: 10, W: 758, H: 32},
 		// The board runs on under the sessions glass; a card, a session or a
 		// document opens clear of the panel and its margin.
 		Board: insets{Top: 64, Left: 394, Right: 0, ContentRight: 356},
@@ -143,6 +145,37 @@ func TestAFoldedPanelIsNotWidenedOrNarrowedForTheRow(t *testing.T) {
 	}
 	if g.Capsules.W < 360-1e-9 {
 		t.Fatalf("capsule row = %v, want at least 360", g.Capsules.W)
+	}
+}
+
+// v0.11.0's dev build on macOS 27 (the operator's frame 1374): with the
+// orchestrator panel folded to its strip, the capsule row began 10 pt past the
+// strip, under the window's buttons, which end 79 pt in. The row begins its gap
+// past the buttons; the strip and the board stay where they were.
+func TestTheCapsuleRowBesideAFoldedOrchestratorBeginsPastTheWindowsButtons(t *testing.T) {
+	folded := panelWidths{Orchestrator: 368, Sessions: 348, OrchestratorFolded: true}
+	g := layoutPastButtons(1000, 700, folded, 0, 79)
+	if g.Capsules.X != 79+capsuleGapLeft || g.Capsules.X+g.Capsules.W != g.Sessions.X-capsuleGapRight {
+		t.Fatalf("capsule row = %+v, want it from %v to the sessions panel's gap", g.Capsules, 79+capsuleGapLeft)
+	}
+	if g.Orchestrator.W != foldedWidth || g.Board.Left != panelMargin+foldedWidth+boardGapLeft {
+		t.Fatalf("the strip %+v or the board's left inset %v moved with the row", g.Orchestrator, g.Board.Left)
+	}
+	if got, want := layoutPastButtons(1000, 700, folded, 0, 0), layoutFor(1000, 700, folded); got != want {
+		t.Fatalf("with no buttons on the row's line: %+v\nwant %+v", got, want)
+	}
+	unfolded := panelWidths{Orchestrator: 368, Sessions: 348}
+	if got, want := layoutPastButtons(1000, 700, unfolded, 360, 79), layoutWithRow(1000, 700, unfolded, 360); got != want {
+		t.Fatalf("an unfolded orchestrator panel ends past the buttons: %+v\nwant %+v", got, want)
+	}
+}
+
+// Beside the folded strip the room the buttons take is room the row has not:
+// the sessions panel narrows for the row's minimum past them.
+func TestTheSessionsPanelNarrowsForTheRowPastTheWindowsButtons(t *testing.T) {
+	g := layoutPastButtons(800, 700, panelWidths{Orchestrator: 368, Sessions: 500, OrchestratorFolded: true}, 360, 79)
+	if g.Capsules.X != 79+capsuleGapLeft || g.Capsules.W < 360-1e-9 {
+		t.Fatalf("capsule row = %+v, want it from %v and at least 360 wide", g.Capsules, 79+capsuleGapLeft)
 	}
 }
 

@@ -121,8 +121,8 @@ func TestUnpinningAFleetIsAlwaysAllowed(t *testing.T) {
 }
 
 func TestEachFleetHasItsOwnBoardDocsAndWizard(t *testing.T) {
-	cfgPath, cfg, c, roots := twoFleetPanel(t, "")
-	resolve := newFleets(runOpts{configPath: cfgPath}, cfg, deadDaemon(t), c)
+	cfgPath, _, c, roots := twoFleetPanel(t, "")
+	resolve := newFleets(runOpts{configPath: cfgPath}, deadDaemon(t), c)
 	b, err := resolve("B")
 	if err != nil {
 		t.Fatalf("Fleet(B): %v", err)
@@ -181,8 +181,8 @@ func TestVetPinLeavesItsArgumentAlone(t *testing.T) {
 }
 
 func TestAFleetsWizardRefusesAnotherFleetsOrchestrator(t *testing.T) {
-	cfgPath, cfg, c, roots := twoFleetPanel(t, `{"short":"a0000001"},{"short":"b0000001"}`)
-	resolve := newFleets(runOpts{configPath: cfgPath}, cfg, fakeDaemon(t, `{"short":"a0000001"},{"short":"b0000001"}`), c)
+	cfgPath, _, c, roots := twoFleetPanel(t, `{"short":"a0000001"},{"short":"b0000001"}`)
+	resolve := newFleets(runOpts{configPath: cfgPath}, fakeDaemon(t, `{"short":"a0000001"},{"short":"b0000001"}`), c)
 	b, err := resolve("B")
 	if err != nil {
 		t.Fatal(err)

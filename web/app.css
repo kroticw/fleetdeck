@@ -94,7 +94,9 @@
      a session or a document opens as over the board. */
   --on-glass-muted: #434a54;
   --glass-control: rgb(255 255 255 / 52%);
+  --glass-control-hover: rgb(255 255 255 / 74%);
   --glass-control-edge: rgb(20 22 26 / 11%);
+  --glass-control-highlight: rgb(255 255 255 / 70%);
   --surface-on-glass: rgb(255 255 255 / 80%);
   --island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%);
   --sheet-shadow: 0 2px 6px rgb(20 22 26 / 10%), 0 18px 48px rgb(20 22 26 / 24%);
@@ -143,7 +145,9 @@ html {
 
     --on-glass-muted: #c1c7cf;
     --glass-control: rgb(255 255 255 / 9%);
+    --glass-control-hover: rgb(255 255 255 / 16%);
     --glass-control-edge: rgb(255 255 255 / 15%);
+    --glass-control-highlight: rgb(255 255 255 / 10%);
     --surface-on-glass: rgb(27 30 36 / 80%);
     --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
     --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
@@ -175,7 +179,9 @@ html {
 
   --on-glass-muted: #c1c7cf;
   --glass-control: rgb(255 255 255 / 9%);
+  --glass-control-hover: rgb(255 255 255 / 16%);
   --glass-control-edge: rgb(255 255 255 / 15%);
+  --glass-control-highlight: rgb(255 255 255 / 10%);
   --surface-on-glass: rgb(27 30 36 / 80%);
   --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
   --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
@@ -3564,6 +3570,33 @@ body.is-resizing {
   padding-left: calc(var(--gap) * 2);
 }
 
+/* The header's row on the line the title bar's buttons are centred on: the
+   window sends that line from the panel's top, and the header is twice as tall
+   with no padding above or below it. In v0.10.1 the brand and the fleet picker
+   sat lower than the buttons. In full screen there are no buttons, and the
+   header keeps its padding. */
+:root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) #header {
+  padding-block: 0;
+  min-height: calc(var(--host-titlebar-center) * 2);
+}
+
+/* Folded, the island is a 48 px strip with no head: the window's buttons sit in
+   its corner and its unfold control is all it shows. The header is the page's,
+   a sibling of the column, and folding hides only the column's own children:
+   on v0.11.0's stand the header started past the buttons, 260 px wide, and the
+   page scrolled sideways under the strip, a scroll bar at its foot. */
+:root[data-surface="orchestrator"]:has(.col-orchestrator[data-folded="1"]) #header {
+  display: none;
+}
+
+/* The header's room stays above the strip's unfold control: with the head
+   hidden the control rose to the strip's top, under the window's close and
+   minimize buttons. The room is the header's, the buttons' line twice; in full
+   screen there are no buttons. */
+:root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) .col-orchestrator[data-folded="1"] {
+  padding-top: calc(var(--host-titlebar-center) * 2);
+}
+
 /* The terminal is the island's lower part, edge to edge, and not a rounded box
    with margins inside it. Its ground stays dense: a terminal over glass is read
    in both themes. The island's own corners round its bottom. */
@@ -3648,6 +3681,16 @@ body.is-resizing {
 :root[data-surface="sessions"]:has(.col-sessions:not([data-folded="1"])) #header {
   margin-top: var(--sessions-head);
   padding: 0 20px 4px 38px;
+}
+
+/* Folded, the island is a 48 px rail with no head. The counters are the page's
+   header, a sibling of the column, and folding hides only the column's own
+   children: on v0.11.0's dev build "0 waiting for you" and "0 stalled" wrapped
+   word by word and ran off the rail's edge. The rail's marks already say who
+   waits (red) and who stalled (dashed), and a panel that knows nothing shows an
+   em dash where their count would be. */
+:root[data-surface="sessions"]:has(.col-sessions[data-folded="1"]) #header {
+  display: none;
 }
 
 :root[data-surface="sessions"] #header .counters {
@@ -3782,6 +3825,13 @@ body.is-resizing {
   left: 0;
   right: auto;
   width: min(28rem, calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px) - 2 * var(--gap-lg)));
+  padding: 10px;
+  border: none;
+  border-radius: var(--radius-xl);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--island-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
 }
 
 /* The box that scrolls is the open room between the panels, so its scrollbar is
@@ -3803,6 +3853,13 @@ body.is-resizing {
      macOS 26 then draws its own thin bar, 13 px tall. */
   scrollbar-width: auto;
   scrollbar-color: auto;
+  /* Down its height the board does not scroll: its columns do. A column longer
+     than the window scrolled the whole board, and WebKit drew the classic 15 px
+     bar at the box's right edge, the sessions glass's left edge, where it read
+     as a second, darker island behind the sessions one. Stretched, every column
+     is the board's height and scrolls inside it. */
+  overflow-y: hidden;
+  align-items: stretch;
 }
 
 /* Thin, and never hidden: it is the one sign that the board scrolls. */
@@ -3816,6 +3873,31 @@ body.is-resizing {
   border: none;
   padding: 0;
   gap: var(--gap);
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+/* A column's bar is the sessions list's: thin, drawn as asked, on no track. */
+:root[data-surface="board"] .kcol::-webkit-scrollbar {
+  width: 6px;
+}
+
+:root[data-surface="board"] .kcol::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-surface="board"] .kcol::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* The stage and its count stay at the column's top while its cards pass under
+   them, on the board's own ground. */
+:root[data-surface="board"] .kcol h5 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
 }
 
 /* The zone stripe is a shadow rather than a border, so the card keeps its
@@ -3927,4 +4009,208 @@ body.is-resizing {
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--island-shadow);
+}
+
+/* --- the page's controls as capsules of glass ---
+ *
+ * The window's own capsules over the board are the system's glass; the controls
+ * the page draws beside them are capsules too: the orchestrator island's head
+ * (the edit pencil, the orchestrator picker, the terminal's font buttons and the
+ * fold button, the fleet menu) and the new card form's fields.
+ *
+ * Measured on macOS 27 (T-070): a page cannot ask WebKit for the system's
+ * material, and a backdrop-filter in a transparent web view blurs the window's
+ * layers under it, the island's glass included. A control lying on the island is
+ * a translucent fill and a rim, with no blur of its own: glass on glass. What
+ * floats over content, the new card form over the board and the fleet menu's
+ * list over the island, is frosted: a dense fill and a blur, read the same
+ * whatever is under it. With no glass all of it is solid.
+ *
+ * A browser tab has no data-surface and keeps its bordered controls. */
+
+/* The fold and unfold buttons are round glass buttons of their own, below. */
+:root[data-surface="orchestrator"] .o-name-edit,
+:root[data-surface="orchestrator"] .o-pick-select,
+:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold),
+:root[data-surface="orchestrator"] .fleet-menu-button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+:root[data-surface="board"] .newcard-title,
+:root[data-surface="board"] .newcard-zone,
+:root[data-surface="board"] .newcard-create,
+:root[data-surface="board"] .newcard-cancel {
+  min-height: 30px;
+  padding: 4px 14px;
+  border: none;
+  border-radius: 999px;
+  color: var(--text);
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+/* A disabled capsule is not lit under the pointer: Create while the card is
+   being written looks as unpressable as it is. */
+:root[data-surface="orchestrator"] .o-name-edit:hover:not(:disabled),
+:root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
+:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold):hover:not(:disabled),
+:root[data-surface="orchestrator"] .fleet-menu-button:hover:not(:disabled),
+:root[data-surface="board"] .newcard-title:hover:not(:disabled),
+:root[data-surface="board"] .newcard-zone:hover:not(:disabled),
+:root[data-surface="board"] .newcard-create:hover:not(:disabled),
+:root[data-surface="board"] .newcard-cancel:hover:not(:disabled) {
+  background-color: var(--glass-control-hover);
+}
+
+:root[data-surface="board"] .newcard-create:disabled,
+:root[data-surface="board"] .newcard-cancel:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The fleet menu's button, its list open: lit, with the accent round it, as a
+   browser tab's has. */
+:root[data-surface="orchestrator"] .fleet-menu-button[aria-expanded="true"] {
+  background-color: var(--glass-control-hover);
+  box-shadow: inset 0 0 0 1px var(--accent), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+/* The title's placeholder is what an empty form shows: read like the muted text
+   beside it, not WebKit's pale default on a frosted panel. */
+:root[data-surface="board"] .newcard-title::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* The closed select is drawn by the page, its chevron in the text's colour; the
+   list it opens stays the system's menu. */
+:root[data-surface="orchestrator"] .o-pick-select,
+:root[data-surface="board"] .newcard-zone {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* The fleet menu's list hangs from the header's right edge, not from the
+   button's left one, and is no wider than the header less its gaps: from the
+   button's edge it ran 224 px on past the island's edge, and the page scrolled
+   sideways under the island (run 34949576998). A browser tab keeps it under the
+   button. */
+:root[data-surface="orchestrator"] #header {
+  position: relative;
+}
+
+:root[data-surface="orchestrator"] .fleet-menu {
+  position: static;
+}
+
+:root[data-surface="orchestrator"] .fleet-menu-list {
+  left: auto;
+  right: var(--gap);
+  min-width: min(14rem, calc(100% - 2 * var(--gap)));
+  max-width: calc(100% - 2 * var(--gap));
+  border: none;
+  border-radius: var(--radius-lg);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--island-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
+}
+
+/* No glass: solid capsules with the border a column's controls have, and
+   nothing blurred. */
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit,
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold),
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button,
+:root[data-surface="board"][data-glass="opaque"] .newcard-title,
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone,
+:root[data-surface="board"][data-glass="opaque"] .newcard-create,
+:root[data-surface="board"][data-glass="opaque"] .newcard-cancel {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit:hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold):hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-create:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-cancel:hover:not(:disabled) {
+  background-color: var(--surface-hover);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button[aria-expanded="true"] {
+  background-color: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+:root[data-surface="board"][data-glass="opaque"] .newcard,
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-list {
+  background-color: var(--surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--island-shadow), inset 0 0 0 1px var(--border-strong);
+}
+
+/* The panels' fold and unfold buttons, round glass. The operator on v0.11.0's
+   dev build: "the buttons that hide and show the panels do not look good, make
+   them liquid glass and round". The unfold control is the only way back to a
+   folded panel: 40 pt across, a target no smaller than the bordered one it
+   replaces (26 by 40 on the stand), centred in the 48 pt strip. Which of the two
+   shows is still the folded state's to say (.col[data-folded="1"]). */
+:root[data-surface="orchestrator"] .col-size-fold,
+:root[data-surface="sessions"] .col-size-fold {
+  width: 28px;
+  height: 28px;
+}
+
+:root[data-surface="orchestrator"] .col-size-unfold,
+:root[data-surface="sessions"] .col-size-unfold {
+  width: 40px;
+  height: 40px;
+}
+
+:root[data-surface="orchestrator"] .col-size-fold,
+:root[data-surface="sessions"] .col-size-fold,
+:root[data-surface="orchestrator"] .col-size-unfold,
+:root[data-surface="sessions"] .col-size-unfold {
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+:root[data-surface="orchestrator"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="sessions"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="orchestrator"] .col-size-unfold:hover:not(:disabled),
+:root[data-surface="sessions"] .col-size-unfold:hover:not(:disabled) {
+  background-color: var(--glass-control-hover);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-fold,
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-fold,
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-unfold,
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-unfold {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled),
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled) {
+  background-color: var(--surface-hover);
 }

@@ -283,15 +283,15 @@ const en = {
 
   // The start page (web/js/start.js): the screen the application opens on,
   // where a fleet is chosen or a new one is made. start_new_text says what
-  // making one does and what it does not do — the panel serves the new fleet
-  // only after it is restarted — and it is above the button, not after it.
+  // making one does and what it does not do — nothing already running is
+  // touched — and it is above the button, not after it.
   start_intro: "Choose a fleet, or start a new one.",
   start_last: "you were here last time",
   start_footer: "A fleet has a board, documentation and an orchestrator of its own. The machine's sessions are visible from every fleet.",
   start_new: "Start a fleet",
   start_new_title: "A new fleet",
   start_new_text:
-    "fleetdeck makes the folder with a board and documentation in it, the same two the first run makes, and adds the fleet to the configuration. It is served after the panel is restarted — nothing that is running now is touched.",
+    "fleetdeck makes the folder with a board and documentation in it, the same two the first run makes, adds the fleet to the configuration and serves it at once — nothing that is running now is touched.",
   start_new_name: "Name",
   start_new_path: "Folder",
   // What is written outside the folder being chosen, said before the button
@@ -303,8 +303,12 @@ const en = {
   start_new_cancel: "Cancel",
   start_name_required: "Name the fleet",
   start_new_unavailable: "This panel does not make fleets: it is a test stand.",
-  start_made: "The fleet is made. Restart the panel to work in it.",
+  start_made: "The fleet is made. Open it from the list.",
   start_failed: "The fleet was not made. What stopped it is named above; nothing after that step was done.",
+  // A refusal at the last step, the running panel taking the fleet in: the
+  // folder and the configuration line are made by then, so start_failed would
+  // say two untrue things.
+  start_not_served: "The fleet is in the configuration and its folder is made, but this panel cannot serve it: what stopped it is named above. Restart the panel to pick it up.",
   start_offline: "The panel is not answering.",
   theme_auto: "theme: auto",
   theme_light: "theme: light",
@@ -344,6 +348,7 @@ const en = {
   update_cannot_built_here: "This app was built on this machine, so there is no release to update it to. Build it again from your checkout.",
   update_cannot_no_version: "This app reports no release version, so there is nothing to compare with what is published.",
   update_cannot_staged: "This copy of the app runs from an update's staging folder, not from where the app is installed. Open the installed app to update it.",
+  update_cannot_dev: "This is a dev build from a working tree, open beside the installed app. It does not update itself: build it again with make dev-app.",
   update_cannot_other: "This app cannot update itself.",
   // Why an update that was tried did not happen.
   update_reason_offline: "GitHub could not be reached",
@@ -557,7 +562,7 @@ const ru = {
   start_new: "Завести флот",
   start_new_title: "Новый флот",
   start_new_text:
-    "fleetdeck создаст папку, а в ней доску и документацию — те же две, что появляются при первом запуске, — и допишет флот в настройку. Панель начнёт его показывать после перезапуска; на то, что работает сейчас, это не влияет.",
+    "fleetdeck создаст папку, а в ней доску и документацию — те же две, что появляются при первом запуске, — допишет флот в настройку и сразу начнёт его показывать; на то, что работает сейчас, это не влияет.",
   start_new_name: "Имя",
   start_new_path: "Папка",
   start_new_outside:
@@ -566,8 +571,9 @@ const ru = {
   start_new_cancel: "Отмена",
   start_name_required: "Укажите имя флота",
   start_new_unavailable: "Эта панель не заводит флотов: это тестовый стенд.",
-  start_made: "Флот заведён. Перезапустите панель, чтобы в нём работать.",
+  start_made: "Флот заведён. Откройте его из списка.",
   start_failed: "Флот не заведён. Что помешало — написано выше; шаги после него не выполнялись.",
+  start_not_served: "Флот записан в настройку и его папка создана, но эта панель не может его обслуживать: что помешало — написано выше. Перезапустите панель, чтобы она его подхватила.",
   start_offline: "Панель не отвечает.",
   theme_auto: "тема: авто",
   theme_light: "тема: светлая",
@@ -604,6 +610,7 @@ const ru = {
   update_cannot_built_here: "Это приложение собрано на этой машине, выпуска для него нет. Пересоберите его из своего клона.",
   update_cannot_no_version: "Приложение не сообщает версию выпуска, сравнивать не с чем.",
   update_cannot_staged: "Эта копия приложения запущена из каталога обновления, а не оттуда, где приложение установлено. Откройте установленное приложение, чтобы обновить его.",
+  update_cannot_dev: "Это dev-сборка из рабочего дерева, открытая рядом с установленным приложением. Сама она не обновляется: пересоберите её через make dev-app.",
   update_cannot_other: "Это приложение не может обновить себя.",
   // Почему обновление, которое попробовали, не состоялось.
   update_reason_offline: "не удалось достучаться до GitHub",

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	webview "github.com/webview/webview_go"
 )
@@ -37,6 +38,11 @@ type glassWindow struct {
 	dragSide  string
 	dragWidth float64
 	dragX     float64
+
+	// On a stand: its trip into full screen, and the frame as the window last
+	// said it measured it.
+	standFS   *standFullScreen
+	frameSaid string
 }
 
 func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp func(page string)) *glassWindow {
@@ -50,13 +56,14 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		surfaces: map[string]*surface{},
 		askBoard: askBoard,
 		putUp:    putUp,
+		standFS:  newStandFullScreen(hostOnStand && standFullScreenOn),
 	}
-	g.ctl = newController(panelURL, loadPanelWidths(), mode)
+	g.ctl = newController(panelURL, panelWidthsForStand(loadPanelWidths(), standFold), mode)
 	g.frame.setMode(mode)
 	logFrameMode(mode)
 	width, height := windowContentSize(w.Window())
 	g.run(g.ctl.resized(width, height, windowIsFullscreen(w.Window())))
-	g.run(g.ctl.titlebarInset(g.frame.titlebarInset()))
+	g.run(g.ctl.titlebarButtons(g.frame.titlebarInset(), g.frame.titlebarCenter()))
 
 	// A surface's page says where its load is through the same binding the
 	// board's does; the board's own goes to the screen (main.go).
@@ -196,10 +203,12 @@ func (g *glassWindow) tick() { g.run(g.ctl.tick()) }
 // thread.
 func (g *glassWindow) surfaceMessage(surface, message, origin string, mainFrame bool) {
 	if !acceptSurfaceMessage(g.panelURL, origin, mainFrame) {
-		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surface, origin, mainFrame)
+		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surfaceKind(surface), origin, mainFrame)
 		return
 	}
-	if s := g.surfaces[surface]; s != nil && s.calls != nil {
+	// Only into the queue of the surface of its generation: a call from a
+	// surface taken down is not the one shown now's (surfacename.go).
+	if s := surfaceNamed(g.surfaces, surface); s != nil && s.calls != nil {
 		s.calls.push(message)
 	}
 }
@@ -208,7 +217,9 @@ func (g *glassWindow) surfaceMessage(surface, message, origin string, mainFrame 
 // settles its promise in that same web view, if it is still the one shown.
 func (g *glassWindow) answerCalls(kind string, s *surface) func(message string) {
 	return func(message string) {
-		reply := answerSurfaceCall(g.bridge, kind, message)
+		// Under the surface's name, so a binding tells its generation
+		// (pageLoaded).
+		reply := answerSurfaceCall(g.bridge, surfaceName(kind, s.gen), message)
 		if reply == "" {
 			return
 		}
@@ -220,15 +231,74 @@ func (g *glassWindow) answerCalls(kind string, s *surface) func(message string) 
 	}
 }
 
-func (g *glassWindow) surfaceNavigation(_, target string, mainFrame bool) bool {
-	allow, effects := g.ctl.navigate(target, mainFrame)
+func (g *glassWindow) surfaceNavigation(surface, target string, mainFrame bool) bool {
+	allow, effects := g.ctl.navigateFrom(surface, target, mainFrame)
 	g.later(effects)
 	return allow
 }
 
-func (g *glassWindow) pageLoaded(surface, state string) {
+// pageLoaded is a side surface's page saying where its load is. A word from a
+// surface not shown now is not about the page shown now: it is not logged as
+// that page's, which scripts/ci-window-stand.sh waits for, and a stand does not
+// count it toward entering full screen.
+func (g *glassWindow) pageLoaded(name, state string) {
+	surface, shown := g.ctl.current(name)
+	if !shown {
+		return
+	}
 	log.Printf("fleetdeck-window: %s", surfacePageSays(surface, state))
-	g.run(g.ctl.pageLoaded(surface, state))
+	g.run(g.ctl.pageLoadedFrom(name, state))
+	if state != pagePanel {
+		return
+	}
+	if after, ok := g.standFS.surfaceLoaded(surface); ok {
+		log.Printf("fleetdeck-window: on this stand the window enters full screen in %v", after)
+		g.toggleFullScreenAfter(after)
+	}
+}
+
+// revealOnStand measures the frame in full screen a few times before the window
+// leaves, while the stand's script brings the pointer to the top of the screen
+// and away (scripts/standpointer): what it brings out over the content need not
+// tell the window anything. Each step is logged and the frame measured after
+// it.
+func (g *glassWindow) revealOnStand(trip int) {
+	at := func(after time.Duration, what string, do func()) {
+		time.AfterFunc(after, func() {
+			g.w.Dispatch(func() {
+				log.Printf("fleetdeck-window: on this stand, full screen %d: %s", trip, what)
+				do()
+				g.reportFrame()
+			})
+		})
+	}
+	for _, after := range standRevealMeasures {
+		at(after, "the frame is measured", func() {})
+	}
+}
+
+func (g *glassWindow) toggleFullScreenAfter(after time.Duration) {
+	time.AfterFunc(after, func() { g.w.Dispatch(func() { toggleFullScreen(g.w.Window()) }) })
+}
+
+// reportFrame puts what the frame measures natively in the window's log, on a
+// stand only: once AppKit has laid the window out, and only when it changed
+// (standframe_darwin.go).
+func (g *glassWindow) reportFrame() {
+	if !hostOnStand {
+		return
+	}
+	g.w.Dispatch(func() {
+		if !g.framed {
+			return
+		}
+		line := frameReportLine(measureFrame(g.frame, g.w.Window(), g.mode))
+		if line == g.frameSaid {
+			return
+		}
+		g.frameSaid = line
+		log.Print(line)
+	})
 }
 
 // surfacePageSays is the window's log line for a surface's page's word about
@@ -240,9 +310,9 @@ func surfacePageSays(surface, state string) string {
 
 // surfaceNavigated is WebKit's word about a surface's navigation, from inside
 // its delegate: carried out later, since it may take that web view down.
-func (g *glassWindow) surfaceNavigated(surface string, e navEvent) {
-	log.Printf("fleetdeck-window: the %s surface's navigation %s", surface, e)
-	g.later(g.ctl.surfaceNavigated(surface, e))
+func (g *glassWindow) surfaceNavigated(name string, e navEvent) {
+	log.Printf("fleetdeck-window: the %s surface's navigation %s", surfaceKind(name), e)
+	g.later(g.ctl.surfaceNavigatedFrom(name, e))
 }
 
 func (g *glassWindow) windowChanged(kind string) {
@@ -251,8 +321,23 @@ func (g *glassWindow) windowChanged(kind string) {
 		g.run(g.ctl.glassChanged(currentGlassMode()))
 	default:
 		width, height := windowContentSize(g.w.Window())
-		g.run(g.ctl.resized(width, height, windowIsFullscreen(g.w.Window())))
-		g.run(g.ctl.titlebarInset(g.frame.titlebarInset()))
+		fullscreen := windowIsFullscreen(g.w.Window())
+		g.run(g.ctl.resized(width, height, fullscreen))
+		g.run(g.ctl.titlebarButtons(g.frame.titlebarInset(), g.frame.titlebarCenter()))
+		if kind == "fullscreen" {
+			if after, ok := g.standFS.changed(fullscreen); ok {
+				verb := "leaves"
+				if !fullscreen {
+					verb = "enters again"
+				}
+				log.Printf("fleetdeck-window: on this stand the window %s full screen in %v", verb, after)
+				g.toggleFullScreenAfter(after)
+				if fullscreen {
+					g.revealOnStand(g.standFS.trip())
+				}
+			}
+		}
+		g.reportFrame()
 	}
 }
 
@@ -280,11 +365,11 @@ func (g *glassWindow) resize(side string, phase int, x float64) {
 
 // --- natives ---------------------------------------------------------------------
 
-func (g *glassWindow) createSurface(kind, url string, glass glassMode) {
+func (g *glassWindow) createSurface(kind, url string, glass glassMode, gen int) {
 	if old := g.surfaces[kind]; old != nil {
 		old.close()
 	}
-	s := newSurface(g.frame.board(), g.frame.panelContent(kind), kind, g.panelURL, glass, g.bridge)
+	s := newSurface(g.frame.board(), g.frame.panelContent(kind), kind, gen, g.panelURL, glass, g.bridge)
 	s.calls = newCallQueue(g.answerCalls(kind, s))
 	g.surfaces[kind] = s
 	g.framed = true
@@ -344,8 +429,13 @@ func (g *glassWindow) setAppearance(choice string) {
 func (g *glassWindow) applyGeometry(geo geometry) {
 	g.frame.layout(geo)
 	g.run(g.ctl.laidOut(geo))
+	g.reportFrame()
 }
-func (g *glassWindow) saveWidths(w panelWidths) { storePanelWidths(w) }
+func (g *glassWindow) saveWidths(w panelWidths) {
+	if storesWidths(standFold) {
+		storePanelWidths(w)
+	}
+}
 
 func (g *glassWindow) setCapsules(model json.RawMessage) {
 	g.model = model
@@ -370,11 +460,16 @@ func (g *glassWindow) reloadBoard() { g.askBoard() }
 
 func (g *glassWindow) setDragBand(height float64) { g.frame.setDragBand(height) }
 
+func (g *glassWindow) showToolbar(visible bool) { setToolbarVisible(g.w.Window(), visible) }
+
+func (g *glassWindow) boardInsets() { g.run(g.ctl.boardInsetsNow()) }
+
 func (g *glassWindow) redrawCapsules() {
 	if !g.framed || g.model == nil {
 		return
 	}
 	drawCapsuleRow(g.frame, g.model, g.mode, g.ctl, g.run)
+	g.reportFrame()
 }
 
 // drawCapsuleRow draws the board's capsule model into the frame's row and gives

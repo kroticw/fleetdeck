@@ -63,6 +63,10 @@ const (
 	// refusalStaged: running from an update's staging directory, which holds
 	// a version being tried or one swapped out, never the installed app.
 	refusalStaged = "staged"
+	// refusalDev: a dev app, built by `make dev-app` to run beside the
+	// installed app. It is rebuilt from its tree by hand, and looking for a
+	// newer version would write the answer the installed app reads.
+	refusalDev = "dev"
 )
 
 // Why an update that was tried did not happen.
@@ -92,6 +96,8 @@ type config struct {
 	// canonical is the installed bundle an update's handover named for this
 	// window (--canonical), empty for a window no update started.
 	canonical string
+	// dev: this is a dev app (devapp.go).
+	dev bool
 }
 
 // way is how this copy of the app updates itself, or why it cannot.
@@ -112,6 +118,10 @@ type way struct {
 // downloading over it would throw their work away. Everything else that is a
 // real installed app updates from the releases page.
 func updateWay(cfg config) way {
+	// A dev app does not update, whatever it was built from.
+	if cfg.dev {
+		return way{Refusal: refusalDev}
+	}
 	bundle := bundleOf(cfg.exe)
 	if bundle == "" {
 		return way{Refusal: refusalNotABundle}

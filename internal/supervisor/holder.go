@@ -129,6 +129,28 @@ func listenerPID(ctx context.Context, port int) (int, error) {
 	return 0, fmt.Errorf("%d processes listen on port %d; not choosing one to stop", len(pids), port)
 }
 
+// executableOf is the binary the process pid runs, as the kernel has it: the
+// first text file lsof lists for the process is its executable, named with
+// every symlink in its path resolved.
+func executableOf(ctx context.Context, pid int) (string, error) {
+	lsof, err := lsofPath()
+	if err != nil {
+		return "", fmt.Errorf("find the binary of pid %d: %w", pid, err)
+	}
+	var out, errOut bytes.Buffer
+	cmd := exec.CommandContext(ctx, lsof, "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-Fn")
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("lsof on pid %d: %w %s", pid, err, strings.TrimSpace(errOut.String()))
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if name, ok := strings.CutPrefix(line, "n"); ok && name != "" {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("lsof lists no binary for pid %d", pid)
+}
+
 // portFreed waits up to d for nothing to listen on port.
 func portFreed(ctx context.Context, port int, d time.Duration) bool {
 	deadline := time.Now().Add(d)

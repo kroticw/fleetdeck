@@ -7,7 +7,10 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
-import { watchBoardScroll, watchListScroll, watchTerminalScroll } from "./standreport.js";
+import { probeColumnScroll, watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll } from "./standreport.js";
+import { watchHeaderLine } from "./standheader.js";
+import { watchControls } from "./standcontrols.js";
+import { watchOverflow } from "./standoverflow.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -191,7 +194,9 @@ const headerParts = regions.has("header")
   ? HEADER_PARTS
   : HEADER_PARTS.filter((part) => regions.has(part === "update" ? "brand" : part));
 if (headerParts.length > 0) {
-  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts });
+  // A stand's frame with the fleet menu open (web/js/host.js, open).
+  const openMenu = host?.open?.includes("fleetmenu") ?? false;
+  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu });
 } else {
   initTheme();
 }
@@ -232,7 +237,7 @@ if (regions.has("center")) {
   // After the tabs, not before: createSections replaces the row's children.
   newCard = createNewCard(document.getElementById("tabs"));
   // A stand's frame with the form open (web/js/host.js, open).
-  if (host?.open === "newcard") newCard.open();
+  if (host?.open?.includes("newcard")) newCard.open();
 }
 
 // The window's capsules (web/js/capsules.js), handed over by the board whenever
@@ -261,10 +266,27 @@ if (host) {
   // On a CI stand only: the board's scrolling, in the window's log.
   const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
+  // And whether a scrolled column keeps its place while the panel's snapshots come in.
+  if (boardEl) probeColumnScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the sessions list's scrollbar, from the sessions surface.
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And the grounds the sessions list lies on, which a screenshot of glass cannot tell from the glass.
+  if (host.stand && host.surface === "sessions" && column) watchGrounds(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And which of the sessions surface's boxes do not fit, folded to a rail or not.
+  if (host.stand && host.surface === "sessions" && column) watchOverflow(window, column, "sessions", (report) => callHost(window, "fleetdeckStandReport", report));
   // And the edges down the orchestrator's terminal, from the orchestrator surface.
   if (host.stand && host.surface === "orchestrator" && column) watchTerminalScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And which of the orchestrator surface's boxes do not fit, folded to a strip or not.
+  if (host.stand && host.surface === "orchestrator" && column) watchOverflow(window, column, "orchestrator", (report) => callHost(window, "fleetdeckStandReport", report));
+  // And where its header's row and brand are centred, against the line the
+  // window's buttons are centred on (web/js/standheader.js).
+  const standHeader = host.stand && host.surface === "orchestrator" ? document.getElementById("header") : null;
+  if (standHeader) watchHeaderLine(window, standHeader, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And how the capsules the page draws read in the window's material: the
+  // orchestrator island's head and the board's new card form (web/js/standcontrols.js).
+  if (host.stand && (host.surface === "orchestrator" || host.surface === "board")) {
+    watchControls(window, host.surface, (report) => callHost(window, "fleetdeckStandReport", report));
+  }
   // The window's panel folds with the column: a fold the column makes itself
   // (its own button) is passed on, and one the window sends is not passed back.
   let panelFolded = column?.dataset.folded === "1";
@@ -310,8 +332,12 @@ if (host) {
       else delete column.dataset.folded;
     },
     focusTerminal: () => document.querySelector("#orchestrator .xterm-helper-textarea")?.focus(),
-    setTitlebarInset: (inset) => {
+    setTitlebar: ({ inset, center }) => {
       page.style.setProperty("--host-inset-titlebar", `${Number(inset) || 0}px`);
+      const line = Number(center) || 0;
+      page.style.setProperty("--host-titlebar-center", `${line}px`);
+      if (line > 0) page.dataset.titlebar = "1";
+      else delete page.dataset.titlebar;
     },
     setFullscreen: (on) => {
       if (on) page.dataset.fullscreen = "1";

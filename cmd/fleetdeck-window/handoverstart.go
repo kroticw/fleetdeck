@@ -48,11 +48,15 @@ func startHandover(events *supervisor.KeeperEvents, tk *supervisor.Takeover, gat
 	gate.onUI(func(windowUI) {
 		if tk.Swapped() {
 			log.Printf("fleetdeck-window: the window has checked in with LaunchServices; telling it again that the app is at %s, not %s", tk.Canonical, tk.Staged)
-			go tk.Reregister()
+			go func() {
+				defer panics.in("in the goroutine registering the app again").guard()
+				tk.Reregister()
+			}()
 		}
 	})
 	ended := make(chan struct{})
 	go func() {
+		defer panics.in("in the goroutine taking the panel over").guard()
 		defer close(ended)
 		err := events.Take(context.Background(), tk)
 		if err == nil {

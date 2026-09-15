@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"sync"
@@ -193,6 +194,29 @@ func (c *Collector) SetFleetOrchestrator(name, id string) bool {
 		}
 	}
 	return false
+}
+
+// AddFleet adds f to the fleets the collector reads from its next cycle on,
+// for a fleet made while the panel runs. It reports whether f was added: a
+// fleet of that name on that board is already here and is kept as it is, so a
+// fleet made twice is served once. A fleet the fleets already here would
+// refuse — its name or its board taken by another — is an error, and nothing
+// changes. The caller persists the fleet first (config.AddFleet).
+func (c *Collector) AddFleet(f fleet.Fleet) (bool, error) {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	for _, have := range c.cfg.FleetList() {
+		if have.Name == f.Name && filepath.Clean(have.BoardPath) == filepath.Clean(f.BoardPath) {
+			return false, nil
+		}
+	}
+	next := c.cfg
+	next.Fleets = append(slices.Clone(c.cfg.Fleets), f)
+	if err := config.ValidateFleets(next); err != nil {
+		return false, err
+	}
+	c.cfg.Fleets = next.Fleets
+	return true, nil
 }
 
 // SetOrchestratorSession updates the pinned orchestrator session id kept in

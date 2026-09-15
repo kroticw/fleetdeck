@@ -10,10 +10,10 @@ import (
 )
 
 func TestAStandKeepsItsPanelWidthsAwayFromTheApps(t *testing.T) {
-	if got := widthsSuite(""); got != "" {
+	if got := widthsSuite("", false); got != "" {
 		t.Fatalf("the app's widths go to suite %q, want its own defaults", got)
 	}
-	got := widthsSuite("/tmp/stand/no-daemon-here.sock")
+	got := widthsSuite("/tmp/stand/no-daemon-here.sock", false)
 	if got == "" {
 		t.Fatal("a window on a stand keeps its widths in the app's own defaults, which the operator's app reads")
 	}

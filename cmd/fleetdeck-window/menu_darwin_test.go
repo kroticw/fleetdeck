@@ -51,6 +51,19 @@ var (
 	closeHideAppDelegateSet     bool
 	closeHideReopenResult       bool
 	closeHideVisibleAfterReopen bool
+	// closeHideFullScreenOptions: what the window's delegate answers for full
+	// screen when AppKit proposes fullScreenProposed.
+	closeHideFullScreenOptions int
+)
+
+// NSApplicationPresentationOptions (AppKit NSApplication.h).
+const (
+	presentationAutoHideDock    = 1 << 0
+	presentationAutoHideMenuBar = 1 << 2
+	presentationFullScreen      = 1 << 10
+	presentationAutoHideToolbar = 1 << 11
+
+	fullScreenProposed = presentationFullScreen | presentationAutoHideMenuBar | presentationAutoHideDock
 )
 
 func TestMain(m *testing.M) {
@@ -62,7 +75,7 @@ func TestMain(m *testing.M) {
 	}
 	runtime.LockOSThread()
 
-	installMenu()
+	installMenu("fleetdeck")
 	mainMenuTopLevelCount = testMainMenuTopLevelCount()
 	hasEditMenu = testHasTopLevelMenuTitled("Edit")
 	hasAppMenu = testHasTopLevelMenuTitled("fleetdeck")
@@ -80,6 +93,7 @@ func TestMain(m *testing.M) {
 	if closeHideWindow != nil {
 		installCloseToHide(closeHideWindow)
 		closeHideShouldCloseResult = windowShouldCloseForTest(closeHideWindow)
+		closeHideFullScreenOptions = windowFullScreenOptionsForTest(closeHideWindow, fullScreenProposed)
 		closeHideVisibleAfterClose = testWindowIsVisible(closeHideWindow)
 		closeHideAppDelegateSet = testAppDelegateSet()
 		closeHideReopenResult = testDispatchReopen(false)
@@ -182,6 +196,34 @@ func TestInstallCloseToHideRefusesTheCloseAndHidesTheWindow(t *testing.T) {
 	}
 	if closeHideVisibleAfterClose {
 		t.Fatal("window is still visible after windowShouldClose: -- it should have been ordered out")
+	}
+}
+
+// v0.11.0's first full screen stand (run 34932941637): the empty toolbar that
+// places the window's buttons stayed in full screen as a black band over the
+// capsule row and the panels' head rows. The window's delegate asks AppKit to
+// hide the toolbar with the menu bar in full screen, keeping what AppKit
+// proposed.
+func TestInFullScreenTheToolbarHidesWithTheMenuBar(t *testing.T) {
+	if closeHideWindow == nil {
+		t.Fatal("TestMain could not create a test NSWindow")
+	}
+	got := closeHideFullScreenOptions
+	if got < 0 {
+		t.Fatal("the window's delegate does not answer window:willUseFullScreenPresentationOptions:")
+	}
+	for _, want := range []struct {
+		bit  int
+		name string
+	}{
+		{presentationAutoHideToolbar, "auto-hide toolbar"},
+		{presentationFullScreen, "full screen"},
+		{presentationAutoHideMenuBar, "auto-hide menu bar"},
+		{presentationAutoHideDock, "auto-hide Dock, as proposed"},
+	} {
+		if got&want.bit == 0 {
+			t.Errorf("full screen options %#x lack %s (%#x)", got, want.name, want.bit)
+		}
 	}
 }
 

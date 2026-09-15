@@ -209,7 +209,7 @@ func TestThePanelUnderstandsHowTheWindowNamesItsOwner(t *testing.T) {
 	// nothing listens on (the daemon is found by uid, not by HOME).
 	dir := t.TempDir()
 	// The stand socket goes the way a stand's window hands it on, in panelArgs.
-	cmd := exec.Command(panel, panelArgs(1, filepath.Join(dir, "no-daemon.sock"))...)
+	cmd := exec.Command(panel, panelArgs(1, filepath.Join(dir, "no-daemon.sock"), 0, "")...)
 	cmd.Env = append(os.Environ(), "HOME="+dir)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -221,7 +221,7 @@ func TestThePanelUnderstandsHowTheWindowNamesItsOwner(t *testing.T) {
 }
 
 func TestThePanelIsToldWhichWindowItBelongsTo(t *testing.T) {
-	got := panelArgs(4242, "")
+	got := panelArgs(4242, "", 0, "")
 	if want := []string{"--owner-pid", "4242"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("panelArgs(4242) = %q, want %q", got, want)
 	}

@@ -62,19 +62,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	webview "github.com/webview/webview_go"
 
+	appconfig "github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/supervisor"
-	"github.com/kroticw/fleetdeck/internal/version"
 )
 
 // defaultURL matches cmd/fleetdeck-status's own default (see its FLEETDECK_ENDPOINT
@@ -105,7 +105,14 @@ func reloadBinding(dispatch func(func()), navigate func(string), url string) fun
 }
 
 func main() {
-	url := flag.String("url", defaultURL, "URL the panel answers on")
+	// Whether this is a dev app is the build's to say, and is needed before the
+	// plan is made: the dev app's own log is opened, and -url's default chosen,
+	// before the flags are parsed.
+	dev := isDevBuild()
+	if dev {
+		openDevWindowLog()
+	}
+	url := flag.String("url", startURL(dev, devURL), "URL the panel answers on")
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	toldHandoverTimeout := flag.Duration(handoverTimeoutFlag, 0, "set by an update: how long the window that started this one gives the handover, from this window's start")
@@ -128,18 +135,49 @@ func main() {
 	if err != nil {
 		log.Fatalf("fleetdeck-window: locate home directory: %v", err)
 	}
-	// The same log the launch agent wrote the panel's output to, so a panel's
-	// history does not split in two at the day the window took over.
-	logPath := filepath.Join(home, "Library", "Logs", "fleetdeck.log")
-
+	// What a panic anywhere in the window says and where it is kept, before
+	// the first goroutine starts (panicexit.go).
+	panics = panicExit{logf: log.Printf, exit: os.Exit, file: panicLogPath(home, dev), build: ownBuild(), exe: exe, now: time.Now}
 	// A stand's socket, when this window runs on a stand, handed to every panel
 	// it starts; a stand that names none is refused before anything starts.
 	standSocket, err := standIsolation(os.LookupEnv)
 	if err != nil {
 		log.Fatalf("fleetdeck-window: %v", err)
 	}
-	// A stand's panel widths stay out of the operator's app's defaults.
-	useWidthsSuite(widthsSuite(standSocket))
+	// What a stand sets and a person's window never has (standsettings.go).
+	stand, err := standSettingsFrom(standSocket, os.LookupEnv)
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+	// What the window works out before anything of it is made -- its panel's
+	// keeper, logs, widths, title, how it updates -- taken as it is
+	// (startplan.go). A dev app keeps off everything of the installed app's
+	// but the fleet daemon and the board (devapp.go).
+	plan, err := planStart(startInput{
+		dev:            dev,
+		url:            *url,
+		exe:            exe,
+		home:           home,
+		handover:       *handover,
+		canonical:      *toldCanonical,
+		standSocket:    standSocket,
+		pid:            os.Getpid(),
+		operatorConfig: appconfig.DefaultPath(),
+		startTimeout:   stand.startTimeout(),
+		env:            os.Environ(),
+	})
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+	if plan.way.dev {
+		log.Printf("fleetdeck-window: a dev app on %s; its panel is started with %q", *url, plan.keeper.Args)
+	}
+	for _, note := range plan.notes {
+		log.Printf("fleetdeck-window: %s", note)
+	}
+	// A stand's and a dev app's panel widths stay out of the operator's app's
+	// defaults.
+	useWidthsSuite(plan.widthsSuite)
 
 	// A window in an update's staging directory opens the installed app and
 	// goes, before it has a window to flash (staged.go).
@@ -156,35 +194,18 @@ func main() {
 		where.action = runRefused
 	}
 
-	// What a stand sets and a person's window never has (standsettings.go).
-	stand, err := standSettingsFrom(standSocket, os.LookupEnv)
-	if err != nil {
-		log.Fatalf("fleetdeck-window: %v", err)
-	}
 	width, height := stand.size()
 	if stand != (standSettings{}) {
-		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q",
-			stand.startTimeout(), width, height, stand.appearance)
+		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q, full screen %v, panels folded %q",
+			stand.startTimeout(), width, height, stand.appearance, stand.fullScreen, stand.fold)
 	}
 
 	// The keeper's word waits in keeperEvents until the window can act on it:
 	// the keeper is made before the window's web views, and nothing it says
 	// may be lost to that.
 	keeperEvents := supervisor.NewKeeperEvents()
-	keeper := &supervisor.Keeper{
-		URL:  *url,
-		Bin:  panelBinary(exe),
-		Args: panelArgs(os.Getpid(), standSocket),
-		// This window: its panels report it as their owner and go when it
-		// goes, and a panel whose window is gone is replaced.
-		Owner:        os.Getpid(),
-		Env:          os.Environ(),
-		LogPath:      logPath,
-		StartTimeout: stand.startTimeout(),
-		MinUptime:    launchdThrottle,
-		Poll:         takenPanelPoll,
-		OnEvent:      keeperEvents.Push,
-	}
+	keeper := plan.keeper
+	keeper.OnEvent = keeperEvents.Push
 	// A panel this window did not start, of another build than the window's,
 	// is used as it is and named over its page (foreign.go).
 	own := ownBuild()
@@ -233,9 +254,14 @@ func main() {
 	w := webview.New(false)
 	startupStep("the web view is made")
 	defer w.Destroy()
-	w.SetTitle("fleetdeck")
+	// Deferred after Destroy, so it runs first: a panic on the main thread is
+	// kept and ends the process, rather than hanging in Destroy (panicexit.go).
+	defer panics.in("on the main thread").guard()
+	w.SetTitle(plan.title)
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand, hostStandOpen = standSocket != "", stand.open
+	standFullScreenOn = stand.fullScreen
+	standFold = stand.fold
 	if stand.appearance != "" {
 		standAppearance = stand.appearance
 		applyAppearance("auto")
@@ -247,7 +273,7 @@ func main() {
 	// do anything at all; see menu_darwin.c for why. installCloseToHide
 	// makes the red button hide the window rather than quit: the process runs
 	// on, and with it the panel it owns -- hiding is not the window going.
-	installMenu()
+	installMenu(plan.title)
 	installCloseToHide(w.Window())
 
 	if where.action == runRefused {
@@ -257,7 +283,7 @@ func main() {
 		return
 	}
 
-	scr := &screen{url: *url, logPath: logPath, takingOver: *handover != "", now: time.Now}
+	scr := &screen{url: *url, logPath: keeper.LogPath, takingOver: *handover != "", now: time.Now}
 	// The glass frame over the board (glasswindow.go): the panels with their
 	// web views and the capsules, up while the board's page is a panel page.
 	// Its bindings are bound here, before the first navigation.
@@ -324,7 +350,10 @@ func main() {
 		})
 	}
 	// The keeper's word, in order, now that the window can act on it.
-	go keeperEvents.Run(context.Background(), handleKeeperEvent)
+	go func() {
+		defer panics.in("in the goroutine handing the keeper's events to the window").guard()
+		keeperEvents.Run(context.Background(), handleKeeperEvent)
+	}()
 
 	// Bound before the first navigation, so the page finds them from its very
 	// first load. A reload the page or a person asks for is a navigation the
@@ -358,8 +387,10 @@ func main() {
 	}
 	// On a stand the board says what a screenshot cannot (web/js/standreport.js).
 	if hostOnStand {
-		if err := w.Bind("fleetdeckStandReport", func(report map[string]any) {
-			log.Printf("fleetdeck-window: the board reports its scrolling: %v", report)
+		// The JSON the page sent, as it sent it: scripts/standcheck reads its
+		// fields against the frame the window measured.
+		if err := w.Bind("fleetdeckStandReport", func(report json.RawMessage) {
+			log.Print(boardStandReportLine(report))
 		}); err != nil {
 			log.Printf("fleetdeck-window: the board will not report its scrolling: %v", err)
 		}
@@ -412,18 +443,14 @@ func main() {
 	// update itself never finds anything to update to, so it shows no button;
 	// why it cannot is in the log, and in the answer to the update binding
 	// should anything call it anyway.
-	canonical := canonicalBundle(exe, *toldCanonical)
+	canonical := plan.canonical
 	// How this build updates is worked out beside the start, not in front of it:
 	// ownTeamID asks codesign, a process of its own, and a window started by an
 	// update has the old window's deadline to keep (handoverstart.go).
 	updateWayOf := sync.OnceValue(func() way {
-		how := updateWay(config{
-			tree:      treeDir,
-			exe:       exe,
-			version:   version.String(),
-			teamID:    ownTeamID(exe),
-			canonical: *toldCanonical,
-		})
+		asked := plan.way
+		asked.teamID = ownTeamID(exe)
+		how := updateWay(asked)
 		startupStep("worked out how this build updates")
 		if how.Refusal != "" {
 			log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
@@ -436,6 +463,7 @@ func main() {
 	// have, and the answer kept for the version before it does not apply.
 	var watching atomic.Pointer[updateWatch]
 	go func() {
+		defer panics.in("in the goroutine watching for an update").guard()
 		how := updateWayOf()
 		if how.Source == nil {
 			return
@@ -478,6 +506,7 @@ func main() {
 			return
 		}
 		go func() {
+			defer panics.in("in the goroutine running an update").guard()
 			defer updating.Store(false)
 			how := updateWayOf()
 			if how.Refusal != "" {
@@ -509,10 +538,13 @@ func main() {
 	// window quit while the old one still ran out of it -- is removed now, beside
 	// the start, unless an update runs or something still runs out of it
 	// (supervisor.RetireLeftover, leftoverstart.go).
-	if retiresLeftover(*handover, canonical) {
-		go supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
-			supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
-			func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })
+	if plan.retiresLeftover {
+		go func() {
+			defer panics.in("in the goroutine retiring a leftover bundle").guard()
+			supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
+				supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
+				func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })
+		}()
 	}
 
 	// Time going by for a page asked for and not loaded (screen.tick), the
@@ -520,6 +552,7 @@ func main() {
 	ticking, stopTicking := context.WithCancel(context.Background())
 	ticked := make(chan struct{})
 	go func() {
+		defer panics.in("in the page load ticker").guard()
 		defer close(ticked)
 		tick := time.NewTicker(pageLoadTick)
 		defer tick.Stop()
@@ -642,6 +675,7 @@ func (r *keeperRun) start() {
 	done := make(chan struct{})
 	r.cancel, r.done = cancel, done
 	go func() {
+		defer panics.in("in the keeper's goroutine").guard()
 		r.k.Run(ctx)
 		close(done)
 	}()

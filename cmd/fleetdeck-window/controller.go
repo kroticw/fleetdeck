@@ -22,6 +22,9 @@ type (
 	createSurfaces struct {
 		Fleet, URL string
 		Glass      glassMode
+		// Gen is the pair's generation (surfacename.go): a word from a surface
+		// of another generation is not about these.
+		Gen int
 	}
 	destroySurfaces struct{}
 	sendTo          struct {
@@ -40,6 +43,16 @@ type (
 	setFrameMode   struct{ Mode glassMode }
 	reloadBoard    struct{}
 	setDragBand    struct{ Height float64 }
+	// showToolbar is the window's empty toolbar shown or hidden: it places the
+	// buttons out of full screen, and in full screen would only make the strip
+	// a pointer at the top of the screen brings out twice as tall.
+	showToolbar struct{ Visible bool }
+	// sendBoardInsets is the board told its insets for the frame as it is when
+	// the effect is carried out (boardInsetsNow), not as it was when the effect
+	// was decided: a capsule row drawn in between narrows the panels. In
+	// v0.10.1 the insets decided before the row was drawn reached the board
+	// after the ones decided after it, and the board kept the panels' widths.
+	sendBoardInsets struct{}
 )
 
 // hostVersion is the layout report's version this window frames; a page of
@@ -68,6 +81,9 @@ type controller struct {
 	// surface whose page has not said it loaded. now is the controller's clock.
 	loads map[string]*pageWatch
 	now   func() time.Time
+	// generation is that of the surfaces made last (layout): the side surfaces'
+	// words are taken only from it (current).
+	generation int
 	// dragging is the panel whose edge is being dragged, "" when none.
 	dragging string
 	// band is how far down from the top the board's page says nothing is
@@ -76,8 +92,9 @@ type controller struct {
 	// rowMin is the capsule row's narrowest form as last drawn (capsuleRow):
 	// the room the frame keeps for it, 0 until the row is drawn.
 	rowMin float64
-	// titlebar is where the title bar's zoom button ends (titlebar.go).
-	titlebar float64
+	// titlebar is where the title bar's zoom button ends, titlebarCenter the
+	// line its buttons are centred on (titlebar.go).
+	titlebar, titlebarCenter float64
 }
 
 // newController frames the panel at panelURL. The window may be opened on a
@@ -106,7 +123,21 @@ func (c *controller) to(surface string, message map[string]any) []effect {
 	return []effect{sendTo{Surface: surface, Message: message}}
 }
 
-func (c *controller) insets(g geometry) []effect {
+// boardInsets is the board to be told its insets, once the effects before it
+// have been carried out; nothing while the frame is down.
+func (c *controller) boardInsets() []effect {
+	if !c.framed {
+		return nil
+	}
+	return []effect{sendBoardInsets{}}
+}
+
+// boardInsetsNow is the board's insets for the frame as it is now: what
+// sendBoardInsets becomes when it is carried out.
+func (c *controller) boardInsetsNow() []effect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	g := c.geometry()
 	return c.to("board", map[string]any{
 		"type": "insets", "top": g.Board.Top, "left": g.Board.Left, "right": g.Board.Right, "contentRight": g.Board.ContentRight,
 	})
@@ -140,11 +171,10 @@ func (c *controller) layout(version int, mode, fleet string) []effect {
 		c.takeDown()
 		return []effect{destroySurfaces{}}
 	}
-	g := c.geometry()
 	if c.framed && fleet == c.fleet {
 		// The same page loaded again: a new document, which needs its insets
 		// and glass again. The surfaces are still there.
-		return append(c.insets(g), c.glassMessage("board")...)
+		return append(c.boardInsets(), c.glassMessage("board")...)
 	}
 	var out []effect
 	if c.framed {
@@ -156,8 +186,9 @@ func (c *controller) layout(version int, mode, fleet string) []effect {
 		c.loads[side] = &pageWatch{}
 		c.loads[side].ask(c.now())
 	}
-	out = append(out, createSurfaces{Fleet: fleet, URL: c.pageURL(fleet), Glass: c.glass}, applyGeometry{G: g})
-	out = append(out, c.insets(g)...)
+	c.generation++
+	out = append(out, createSurfaces{Fleet: fleet, URL: c.pageURL(fleet), Glass: c.glass, Gen: c.generation}, applyGeometry{G: c.geometry()})
+	out = append(out, c.boardInsets()...)
 	return append(out, c.glassMessage("board")...)
 }
 
@@ -197,6 +228,54 @@ func (c *controller) surfaceNavigated(surface string, e navEvent) []effect {
 	}
 	v, waited := w.navSays(e, c.now())
 	return c.follow(surface, v, waited)
+}
+
+// current is the kind of the side surface name names, and whether it is one of
+// the surfaces shown now: of the generation made last, with the frame up. A
+// word from a surface taken down, or under a name that is no surface's, is not
+// taken.
+//
+// The check and the word taken after it are not one critical section. They do
+// not need to be: every word reaches the controller on the main thread, as the
+// board's layout report that makes a new generation does, so no generation is
+// made between them.
+func (c *controller) current(name string) (string, bool) {
+	kind, gen, ok := parseSurfaceName(name)
+	if !ok {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return kind, c.framed && gen == c.generation
+}
+
+// surfaceNavigatedFrom is surfaceNavigated for the surface named name, and
+// nothing for a surface not shown now.
+func (c *controller) surfaceNavigatedFrom(name string, e navEvent) []effect {
+	kind, ok := c.current(name)
+	if !ok {
+		return nil
+	}
+	return c.surfaceNavigated(kind, e)
+}
+
+// pageLoadedFrom is pageLoaded for the surface named name, and nothing for a
+// surface not shown now.
+func (c *controller) pageLoadedFrom(name, state string) []effect {
+	kind, ok := c.current(name)
+	if !ok {
+		return nil
+	}
+	return c.pageLoaded(kind, state)
+}
+
+// navigateFrom is navigate for the surface named name. A surface not shown now
+// goes nowhere and does nothing: it is being taken down.
+func (c *controller) navigateFrom(name, target string, mainFrame bool) (allow bool, effects []effect) {
+	if _, ok := c.current(name); !ok {
+		return false, nil
+	}
+	return c.navigate(target, mainFrame)
 }
 
 // tick is time going by for the side surfaces' pages asked for.
@@ -280,9 +359,8 @@ func (c *controller) panel(side string, folded bool) []effect {
 	if !c.framed {
 		return out
 	}
-	g := c.geometry()
-	out = append(out, applyGeometry{G: g})
-	out = append(out, c.insets(g)...)
+	out = append(out, applyGeometry{G: c.geometry()})
+	out = append(out, c.boardInsets()...)
 	return append(out, c.to(side, map[string]any{"type": "folded", "folded": folded})...)
 }
 
@@ -329,7 +407,7 @@ func (c *controller) resizeEnd() []effect {
 	}
 	c.dragging = ""
 	out := []effect{saveWidths{W: c.widths}}
-	return append(out, c.insets(c.geometry())...)
+	return append(out, c.boardInsets()...)
 }
 
 // theme is the board reporting the theme it cycled to.
@@ -361,23 +439,37 @@ func (c *controller) capsuleRow(rowMin float64) []effect {
 	if !c.framed {
 		return nil
 	}
-	g := c.geometry()
-	return append([]effect{applyGeometry{G: g}}, c.insets(g)...)
+	return append([]effect{applyGeometry{G: c.geometry()}}, c.boardInsets()...)
 }
 
 // geometry is the frame for the window as it is, keeping the capsule row its
 // minimum.
 func (c *controller) geometry() geometry {
-	return layoutWithRow(c.width, c.height, c.widths, c.rowMin)
+	return layoutPastButtons(c.width, c.height, c.widths, c.rowMin, c.buttonsEnd())
+}
+
+// buttonsEnd is where the window's buttons end on the capsule row's line: the
+// zoom button's right edge out of full screen, and nothing in it, where the
+// buttons are not over the row.
+func (c *controller) buttonsEnd() float64 {
+	if c.fullscreen {
+		return 0
+	}
+	return c.titlebar
 }
 
 // draggedBesideRow is a dragged width stopped where the other panel, at its
-// width, and the capsule row's minimum leave no more room.
+// width -- beside the window's buttons, for the orchestrator panel -- and the
+// capsule row's minimum leave no more room.
 func (c *controller) draggedBesideRow(width, other float64, otherFolded bool) float64 {
 	if c.rowMin <= 0 {
 		return width
 	}
-	return math.Min(width, rowRoomFor(c.width, clampPanel(other, c.width, otherFolded), c.rowMin))
+	room := clampPanel(other, c.width, otherFolded)
+	if c.dragging == "sessions" {
+		room = besideButtons(room, c.buttonsEnd())
+	}
+	return math.Min(width, rowRoomFor(c.width, room, c.rowMin))
 }
 
 // laidOut is the frame laid out as g. A geometry decided before the capsule row
@@ -394,7 +486,7 @@ func (c *controller) laidOut(g geometry) []effect {
 	if g == now {
 		return nil
 	}
-	return append([]effect{applyGeometry{G: now}}, c.insets(now)...)
+	return append([]effect{applyGeometry{G: now}}, c.boardInsets()...)
 }
 
 func (c *controller) capsuleAction(action string) []effect {
@@ -432,13 +524,12 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	c.width, c.height, c.fullscreen = width, height, fullscreen
 	var out []effect
 	if c.framed {
-		g := c.geometry()
-		out = append([]effect{applyGeometry{G: g}}, c.insets(g)...)
+		out = append([]effect{applyGeometry{G: c.geometry()}}, c.boardInsets()...)
 	}
 	if !changed {
 		return out
 	}
-	out = append(out, c.dragBand())
+	out = append(out, c.dragBand(), showToolbar{Visible: !fullscreen})
 	if c.framed {
 		out = append(out, c.to("orchestrator", map[string]any{"type": "fullscreen", "on": fullscreen})...)
 	}

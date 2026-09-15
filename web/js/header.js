@@ -525,10 +525,15 @@ export function menuGo(go, { switchFleet: goFleet, assign }) {
 
 // options.switchFleet replaces the fleet switch. The fleetdeck window passes its
 // own, because a switch there changes all three of its web views, not this one.
-// options.parts is which of HEADER_PARTS to draw.
+// options.parts is which of HEADER_PARTS to draw. options.openMenu opens the
+// fleet menu from the start: a stand's frame shows it without a press.
 export function renderHeader(
   root,
-  { switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }), parts = HEADER_PARTS } = {},
+  {
+    switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }),
+    parts = HEADER_PARTS,
+    openMenu = false,
+  } = {},
 ) {
   initTheme();
 
@@ -557,7 +562,7 @@ export function renderHeader(
   // in that markup would shut itself under the operator's hand on the next
   // snapshot. The last snapshot is kept beside it so the menu can be repainted
   // on a click without waiting for one.
-  let menuOpen = false;
+  let menuOpen = openMenu;
   let lastSnapshot = null;
   let lastPaint = () => {};
   const applyMenu = (action, fleet) => {

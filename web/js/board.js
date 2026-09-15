@@ -102,7 +102,7 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
 // healthy empty board (spec section 7's "degrade in parts, never silently").
 // snap?.boardError rather than snap.boardError so this still falls through
 // to the normal empty-columns render when snap itself is null.
-function render(root, snap) {
+export function render(root, snap) {
   if (snap?.boardError) {
     root.innerHTML = `<div class="kerror">${escapeHTML(snap.boardError)}</div>`;
     return;
@@ -118,7 +118,21 @@ function render(root, snap) {
   const columns = STAGES.map((stage, i) => columnHTML(stage, stage, known[i], orphanPaths, stoppedPaths)).join("");
   const otherColumn = columnHTML("other", "other", other, orphanPaths, stoppedPaths);
 
+  // In the fleetdeck window a column scrolls on its own (web/app.css), and the
+  // panel's snapshot comes every second: columns drawn anew are at their top,
+  // so each one scrolled is put back where it was, by its stage. Columns after
+  // a board error start at their top: the error left none to remember.
+  const scrolled = new Map();
+  for (const column of root.querySelectorAll(":scope > .kcol")) {
+    if (column.scrollTop > 0) scrolled.set(column.dataset.stage, column.scrollTop);
+  }
+
   root.innerHTML = columns + otherColumn;
+
+  for (const column of root.querySelectorAll(":scope > .kcol")) {
+    const top = scrolled.get(column.dataset.stage);
+    if (top !== undefined) column.scrollTop = top;
+  }
 
   // CSP forbids an inline style="..." attribute (index.html: style-src
   // 'self'), so the bar's width can never be baked into the HTML string
