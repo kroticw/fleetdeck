@@ -247,6 +247,22 @@ if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
 		[ -n "$went_in" ] || break
 		sleep 3
 		capture_screen "$out/window-fullscreen-$((trips + 1)).png"
+		# The frame with the menu bar shown, as a pointer at the top of the
+		# screen shows it: the window shows it on its own a while after it went in.
+		shown=
+		for _ in $(seq 20); do
+			n=$(tail -n "+$went_in" "$out/window.log" | grep -n 'fleetdeck-window: the frame measures .*"fullScreen":true,"menuBarVisible":true' | head -n 1 | cut -d: -f1)
+			if [ -n "$n" ]; then
+				shown=$((went_in + n - 1))
+				break
+			fi
+			sleep 1
+		done
+		if [ -n "$shown" ]; then
+			sleep 1
+			capture_screen "$out/window-fullscreen-revealed-$((trips + 1)).png"
+		fi
+		echo "--- full screen $((trips + 1)): the menu bar shown at log line ${shown:-never}"
 		came_out=
 		for _ in $(seq 45); do
 			came_out=$(measure_from "$went_in" false)

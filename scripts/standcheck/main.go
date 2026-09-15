@@ -85,13 +85,17 @@ type overlay struct {
 // frameReport is the window's word on its frame, in points from the window's
 // top left.
 type frameReport struct {
-	Glass        string    `json:"glass"`
-	FullScreen   bool      `json:"fullScreen"`
-	Close        box       `json:"close"`
-	Orchestrator box       `json:"orchestrator"`
-	Sessions     box       `json:"sessions"`
-	Row          box       `json:"row"`
-	Capsules     []capsule `json:"capsules"`
+	Glass      string `json:"glass"`
+	FullScreen bool   `json:"fullScreen"`
+	// MenuBarVisible: the menu bar is shown, as a pointer at the top of the
+	// screen shows it in full screen, the title bar coming out under it.
+	MenuBarVisible bool      `json:"menuBarVisible"`
+	ToolbarVisible bool      `json:"toolbarVisible"`
+	Close          box       `json:"close"`
+	Orchestrator   box       `json:"orchestrator"`
+	Sessions       box       `json:"sessions"`
+	Row            box       `json:"row"`
+	Capsules       []capsule `json:"capsules"`
 	// SegmentBorderShape is the tabs' NSControlBorderShape, -1 on a system
 	// without one; SelectedTopInset where the selected tab's fill starts in
 	// its top row, as a share of its height.
@@ -185,6 +189,14 @@ func check(log string, trips int) []string {
 			problems = append(problems, tabProblems(when, f)...)
 			problems = append(problems, l.boardProblems(when, r)...)
 			problems = append(problems, coverProblems(when, f)...)
+			// With the menu bar shown: what a pointer at the top of the screen
+			// brings out over the content.
+			for k := r.to; k >= r.from; k-- {
+				if l.frames[k].MenuBarVisible {
+					problems = append(problems, coverProblems(fmt.Sprintf("in full screen %d, the menu bar shown: ", in), l.frames[k])...)
+					break
+				}
+			}
 			continue
 		}
 		out++

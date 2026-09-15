@@ -300,6 +300,29 @@ func TestAShownTitleBarOverTheCapsuleRowInFullScreenIsAProblem(t *testing.T) {
 	}
 }
 
+// v0.10.2's dev build on macOS 27 (the operator's frame 1369): in full screen,
+// the pointer at the top of the screen, the menu bar came out with the title bar
+// and its toolbar under it, a dark band over the capsule row. At rest the
+// frame kept its properties.
+func TestATitleBarOverTheRowWithTheMenuBarShownInFullScreenIsAProblem(t *testing.T) {
+	rest, shown := goodFrame(true), goodFrame(true)
+	shown.MenuBarVisible = true
+	shown.ContentLayoutTop = 0
+	shown.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: 21, W: 1024, H: 52}, Visible: true, Alpha: 1}}
+	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, shown, rest, goodBoard(true), goodFrame(false), goodBoard(false))
+	wantProblem(t, check(log, 1), "in full screen 1, the menu bar shown", "NSToolbarFullScreenWindow", "capsule row")
+}
+
+func TestATitleBarClearOfTheRowWithTheMenuBarShownIsNoProblem(t *testing.T) {
+	rest, shown := goodFrame(true), goodFrame(true)
+	shown.MenuBarVisible = true
+	shown.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: -52, W: 1024, H: 52}, Visible: true, Alpha: 1}}
+	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, shown, rest, goodBoard(true), goodFrame(false), goodBoard(false))
+	if got := check(log, 1); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
 // A title bar hidden, clear, above the screen or out of full screen covers
 // nothing of the capsule row a person sees.
 func TestATitleBarThatShowsNothingOverTheRowIsNoProblem(t *testing.T) {
