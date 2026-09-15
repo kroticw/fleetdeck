@@ -319,17 +319,24 @@ jobs:
       # nothing of glass or of blur.
       #
       # The frame is shown with content (scripts/standdaemon): a card in every
-      # stage, more long-named sessions than the sessions panel shows, one
-      # waiting and one stopped, and an orchestrator terminal with long lines
-      # and a status line. An empty frame hid what the operator saw broken in
-      # v0.10.0's panels. The last frame has the new card form open.
+      # stage and a done column taller than the window, more long-named sessions
+      # than the sessions panel shows, one waiting and one stopped, and an
+      # orchestrator terminal with long lines and a status line. An empty frame
+      # hid what the operator saw broken in v0.10.0's panels. The last frame has
+      # the new card form open.
+      #
+      # Each stand runs whether or not the one before it failed: a gate that
+      # fails in the first one would otherwise leave the frames of the others,
+      # glass and opaque, dark and light, untaken.
       - name: This build's window in its frame, light
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
           FLEETDECK_STAND_CAPSULES: glass
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/light exec content
       - name: This build's window in its frame, dark
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
@@ -337,11 +344,40 @@ jobs:
           FLEETDECK_STAND_SYSTEM: light
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
       - name: This build's window in its frame, dark, with the new card form open
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
           FLEETDECK_STAND_OPEN: newcard
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7799 out/dark-newcard exec content
+      # In full screen and after it: v0.10.1's theme and limits capsules lay over
+      # the sessions panel in full screen on the operator's macOS, and no stand
+      # had entered it. The window goes in once its surfaces have loaded and
+      # comes out on its own; scripts/standcheck holds the frame to its
+      # properties before, in and after full screen, by the window's own
+      # measurements. Glass here, opaque below.
+      - name: This build's window in full screen and after it, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_FULLSCREEN: "on"
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7807 out/fullscreen-glass-dark exec content
+      # With the orchestrator panel folded to its strip: v0.10.2's dev build laid
+      # the capsule row under the window's buttons beside it, and no stand had
+      # opened a folded panel. The window opens folded as FLEETDECK_STAND_FOLD
+      # says and keeps no widths; scripts/standcheck holds that no capsule lies
+      # under a window button. Glass through full screen here, opaque below.
+      - name: This build's window with the orchestrator panel folded, in full screen and after it, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_FULLSCREEN: "on"
+          FLEETDECK_STAND_FOLD: orchestrator
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7811 out/fold-orchestrator-fullscreen-glass-dark exec content
       # The capsules take the theme chosen in fleetdeck, whatever the system's
       # (capsules_darwin.c). With a theme other than the system's they were dark
       # on dark or light on light on glass (run 34868250061), and white on white
@@ -356,6 +392,7 @@ jobs:
       # (FLEETDECK_STAND_SYSTEM): glass menus and the Dock show the wallpaper, so
       # a screenshot cannot say, and `defaults` says only what was written.
       - name: This build's window in its frame, glass, the system dark and the app light
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
@@ -366,6 +403,7 @@ jobs:
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7801 out/glass-system-dark-app-light exec content
       - name: This build's window in its frame, opaque, the system dark and the app light
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
@@ -378,6 +416,7 @@ jobs:
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7803 out/opaque-system-dark-app-light exec content
       - name: This build's window in its frame, opaque, the system light and the app dark
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
@@ -388,11 +427,36 @@ jobs:
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7805 out/opaque-system-light-app-dark exec content
+      - name: This build's window in full screen and after it, opaque, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_FULLSCREEN: "on"
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7809 out/fullscreen-opaque-dark exec content
+      - name: This build's window with the orchestrator panel folded, opaque, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_FOLD: orchestrator
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7813 out/fold-orchestrator-opaque-dark exec content
       - name: The system light again
         if: always()
         run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
+      # They run when a stand above failed too: a red job still says whether the
+      # window's own tests pass.
       - name: The window's tests on macOS 26
+        if: ${{ !cancelled() }}
         run: go test -count=1 ./cmd/fleetdeck-window/
       - name: The runner's transparency and contrast as they were
         if: always()

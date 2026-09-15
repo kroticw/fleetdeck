@@ -181,6 +181,34 @@ void fd_window_content_size(void *window, double *width, double *height) {
   *height = r.size.height;
 }
 
+// The menu bar's height in points (standframe_darwin.go), whether or not it
+// is shown: in full screen it comes out over the top of the window.
+double fd_window_menu_bar_height(void) {
+  id menu = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("mainMenu"));
+  return menu ? ((double (*)(id, SEL))objc_msgSend)(menu, sel("menuBarHeight")) : 0;
+}
+
+// Whether the menu bar is shown (standframe_darwin.go): it hides as the window
+// settles in full screen.
+int fd_window_menu_bar_visible(void) {
+  return ((signed char (*)(id, SEL))objc_msgSend)(cls("NSMenu"), sel("menuBarVisible")) != 0;
+}
+
+// The window's toolbar shown or hidden, and whether it is shown: 0 with none.
+void fd_window_set_toolbar_visible(void *window, int visible) {
+  id toolbar = send0((id)window, sel("toolbar"));
+  if (toolbar) ((void (*)(id, SEL, signed char))objc_msgSend)(toolbar, sel("setVisible:"), (signed char)(visible != 0));
+}
+
+int fd_window_toolbar_visible(void *window) {
+  id toolbar = send0((id)window, sel("toolbar"));
+  return toolbar && ((signed char (*)(id, SEL))objc_msgSend)(toolbar, sel("isVisible")) != 0;
+}
+
+// A stand's trip into full screen and out (standfullscreen.go): what the
+// window's green button does.
+void fd_window_toggle_fullscreen(void *window) { sendVoid1((id)window, sel("toggleFullScreen:"), (id)0); }
+
 int fd_window_is_fullscreen(void *window) {
   unsigned long mask = ((unsigned long (*)(id, SEL))objc_msgSend)((id)window, sel("styleMask"));
   return (mask & (1UL << 14)) != 0;  // NSWindowStyleMaskFullScreen

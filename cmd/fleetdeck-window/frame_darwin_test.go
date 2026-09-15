@@ -4,7 +4,10 @@ package main
 // (menu_darwin_test.go), on a window never put on screen; the tests below only
 // read what it found. See menu_darwin_test.go for why.
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 var (
 	frameGeometry = layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348})
@@ -32,7 +35,7 @@ func TestPanelsAreRegularGlassWithTheDesignRadius(t *testing.T) {
 	}
 }
 
-// The frame runs under the title bar: the capsules' 12 pt and the panels' 8 pt
+// The frame runs under the title bar: the capsules' 10 pt and the panels' 8 pt
 // are from the window's top edge, with the window's buttons over the
 // orchestrator panel's corner. On the macos-15 runner of PR #166 the root kept
 // the content area it replaced, and the title bar's 28 pt above it were black.
@@ -125,6 +128,42 @@ func TestDraggingThePanelsEdgeChangesItsWidthWithinLimits(t *testing.T) {
 	}
 	if len(r.savedWidths) != 2 || r.savedWidths[0].Orchestrator != 418 || r.savedWidths[1].Orchestrator != 220 {
 		t.Fatalf("widths kept on release = %+v, want 418 then 220", r.savedWidths)
+	}
+}
+
+// v0.10.1 on the operator's macOS: with no toolbar the window's buttons sat
+// where a plain title bar puts them, centred 16 pt from the window's top left,
+// on the orchestrator panel's edge 8 pt in, and above the brand. A window with a
+// unified toolbar centres them 26 pt in, which is where the panel's 18 pt corner
+// curves around: the buttons sit concentric in it, as in a floating sidebar. The
+// window says that line to the surface, and the material does not move it.
+func TestTheWindowsButtonsSitConcentricInTheOrchestratorPanelsCorner(t *testing.T) {
+	r := frameResult
+	cx, cy := r.closeButton.X+r.closeButton.W/2, r.closeButton.Y+r.closeButton.H/2
+	want := panelMargin + 18
+	if r.closeButton.W == 0 || math.Abs(cx-want) > 1 || math.Abs(cy-want) > 1 {
+		t.Errorf("the close button is centred at (%v, %v), want (%v, %v) in the orchestrator panel's corner", cx, cy, want, want)
+	}
+	if math.Abs(r.titlebarCenter-cy) > 0.01 {
+		t.Errorf("the window says its buttons are centred %v pt down, they are at %v", r.titlebarCenter, cy)
+	}
+	if r.closeButtonOpaque != r.closeButton {
+		t.Errorf("the close button is at %+v with the panels opaque, %+v on glass", r.closeButtonOpaque, r.closeButton)
+	}
+}
+
+// The toolbar is there only to place the buttons: no items, and the title bar
+// over it transparent, so it draws nothing over the capsules or the board.
+func TestTheToolbarThatPlacesTheButtonsIsEmptyUnifiedAndUnderATransparentTitleBar(t *testing.T) {
+	r := frameResult
+	if r.toolbarItems != 0 {
+		t.Errorf("the window's toolbar has %d items (-1: no toolbar), want an empty toolbar", r.toolbarItems)
+	}
+	if r.toolbarStyle != 3 {
+		t.Errorf("toolbar style %d, want 3 (NSWindowToolbarStyleUnified)", r.toolbarStyle)
+	}
+	if !r.titlebarTransparent {
+		t.Error("the title bar is not transparent over the toolbar")
 	}
 }
 

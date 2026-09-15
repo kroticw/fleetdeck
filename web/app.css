@@ -3564,6 +3564,33 @@ body.is-resizing {
   padding-left: calc(var(--gap) * 2);
 }
 
+/* The header's row on the line the title bar's buttons are centred on: the
+   window sends that line from the panel's top, and the header is twice as tall
+   with no padding above or below it. In v0.10.1 the brand and the fleet picker
+   sat lower than the buttons. In full screen there are no buttons, and the
+   header keeps its padding. */
+:root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) #header {
+  padding-block: 0;
+  min-height: calc(var(--host-titlebar-center) * 2);
+}
+
+/* Folded, the island is a 48 px strip with no head: the window's buttons sit in
+   its corner and its unfold control is all it shows. The header is the page's,
+   a sibling of the column, and folding hides only the column's own children:
+   on v0.10.2's stand the header started past the buttons, 260 px wide, and the
+   page scrolled sideways under the strip, a scroll bar at its foot. */
+:root[data-surface="orchestrator"]:has(.col-orchestrator[data-folded="1"]) #header {
+  display: none;
+}
+
+/* The header's room stays above the strip's unfold control: with the head
+   hidden the control rose to the strip's top, under the window's close and
+   minimize buttons. The room is the header's, the buttons' line twice; in full
+   screen there are no buttons. */
+:root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) .col-orchestrator[data-folded="1"] {
+  padding-top: calc(var(--host-titlebar-center) * 2);
+}
+
 /* The terminal is the island's lower part, edge to edge, and not a rounded box
    with margins inside it. Its ground stays dense: a terminal over glass is read
    in both themes. The island's own corners round its bottom. */
@@ -3813,6 +3840,13 @@ body.is-resizing {
      macOS 26 then draws its own thin bar, 13 px tall. */
   scrollbar-width: auto;
   scrollbar-color: auto;
+  /* Down its height the board does not scroll: its columns do. A column longer
+     than the window scrolled the whole board, and WebKit drew the classic 15 px
+     bar at the box's right edge, the sessions glass's left edge, where it read
+     as a second, darker island behind the sessions one. Stretched, every column
+     is the board's height and scrolls inside it. */
+  overflow-y: hidden;
+  align-items: stretch;
 }
 
 /* Thin, and never hidden: it is the one sign that the board scrolls. */
@@ -3826,6 +3860,31 @@ body.is-resizing {
   border: none;
   padding: 0;
   gap: var(--gap);
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+/* A column's bar is the sessions list's: thin, drawn as asked, on no track. */
+:root[data-surface="board"] .kcol::-webkit-scrollbar {
+  width: 6px;
+}
+
+:root[data-surface="board"] .kcol::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-surface="board"] .kcol::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* The stage and its count stay at the column's top while its cards pass under
+   them, on the board's own ground. */
+:root[data-surface="board"] .kcol h5 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
 }
 
 /* The zone stripe is a shadow rather than a border, so the card keeps its
