@@ -62,7 +62,7 @@ func TestMain(m *testing.M) {
 	}
 	runtime.LockOSThread()
 
-	installMenu()
+	installMenu("fleetdeck")
 	mainMenuTopLevelCount = testMainMenuTopLevelCount()
 	hasEditMenu = testHasTopLevelMenuTitled("Edit")
 	hasAppMenu = testHasTopLevelMenuTitled("fleetdeck")

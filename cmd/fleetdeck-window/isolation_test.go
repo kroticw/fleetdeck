@@ -25,7 +25,7 @@ func TestAWindowOutsideAStandStartsItsPanelsAsBefore(t *testing.T) {
 	if err != nil || socket != "" {
 		t.Fatalf("standIsolation with nothing set = %q, %v; want none", socket, err)
 	}
-	if got := panelArgs(4242, socket); strings.Join(got, " ") != "--owner-pid 4242" {
+	if got := panelArgs(4242, socket, 0, ""); strings.Join(got, " ") != "--owner-pid 4242" {
 		t.Fatalf("panelArgs = %q", got)
 	}
 }
@@ -35,7 +35,7 @@ func TestAWindowOnAStandHandsTheStandSocketToItsPanels(t *testing.T) {
 	if err != nil || socket != "/tmp/stand/no-daemon.sock" {
 		t.Fatalf("standIsolation = %q, %v", socket, err)
 	}
-	got := strings.Join(panelArgs(4242, socket), " ")
+	got := strings.Join(panelArgs(4242, socket, 0, ""), " ")
 	if want := "--owner-pid 4242 --stand-socket /tmp/stand/no-daemon.sock"; got != want {
 		t.Fatalf("panelArgs on a stand = %q, want %q", got, want)
 	}

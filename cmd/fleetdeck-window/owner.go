@@ -33,10 +33,20 @@ func panelBinary(windowExecutable string) string {
 // thing that keeps it off the real one. The keeper starts every panel with
 // these arguments -- the restart after an update's swap too -- so none is
 // started without it.
-func panelArgs(window int, standSocket string) []string {
+//
+// It hands on the port too, the port of the URL the window looks at
+// (panelPort), so the panel listens where the window looks rather than on
+// server.port; and a dev app's copy of the operator's config (devapp.go).
+func panelArgs(window int, standSocket string, port int, configPath string) []string {
 	args := []string{"--owner-pid", strconv.Itoa(window)}
+	if port != 0 {
+		args = append(args, "--port", strconv.Itoa(port))
+	}
 	if standSocket != "" {
 		args = append(args, "--stand-socket", standSocket)
+	}
+	if configPath != "" {
+		args = append(args, "--config", configPath)
 	}
 	return args
 }

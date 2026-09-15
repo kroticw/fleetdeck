@@ -348,6 +348,7 @@ const en = {
   update_cannot_built_here: "This app was built on this machine, so there is no release to update it to. Build it again from your checkout.",
   update_cannot_no_version: "This app reports no release version, so there is nothing to compare with what is published.",
   update_cannot_staged: "This copy of the app runs from an update's staging folder, not from where the app is installed. Open the installed app to update it.",
+  update_cannot_dev: "This is a dev build from a working tree, open beside the installed app. It does not update itself: build it again with make dev-app.",
   update_cannot_other: "This app cannot update itself.",
   // Why an update that was tried did not happen.
   update_reason_offline: "GitHub could not be reached",
@@ -609,6 +610,7 @@ const ru = {
   update_cannot_built_here: "Это приложение собрано на этой машине, выпуска для него нет. Пересоберите его из своего клона.",
   update_cannot_no_version: "Приложение не сообщает версию выпуска, сравнивать не с чем.",
   update_cannot_staged: "Эта копия приложения запущена из каталога обновления, а не оттуда, где приложение установлено. Откройте установленное приложение, чтобы обновить его.",
+  update_cannot_dev: "Это dev-сборка из рабочего дерева, открытая рядом с установленным приложением. Сама она не обновляется: пересоберите её через make dev-app.",
   update_cannot_other: "Это приложение не может обновить себя.",
   // Почему обновление, которое попробовали, не состоялось.
   update_reason_offline: "не удалось достучаться до GitHub",

@@ -13,6 +13,7 @@
 #include <objc/objc.h>
 #include <objc/runtime.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 static id cls(const char *name) { return (id)objc_getClass(name); }
 static SEL sel(const char *name) { return sel_registerName(name); }
@@ -72,7 +73,7 @@ static id menuTarget(void) {
   return instance;
 }
 
-void fleetdeck_install_menu(void) {
+void fleetdeck_install_menu(const char *appName) {
   id app = send0(cls("NSApplication"), sel("sharedApplication"));
 
   id menubar = newMenu("");
@@ -80,9 +81,11 @@ void fleetdeck_install_menu(void) {
   // The bold app-name menu. Quit is the one item every Mac app is expected
   // to have; without any menu at all it suffers the exact same fate as
   // Cmd+V -- Cmd+Q has nothing to route through either.
-  id appMenuItem = newMenuItem("fleetdeck", NULL, "");
-  id appMenu = newMenu("fleetdeck");
-  menuAddItem(appMenu, newMenuItem("Quit fleetdeck", "terminate:", "q"));
+  id appMenuItem = newMenuItem(appName, NULL, "");
+  id appMenu = newMenu(appName);
+  char quit[128];
+  snprintf(quit, sizeof quit, "Quit %s", appName);
+  menuAddItem(appMenu, newMenuItem(quit, "terminate:", "q"));
   itemSetSubmenu(appMenuItem, appMenu);
   menuAddItem(menubar, appMenuItem);
 

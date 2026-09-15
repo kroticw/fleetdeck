@@ -23,6 +23,12 @@ const LsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Framew
 // identifier. A stand called something else can never be opened as the app.
 const StandBundleID = "dev.fleetdeck.stand"
 
+// DevBundleID is the bundle identifier of a dev app, which `make dev-app` builds
+// from a working tree to run beside the installed app. Not the app's own, for
+// the reason StandBundleID is not, and not the stands' either: a dev app is
+// opened on the operator's own screen, a stand is not.
+const DevBundleID = "dev.fleetdeck.dev"
+
 // lsregisterTimeout bounds one call. Measured on 2026-09-14 on the operator's
 // machine: registering a bundle took 20-25 ms, forgetting one 10-13 ms, and a
 // full dump well under a second; a call past this is a database that is not
