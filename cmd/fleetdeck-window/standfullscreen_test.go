@@ -11,10 +11,9 @@ import (
 // surfaces have loaded, leaves it once it is in, and goes in and out a second
 // time; then no more, whatever the pages do after.
 
-// The frame is measured while the window is in full screen, the toolbar hidden
-// around the measures on the second trip, all before the window leaves.
+// The frame is measured while the window is in full screen, before it leaves.
 func TestAStandMeasuresTheFrameInFullScreenBeforeItLeaves(t *testing.T) {
-	steps := append(append([]time.Duration{standRevealToolbarOff}, standRevealMeasures...), standRevealToolbarOn, standFullScreenLeaveAfter)
+	steps := append(append([]time.Duration{0}, standRevealMeasures...), standFullScreenLeaveAfter)
 	for i := 1; i < len(steps); i++ {
 		if steps[i] <= steps[i-1] {
 			t.Fatalf("step %d at %v comes no later than step %d at %v: %v", i, steps[i], i-1, steps[i-1], steps)

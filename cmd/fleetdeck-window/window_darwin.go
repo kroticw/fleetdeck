@@ -161,7 +161,8 @@ func menuBarVisible() bool { return C.fd_window_menu_bar_visible() != 0 }
 // menuBarHeight is the menu bar's height in points; a stand's only.
 func menuBarHeight() float64 { return float64(C.fd_window_menu_bar_height()) }
 
-// setToolbarVisible shows or hides window's toolbar; a stand's only.
+// setToolbarVisible shows or hides window's toolbar: hidden in full screen
+// (controller.go showToolbar).
 func setToolbarVisible(window unsafe.Pointer, visible bool) {
 	C.fd_window_set_toolbar_visible(window, cBool(visible))
 }

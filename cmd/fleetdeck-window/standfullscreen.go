@@ -17,12 +17,6 @@ const (
 	// Twice: coming out of full screen must leave the frame as it was, and
 	// going in again must not bring back what the first time did not show.
 	standFullScreenTrips = 2
-
-	// While in full screen, timed from going in, before the window leaves: on
-	// the second trip the toolbar hidden, then shown again, to measure the
-	// frame without it.
-	standRevealToolbarOff = 1 * time.Second
-	standRevealToolbarOn  = 10 * time.Second
 )
 
 // standRevealMeasures is when, from going in, the frame is measured in full

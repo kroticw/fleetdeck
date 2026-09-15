@@ -40,6 +40,10 @@ type (
 	setFrameMode   struct{ Mode glassMode }
 	reloadBoard    struct{}
 	setDragBand    struct{ Height float64 }
+	// showToolbar is the window's empty toolbar shown or hidden: it places the
+	// buttons out of full screen, and in full screen would only make the strip
+	// a pointer at the top of the screen brings out twice as tall.
+	showToolbar struct{ Visible bool }
 	// sendBoardInsets is the board told its insets for the frame as it is when
 	// the effect is carried out (boardInsetsNow), not as it was when the effect
 	// was decided: a capsule row drawn in between narrows the panels. In
@@ -470,7 +474,7 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	if !changed {
 		return out
 	}
-	out = append(out, c.dragBand())
+	out = append(out, c.dragBand(), showToolbar{Visible: !fullscreen})
 	if c.framed {
 		out = append(out, c.to("orchestrator", map[string]any{"type": "fullscreen", "on": fullscreen})...)
 	}

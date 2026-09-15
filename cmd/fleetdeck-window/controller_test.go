@@ -506,6 +506,37 @@ func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 	}
 }
 
+func toolbarEffects(effects []effect) []effect {
+	var out []effect
+	for _, e := range effects {
+		if _, ok := e.(showToolbar); ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// v0.10.2's dev build on a stand: in full screen a pointer at the top of the
+// screen brought the title bar's strip out over the capsule row, 66 pt tall with
+// the toolbar and 32 without it. The toolbar only places the buttons out of
+// full screen: it is hidden going in, whether or not the frame is up, and shown
+// again coming out, before the buttons are measured.
+func TestTheToolbarIsHiddenInFullScreenAndShownAgainOutOfIt(t *testing.T) {
+	c := started()
+	if got := toolbarEffects(c.resized(1440, 900, true)); !reflect.DeepEqual(got, []effect{showToolbar{Visible: false}}) {
+		t.Fatalf("going into full screen: %#v, want the toolbar hidden", got)
+	}
+	if got := toolbarEffects(c.resized(1728, 1117, true)); len(got) != 0 {
+		t.Fatalf("resized in full screen: %#v, want nothing of the toolbar", got)
+	}
+	if got := toolbarEffects(c.resized(1512, 982, false)); !reflect.DeepEqual(got, []effect{showToolbar{Visible: true}}) {
+		t.Fatalf("coming out of full screen: %#v, want the toolbar shown", got)
+	}
+	if got := toolbarEffects(c.resized(1000, 700, false)); len(got) != 0 {
+		t.Fatalf("resized out of full screen: %#v, want nothing of the toolbar", got)
+	}
+}
+
 func TestFullScreenTellsTheOrchestratorSurfaceToDropTheButtonsRoom(t *testing.T) {
 	got := loadedFrame().resized(1440, 900, true)
 	if got[0] != (applyGeometry{G: layoutFor(1440, 900, panelWidths{Orchestrator: 368, Sessions: 348})}) {

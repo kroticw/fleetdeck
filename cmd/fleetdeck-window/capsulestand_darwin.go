@@ -78,6 +78,7 @@ func (n *standNatives) setAppearance(string)   {}
 func (n *standNatives) saveWidths(panelWidths) {}
 func (n *standNatives) reloadBoard()           {}
 func (n *standNatives) setDragBand(float64)    {}
+func (n *standNatives) showToolbar(bool)       {}
 
 // standFrame is what is on the screen: the window's width as laid out, the
 // panels' widths and inner edges, the row's width and minimum, its capsules,
