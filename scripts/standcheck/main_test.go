@@ -88,7 +88,7 @@ func logOf(t *testing.T, reports ...any) string {
 		switch r.(type) {
 		case frameReport:
 			b.WriteString("2026/09/15 11:00:01.000000 fleetdeck-window: the frame measures " + string(raw) + "\n")
-		case headerReport:
+		case headerReport, stripReport:
 			b.WriteString("2026/09/15 11:00:01.000000 fleetdeck-window: the orchestrator surface reports its scrolling: " + string(raw) + "\n")
 		case boardReport:
 			b.WriteString("2026/09/15 11:00:01.000000 fleetdeck-window: the board reports its scrolling: " + string(raw) + "\n")
@@ -169,6 +169,62 @@ func TestATabUnderTheWindowsButtonsIsAProblem(t *testing.T) {
 	wantProblem(t, check(log, 0), "tabs", "zoom button")
 }
 
+// goodStrip is the folded orchestrator strip's word on its fit when everything
+// fits: its unfold control inside it, below the window's buttons.
+func goodStrip() stripReport {
+	var s stripReport
+	if err := json.Unmarshal([]byte(`{"surface":"orchestrator","report":"overflow","folded":true,"width":48,"scrollWidth":48,"overflowing":[],"shown":["main","section.col.col-orchestrator","div.col-size.col-size-left","button.col-size-btn.col-size-unfold"],"unfold":{"left":7,"top":78,"right":41,"bottom":112,"reachable":true}}`), &s); err != nil {
+		panic(err)
+	}
+	return s
+}
+
+func TestAFoldedOrchestratorStripWhereEverythingFitsIsNoProblem(t *testing.T) {
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false), goodStrip())
+	if got := check(log, 0); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
+// Run 34938432322, the orchestrator panel folded: a scroll bar at the strip's
+// foot. The header, a sibling of the column that folding does not hide, starts
+// past the window's buttons and is wider than the strip.
+func TestAFoldedOrchestratorStripThatScrollsSidewaysIsAProblem(t *testing.T) {
+	s := goodStrip()
+	if err := json.Unmarshal([]byte(`{"scrollWidth":312,"overflowing":[{"element":"header","scrollWidth":312,"clientWidth":48,"left":0,"right":48}]}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false), s)
+	problems := check(log, 0)
+	wantProblem(t, problems, "in the folded orchestrator strip header is 312 wide for 48")
+	wantProblem(t, problems, "page is 312 wide in 48: it scrolls sideways")
+}
+
+func TestAFoldedOrchestratorStripWithNoReportIsAProblem(t *testing.T) {
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false))
+	wantProblem(t, check(log, 0), "no overflow report from the folded orchestrator strip")
+}
+
+func TestAnUnfoldControlNotReachedOutsideOrUnderTheButtonsIsAProblem(t *testing.T) {
+	for _, c := range []struct {
+		patch string
+		words string
+	}{
+		{`{"unfold":null}`, "shows no unfold control"},
+		{`{"unfold":{"left":7,"top":78,"right":41,"bottom":112,"reachable":false}}`, "reaches something else"},
+		{`{"unfold":{"left":30,"top":78,"right":64,"bottom":112,"reachable":true}}`, "outside the strip"},
+		{`{"unfold":{"left":7,"top":8,"right":41,"bottom":42,"reachable":true}}`, "under the window's close button"},
+	} {
+		s := goodStrip()
+		s.Unfold = nil
+		if err := json.Unmarshal([]byte(c.patch), &s); err != nil {
+			t.Fatal(err)
+		}
+		log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false), s)
+		wantProblem(t, check(log, 0), c.words)
+	}
+}
+
 // besideFoldedStrip is b starting its gap past the folded orchestrator strip.
 func besideFoldedStrip(b boardReport) boardReport {
 	b.BoardLeft = 8 + 48 + 18
@@ -182,14 +238,14 @@ func besideFoldedStrip(b boardReport) boardReport {
 func TestTheHeaderOfAFoldedOrchestratorStripIsNotHeldToTheButtonsLine(t *testing.T) {
 	header := goodHeader(false)
 	header.HeaderRowCenter, header.BrandCenter = 27, 27
-	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), header)
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), header, goodStrip())
 	if got := check(log, 0); len(got) != 0 {
 		t.Fatalf("problems %q, want none", got)
 	}
 }
 
 func TestARowPastTheWindowsButtonsBesideTheFoldedStripIsNoProblem(t *testing.T) {
-	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false))
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false), goodStrip())
 	if got := check(log, 0); len(got) != 0 {
 		t.Fatalf("problems %q, want none", got)
 	}

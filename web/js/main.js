@@ -9,6 +9,7 @@ import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
 import { watchBoardScroll, watchListScroll, watchTerminalScroll } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
+import { watchOverflow } from "./standoverflow.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -266,6 +267,8 @@ if (host) {
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the edges down the orchestrator's terminal, from the orchestrator surface.
   if (host.stand && host.surface === "orchestrator" && column) watchTerminalScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And which of the orchestrator surface's boxes do not fit, folded to a strip or not.
+  if (host.stand && host.surface === "orchestrator" && column) watchOverflow(window, column, "orchestrator", (report) => callHost(window, "fleetdeckStandReport", report));
   // And where its header's row and brand are centred, against the line the
   // window's buttons are centred on (web/js/standheader.js).
   const standHeader = host.stand && host.surface === "orchestrator" ? document.getElementById("header") : null;
