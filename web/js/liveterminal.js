@@ -161,58 +161,10 @@ function terminalFitter(terminal) {
 // terminal, `ESC[999;999H` followed by a cursor report.
 const MAX_SESSION_COLS = 500;
 
-// The longest control sequence worth holding over from one piece of the stream
-// to the next: ESC [ and two numbers of three digits.
-const MAX_HELD_SEQUENCE = 16;
-
-// positionWatcher reads the session's bytes on their way into the terminal and
-// says whether any of them places the cursor at an absolute column past `cols`:
-// CHA (ESC[<col>G), HPA (ESC[<col>`) or CUP (ESC[<row>;<col>H or f).
-//
-// That is how the daemon draws a screen for a session wider than this terminal.
-// It clears the screen and places every word at its column, and xterm clamps a
-// column past its edge to the last one, so the words run into each other.
-// Nothing else is taken for it. A column equal to the last one fits. A row past
-// the bottom, a relative move, a wide character at the edge and the alternate
-// screen are all things a terminal of the right size is sent too.
-//
-// A sequence cut between two pieces of the stream is held until the next piece.
-function positionWatcher() {
-  let held = null;
-  return (bytes, cols) => {
-    let data = bytes;
-    if (held) {
-      data = new Uint8Array(held.length + bytes.length);
-      data.set(held);
-      data.set(bytes, held.length);
-      held = null;
-    }
-    let past = false;
-    for (let i = 0; i < data.length; i += 1) {
-      if (data[i] !== 0x1b) continue;
-      if (i + 1 < data.length && data[i + 1] !== 0x5b) continue;
-      const params = [0];
-      let j = i + 2;
-      for (; j < data.length && j - i < MAX_HELD_SEQUENCE; j += 1) {
-        const b = data[j];
-        if (b >= 0x30 && b <= 0x39) params[params.length - 1] = params[params.length - 1] * 10 + (b - 0x30);
-        else if (b === 0x3b) params.push(0);
-        else break;
-      }
-      if (j >= data.length) {
-        if (data.length - i < MAX_HELD_SEQUENCE) held = data.slice(i);
-        break;
-      }
-      const final = data[j];
-      let col = 0;
-      if (final === 0x47 || final === 0x60) col = params[0] || 1;
-      else if (final === 0x48 || final === 0x66) col = params[1] || 1;
-      if (col > cols && col <= MAX_SESSION_COLS) past = true;
-      i = j;
-    }
-    return past;
-  };
-}
+// The tallest a session can be (maxTerminalRows in internal/server/pty.go). A
+// cursor moved down by more is an application finding the bottom of its
+// terminal, not a taller session.
+const MAX_SESSION_ROWS = 200;
 
 // wheelLines is how far a wheel event asks to move, in terminal lines: the
 // distance the browser would scroll any page by for the same event, measured
@@ -408,6 +360,12 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // last given this terminal's size.
   let reclaim = null;
   let widened = false;
+  // The pieces of the stream handed to xterm, the last piece xterm has finished
+  // reading, and the last piece that had arrived when the session was last given
+  // a size (see noticeWidened).
+  let received = 0;
+  let parsed = 0;
+  let staleThrough = 0;
   // The size over the terminal (see showSize): its element, the timer that
   // hides it, and whether the next time the terminal follows its pane is one
   // a change of type asked for, which is the time to show it — and whether the
@@ -494,6 +452,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     followWheel(made);
     followFontKeys(made);
     if (links && typeof made.registerLinkProvider === "function") made.registerLinkProvider(wikiLinkProvider(made, links));
+    followSize(made);
     refit = terminalFitter(made);
     // Before the socket exists, because the socket asks for this size.
     unfitted = !(refit && refit());
@@ -522,11 +481,12 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     socket.send(JSON.stringify({ type: "resize", cols, rows }));
     sessionSize = [cols, rows];
     widened = false;
+    staleThrough = received;
     return true;
   };
 
   // takeSizeBack gives the session this terminal's size again after the stream
-  // showed another attacher made it wider (see positionWatcher). The daemon
+  // showed another attacher made it bigger (see followSize). The daemon
   // repaints every attacher for the size a session has, so the repaint that
   // follows is drawn for this terminal. Measured against CLI 2.1.269, the screen
   // then matched a fresh attach's exactly.
@@ -534,19 +494,76 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // A terminal that cannot be measured, folded or in a hidden tab, takes
   // nothing: it keeps the columns it last had, which are no longer its pane's.
   // The widening stays noticed, and followPane takes the size back once the pane
-  // can be measured again.
+  // can be measured again. A pane still moving is followPane's too: taking the
+  // size back in the middle of a drag would send a size the pane only passed
+  // through, so the take-back waits for the pane to settle.
   const takeSizeBack = () => {
     reclaim = null;
-    if (!widened || !terminal || !(refit && refit())) return;
+    if (!widened || !terminal || settle !== null) return;
+    unfitted = !(refit && refit());
+    say.standing();
+    if (unfitted) return;
     if (tellSession(true)) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_EVERY_MS);
   };
 
-  // noticeWidened is the stream having placed something past the terminal's
-  // edge. A timer already armed, the first wait or the pause after a take-back,
-  // covers it.
+  // noticeWidened is xterm reading a screen drawn for a session bigger than
+  // this terminal. A timer already armed, the first wait or the pause after a
+  // take-back, covers it.
+  //
+  // xterm reads the stream after it arrives, not as it arrives. A screen that
+  // arrived before this terminal last gave the session a size is read after
+  // that, and the daemon's repaint for that size is already on its way behind
+  // it. So what xterm is reading counts only if it arrived after that size was
+  // sent. Otherwise every take-back would be followed by a second one, of the
+  // same size, a second later.
   const noticeWidened = () => {
+    if (parsed + 1 <= staleThrough) return;
     widened = true;
     if (reclaim === null) reclaim = timers.setTimeout(takeSizeBack, RECLAIM_WAIT_MS);
+  };
+
+  // followSize watches xterm read the stream for the two ways the daemon draws a
+  // screen for a session bigger than this terminal.
+  //
+  // Wider: the daemon clears the screen and places every word at its absolute
+  // column: CHA (ESC[<col>G), HPA (ESC[<col>`) or CUP and HVP
+  // (ESC[<row>;<col>H or f). xterm clamps a column past its edge to the last
+  // one, so the words run into each other.
+  //
+  // Taller at the same width: the daemon reaches each next line with a cursor
+  // down (ESC[1B), and xterm stops the cursor at the last row, so every row past
+  // it is drawn over the last one. Measured on a disposable session (CLI
+  // 2.1.269): a 76 × 60 attacher beside a 76 × 40 terminal piled 20 rows onto its
+  // last one, and the terminal's own resize repaired it.
+  //
+  // Nothing else counts. A column equal to the last one fits. An absolute row
+  // past the bottom, a move right and a wide character at the edge are all things
+  // a terminal of the right size is sent too. A column past MAX_SESSION_COLS or a
+  // move down past MAX_SESSION_ROWS is an application finding its corner. The
+  // alternate screen is not tracked, so switching to it is no reason by itself.
+  //
+  // These are hooks in xterm's parser rather than a look at the bytes, because
+  // where the cursor is when a move down arrives is xterm's to know. xterm also
+  // reads a sequence cut between two pieces of the stream as one. The hooks only
+  // watch: xterm still moves the cursor. `widened` covers a taller session as
+  // well as a wider one.
+  const followSize = (made) => {
+    const parser = made.parser;
+    if (typeof parser?.registerCsiHandler !== "function") return;
+    const param = (params, i) => (typeof params[i] === "number" && params[i] > 0 ? params[i] : 1);
+    const column = (col) => {
+      if (col > made.cols && col <= MAX_SESSION_COLS) noticeWidened();
+      return false;
+    };
+    parser.registerCsiHandler({ final: "G" }, (params) => column(param(params, 0)));
+    parser.registerCsiHandler({ final: "`" }, (params) => column(param(params, 0)));
+    parser.registerCsiHandler({ final: "H" }, (params) => column(param(params, 1)));
+    parser.registerCsiHandler({ final: "f" }, (params) => column(param(params, 1)));
+    parser.registerCsiHandler({ final: "B" }, (params) => {
+      const rows = param(params, 0);
+      if (rows <= MAX_SESSION_ROWS && made.buffer.active.cursorY + rows > made.rows - 1) noticeWidened();
+      return false;
+    });
   };
 
   const dropReclaim = () => {
@@ -726,9 +743,6 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     ws.binaryType = "arraybuffer";
     socket = ws;
     sessionSize = [cols, rows];
-    // Per socket: a sequence held over from a stream that ended is not the start
-    // of the next one's.
-    const pastEdge = positionWatcher();
     ws.onopen = () => {
       if (socket !== ws) return;
       ws.send(JSON.stringify({ type: "auth", token }));
@@ -740,9 +754,14 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
         return;
       }
       // Appended, never redrawn: what arrived is the session's own output, in order.
-      const bytes = new Uint8Array(event.data);
-      if (pastEdge(bytes, term.cols)) noticeWidened();
-      term.write(bytes);
+      // Each piece is numbered as it arrives and marked read once xterm has read
+      // it, which is how noticeWidened tells a screen that arrived before the
+      // last size sent from one that arrived after.
+      received += 1;
+      const piece = received;
+      term.write(new Uint8Array(event.data), () => {
+        parsed = piece;
+      });
     };
     ws.onclose = (event) => {
       if (socket !== ws) return;

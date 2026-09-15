@@ -57,6 +57,9 @@ function paint(cols, rows) {
     }
     lines.push(line);
   }
+  // A screen as tall as the session, the last line on its last row, the way a
+  // terminal application keeps its input at the bottom.
+  while (lines.length < rows) lines.unshift([]);
   return `\x1b[2J\x1b[H${lines
     .slice(-rows)
     .map((line) => line.map(([col, word]) => `\x1b[${col}G${word}`).join(""))
@@ -124,15 +127,22 @@ function fakeDaemon() {
     // An attacher that comes and goes, as a tool typing keys into the session
     // does. When it leaves, the daemon puts the session at the size of the
     // attacher that attached last (measured on 2.1.269), not of the last resize.
-    passing(cols, rows) {
+    // visit attaches such an attacher and returns its leaving; passing is a visit
+    // with nothing in between.
+    visit(cols, rows) {
       daemon.another(cols, rows);
-      const last = attached.at(-1);
-      if (!last) return;
-      const query = new URL(last.socket.url).searchParams;
-      const told = resizes({ sent: last.socket.sent.slice(0, last.read) }).at(-1);
-      daemon.cols = told ? told.cols : Number(query.get("cols"));
-      daemon.rows = told ? told.rows : Number(query.get("rows"));
-      daemon.repaint();
+      return () => {
+        const last = attached.at(-1);
+        if (!last) return;
+        const query = new URL(last.socket.url).searchParams;
+        const told = resizes({ sent: last.socket.sent.slice(0, last.read) }).at(-1);
+        daemon.cols = told ? told.cols : Number(query.get("cols"));
+        daemon.rows = told ? told.rows : Number(query.get("rows"));
+        daemon.repaint();
+      };
+    },
+    passing(cols, rows) {
+      daemon.visit(cols, rows)();
     },
     // Takes in what the terminals sent since the last call.
     pump() {
@@ -196,8 +206,7 @@ afterEach(() => {
 
 // A terminal in a pane of `pane` cells, attached to the daemon. `armed` is the
 // delay of every timer it arms, in order.
-async function attach(daemon, pane) {
-  const timers = fakeTimers();
+async function attach(daemon, pane, { timers = fakeTimers(), report = {} } = {}) {
   const armed = [];
   const setTimeout = timers.setTimeout;
   timers.setTimeout = (fn, ms) => {
@@ -207,7 +216,7 @@ async function attach(daemon, pane) {
   const host = dom.element("div");
   host.pane = pane;
   dom.document.body.appendChild(host);
-  const live = createLiveTerminal(host, "orchestrator", { timers });
+  const live = createLiveTerminal(host, "orchestrator", { timers, report });
   live.open();
   await settle();
   const socket = sockets.at(-1);
@@ -246,6 +255,42 @@ test("a session another attacher made wider is taken back to this terminal's siz
   for (let i = 0; i < 3; i++) await round(daemon, column);
   assert.equal(resizes(column.socket).length, 1, "a screen that fits asks for nothing more");
   assert.equal(column.timers.count(), 0, "and leaves no timer behind");
+});
+
+// Taller at the same width breaks the bottom instead: the daemon reaches each
+// next line with a cursor down, xterm stops at the last row, and the rows past it
+// are drawn over the last one. Measured on a disposable session with a 76 × 60
+// attacher beside a 76 × 40 terminal.
+test("a session another attacher made taller is taken back too, and the bottom is what a fresh attach draws", async () => {
+  const daemon = fakeDaemon();
+  const column = await attach(daemon, { cols: 76, rows: 40 });
+  const expected = await freshAttach(76, 40);
+
+  daemon.another(76, 60);
+  await drawn(column.terminal);
+  assert.notDeepEqual(screen(column.terminal), expected, "a frame for 60 rows drawn into 40 is wrong at the bottom");
+
+  await round(daemon, column);
+  assert.deepEqual(resizes(column.socket), [{ type: "resize", cols: 76, rows: 40 }]);
+  assert.deepEqual(screen(column.terminal), expected);
+});
+
+// xterm reads the stream a moment after it arrives. A wide screen already on its
+// way when the size is sent back is covered by the repaint that follows.
+test("a screen that arrived before the size was sent back is not a reason to send it again", async () => {
+  const daemon = fakeDaemon();
+  const column = await attach(daemon, { cols: 76, rows: 40 });
+  daemon.another(120, 40);
+  await drawn(column.terminal);
+
+  daemon.another(120, 40);
+  await column.timers.tick();
+  assert.equal(resizes(column.socket).length, 1, "the take-back fired before xterm read the second screen");
+  daemon.pump();
+  await drawn(column.terminal);
+  for (let i = 0; i < 3; i++) await round(daemon, column);
+  assert.equal(resizes(column.socket).length, 1, "the screen that was on its way when the size went back asked for it again");
+  assert.deepEqual(screen(column.terminal), await freshAttach(76, 40));
 });
 
 test("a wide frame that arrives in many pieces takes the size back once, not once per piece", async () => {
@@ -298,6 +343,8 @@ const FITTING = [
   ["wide characters at the right edge", "\x1b[1;75H中文🟢\x1b[2;76H🟢"],
   ["an application asking where the corner is", "\x1b[999;999H\x1b[6n"],
   ["a cursor moved right past the edge, relatively", "\x1b[1G\x1b[200Cx"],
+  ["a cursor moved down onto the last row and no further", "\x1b[38;1H\x1b[1Bx\x1b[1;1H\x1b[39B"],
+  ["an application finding the bottom", "\x1b[1;1H\x1b[999B"],
   ["colours and private modes", "\x1b[38;2;255;120;0mred\x1b[0m\x1b[?2026h\x1b[?25l\x1b[?2026l"],
 ];
 
@@ -315,13 +362,22 @@ test("positions that fit the terminal are not a reason to take the size back", a
 });
 
 test("a column past the edge split across two pieces of the stream is still read", async () => {
-  const daemon = fakeDaemon();
-  const column = await attach(daemon, { cols: 76, rows: 40 });
-  column.socket.serverSend(frame("\x1b[1"));
-  column.socket.serverSend(frame("20Gx"));
-  await drawn(column.terminal);
-  await round(daemon, column);
-  assert.deepEqual(resizes(column.socket), [{ type: "resize", cols: 76, rows: 40 }]);
+  const pieces = [
+    ["CHA", "\x1b[1", "20Gx"],
+    ["CUP", "\x1b[1;1", "20Hx"],
+    ["HVP", "\x1b[1;1", "20fx"],
+    ["HPA", "\x1b[12", "0`x"],
+  ];
+  for (const [what, first, second] of pieces) {
+    const daemon = fakeDaemon();
+    const column = await attach(daemon, { cols: 76, rows: 40 });
+    column.socket.serverSend(frame(first));
+    column.socket.serverSend(frame(second));
+    await drawn(column.terminal);
+    await round(daemon, column);
+    assert.deepEqual(resizes(column.socket), [{ type: "resize", cols: 76, rows: 40 }], `${what} split as ${JSON.stringify([first, second])}`);
+    column.live.stop();
+  }
 });
 
 test("two terminals of different widths on one session settle on the narrower one without taking turns", async () => {
@@ -349,6 +405,19 @@ test("two terminals of different widths on one session settle on the narrower on
     assert.equal(resizes(wide.socket).length, 0, `after visit ${visit}: ${now}`);
     assert.deepEqual(screen(column.terminal), await freshAttach(76, 40), `after visit ${visit} the narrow terminal is right again`);
   }
+
+  // A visit that lasts longer than the wait: the narrow terminal takes the size
+  // back while the visitor is attached, and again when it leaves and the daemon
+  // gives the session the wide terminal's size. Two take-backs for such a visit;
+  // what bounds them is the one-a-second pace, not the visit.
+  const leave = daemon.visit(120, 40);
+  for (let i = 0; i < 4; i++) await round(daemon, column, wide);
+  assert.equal(resizes(column.socket).length, 5, "taken back while the visitor is still attached");
+  leave();
+  for (let i = 0; i < 4; i++) await round(daemon, column, wide);
+  assert.equal(resizes(column.socket).length, 6, "and again once it has left");
+  assert.equal(resizes(wide.socket).length, 0);
+  assert.deepEqual(screen(column.terminal), await freshAttach(76, 40));
 
   // The other way round: the narrow one attaching last takes nothing back.
   const second = fakeDaemon();
@@ -418,4 +487,73 @@ test("a stream that ends drops a take-back it had armed", async () => {
   assert.equal(column.timers.count(), 1);
   column.socket.serverClose(4002, "dropped");
   assert.equal(column.timers.count(), 0, "a take-back outlived its stream");
+});
+
+// A clock whose timers can also be fired one at a time, oldest first, for a case
+// about what happens between two of them.
+function steppedTimers() {
+  let nextId = 1;
+  const pending = new Map();
+  return {
+    setTimeout(fn) {
+      const id = nextId++;
+      pending.set(id, fn);
+      return id;
+    },
+    clearTimeout(id) {
+      pending.delete(id);
+    },
+    count() {
+      return pending.size;
+    },
+    async fireOldest() {
+      const oldest = pending.entries().next().value;
+      if (!oldest) return;
+      pending.delete(oldest[0]);
+      oldest[1]();
+      await settle();
+    },
+    async tick() {
+      for (const [id, fn] of [...pending.entries()]) {
+        pending.delete(id);
+        fn();
+      }
+      await settle();
+    },
+  };
+}
+
+// A drag of the column's edge moves the pane on every pointer event, and the
+// take-back's wait can end in the middle of it.
+test("a widening noticed while the pane is still moving is taken back once, at the size the pane stops at", async () => {
+  const observers = installObserver();
+  const daemon = fakeDaemon();
+  const timers = steppedTimers();
+  const column = await attach(daemon, { cols: 76, rows: 40 }, { timers });
+  daemon.another(120, 40);
+  await drawn(column.terminal);
+
+  column.pane.cols = 72;
+  observers[0].resize();
+  await timers.fireOldest();
+  assert.deepEqual(resizes(column.socket), [], "the take-back's wait ended mid-drag and sent a size the pane only passed through");
+
+  column.pane.cols = 70;
+  observers[0].resize();
+  for (let i = 0; i < 3; i++) await round(daemon, column);
+  assert.deepEqual(resizes(column.socket), [{ type: "resize", cols: 70, rows: 40 }]);
+  assert.deepEqual(screen(column.terminal), await freshAttach(70, 40));
+});
+
+test("a take-back that finds the pane cannot be measured says the terminal does not follow it", async () => {
+  const daemon = fakeDaemon();
+  let standing = 0;
+  const column = await attach(daemon, { cols: 76, rows: 40 }, { report: { standing: () => (standing += 1) } });
+  const before = standing;
+  column.pane.hidden = true;
+  daemon.another(120, 40);
+  await drawn(column.terminal);
+  await round(daemon, column);
+  assert.equal(column.live.unfitted, true, "the terminal still claims to follow a pane it cannot measure");
+  assert.ok(standing > before, "and its caller was not told to read that again");
 });
