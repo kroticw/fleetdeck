@@ -30,7 +30,7 @@ func TestAFrameReportLineIsWhatTheStandsCheckerReads(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, words)), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "fullScreen", "glass", "menuBarVisible", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions", "toolbarVisible"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "fullScreen", "glass", "menuBarVisible", "minimize", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions", "toolbarVisible", "zoom"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields %v, want %v", got, want)
 	}
 	var overlays []map[string]json.RawMessage

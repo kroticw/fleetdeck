@@ -293,12 +293,54 @@ func collectCapsuleLayoutResults() {
 	}
 	resizedResult = probeCapsuleLayoutForTest(m, 1000, 1440, false)
 	standResult = probeCapsuleStandForTest(m)
+	foldResults = probeFoldsForTest(m)
 	regrowResults = []capsuleRegrowProbe{probeCapsuleRegrowForTest(m, 1000, 1728), probeCapsuleRegrowForTest(m, 1728, 1000)}
 }
 
 // regrowResults: the row drawn at one width and laid out at a much wider or
 // narrower one without a redraw, as entering and leaving full screen do.
 var regrowResults []capsuleRegrowProbe
+
+// foldResults: a stand's window in every fold of its panels (probeFoldsForTest).
+var foldResults []foldedStandFrame
+
+// v0.10.2's dev build on macOS 27 (the operator's frame 1374): with the
+// orchestrator panel folded to its strip, the capsule row began 10 pt past the
+// strip, and the Board/Docs tabs lay under the window's buttons, which reach
+// past it. In every fold no capsule shown lies under the close, minimize or
+// zoom button.
+func TestNoCapsuleLiesUnderTheWindowsButtonsInAnyFold(t *testing.T) {
+	if len(foldResults) != 5 {
+		t.Fatalf("%d folds measured, want 5", len(foldResults))
+	}
+	for _, r := range foldResults {
+		f := r.frame
+		buttons := []struct {
+			name string
+			b    measuredBox
+		}{{"close", f.Close}, {"minimize", f.Minimize}, {"zoom", f.Zoom}}
+		for _, button := range buttons {
+			if button.b.W == 0 {
+				t.Errorf("%s: no %s button measured", r.when, button.name)
+			}
+		}
+		if len(f.Capsules) == 0 {
+			t.Errorf("%s: no capsule shown", r.when)
+		}
+		for _, c := range f.Capsules {
+			for _, button := range buttons {
+				if boxesOverlap(c.measuredBox, button.b) {
+					t.Errorf("%s: %s at %v..%v lies under the %s button at %v..%v", r.when, c.Name, c.X, c.X+c.W, button.name, button.b.X, button.b.X+button.b.W)
+				}
+			}
+		}
+	}
+}
+
+func boxesOverlap(a, b measuredBox) bool {
+	const slack = 0.01
+	return a.X < b.X+b.W-slack && b.X < a.X+a.W-slack && a.Y < b.Y+b.H-slack && b.Y < a.Y+a.H-slack
+}
 
 // v0.10.1 on the operator's macOS, in full screen: the theme and the limits lay
 // over the sessions panel until a panel's edge was dragged. The row's content

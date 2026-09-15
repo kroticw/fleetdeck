@@ -47,9 +47,12 @@ type standFrameReport struct {
 	FullScreen bool   `json:"fullScreen"`
 	// MenuBarVisible: the menu bar is shown, as a pointer at the top of the
 	// screen shows it in full screen; ToolbarVisible: the window's toolbar is.
-	MenuBarVisible     bool              `json:"menuBarVisible"`
-	ToolbarVisible     bool              `json:"toolbarVisible"`
+	MenuBarVisible bool `json:"menuBarVisible"`
+	ToolbarVisible bool `json:"toolbarVisible"`
+	// The window's three buttons; zero-sized when there is no such button.
 	Close              measuredBox       `json:"close"`
+	Minimize           measuredBox       `json:"minimize"`
+	Zoom               measuredBox       `json:"zoom"`
 	Orchestrator       measuredBox       `json:"orchestrator"`
 	Sessions           measuredBox       `json:"sessions"`
 	Row                measuredBox       `json:"row"`
@@ -82,6 +85,8 @@ func measureFrame(f *frame, window unsafe.Pointer, mode glassMode) standFrameRep
 		MenuBarVisible:     menuBarVisible(),
 		ToolbarVisible:     toolbarVisible(window),
 		Close:              boxOf(C.fd_test_window_button(window, 0)),
+		Minimize:           boxOf(C.fd_test_window_button(window, 1)),
+		Zoom:               boxOf(C.fd_test_window_button(window, 2)),
 		Orchestrator:       boxOf(C.fd_test_frame_of(C.fd_test_panel(f.p, 0))),
 		Sessions:           boxOf(C.fd_test_frame_of(C.fd_test_panel(f.p, 1))),
 		Row:                boxOf(C.fd_test_frame_of(f.capsules())),

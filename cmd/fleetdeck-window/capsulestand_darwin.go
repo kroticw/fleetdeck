@@ -150,6 +150,50 @@ func probeCapsuleStandForTest(m capsuleModel) capsuleStandProbe {
 	return out
 }
 
+// foldedStandFrame is the frame as measured (measureFrame) with the panels
+// folded as when says.
+type foldedStandFrame struct {
+	when  string
+	frame standFrameReport
+}
+
+// probeFoldsForTest is a stand's window, 1000 by 700, started with the
+// orchestrator panel folded, its buttons measured once the frame is up, as
+// glassWindow measures them whenever the window changes; then with neither
+// panel folded, the sessions panel folded, both, and the orchestrator panel
+// alone again, each folded or unfolded as a surface does.
+func probeFoldsForTest(m capsuleModel) []foldedStandFrame {
+	window := C.fd_test_window(1000, 700)
+	f := installFrame(window)
+	f.setMode(glassModeGlass)
+	ctl := newController("http://127.0.0.1:7777/", panelWidths{Orchestrator: 368, Sessions: 348, OrchestratorFolded: true}, glassModeGlass)
+	n := &standNatives{f: f, ctl: ctl, mode: glassModeGlass}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		panic(err)
+	}
+	width, height := windowContentSize(window)
+	n.run(ctl.resized(width, height, false))
+	n.run(ctl.capsules(raw))
+	n.run(ctl.layout(hostVersion, "panel", "stand"))
+	n.run(ctl.titlebarButtons(f.titlebarInset(), f.titlebarCenter()))
+	out := []foldedStandFrame{{"started with the orchestrator panel folded", measureFrame(f, window, glassModeGlass)}}
+	for _, s := range []struct {
+		side   string
+		folded bool
+		when   string
+	}{
+		{"orchestrator", false, "with neither panel folded"},
+		{"sessions", true, "with the sessions panel folded"},
+		{"orchestrator", true, "with both panels folded"},
+		{"sessions", false, "with the orchestrator panel folded again"},
+	} {
+		n.run(ctl.panel(s.side, s.folded))
+		out = append(out, foldedStandFrame{s.when, measureFrame(f, window, glassModeGlass)})
+	}
+	return out
+}
+
 func readStandFrame(n *standNatives) standFrame {
 	o := C.fd_test_frame_of(C.fd_test_panel(n.f.p, 0))
 	s := C.fd_test_frame_of(C.fd_test_panel(n.f.p, 1))

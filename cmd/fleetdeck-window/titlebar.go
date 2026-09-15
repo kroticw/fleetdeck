@@ -15,15 +15,22 @@ const titlebarGap = 8.0
 // right edge, and center, the line they are centred on, in points from the
 // window's left and top edges; 0 for each when the window has no such button.
 // The orchestrator's surface hears of them once its page has loaded
-// (pageLoaded) and again whenever they move.
+// (pageLoaded) and again whenever they move. The capsule row keeps past them
+// (layoutPastButtons): a frame up whose row they now reach, or no longer reach,
+// is laid out again.
 func (c *controller) titlebarButtons(x, center float64) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if x == c.titlebar && center == c.titlebarCenter {
 		return nil
 	}
+	before := c.geometry()
 	c.titlebar, c.titlebarCenter = x, center
-	return c.titlebarMessage()
+	var out []effect
+	if now := c.geometry(); c.framed && now != before {
+		out = append(append(out, applyGeometry{G: now}), c.boardInsets()...)
+	}
+	return append(out, c.titlebarMessage()...)
 }
 
 // titlebarMessage is the orchestrator surface's inset and line, in its own

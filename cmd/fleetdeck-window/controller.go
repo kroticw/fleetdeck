@@ -386,16 +386,31 @@ func (c *controller) capsuleRow(rowMin float64) []effect {
 // geometry is the frame for the window as it is, keeping the capsule row its
 // minimum.
 func (c *controller) geometry() geometry {
-	return layoutWithRow(c.width, c.height, c.widths, c.rowMin)
+	return layoutPastButtons(c.width, c.height, c.widths, c.rowMin, c.buttonsEnd())
+}
+
+// buttonsEnd is where the window's buttons end on the capsule row's line: the
+// zoom button's right edge out of full screen, and nothing in it, where the
+// buttons are not over the row.
+func (c *controller) buttonsEnd() float64 {
+	if c.fullscreen {
+		return 0
+	}
+	return c.titlebar
 }
 
 // draggedBesideRow is a dragged width stopped where the other panel, at its
-// width, and the capsule row's minimum leave no more room.
+// width -- beside the window's buttons, for the orchestrator panel -- and the
+// capsule row's minimum leave no more room.
 func (c *controller) draggedBesideRow(width, other float64, otherFolded bool) float64 {
 	if c.rowMin <= 0 {
 		return width
 	}
-	return math.Min(width, rowRoomFor(c.width, clampPanel(other, c.width, otherFolded), c.rowMin))
+	room := clampPanel(other, c.width, otherFolded)
+	if c.dragging == "sessions" {
+		room = besideButtons(room, c.buttonsEnd())
+	}
+	return math.Min(width, rowRoomFor(c.width, room, c.rowMin))
 }
 
 // laidOut is the frame laid out as g. A geometry decided before the capsule row

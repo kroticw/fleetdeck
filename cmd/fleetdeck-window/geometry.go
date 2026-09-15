@@ -83,9 +83,20 @@ func layoutFor(width, height float64, w panelWidths) geometry {
 // readable width, and no further. This is only what the window shows; the
 // widths a person set are kept, and come back in a window wide enough.
 func layoutWithRow(width, height float64, w panelWidths, rowMin float64) geometry {
+	return layoutPastButtons(width, height, w, rowMin, 0)
+}
+
+// layoutPastButtons is layoutWithRow with the window's buttons ending buttonsEnd
+// points from its left edge on the capsule row's line, 0 with none there: the
+// row begins its gap past whichever ends further right, the orchestrator panel
+// or the buttons, and the panels narrow for the row with that room taken. Only
+// the folded orchestrator strip ends short of the buttons. In v0.10.2's dev
+// build the row beside the strip began under the zoom button (the operator's
+// frame 1374).
+func layoutPastButtons(width, height float64, w panelWidths, rowMin, buttonsEnd float64) geometry {
 	ow := clampPanel(w.Orchestrator, width, w.OrchestratorFolded)
 	sw := clampPanel(w.Sessions, width, w.SessionsFolded)
-	ow, sw = narrowForRow(width, ow, sw, w, rowMin)
+	ow, sw = narrowForRow(width, ow, sw, w, rowMin, buttonsEnd)
 	// Each panel's limit is 60% of the window, so two of them can ask for more
 	// than it has: the sessions panel gets at most what the orchestrator panel
 	// and the margins leave, and the two never overlap.
@@ -95,7 +106,7 @@ func layoutWithRow(width, height float64, w panelWidths, rowMin float64) geometr
 	h := height - 2*panelMargin
 	o := rect{X: panelMargin, Y: panelMargin, W: ow, H: h}
 	s := rect{X: width - panelMargin - sw, Y: panelMargin, W: sw, H: h}
-	capX := o.X + o.W + capsuleGapLeft
+	capX := math.Max(o.X+o.W, buttonsEnd) + capsuleGapLeft
 	return geometry{
 		Orchestrator: o,
 		Sessions:     s,
@@ -108,8 +119,8 @@ func layoutWithRow(width, height float64, w panelWidths, rowMin float64) geometr
 	}
 }
 
-func narrowForRow(width, ow, sw float64, w panelWidths, rowMin float64) (float64, float64) {
-	excess := ow + sw - (width - 2*panelMargin - capsuleGapLeft - capsuleGapRight - rowMin)
+func narrowForRow(width, ow, sw float64, w panelWidths, rowMin, buttonsEnd float64) (float64, float64) {
+	excess := besideButtons(ow, buttonsEnd) + sw - (width - 2*panelMargin - capsuleGapLeft - capsuleGapRight - rowMin)
 	if rowMin <= 0 || excess <= 0 {
 		return ow, sw
 	}
@@ -125,6 +136,13 @@ func narrowForRow(width, ow, sw float64, w panelWidths, rowMin float64) (float64
 	}
 	share := math.Min(1, excess/(os+ss))
 	return ow - os*share, sw - ss*share
+}
+
+// besideButtons is the room an orchestrator panel ow wide takes from the
+// capsule row with the window's buttons ending buttonsEnd from the window's
+// left edge: the panel's width, or as far as the buttons reach past its margin.
+func besideButtons(ow, buttonsEnd float64) float64 {
+	return math.Max(ow, buttonsEnd-panelMargin)
 }
 
 // rowRoomFor is the widest a panel may be dragged to beside the other panel at
