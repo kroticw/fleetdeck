@@ -66,15 +66,14 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	webview "github.com/webview/webview_go"
 
+	appconfig "github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/supervisor"
-	"github.com/kroticw/fleetdeck/internal/version"
 )
 
 // defaultURL matches cmd/fleetdeck-status's own default (see its FLEETDECK_ENDPOINT
@@ -105,7 +104,14 @@ func reloadBinding(dispatch func(func()), navigate func(string), url string) fun
 }
 
 func main() {
-	url := flag.String("url", defaultURL, "URL the panel answers on")
+	// Whether this is a dev app is the build's to say, and is needed before the
+	// plan is made: the dev app's own log is opened, and -url's default chosen,
+	// before the flags are parsed.
+	dev := isDevBuild()
+	if dev {
+		openDevWindowLog()
+	}
+	url := flag.String("url", startURL(dev, devURL), "URL the panel answers on")
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	toldHandoverTimeout := flag.Duration(handoverTimeoutFlag, 0, "set by an update: how long the window that started this one gives the handover, from this window's start")
@@ -128,18 +134,46 @@ func main() {
 	if err != nil {
 		log.Fatalf("fleetdeck-window: locate home directory: %v", err)
 	}
-	// The same log the launch agent wrote the panel's output to, so a panel's
-	// history does not split in two at the day the window took over.
-	logPath := filepath.Join(home, "Library", "Logs", "fleetdeck.log")
-
 	// A stand's socket, when this window runs on a stand, handed to every panel
 	// it starts; a stand that names none is refused before anything starts.
 	standSocket, err := standIsolation(os.LookupEnv)
 	if err != nil {
 		log.Fatalf("fleetdeck-window: %v", err)
 	}
-	// A stand's panel widths stay out of the operator's app's defaults.
-	useWidthsSuite(widthsSuite(standSocket))
+	// What a stand sets and a person's window never has (standsettings.go).
+	stand, err := standSettingsFrom(standSocket, os.LookupEnv)
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+	// What the window works out before anything of it is made -- its panel's
+	// keeper, logs, widths, title, how it updates -- taken as it is
+	// (startplan.go). A dev app keeps off everything of the installed app's
+	// but the fleet daemon and the board (devapp.go).
+	plan, err := planStart(startInput{
+		dev:            dev,
+		url:            *url,
+		exe:            exe,
+		home:           home,
+		handover:       *handover,
+		canonical:      *toldCanonical,
+		standSocket:    standSocket,
+		pid:            os.Getpid(),
+		operatorConfig: appconfig.DefaultPath(),
+		startTimeout:   stand.startTimeout(),
+		env:            os.Environ(),
+	})
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+	if plan.way.dev {
+		log.Printf("fleetdeck-window: a dev app on %s; its panel is started with %q", *url, plan.keeper.Args)
+	}
+	for _, note := range plan.notes {
+		log.Printf("fleetdeck-window: %s", note)
+	}
+	// A stand's and a dev app's panel widths stay out of the operator's app's
+	// defaults.
+	useWidthsSuite(plan.widthsSuite)
 
 	// A window in an update's staging directory opens the installed app and
 	// goes, before it has a window to flash (staged.go).
@@ -156,11 +190,6 @@ func main() {
 		where.action = runRefused
 	}
 
-	// What a stand sets and a person's window never has (standsettings.go).
-	stand, err := standSettingsFrom(standSocket, os.LookupEnv)
-	if err != nil {
-		log.Fatalf("fleetdeck-window: %v", err)
-	}
 	width, height := stand.size()
 	if stand != (standSettings{}) {
 		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q",
@@ -171,20 +200,8 @@ func main() {
 	// the keeper is made before the window's web views, and nothing it says
 	// may be lost to that.
 	keeperEvents := supervisor.NewKeeperEvents()
-	keeper := &supervisor.Keeper{
-		URL:  *url,
-		Bin:  panelBinary(exe),
-		Args: panelArgs(os.Getpid(), standSocket),
-		// This window: its panels report it as their owner and go when it
-		// goes, and a panel whose window is gone is replaced.
-		Owner:        os.Getpid(),
-		Env:          os.Environ(),
-		LogPath:      logPath,
-		StartTimeout: stand.startTimeout(),
-		MinUptime:    launchdThrottle,
-		Poll:         takenPanelPoll,
-		OnEvent:      keeperEvents.Push,
-	}
+	keeper := plan.keeper
+	keeper.OnEvent = keeperEvents.Push
 	// A panel this window did not start, of another build than the window's,
 	// is used as it is and named over its page (foreign.go).
 	own := ownBuild()
@@ -233,7 +250,7 @@ func main() {
 	w := webview.New(false)
 	startupStep("the web view is made")
 	defer w.Destroy()
-	w.SetTitle("fleetdeck")
+	w.SetTitle(plan.title)
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand, hostStandOpen = standSocket != "", stand.open
 	if stand.appearance != "" {
@@ -247,7 +264,7 @@ func main() {
 	// do anything at all; see menu_darwin.c for why. installCloseToHide
 	// makes the red button hide the window rather than quit: the process runs
 	// on, and with it the panel it owns -- hiding is not the window going.
-	installMenu()
+	installMenu(plan.title)
 	installCloseToHide(w.Window())
 
 	if where.action == runRefused {
@@ -257,7 +274,7 @@ func main() {
 		return
 	}
 
-	scr := &screen{url: *url, logPath: logPath, takingOver: *handover != "", now: time.Now}
+	scr := &screen{url: *url, logPath: keeper.LogPath, takingOver: *handover != "", now: time.Now}
 	// The glass frame over the board (glasswindow.go): the panels with their
 	// web views and the capsules, up while the board's page is a panel page.
 	// Its bindings are bound here, before the first navigation.
@@ -412,18 +429,14 @@ func main() {
 	// update itself never finds anything to update to, so it shows no button;
 	// why it cannot is in the log, and in the answer to the update binding
 	// should anything call it anyway.
-	canonical := canonicalBundle(exe, *toldCanonical)
+	canonical := plan.canonical
 	// How this build updates is worked out beside the start, not in front of it:
 	// ownTeamID asks codesign, a process of its own, and a window started by an
 	// update has the old window's deadline to keep (handoverstart.go).
 	updateWayOf := sync.OnceValue(func() way {
-		how := updateWay(config{
-			tree:      treeDir,
-			exe:       exe,
-			version:   version.String(),
-			teamID:    ownTeamID(exe),
-			canonical: *toldCanonical,
-		})
+		asked := plan.way
+		asked.teamID = ownTeamID(exe)
+		how := updateWay(asked)
 		startupStep("worked out how this build updates")
 		if how.Refusal != "" {
 			log.Printf("fleetdeck-window: this build cannot update itself: %s", how.Refusal)
@@ -509,7 +522,7 @@ func main() {
 	// window quit while the old one still ran out of it -- is removed now, beside
 	// the start, unless an update runs or something still runs out of it
 	// (supervisor.RetireLeftover, leftoverstart.go).
-	if retiresLeftover(*handover, canonical) {
+	if plan.retiresLeftover {
 		go supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
 			supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
 			func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })
