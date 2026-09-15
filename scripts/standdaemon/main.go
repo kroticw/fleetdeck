@@ -68,14 +68,27 @@ type card struct {
 	Session, Title        string
 }
 
-// cards is the board: every stage holds something, and the titles are long.
-var cards = []card{
+// cards is the board: every stage holds something, the titles are long, and
+// done is taller than the stand's window, as the operator's is (finished).
+var cards = append([]card{
 	{File: "T-101.md", ID: "T-101", Zone: "planned", Stage: "new", Title: "Measure how long the panel takes to answer under a loaded machine before choosing its deadline"},
 	{File: "T-102.md", ID: "T-102", Zone: "urgent", Stage: "active", Progress: 60, Session: "5e55a001", Title: "fleetdeck: Liquid Glass window with native panels over the board, the v0.10.1 fixes"},
 	{File: "T-103.md", ID: "T-103", Zone: "unplanned", Stage: "active", Progress: 20, Session: "5e55a002", Title: "cruises: full review of the booking branch before the release candidate goes out"},
 	{File: "T-104.md", ID: "T-104", Zone: "planned", Stage: "review", Progress: 80, Session: "5e55a003", Title: "BS-27572: rewrite the payment reconciliation job so that it survives a restart halfway"},
 	{File: "T-105.md", ID: "T-105", Zone: "niceToHave", Stage: "blocked", Progress: 40, Session: stoppedShort, Title: "fleetdeck: release v0.10.0 and hand the checklist to the operator"},
 	{File: "T-106.md", ID: "T-106", Zone: "planned", Stage: "done", Progress: 100, Title: "Keep every branch after a merge: the operator's word on deleting them"},
+}, finished(24)...)
+
+// finished is n more done cards, numbered from T-201: a column taller than the
+// stand's window (column_test.go).
+func finished(n int) []card {
+	out := make([]card, 0, n)
+	for i := range n {
+		id := fmt.Sprintf("T-%d", 201+i)
+		out = append(out, card{File: id + ".md", ID: id, Zone: "planned", Stage: "done", Progress: 100,
+			Title: fmt.Sprintf("Finished work number %d, kept on the board with a title long enough to wrap", i+1)})
+	}
+	return out
 }
 
 // layout writes the board's cards under board and the stopped session's record
