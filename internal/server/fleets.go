@@ -11,13 +11,10 @@ import "net/http"
 // run from a panel instead of a terminal. ok says whether the fleet is there;
 // an error means the request itself was refused and nothing was made.
 //
-// What it deliberately does not do is make the new fleet servable. This panel
-// read the configuration when it started and does not read it again: one board
-// watcher per fleet, one orchestrator appointer per fleet, and the collector
-// were all built from that read (cmd/fleetdeck/main.go). Rebuilding them under
-// live requests is a change of its own, and a fleet that half-exists — in the
-// configuration, missing from the running panel — would be worse than one that
-// plainly needs a restart. The page says so, before the button and after it.
+// ok also means the fleet is served: the steps end with the running panel
+// taking the fleet in (cmd/fleetdeck/main.go, fleetMaker), and a fleet it
+// cannot take is a failed step, never a made fleet — one that is in the
+// configuration and answers 404 is what the page must not call made.
 func (d Deps) handleCreateFleet(w http.ResponseWriter, r *http.Request) {
 	if d.CreateFleet == nil {
 		unavailable(w, "making fleets")

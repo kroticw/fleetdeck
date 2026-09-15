@@ -277,8 +277,11 @@ test("making a fleet sends the name and the folder, and reports every step", asy
   ]);
 });
 
-test("a made fleet says the panel has to be restarted before it is served", async () => {
-  routes["POST /api/fleets"] = reply(200, { ok: true, steps: [{ name: "config", note: "added" }] });
+test("a made fleet is listed from the snapshot that serves it, with no restart asked for", async () => {
+  routes["POST /api/fleets"] = reply(200, {
+    ok: true,
+    steps: [{ name: "config", note: "added" }, { name: "panel", note: "fleet vpn is served now" }],
+  });
   start();
   push(snapshot(["fleetdeck"]));
   fireEvent(root.querySelector(".start-new"), "click");
@@ -286,11 +289,40 @@ test("a made fleet says the panel has to be restarted before it is served", asyn
   root.querySelector(".start-new-path").value = "~/vpn";
   fireEvent(root.querySelector(".start-new-create"), "click");
   await settle();
-  // The fleet is on disk and in the configuration, and this panel will not
-  // serve it: saying so is the whole of the honesty here, and the list below
-  // deliberately does not grow a fleet that cannot be opened.
   assert.equal(root.querySelector(".setup-status").textContent, t("start_made"));
+  assert.doesNotMatch(t("start_made"), /restart/i);
+  assert.doesNotMatch(t("start_new_text"), /restart/i);
+  // The page does not invent the entry: the panel serves the fleet, and the
+  // next snapshot names it.
   assert.deepEqual(texts(".start-fleet-name"), ["fleetdeck"]);
+  push(snapshot(["fleetdeck", "vpn"]));
+  assert.deepEqual(texts(".start-fleet-name"), ["fleetdeck", "vpn"]);
+  // What was reported stays on screen while the list grows under it.
+  assert.equal(root.querySelector(".setup-status").textContent, t("start_made"));
+});
+
+test("a fleet the panel cannot serve is not called made, and a restart is named as what brings it in", async () => {
+  routes["POST /api/fleets"] = reply(200, {
+    ok: false,
+    steps: [
+      { name: "workspace", note: "board created, docs created" },
+      { name: "config", note: "fleet vpn added" },
+      { name: "statusline", note: "kept" },
+      { name: "permissions", note: "added" },
+      { name: "panel", error: "fleet vpn is in config.yaml, but this panel cannot serve it: name taken; restart the panel to read the file again" },
+    ],
+  });
+  start();
+  push(snapshot(["fleetdeck"]));
+  fireEvent(root.querySelector(".start-new"), "click");
+  root.querySelector(".start-new-name").value = "vpn";
+  root.querySelector(".start-new-path").value = "~/vpn";
+  fireEvent(root.querySelector(".start-new-create"), "click");
+  await settle();
+  // The folder and the configuration line are there, so "was not made" and
+  // "nothing after that step was done" would both be untrue.
+  assert.equal(root.querySelector(".setup-status").textContent, t("start_not_served"));
+  assert.match(t("start_not_served"), /restart/i);
 });
 
 test("a refused step is shown with its reason and nothing is called done", async () => {
