@@ -20,11 +20,17 @@ func TestAFrameReportLineIsWhatTheStandsCheckerReads(t *testing.T) {
 	if !strings.HasPrefix(line, words) {
 		t.Fatalf("line %q, want it to start %q", line, words)
 	}
+	// scripts/ci-window-stand.sh finds the frame in full screen with the menu
+	// bar shown by these two fields side by side.
+	shown := frameReportLine(standFrameReport{FullScreen: true, MenuBarVisible: true})
+	if !strings.Contains(shown, `"fullScreen":true,"menuBarVisible":true`) {
+		t.Fatalf("line %q, want full screen and the menu bar side by side", shown)
+	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, words)), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "fullScreen", "glass", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "fullScreen", "glass", "menuBarVisible", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions", "toolbarVisible"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields %v, want %v", got, want)
 	}
 	var overlays []map[string]json.RawMessage

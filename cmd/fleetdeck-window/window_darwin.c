@@ -181,6 +181,28 @@ void fd_window_content_size(void *window, double *width, double *height) {
   *height = r.size.height;
 }
 
+// A stand's look at full screen with the menu bar shown (standfullscreen.go):
+// what a pointer at the top of the screen brings out, which a stand cannot move
+// a pointer to do.
+void fd_window_set_menu_bar_visible(int visible) {
+  ((void (*)(id, SEL, signed char))objc_msgSend)(cls("NSMenu"), sel("setMenuBarVisible:"), (signed char)(visible != 0));
+}
+
+int fd_window_menu_bar_visible(void) {
+  return ((signed char (*)(id, SEL))objc_msgSend)(cls("NSMenu"), sel("menuBarVisible")) != 0;
+}
+
+// The window's toolbar shown or hidden, and whether it is shown: 0 with none.
+void fd_window_set_toolbar_visible(void *window, int visible) {
+  id toolbar = send0((id)window, sel("toolbar"));
+  if (toolbar) ((void (*)(id, SEL, signed char))objc_msgSend)(toolbar, sel("setVisible:"), (signed char)(visible != 0));
+}
+
+int fd_window_toolbar_visible(void *window) {
+  id toolbar = send0((id)window, sel("toolbar"));
+  return toolbar && ((signed char (*)(id, SEL))objc_msgSend)(toolbar, sel("isVisible")) != 0;
+}
+
 // A stand's trip into full screen and out (standfullscreen.go): what the
 // window's green button does.
 void fd_window_toggle_fullscreen(void *window) { sendVoid1((id)window, sel("toggleFullScreen:"), (id)0); }

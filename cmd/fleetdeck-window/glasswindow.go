@@ -245,6 +245,33 @@ func (g *glassWindow) pageLoaded(surface, state string) {
 	}
 }
 
+// revealOnStand shows the menu bar in full screen a while after the window went
+// in and hides it again before the window leaves, measuring the frame with it
+// shown: what a pointer at the top of the screen brings out over the content,
+// which a stand cannot move a pointer to do. On the second trip the toolbar is
+// hidden around it, to measure the frame without it. Each step is logged and
+// the frame measured after it.
+func (g *glassWindow) revealOnStand(trip int) {
+	at := func(after time.Duration, what string, do func()) {
+		time.AfterFunc(after, func() {
+			g.w.Dispatch(func() {
+				log.Printf("fleetdeck-window: on this stand, full screen %d: %s", trip, what)
+				do()
+				g.reportFrame()
+			})
+		})
+	}
+	if trip == 2 {
+		at(standRevealToolbarOff, "the toolbar is hidden", func() { setToolbarVisible(g.w.Window(), false) })
+	}
+	at(standRevealShow, "the menu bar is shown", func() { setMenuBarVisible(true) })
+	at(standRevealMeasure, "the frame is measured with the menu bar shown", func() {})
+	at(standRevealHide, "the menu bar is hidden", func() { setMenuBarVisible(false) })
+	if trip == 2 {
+		at(standRevealToolbarOn, "the toolbar is shown again", func() { setToolbarVisible(g.w.Window(), true) })
+	}
+}
+
 func (g *glassWindow) toggleFullScreenAfter(after time.Duration) {
 	time.AfterFunc(after, func() { g.w.Dispatch(func() { toggleFullScreen(g.w.Window()) }) })
 }
@@ -300,6 +327,9 @@ func (g *glassWindow) windowChanged(kind string) {
 				}
 				log.Printf("fleetdeck-window: on this stand the window %s full screen in %v", verb, after)
 				g.toggleFullScreenAfter(after)
+				if fullscreen {
+					g.revealOnStand(g.standFS.trip())
+				}
 			}
 		}
 		g.reportFrame()

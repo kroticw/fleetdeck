@@ -154,6 +154,19 @@ func windowIsFullscreen(window unsafe.Pointer) bool { return C.fd_window_is_full
 // button does; a stand's only (standfullscreen.go).
 func toggleFullScreen(window unsafe.Pointer) { C.fd_window_toggle_fullscreen(window) }
 
+// setMenuBarVisible shows or hides the menu bar, as in full screen a pointer at
+// the top of the screen does; a stand's only (standfullscreen.go).
+func setMenuBarVisible(visible bool) { C.fd_window_set_menu_bar_visible(cBool(visible)) }
+
+func menuBarVisible() bool { return C.fd_window_menu_bar_visible() != 0 }
+
+// setToolbarVisible shows or hides window's toolbar; a stand's only.
+func setToolbarVisible(window unsafe.Pointer, visible bool) {
+	C.fd_window_set_toolbar_visible(window, cBool(visible))
+}
+
+func toolbarVisible(window unsafe.Pointer) bool { return C.fd_window_toolbar_visible(window) != 0 }
+
 // windowEvents is where word of the window changing goes: glasswindow.go.
 var windowEvents = struct {
 	sync.Mutex

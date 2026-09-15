@@ -2,11 +2,26 @@
 
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // A stand asked for full screen (standFullScreenEnv) enters it once both side
 // surfaces have loaded, leaves it once it is in, and goes in and out a second
 // time; then no more, whatever the pages do after.
+
+// The menu bar is shown, the frame measured with it and the menu bar hidden
+// again while the window is in full screen, the toolbar hidden around it on the
+// second trip, all before the window leaves.
+func TestAStandShowsTheMenuBarInFullScreenBeforeItLeaves(t *testing.T) {
+	steps := []time.Duration{standRevealToolbarOff, standRevealShow, standRevealMeasure, standRevealHide, standRevealToolbarOn, standFullScreenLeaveAfter}
+	for i := 1; i < len(steps); i++ {
+		if steps[i] <= steps[i-1] {
+			t.Fatalf("step %d at %v comes no later than step %d at %v: %v", i, steps[i], i-1, steps[i-1], steps)
+		}
+	}
+}
 
 func TestAStandNotAskedForFullScreenNeverEntersIt(t *testing.T) {
 	s := newStandFullScreen(false)
@@ -45,6 +60,9 @@ func TestAStandGoesInAndOutOfFullScreenTwiceAndNoMore(t *testing.T) {
 		after, ok := s.changed(true)
 		if !ok || after != standFullScreenLeaveAfter {
 			t.Fatalf("trip %d, in full screen: leave after %v, %v; want after %v", trip, after, ok, standFullScreenLeaveAfter)
+		}
+		if s.trip() != trip {
+			t.Fatalf("in full screen on trip %d, the stand says trip %d", trip, s.trip())
 		}
 		if _, ok := s.changed(true); ok {
 			t.Fatalf("trip %d: full screen said again asked for a change", trip)

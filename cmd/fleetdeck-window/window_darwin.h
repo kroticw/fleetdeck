@@ -32,5 +32,12 @@ void fd_window_content_size(void *window, double *width, double *height);
 int fd_window_is_fullscreen(void *window);
 // Puts window into full screen or out of it, as its green button does.
 void fd_window_toggle_fullscreen(void *window);
+// The menu bar shown or hidden, as in full screen a pointer at the top of the
+// screen shows it; whether it is shown.
+void fd_window_set_menu_bar_visible(int visible);
+int fd_window_menu_bar_visible(void);
+// window's toolbar shown or hidden; whether it is shown, 0 with no toolbar.
+void fd_window_set_toolbar_visible(void *window, int visible);
+int fd_window_toolbar_visible(void *window);
 
 #endif

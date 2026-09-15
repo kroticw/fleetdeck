@@ -43,8 +43,12 @@ type measuredOverlay struct {
 // panels, the capsule row and each capsule shown, and the tabs' border shape
 // and selected segment's shape (capsules_darwin.c).
 type standFrameReport struct {
-	Glass              string            `json:"glass"`
-	FullScreen         bool              `json:"fullScreen"`
+	Glass      string `json:"glass"`
+	FullScreen bool   `json:"fullScreen"`
+	// MenuBarVisible: the menu bar is shown, as a pointer at the top of the
+	// screen shows it in full screen; ToolbarVisible: the window's toolbar is.
+	MenuBarVisible     bool              `json:"menuBarVisible"`
+	ToolbarVisible     bool              `json:"toolbarVisible"`
 	Close              measuredBox       `json:"close"`
 	Orchestrator       measuredBox       `json:"orchestrator"`
 	Sessions           measuredBox       `json:"sessions"`
@@ -75,6 +79,8 @@ func measureFrame(f *frame, window unsafe.Pointer, mode glassMode) standFrameRep
 	out := standFrameReport{
 		Glass:              string(mode),
 		FullScreen:         windowIsFullscreen(window),
+		MenuBarVisible:     menuBarVisible(),
+		ToolbarVisible:     toolbarVisible(window),
 		Close:              boxOf(C.fd_test_window_button(window, 0)),
 		Orchestrator:       boxOf(C.fd_test_frame_of(C.fd_test_panel(f.p, 0))),
 		Sessions:           boxOf(C.fd_test_frame_of(C.fd_test_panel(f.p, 1))),

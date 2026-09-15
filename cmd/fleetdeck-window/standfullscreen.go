@@ -17,7 +17,21 @@ const (
 	// Twice: coming out of full screen must leave the frame as it was, and
 	// going in again must not bring back what the first time did not show.
 	standFullScreenTrips = 2
+
+	// While in full screen, timed from going in, before the window leaves: the
+	// menu bar shown, as a pointer at the top of the screen shows it with the
+	// title bar under it; the frame measured with it shown; the menu bar
+	// hidden again. On the second trip the toolbar is hidden for a while
+	// around that, to measure the frame without it.
+	standRevealToolbarOff = 1 * time.Second
+	standRevealShow       = 4 * time.Second
+	standRevealMeasure    = 6 * time.Second
+	standRevealHide       = 8 * time.Second
+	standRevealToolbarOn  = 10 * time.Second
 )
+
+// trip is the trip into full screen the window is on, from 1.
+func (s *standFullScreen) trip() int { return s.trips + 1 }
 
 // standFullScreen is a stand's trips into full screen and out of it: v0.10.1's
 // capsules lay over the sessions panel in full screen, which no stand had
