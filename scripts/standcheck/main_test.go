@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -81,19 +82,10 @@ func logOf(t *testing.T, reports ...any) string {
 	t.Helper()
 	var b strings.Builder
 	b.WriteString("2026/09/15 11:00:00.000000 fleetdeck-window: the panel's page says \"panel\"\n")
-	for _, r := range reports {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		switch r.(type) {
-		case frameReport:
-			b.WriteString("2026/09/15 11:00:01.000000 fleetdeck-window: the frame measures " + string(raw) + "\n")
-		case headerReport, stripReport:
-			b.WriteString("2026/09/15 11:00:01.000000 fleetdeck-window: the orchestrator surface reports its scrolling: " + string(raw) + "\n")
-		case boardReport:
-			b.WriteString("2026/09/15 11:00:01.000000 fleetdeck-window: the board reports its scrolling: " + string(raw) + "\n")
-		}
+	// A second apart, as a stand's reports are: none comes just before the
+	// next.
+	for i, r := range reports {
+		b.WriteString(logLine(t, fmt.Sprintf("11:%02d:%02d.000000", i/60, i%60), r))
 	}
 	// The terminal's report comes through the same line and says nothing of
 	// the header.
@@ -476,6 +468,57 @@ func TestABoardReportJustBeforeTheFirstFrameIsHeldToIt(t *testing.T) {
 	wrong := goodBoard(false)
 	wrong.BoardRight = 600
 	wantProblem(t, check(logOf(t, wrong, goodFrame(false), goodHeader(false)), 0), "the board ends at 600")
+}
+
+// Run 34941628912, the opaque full screen stand: coming out of full screen the
+// board reported itself 58 ms before the window measured its frame out of it,
+// and the report was held to the frame in full screen. It is the frame's out of
+// full screen.
+func TestABoardReportJustBeforeTheFrameOfTheNextPhaseIsHeldToThatFrame(t *testing.T) {
+	log := logLine(t, "11:00:01.000000", goodFrame(false)) +
+		logLine(t, "11:00:01.100000", goodBoard(false)) +
+		logLine(t, "11:00:01.200000", goodHeader(false)) +
+		logLine(t, "11:00:07.000000", goodFrame(true)) +
+		logLine(t, "11:00:07.030000", goodBoard(true)) +
+		logLine(t, "11:00:19.083000", goodBoard(false)) +
+		logLine(t, "11:00:19.141000", goodFrame(false))
+	if got := check(log, 1); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
+// logLine is the window's log line at clock for a frame, board, header or
+// strip report.
+func logLine(t *testing.T, clock string, r any) string {
+	t.Helper()
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var words string
+	switch r.(type) {
+	case frameReport:
+		words = "the frame measures "
+	case headerReport, stripReport:
+		words = "the orchestrator surface reports its scrolling: "
+	case boardReport:
+		words = "the board reports its scrolling: "
+	default:
+		t.Fatalf("no log line for %T", r)
+	}
+	return "2026/09/15 " + clock + " fleetdeck-window: " + words + string(raw) + "\n"
+}
+
+// A board report half a second before the next frame is the frame's before it,
+// whatever the next frame measures.
+func TestABoardReportLongBeforeTheNextFrameStaysWithTheFrameBeforeIt(t *testing.T) {
+	later := goodFrame(false)
+	later.Sessions.X, later.Sessions.W = 700, 292
+	log := logLine(t, "11:00:01.000000", goodFrame(false)) + logLine(t, "11:00:01.500000", goodBoard(false)) + logLine(t, "11:00:02.000000", later)
+	l, problems := parse(log)
+	if len(problems) != 0 || len(l.boards) != 1 || l.boards[0].frame != 0 {
+		t.Fatalf("boards %+v, problems %q; want the one report with the first frame", l.boards, problems)
+	}
 }
 
 func TestATitleBarClearOfTheRowWithTheMenuBarShownIsNoProblem(t *testing.T) {

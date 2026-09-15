@@ -29,6 +29,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
@@ -169,14 +170,43 @@ type stripAfter struct {
 // the board's and the orchestrator strip's, each of the last two with the frame
 // last measured before it (-1 for none).
 type standLog struct {
-	frames  []frameReport
-	headers []headerReport
-	boards  []boardAfter
-	strips  []stripAfter
+	frames []frameReport
+	// frameTimes is when the window logged each frame; zero for a line
+	// without a time.
+	frameTimes []time.Time
+	headers    []headerReport
+	boards     []boardAfter
+	strips     []stripAfter
+}
+
+// reportLead is how long before the window measures a frame the board's page
+// may report on it: the page reports on its insets as the window sends them,
+// and the window logs its frame once AppKit has laid it out. Run 34941628912
+// logged a board report 58 ms before the frame it was of.
+const reportLead = 250 * time.Millisecond
+
+// lineTime is when the window logged line, zero for a line without a time.
+func lineTime(line string) time.Time {
+	const layout = "2006/01/02 15:04:05.000000"
+	if len(line) < len(layout) {
+		return time.Time{}
+	}
+	t, err := time.Parse(layout, line[:len(layout)])
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// laidOutAnew is whether frame b lays the window out differently from frame a:
+// in or out of full screen, or either panel elsewhere.
+func laidOutAnew(a, b frameReport) bool {
+	return a.FullScreen != b.FullScreen || a.Orchestrator != b.Orchestrator || a.Sessions != b.Sessions
 }
 
 type boardAfter struct {
 	frame int
+	at    time.Time
 	boardReport
 }
 
@@ -268,6 +298,7 @@ func parse(log string) (standLog, []string) {
 	var l standLog
 	var problems []string
 	for _, line := range strings.Split(log, "\n") {
+		at := lineTime(line)
 		if i := strings.Index(line, framePrefix); i >= 0 {
 			var f frameReport
 			if err := json.Unmarshal([]byte(line[i+len(framePrefix):]), &f); err != nil {
@@ -275,6 +306,7 @@ func parse(log string) (standLog, []string) {
 				continue
 			}
 			l.frames = append(l.frames, f)
+			l.frameTimes = append(l.frameTimes, at)
 		}
 		if i := strings.Index(line, headerPrefix); i >= 0 && strings.Contains(line, `"headerRowCenter"`) {
 			var h headerReport
@@ -298,7 +330,20 @@ func parse(log string) (standLog, []string) {
 				problems = append(problems, fmt.Sprintf("a board report that is not one: %v", err))
 				continue
 			}
-			l.boards = append(l.boards, boardAfter{frame: len(l.frames) - 1, boardReport: b})
+			l.boards = append(l.boards, boardAfter{frame: len(l.frames) - 1, at: at, boardReport: b})
+		}
+	}
+	// A board report logged just before the window measured a frame that lays
+	// it out anew is that frame's: the page reports on the insets it was sent
+	// a few milliseconds before the window logs what AppKit laid out.
+	for k := range l.boards {
+		b := &l.boards[k]
+		next := b.frame + 1
+		if next >= len(l.frames) || b.at.IsZero() || l.frameTimes[next].IsZero() || l.frameTimes[next].Sub(b.at) > reportLead {
+			continue
+		}
+		if b.frame < 0 || laidOutAnew(l.frames[b.frame], l.frames[next]) {
+			b.frame = next
 		}
 	}
 	return l, problems
