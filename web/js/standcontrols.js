@@ -129,11 +129,17 @@ function worstContrast(win, el, colour) {
   return hundredth(worst);
 }
 
-// An empty field shows its placeholder, not its text: how that reads, or null
-// for a control with none showing.
-function placeholderContrast(win, el) {
-  if (!el.placeholder || el.value) return null;
-  return worstContrast(win, el, win.getComputedStyle(el, "::placeholder").color);
+// An empty field shows its placeholder, not its text: how that reads. contrast
+// is null for a control with none showing (measured null) and for a WebKit that
+// answers ::placeholder with the field's own style (measured false): macOS 27's
+// gives the placeholder's colour, the CI stand's macOS 26 gave the text's, which
+// read as the text's contrast. web/app.css gives the placeholder another colour
+// than the text, so the two are never the same where WebKit answers.
+function placeholderOf(win, el, style) {
+  if (!el.placeholder || el.value) return { contrast: null, measured: null };
+  const colour = win.getComputedStyle(el, "::placeholder").color;
+  if (colour === style.color) return { contrast: null, measured: false };
+  return { contrast: worstContrast(win, el, colour), measured: true };
 }
 
 // controlsReport is what surface's capsules in win say of themselves. A control
@@ -148,6 +154,7 @@ export function controlsReport(win, surface) {
     const style = win.getComputedStyle(el);
     const backdrop = backdropOf(style);
     const opacity = opacityOf(win, el);
+    const placeholder = placeholderOf(win, el, style);
     controls.push({
       name,
       height: tenth(box.height),
@@ -157,7 +164,8 @@ export function controlsReport(win, surface) {
       backdrop,
       floating: backdrop !== "none",
       contrast: worstContrast(win, el, style.color),
-      placeholderContrast: placeholderContrast(win, el),
+      placeholderContrast: placeholder.contrast,
+      placeholderMeasured: placeholder.measured,
       disabled: el.disabled === true,
     });
   }

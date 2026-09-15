@@ -171,6 +171,20 @@ test("an empty field says how its placeholder reads, over the same grounds as it
   assert.equal(typed.placeholderContrast, null, "a field with text shows no placeholder");
 });
 
+// #185's stand on macOS 26: the placeholder's contrast came out as the text's.
+// That WebKit answers ::placeholder with the field's own style, and a number
+// taken from it is the text's, not the placeholder's.
+test("a placeholder WebKit does not tell apart from the text is reported unmeasured, not as the text's contrast", () => {
+  const body = node();
+  const title = node({ parent: body, placeholder: "Card title", style: { backgroundColor: "rgb(255, 255, 255)", color: "rgb(26, 29, 34)", borderTopLeftRadius: "999px" } });
+  title.placeholderStyle = { color: "rgb(26, 29, 34)" };
+  const [control] = controlsReport(fakeWindow({ grounds: LIGHT, elements: { ".newcard-title": title }, body }), "board").controls;
+  assert.equal(control.placeholderContrast, null);
+  assert.equal(control.placeholderMeasured, false);
+  title.placeholderStyle = { color: "rgb(91, 100, 112)" };
+  assert.equal(controlsReport(fakeWindow({ grounds: LIGHT, elements: { ".newcard-title": title }, body }), "board").controls[0].placeholderMeasured, true);
+});
+
 // Review of #185: an element's opacity, or an ancestor's, makes its fill as
 // see-through as its colour's alpha does.
 test("opacity on a control or above it is part of how see-through it is and how its text reads", () => {
