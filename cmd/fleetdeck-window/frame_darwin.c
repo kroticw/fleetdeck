@@ -274,6 +274,19 @@ void *fd_frame_install(void *window) {
   sendVoidLong(f->window, sel("setStyleMask:"), (long)(mask | (1UL << 15)));  // full-size content view
   sendVoidBool(f->window, sel("setTitlebarAppearsTransparent:"), 1);
   sendVoidLong(f->window, sel("setTitleVisibility:"), 1);  // hidden
+  // An empty toolbar, there only for where it puts the window's buttons: a
+  // unified one centres them 26 pt from the window's top left -- the
+  // orchestrator panel's 8 pt margin and 18 pt corner -- concentric in the
+  // panel's corner, as in a floating sidebar. Without it they were centred 16 pt
+  // in, on the panel's edge (v0.10.1). With no items and the title bar
+  // transparent it draws nothing, and the content still runs the window's whole
+  // height; on a hidden macOS 27 window neither the frame nor contentMinSize
+  // moved.
+  id toolbar = ((id (*)(id, SEL, id))objc_msgSend)(send0(cls("NSToolbar"), sel("alloc")), sel("initWithIdentifier:"),
+                                                   nsstring("fleetdeck"));
+  sendVoid1(f->window, sel("setToolbar:"), toolbar);
+  sendVoid0(toolbar, sel("release"));
+  if (respondsTo(f->window, "setToolbarStyle:")) sendVoidLong(f->window, sel("setToolbarStyle:"), 3);  // unified
   ((void (*)(id, SEL, CGRect, signed char))objc_msgSend)(f->window, sel("setFrame:display:"), whole, 0);
   CGRect bounds = CGRectMake(0, 0, whole.size.width, whole.size.height);
   f->root = frameView(bounds);
@@ -402,19 +415,33 @@ void fd_frame_set_drag_band(void *frame, double height) {
 
 void *fd_frame_board(void *frame) { return ((struct fd_frame *)frame)->board; }
 
-double fd_frame_titlebar_inset(void *frame) {
-  id window = ((struct fd_frame *)frame)->window;
-  // NSWindowZoomButton, the rightmost of the three.
-  id zoom = ((id (*)(id, SEL, unsigned long))objc_msgSend)(window, sel("standardWindowButton:"), 2);
-  if (!zoom || sendBool0(zoom, sel("isHidden"))) return 0;
-  CGRect bounds = sendRect0(zoom, sel("bounds"));
-  CGRect inWindow;
+// A shown standard window button's frame in the window's base coordinates, from
+// its bottom left; 0 when the window has no such button or it is hidden.
+static int buttonInWindow(id window, unsigned long kind, CGRect *out) {
+  id button = ((id (*)(id, SEL, unsigned long))objc_msgSend)(window, sel("standardWindowButton:"), kind);
+  if (!button || sendBool0(button, sel("isHidden"))) return 0;
+  CGRect bounds = sendRect0(button, sel("bounds"));
 #if defined(__x86_64__)
-  ((void (*)(CGRect *, id, SEL, CGRect, id))objc_msgSend_stret)(&inWindow, zoom, sel("convertRect:toView:"), bounds, nil);
+  ((void (*)(CGRect *, id, SEL, CGRect, id))objc_msgSend_stret)(out, button, sel("convertRect:toView:"), bounds, nil);
 #else
-  inWindow = ((CGRect (*)(id, SEL, CGRect, id))objc_msgSend)(zoom, sel("convertRect:toView:"), bounds, nil);
+  *out = ((CGRect (*)(id, SEL, CGRect, id))objc_msgSend)(button, sel("convertRect:toView:"), bounds, nil);
 #endif
-  return inWindow.origin.x + inWindow.size.width;
+  return 1;
+}
+
+double fd_frame_titlebar_inset(void *frame) {
+  CGRect zoom;
+  // NSWindowZoomButton, the rightmost of the three.
+  if (!buttonInWindow(((struct fd_frame *)frame)->window, 2, &zoom)) return 0;
+  return zoom.origin.x + zoom.size.width;
+}
+
+double fd_frame_titlebar_center(void *frame) {
+  id window = ((struct fd_frame *)frame)->window;
+  CGRect close;
+  // NSWindowCloseButton: the three share their line.
+  if (!buttonInWindow(window, 0, &close)) return 0;
+  return sendRect0(window, sel("frame")).size.height - (close.origin.y + close.size.height / 2);
 }
 
 int fd_glass_available(void) { return cls("NSGlassEffectView") != (id)0; }
@@ -447,6 +474,45 @@ int fd_frame_board_observed(void *frame) { return ((struct fd_frame *)frame)->bo
 // The layout pass AppKit runs on a window before its next frame on screen.
 void fd_test_layout_window(void *window) {
   sendVoid0(send0((id)window, sel("contentView")), sel("layoutSubtreeIfNeeded"));
+}
+
+// A standard window button's frame -- kind 0 close, 1 minimize, 2 zoom -- in the
+// window's coordinates from its top left; all zero when there is none.
+fd_rect fd_test_window_button(void *window, int kind) {
+  id b = ((id (*)(id, SEL, unsigned long))objc_msgSend)((id)window, sel("standardWindowButton:"), (unsigned long)kind);
+  if (!b) return (fd_rect){0, 0, 0, 0};
+  fd_test_layout_window(window);
+  CGRect bounds = sendRect0(b, sel("bounds"));
+  CGRect r;
+#if defined(__x86_64__)
+  ((void (*)(CGRect *, id, SEL, CGRect, id))objc_msgSend_stret)(&r, b, sel("convertRect:toView:"), bounds, nil);
+#else
+  r = ((CGRect (*)(id, SEL, CGRect, id))objc_msgSend)(b, sel("convertRect:toView:"), bounds, nil);
+#endif
+  double height = sendRect0((id)window, sel("frame")).size.height;
+  return (fd_rect){r.origin.x, height - r.origin.y - r.size.height, r.size.width, r.size.height};
+}
+
+// The window's toolbar: how many items it has, -1 with no toolbar.
+long fd_test_toolbar_items(void *window) {
+  id toolbar = send0((id)window, sel("toolbar"));
+  return toolbar ? sendLong0(send0(toolbar, sel("items")), sel("count")) : -1;
+}
+
+long fd_test_toolbar_style(void *window) { return sendLong0((id)window, sel("toolbarStyle")); }
+int fd_test_titlebar_transparent(void *window) { return sendBool0((id)window, sel("titlebarAppearsTransparent")) != 0; }
+
+// Whether a click at (x, y), from the window's top left, lands on view or inside
+// it, hit-tested the way the window routes a mouse down: from the view that
+// holds the content view and the title bar, so the title bar and its toolbar
+// get the click where they are over the content.
+int fd_test_window_hit_within(void *window, double x, double y, void *view) {
+  id theme = send0(send0((id)window, sel("contentView")), sel("superview"));
+  if (!theme) return 0;
+  fd_test_layout_window(window);
+  double height = sendRect0((id)window, sel("frame")).size.height;
+  id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(theme, sel("hitTest:"), CGPointMake(x, height - y));
+  return hit && ((signed char (*)(id, SEL, id))objc_msgSend)(hit, sel("isDescendantOf:"), (id)view) != 0;
 }
 
 // A window that counts what the band asks of it instead of doing it: a real

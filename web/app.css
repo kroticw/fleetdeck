@@ -3564,6 +3564,16 @@ body.is-resizing {
   padding-left: calc(var(--gap) * 2);
 }
 
+/* The header's row on the line the title bar's buttons are centred on: the
+   window sends that line from the panel's top, and the header is twice as tall
+   with no padding above or below it. In v0.10.1 the brand and the fleet picker
+   sat lower than the buttons. In full screen there are no buttons, and the
+   header keeps its padding. */
+:root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) #header {
+  padding-block: 0;
+  min-height: calc(var(--host-titlebar-center) * 2);
+}
+
 /* The terminal is the island's lower part, edge to edge, and not a rounded box
    with margins inside it. Its ground stays dense: a terminal over glass is read
    in both themes. The island's own corners round its bottom. */

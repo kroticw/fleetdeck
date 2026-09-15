@@ -310,8 +310,12 @@ if (host) {
       else delete column.dataset.folded;
     },
     focusTerminal: () => document.querySelector("#orchestrator .xterm-helper-textarea")?.focus(),
-    setTitlebarInset: (inset) => {
+    setTitlebar: ({ inset, center }) => {
       page.style.setProperty("--host-inset-titlebar", `${Number(inset) || 0}px`);
+      const line = Number(center) || 0;
+      page.style.setProperty("--host-titlebar-center", `${line}px`);
+      if (line > 0) page.dataset.titlebar = "1";
+      else delete page.dataset.titlebar;
     },
     setFullscreen: (on) => {
       if (on) page.dataset.fullscreen = "1";

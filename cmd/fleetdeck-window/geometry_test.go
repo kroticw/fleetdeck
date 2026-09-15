@@ -12,7 +12,9 @@ func TestTheDefaultLayoutMatchesTheChosenDesign(t *testing.T) {
 	want := geometry{
 		Orchestrator: rect{X: 8, Y: 8, W: 368, H: 966},
 		Sessions:     rect{X: 1156, Y: 8, W: 348, H: 966},
-		Capsules:     rect{X: 386, Y: 12, W: 758, H: 32},
+		// Centred 26 from the top, on the line of the window's buttons and of
+		// both panels' head rows.
+		Capsules: rect{X: 386, Y: 10, W: 758, H: 32},
 		// The board runs on under the sessions glass; a card, a session or a
 		// document opens clear of the panel and its margin.
 		Board: insets{Top: 64, Left: 394, Right: 0, ContentRight: 356},

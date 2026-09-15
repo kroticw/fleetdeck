@@ -8,7 +8,7 @@ import "math"
 // points, with the origin at the window's top left.
 const (
 	panelMargin     = 8.0
-	capsuleTop      = 12.0
+	capsuleTop      = 10.0 // centred 26 down, on the window's buttons' line
 	capsuleHeight   = 32.0
 	capsuleGapLeft  = 10.0
 	capsuleGapRight = 12.0

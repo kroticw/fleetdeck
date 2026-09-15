@@ -7,10 +7,12 @@ import (
 	"testing"
 )
 
-// The title bar's buttons float over the orchestrator panel's top corner. The
+// The title bar's buttons sit in the orchestrator panel's top corner. The
 // orchestrator's surface is told how far into it they reach, so its header
-// starts past them; the window measures the zoom button's right edge
-// (frame.titlebarInset) and the controller turns it into the surface's inset.
+// starts past them, and the line they are centred on, so its header row is
+// centred on it too; the window measures the zoom button's right edge and the
+// buttons' centre (frame.titlebarInset, frame.titlebarCenter) and the
+// controller turns them into the surface's coordinates.
 
 func titlebarMessages(effects []effect) []map[string]any {
 	var out []map[string]any
@@ -25,13 +27,13 @@ func titlebarMessages(effects []effect) []map[string]any {
 	return out
 }
 
-func TestTheOrchestratorSurfaceLearnsWhereTheTitleBarButtonsEndWhenItLoads(t *testing.T) {
+func TestTheOrchestratorSurfaceLearnsWhereTheTitleBarButtonsAreWhenItLoads(t *testing.T) {
 	c := started()
 	c.layout(1, "panel", "work")
-	if got := titlebarMessages(c.titlebarInset(76)); len(got) != 0 {
+	if got := titlebarMessages(c.titlebarButtons(79, 26)); len(got) != 0 {
 		t.Fatalf("before the surface loaded: %v, want nothing sent", got)
 	}
-	want := []map[string]any{{"type": "titlebar", "inset": 76 - panelMargin + titlebarGap}}
+	want := []map[string]any{{"type": "titlebar", "inset": 79 - panelMargin + titlebarGap, "center": 26 - panelMargin}}
 	if got := titlebarMessages(c.pageLoaded("orchestrator", "panel")); !reflect.DeepEqual(got, want) {
 		t.Fatalf("on the orchestrator's load: %v, want %v", got, want)
 	}
@@ -40,17 +42,21 @@ func TestTheOrchestratorSurfaceLearnsWhereTheTitleBarButtonsEndWhenItLoads(t *te
 	}
 }
 
-func TestTheOrchestratorSurfaceHearsOfTheTitleBarAgainOnlyWhenItMoves(t *testing.T) {
+func TestTheOrchestratorSurfaceHearsOfTheTitleBarAgainOnlyWhenItsButtonsMove(t *testing.T) {
 	c := loadedFrame()
-	if got := titlebarMessages(c.titlebarInset(76)); len(got) != 1 {
+	if got := titlebarMessages(c.titlebarButtons(79, 26)); len(got) != 1 {
 		t.Fatalf("the first measure after load: %v, want one message", got)
 	}
-	if got := titlebarMessages(c.titlebarInset(76)); len(got) != 0 {
+	if got := titlebarMessages(c.titlebarButtons(79, 26)); len(got) != 0 {
 		t.Fatalf("the same measure again: %v, want nothing", got)
 	}
-	want := []map[string]any{{"type": "titlebar", "inset": 90 - panelMargin + titlebarGap}}
-	if got := titlebarMessages(c.titlebarInset(90)); !reflect.DeepEqual(got, want) {
-		t.Fatalf("a moved button: %v, want %v", got, want)
+	want := []map[string]any{{"type": "titlebar", "inset": 79 - panelMargin + titlebarGap, "center": 20 - panelMargin}}
+	if got := titlebarMessages(c.titlebarButtons(79, 20)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("buttons moved down the title bar: %v, want %v", got, want)
+	}
+	want = []map[string]any{{"type": "titlebar", "inset": 90 - panelMargin + titlebarGap, "center": 20 - panelMargin}}
+	if got := titlebarMessages(c.titlebarButtons(90, 20)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("buttons moved along it: %v, want %v", got, want)
 	}
 }
 
@@ -64,12 +70,12 @@ func TestTheZoomButtonEndsInsideTheOrchestratorPanel(t *testing.T) {
 }
 
 // No buttons -- a window without a title bar, or one whose buttons are hidden
-// -- is no inset: the header keeps its own padding.
-func TestNoTitleBarButtonsIsNoInset(t *testing.T) {
+// -- is no inset and no line: the header keeps its own padding.
+func TestNoTitleBarButtonsIsNoInsetAndNoLine(t *testing.T) {
 	c := loadedFrame()
-	c.titlebarInset(76)
-	want := []map[string]any{{"type": "titlebar", "inset": 0.0}}
-	if got := titlebarMessages(c.titlebarInset(0)); !reflect.DeepEqual(got, want) {
+	c.titlebarButtons(79, 26)
+	want := []map[string]any{{"type": "titlebar", "inset": 0.0, "center": 0.0}}
+	if got := titlebarMessages(c.titlebarButtons(0, 0)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("buttons gone: %v, want %v", got, want)
 	}
 }
