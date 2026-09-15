@@ -555,10 +555,13 @@ test("on the board the box that scrolls is the room between the panels", () => {
 
 // A trackpad or a wheel over the open room scrolls the board sideways as it
 // did: the surface leaves the base rule's overflow-x alone and takes no input
-// away from the box.
+// away from the box. Down its height the box does not scroll at all, its
+// columns do (web/tests/board-columns-css.test.js).
 test("on the board the box still scrolls sideways under a trackpad or a wheel", () => {
   const board = ruleBody(':root[data-surface="board"] #board');
-  assert.doesNotMatch(board, /overflow/);
+  // Any overflow property but overflow-y: overflow, overflow-x, overflow-inline
+  // and overflow-block all reach the sideways scrolling.
+  assert.doesNotMatch(board, /overflow(?!-y\s*:)[a-z-]*\s*:/);
   assert.doesNotMatch(board, /pointer-events/);
   assert.doesNotMatch(board, /touch-action/);
 });
