@@ -184,6 +184,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/capsules.js":       true,
 		"js/topband.js":        true,
 		"js/standreport.js":    true,
+		"js/standheader.js":    true,
 		"vendor/xterm.js":      true,
 		"vendor/xterm.css":     true,
 		"vendor/LICENSE.xterm": true,
