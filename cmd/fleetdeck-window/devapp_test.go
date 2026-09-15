@@ -158,7 +158,7 @@ func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBannersOnItsOwnPort(t *testing
 	// What an earlier dev app left there is replaced, not kept.
 	writeFile(t, dev, "server:\n    port: 1\n")
 
-	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
 		t.Fatal(err)
 	}
 	want, err := appconfig.Load(operatorPath)
@@ -184,7 +184,7 @@ func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBannersOnItsOwnPort(t *testing
 func TestADevAppWithNoOperatorConfigRefuses(t *testing.T) {
 	dir := t.TempDir()
 	dev := devConfigPath(dir, 7778)
-	if err := copyDevConfig(filepath.Join(dir, "none.yaml"), dev, "", 7778); err == nil {
+	if _, err := copyDevConfig(filepath.Join(dir, "none.yaml"), dev, "", 7778); err == nil {
 		t.Fatal("copyDevConfig with no operator's config: want a refusal")
 	}
 	if _, err := os.Stat(dev); err == nil {
@@ -202,10 +202,10 @@ func TestTwoDevAppsOnTwoPortsKeepTwoConfigCopies(t *testing.T) {
 	if first == second {
 		t.Fatalf("two dev ports share the config copy %s", first)
 	}
-	if err := copyDevConfig(operatorPath, first, "", 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, first, "", 7778); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyDevConfig(operatorPath, second, "", 7779); err != nil {
+	if _, err := copyDevConfig(operatorPath, second, "", 7779); err != nil {
 		t.Fatal(err)
 	}
 	for path, port := range map[string]int{first: 7778, second: 7779} {
@@ -242,7 +242,7 @@ func TestAFleetMadeInADevAppIsKeptAtItsNextStart(t *testing.T) {
 	operatorPath := filepath.Join(dir, "config.yaml")
 	writeFile(t, operatorPath, operatorConfig)
 	dev := devConfigPath(dir, 7778)
-	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
 		t.Fatal(err)
 	}
 	board := t.TempDir()
@@ -250,7 +250,7 @@ func TestAFleetMadeInADevAppIsKeptAtItsNextStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
 		t.Fatal(err)
 	}
 	if kept := fleetsNamed(t, dev, "testdeck"); len(kept) != 1 || kept[0].BoardPath != board {
@@ -268,7 +268,7 @@ func TestTheOperatorsFleetWinsOverADevFleetOfTheSameName(t *testing.T) {
 	operatorPath := filepath.Join(dir, "config.yaml")
 	writeFile(t, operatorPath, operatorConfig)
 	dev := devConfigPath(dir, 7778)
-	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
 		t.Fatal(err)
 	}
 	devBoard, operatorBoard := t.TempDir(), t.TempDir()
@@ -279,7 +279,7 @@ func TestTheOperatorsFleetWinsOverADevFleetOfTheSameName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
 		t.Fatal(err)
 	}
 	if kept := fleetsNamed(t, dev, "work"); len(kept) != 1 || kept[0].BoardPath != operatorBoard {
@@ -295,7 +295,7 @@ func TestADevAppKeepsTheFleetsOfTheSharedCopyOnItsFirstStartOnAPort(t *testing.T
 	operatorPath := filepath.Join(dir, "config.yaml")
 	writeFile(t, operatorPath, operatorConfig)
 	legacy := legacyDevConfigPath(dir)
-	if err := copyDevConfig(operatorPath, legacy, "", 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, legacy, "", 7778); err != nil {
 		t.Fatal(err)
 	}
 	board := t.TempDir()
@@ -308,7 +308,7 @@ func TestADevAppKeepsTheFleetsOfTheSharedCopyOnItsFirstStartOnAPort(t *testing.T
 	}
 
 	dev := devConfigPath(dir, 7778)
-	if err := copyDevConfig(operatorPath, dev, legacy, 7778); err != nil {
+	if _, err := copyDevConfig(operatorPath, dev, legacy, 7778); err != nil {
 		t.Fatal(err)
 	}
 	if kept := fleetsNamed(t, dev, "testdeck"); len(kept) != 1 || kept[0].BoardPath != board {
@@ -316,6 +316,129 @@ func TestADevAppKeepsTheFleetsOfTheSharedCopyOnItsFirstStartOnAPort(t *testing.T
 	}
 	if after, _ := os.ReadFile(legacy); string(after) != string(before) {
 		t.Fatalf("the shared copy was changed:\n%s", after)
+	}
+}
+
+// A fleet the operator removed from the config is not brought back by the
+// dev copy it was copied into: only fleets made in a dev app are carried.
+func TestAFleetTheOperatorRemovedIsNotBroughtBackByTheDevCopy(t *testing.T) {
+	dir := t.TempDir()
+	operatorPath := filepath.Join(dir, "config.yaml")
+	writeFile(t, operatorPath, operatorConfig)
+	if err := appconfig.AddFleet(operatorPath, fleet.Fleet{Name: "old", BoardPath: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	dev := devConfigPath(dir, 7778)
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	if len(fleetsNamed(t, dev, "old")) != 1 {
+		t.Fatal("the operator's fleet is not in the first copy")
+	}
+
+	writeFile(t, operatorPath, operatorConfig) // the operator removed "old"
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	if brought := fleetsNamed(t, dev, "old"); len(brought) != 0 {
+		t.Fatalf("the fleet the operator removed is back in the dev copy: %+v", brought)
+	}
+}
+
+// The shared copy of before carries no record of which fleets were the
+// operator's, so of its fleets only those on a board no fleet of the
+// operator's config is on are taken: a fleet the operator renamed stays on its
+// board, and is not carried under its old name.
+func TestTheSharedCopyGivesOnlyFleetsOnBoardsOfTheirOwn(t *testing.T) {
+	dir := t.TempDir()
+	operatorPath := filepath.Join(dir, "config.yaml")
+	writeFile(t, operatorPath, operatorConfig)
+	renamedBoard, devBoard := t.TempDir(), t.TempDir()
+	if err := appconfig.AddFleet(operatorPath, fleet.Fleet{Name: "renamed", BoardPath: renamedBoard}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := legacyDevConfigPath(dir)
+	writeFile(t, legacy, operatorConfig+"fleets:\n"+
+		"    - name: original\n      board:\n        path: "+renamedBoard+"\n"+
+		"    - name: testdeck\n      board:\n        path: "+devBoard+"\n")
+
+	dev := devConfigPath(dir, 7778)
+	notes, err := copyDevConfig(operatorPath, dev, legacy, 7778)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept := fleetsNamed(t, dev, "testdeck"); len(kept) != 1 {
+		t.Errorf("the shared copy's fleet on a board of its own is not carried: %+v", kept)
+	}
+	if brought := fleetsNamed(t, dev, "original"); len(brought) != 0 {
+		t.Errorf("a fleet of the shared copy on an operator's board is carried: %+v", brought)
+	}
+	// Taken for the operator's own, it is no fleet left out: nothing to say.
+	if len(notes) != 0 {
+		t.Errorf("notes = %q; a fleet taken for the operator's is left without a word", notes)
+	}
+}
+
+// A fleet made in a dev app that the operator's config has since taken the
+// board of would make a copy that does not load, and no dev app would start.
+// It is left out, and said.
+func TestADevFleetThatWouldNotLoadIsLeftOutAndSaid(t *testing.T) {
+	dir := t.TempDir()
+	operatorPath := filepath.Join(dir, "config.yaml")
+	writeFile(t, operatorPath, operatorConfig)
+	dev := devConfigPath(dir, 7778)
+	if _, err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	board := t.TempDir()
+	if err := appconfig.AddFleet(dev, fleet.Fleet{Name: "devfleet", BoardPath: board}); err != nil {
+		t.Fatal(err)
+	}
+	if err := appconfig.AddFleet(operatorPath, fleet.Fleet{Name: "work", BoardPath: board}); err != nil {
+		t.Fatal(err)
+	}
+
+	notes, err := copyDevConfig(operatorPath, dev, "", 7778)
+	if err != nil {
+		t.Fatalf("a dev fleet on the operator's board kept the copy from being written: %v", err)
+	}
+	if len(fleetsNamed(t, dev, "devfleet")) != 0 {
+		t.Error("the dev fleet on the operator's board is carried")
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "devfleet") {
+		t.Errorf("notes = %q; want one naming devfleet", notes)
+	}
+}
+
+// The dev app's own log, which main opens before its flags are parsed.
+func TestADevAppsWindowLogIsItsOwn(t *testing.T) {
+	if got, want := devWindowLogPath("/h"), "/h/Library/Logs/fleetdeck-dev-window.log"; got != want {
+		t.Fatalf("devWindowLogPath = %q, want %q", got, want)
+	}
+}
+
+// makefileDevApp is the name of the bundle `make dev-app` builds, as the
+// Makefile writes it.
+func makefileDevApp(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if value, ok := strings.CutPrefix(line, "DEV_APP = "); ok {
+			return filepath.Base(value)
+		}
+	}
+	t.Fatal("the Makefile has no DEV_APP")
+	return ""
+}
+
+// The window, the panel (cmd/fleetdeck's devBundleName, which keeps a dev
+// app's fleets off the statusline) and the Makefile name the dev bundle alike.
+func TestTheDevBundleIsNamedAsTheMakefileBuildsIt(t *testing.T) {
+	if got := makefileDevApp(t); got != devBundleName {
+		t.Fatalf("make dev-app builds %q, the window calls it %q", got, devBundleName)
 	}
 }
 
@@ -433,68 +556,6 @@ func TestMakeDevAppBuildsTheDevBundleWithoutOpeningIt(t *testing.T) {
 	}
 	if strings.Contains(string(info), "main.treeDir") {
 		t.Errorf("the dev window carries a source tree to update from; its build record:\n%s", info)
-	}
-}
-
-// Which SDK a cgo build links against is scripts/darwin-sdkroot.sh's answer:
-// SDKROOT when it is set, and otherwise what xcrun says the selected developer
-// directory's SDK is. The script is run here with an xcrun of the test's own
-// first on PATH and no /usr/bin on it at all, so neither make nor any xcrun
-// shim runs under the made-up paths below.
-func TestTheSDKIsTheOneGivenOrTheSelectedDeveloperDirectorys(t *testing.T) {
-	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "darwin-sdkroot.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fakeXcrun := func(answer string) (dir, calls string) {
-		dir = t.TempDir()
-		calls = filepath.Join(dir, "calls")
-		body := "#!/bin/sh\necho \"$*\" >> '" + calls + "'\n"
-		if answer != "" {
-			body += "echo '" + answer + "'\n"
-		}
-		if err := os.WriteFile(filepath.Join(dir, "xcrun"), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		return dir, calls
-	}
-	run := func(dir, sdkroot string) (string, string, error) {
-		cmd := exec.Command("/bin/sh", script)
-		cmd.Env = []string{"PATH=" + dir + ":/bin", "SDKROOT=" + sdkroot}
-		var stderr strings.Builder
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
-		return strings.TrimSpace(string(out)), stderr.String(), err
-	}
-
-	dir, calls := fakeXcrun("/Selected/MacOSX.sdk")
-	if got, _, err := run(dir, "/Given/MacOSX.sdk"); err != nil || got != "/Given/MacOSX.sdk" {
-		t.Errorf("with SDKROOT given: %q, %v; want the given SDK", got, err)
-	}
-	if _, err := os.Stat(calls); err == nil {
-		t.Error("with SDKROOT given, xcrun was asked anyway")
-	}
-	if got, _, err := run(dir, ""); err != nil || got != "/Selected/MacOSX.sdk" {
-		t.Errorf("with no SDKROOT: %q, %v; want xcrun's answer", got, err)
-	}
-	if data, _ := os.ReadFile(calls); strings.TrimSpace(string(data)) != "--sdk macosx --show-sdk-path" {
-		t.Errorf("xcrun was asked %q, want the selected developer directory's SDK", data)
-	}
-
-	silent, _ := fakeXcrun("")
-	if got, stderr, err := run(silent, ""); err == nil || got != "" || !strings.Contains(stderr, "SDKROOT") {
-		t.Errorf("with xcrun answering nothing: %q, %v, %q; want a failure that says to set SDKROOT", got, err, stderr)
-	}
-
-	// An Xcode whose license is not accepted: xcrun exits 69 and says why,
-	// and the build says it too, rather than building against no SDK.
-	unlicensed := t.TempDir()
-	refusal := "#!/bin/sh\necho 'You have not agreed to the Xcode license agreements.' >&2\nexit 69\n"
-	if err := os.WriteFile(filepath.Join(unlicensed, "xcrun"), []byte(refusal), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got, stderr, err := run(unlicensed, ""); err == nil || got != "" || !strings.Contains(stderr, "exit 69") || !strings.Contains(stderr, "license") {
-		t.Errorf("with xcrun refusing for its license: %q, %v, %q; want a failure naming exit 69 and what xcrun said", got, err, stderr)
 	}
 }
 

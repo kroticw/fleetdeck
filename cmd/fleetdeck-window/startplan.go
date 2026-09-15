@@ -3,7 +3,6 @@
 package main
 
 import (
-	"path/filepath"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/supervisor"
@@ -41,11 +40,8 @@ type startPlan struct {
 	// keeper keeps the window's panel; OnEvent is main's to set. nil when the
 	// start is refused.
 	keeper *supervisor.Keeper
-	// windowLog is where a dev app's window writes its own log, as well as to
-	// stderr: opened from Finder or the Dock, its stderr goes nowhere anyone
-	// reads. Set before anything can refuse the start, so a refusal is written
-	// there too; empty for any other window.
-	windowLog string
+	// notes are for the window's log: what the dev app's config copy left out.
+	notes []string
 	// widthsSuite is where the panels' widths are kept (standwidths.go).
 	widthsSuite string
 	// title is the window's title and the app menu's name.
@@ -65,9 +61,6 @@ type startPlan struct {
 // start is not refused.
 func planStart(in startInput) (startPlan, error) {
 	var plan startPlan
-	if in.dev {
-		plan.windowLog = filepath.Join(in.home, "Library", "Logs", "fleetdeck-dev-window.log")
-	}
 	port, err := panelPort(in.url)
 	if err != nil {
 		return plan, err
@@ -81,9 +74,11 @@ func planStart(in startInput) (startPlan, error) {
 			return plan, err
 		}
 		panelConfig = devConfigPath(in.home, port)
-		if err := copyDevConfig(in.operatorConfig, panelConfig, legacyDevConfigPath(in.home), port); err != nil {
+		notes, err := copyDevConfig(in.operatorConfig, panelConfig, legacyDevConfigPath(in.home), port)
+		if err != nil {
 			return plan, err
 		}
+		plan.notes = notes
 	}
 	plan.canonical = canonicalBundle(in.exe, in.canonical)
 	plan.keeper = &supervisor.Keeper{

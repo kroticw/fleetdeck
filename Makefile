@@ -65,8 +65,9 @@ MACOS_MIN_VERSION := $(shell plutil -extract LSMinimumSystemVersion raw cmd/flee
 # arm64e.x1. On a runner with one toolchain both answers are the same SDK.
 # scripts/darwin-sdkroot.sh makes the choice, so it can be tested without make.
 # Recursive, so it runs only for a target that builds against it, and never off
-# darwin.
-DARWIN_SDKROOT = $(shell SDKROOT="$(SDKROOT)" scripts/darwin-sdkroot.sh)
+# darwin; and asked once, the answer kept, so what it says when it names no SDK
+# is said once.
+DARWIN_SDKROOT = $(eval DARWIN_SDKROOT := $(shell SDKROOT="$(SDKROOT)" scripts/darwin-sdkroot.sh))$(DARWIN_SDKROOT)
 endif
 DARWIN_SDK_ENV = $(if $(DARWIN_SDKROOT),SDKROOT="$(DARWIN_SDKROOT)")
 
@@ -80,7 +81,7 @@ DARWIN_SDK_ENV = $(if $(DARWIN_SDKROOT),SDKROOT="$(DARWIN_SDKROOT)")
 # own default for each variable, which setting it replaces. The Go linker writes
 # 13.0 into the binaries it links on its own and takes no flag for it, which is
 # where the panel's minimum comes from.
-DARWIN_CGO_ENV = $(if $(MACOS_MIN_VERSION),,$(error cannot read LSMinimumSystemVersion from cmd/fleetdeck-window/Info.plist))$(if $(DARWIN_SDKROOT),,$(error cannot find a macOS SDK: xcrun --sdk macosx --show-sdk-path answered nothing; install Xcode or the Command Line Tools, or set SDKROOT))$(DARWIN_SDK_ENV) CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_CXXFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)"
+DARWIN_CGO_ENV = $(if $(MACOS_MIN_VERSION),,$(error cannot read LSMinimumSystemVersion from cmd/fleetdeck-window/Info.plist))$(if $(DARWIN_SDKROOT),,$(error cannot find a macOS SDK: scripts/darwin-sdkroot.sh named none, and said why above; set SDKROOT to build against one))$(DARWIN_SDK_ENV) CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_CXXFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)"
 
 ifeq ($(strip $(BIN_NAMES)),)
 $(error no command directories found under cmd/: there is nothing to build)

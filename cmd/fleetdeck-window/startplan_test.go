@@ -53,7 +53,6 @@ func TestTheInstalledAppsStartIsTheAppsOwn(t *testing.T) {
 		"panel binary": {k.Bin, panelBinary(installedExe)},
 		"stops only":   {k.StopsOnly, ""},
 		"panel log":    {k.LogPath, filepath.Join(home, "Library", "Logs", "fleetdeck.log")},
-		"window log":   {plan.windowLog, ""},
 		"widths suite": {plan.widthsSuite, ""},
 		"title":        {plan.title, "fleetdeck"},
 	})
@@ -93,7 +92,6 @@ func TestADevAppsStartKeepsOffTheInstalledApp(t *testing.T) {
 		"keeper args":  {strings.Join(k.Args, " "), "--owner-pid 4242 --port 7778 --config " + devConfig},
 		"stops only":   {k.StopsOnly, panelBinary(exe)},
 		"panel log":    {k.LogPath, filepath.Join(home, "Library", "Logs", "fleetdeck-dev.log")},
-		"window log":   {plan.windowLog, filepath.Join(home, "Library", "Logs", "fleetdeck-dev-window.log")},
 		"widths suite": {plan.widthsSuite, devWidthsSuite},
 		"title":        {plan.title, "fleetdeck dev"},
 	})
@@ -115,10 +113,10 @@ func TestADevAppsStartKeepsOffTheInstalledApp(t *testing.T) {
 	}
 }
 
-// A refused dev app says why in its own log, which it knows before it refuses:
-// opened from Finder its output goes nowhere else. It makes no keeper and
-// writes no config copy.
-func TestADevAppRefusesToStartAndStillNamesItsLog(t *testing.T) {
+// A refused dev app makes no keeper and writes no config copy. Why it refused
+// goes to its own log, which main opens before anything else
+// (openDevWindowLog).
+func TestADevAppRefusesToStart(t *testing.T) {
 	home := t.TempDir()
 	operatorPath := filepath.Join(home, "config.yaml")
 	writeFile(t, operatorPath, operatorConfig) // server.port 7801
@@ -133,9 +131,6 @@ func TestADevAppRefusesToStartAndStillNamesItsLog(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: the dev app started", name)
 			continue
-		}
-		if want := filepath.Join(home, "Library", "Logs", "fleetdeck-dev-window.log"); plan.windowLog != want {
-			t.Errorf("%s: window log = %q, want %q", name, plan.windowLog, want)
 		}
 		if plan.keeper != nil {
 			t.Errorf("%s: a keeper was made for a refused start", name)

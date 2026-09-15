@@ -64,7 +64,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"sync"
@@ -105,7 +104,14 @@ func reloadBinding(dispatch func(func()), navigate func(string), url string) fun
 }
 
 func main() {
-	url := flag.String("url", startURL(isDevBuild(), devURL), "URL the panel answers on")
+	// Whether this is a dev app is the build's to say, and is needed before the
+	// plan is made: the dev app's own log is opened, and -url's default chosen,
+	// before the flags are parsed.
+	dev := isDevBuild()
+	if dev {
+		openDevWindowLog()
+	}
+	url := flag.String("url", startURL(dev, devURL), "URL the panel answers on")
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	toldHandoverTimeout := flag.Duration(handoverTimeoutFlag, 0, "set by an update: how long the window that started this one gives the handover, from this window's start")
@@ -144,7 +150,7 @@ func main() {
 	// (startplan.go). A dev app keeps off everything of the installed app's
 	// but the fleet daemon and the board (devapp.go).
 	plan, err := planStart(startInput{
-		dev:            isDevBuild(),
+		dev:            dev,
 		url:            *url,
 		exe:            exe,
 		home:           home,
@@ -156,20 +162,14 @@ func main() {
 		startTimeout:   stand.startTimeout(),
 		env:            os.Environ(),
 	})
-	// A dev app's own log, before its start can be refused: opened from Finder
-	// or the Dock, its stderr goes nowhere anyone reads.
-	if plan.windowLog != "" {
-		if f, logErr := os.OpenFile(plan.windowLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); logErr == nil {
-			log.SetOutput(io.MultiWriter(os.Stderr, f))
-		} else {
-			log.Printf("fleetdeck-window: the dev app's log %s cannot be opened: %v", plan.windowLog, logErr)
-		}
-	}
 	if err != nil {
 		log.Fatalf("fleetdeck-window: %v", err)
 	}
 	if plan.way.dev {
 		log.Printf("fleetdeck-window: a dev app on %s; its panel is started with %q", *url, plan.keeper.Args)
+	}
+	for _, note := range plan.notes {
+		log.Printf("fleetdeck-window: %s", note)
 	}
 	// A stand's and a dev app's panel widths stay out of the operator's app's
 	// defaults.
