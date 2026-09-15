@@ -6,7 +6,7 @@
 // All set -- and installs it on the already-running NSApplication. Safe to
 // call any time after webview.New() returns: by then the app has already
 // finished launching (see main.go).
-void fleetdeck_install_menu(void);
+void fleetdeck_install_menu(const char *appName);
 
 // fleetdeck_install_close_to_hide replaces window's delegate so the close
 // button hides the window instead of destroying it, and NSApp's delegate so

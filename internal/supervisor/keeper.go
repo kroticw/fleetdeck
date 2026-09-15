@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -163,6 +164,15 @@ type Keeper struct {
 	// keeper does not, such as a launch agent that would start it again.
 	MayReplace func(PanelBuild) bool
 
+	// StopsOnly, when set, is the one binary whose processes this keeper may
+	// stop: a dev app's own panel binary. Before anything on the port is
+	// signalled, the binary of the process listening there -- the kernel's
+	// answer, not the panel's -- must be this path; otherwise nothing is
+	// stopped, and the keeper says whose the port is (Event.Detail). A dev app
+	// runs beside the installed app and beside dev apps built in other trees,
+	// under one identifier and one port, and none of theirs is its to stop.
+	StopsOnly string
+
 	// OnEvent is called from Run's goroutine.
 	OnEvent func(Event)
 
@@ -255,20 +265,30 @@ func (k *Keeper) forgetReplace() {
 // Run keeps a panel answering at URL until ctx ends.
 func (k *Keeper) Run(ctx context.Context) {
 	k.init()
+	// refused is why a stop was not made (stoppable), said with the next
+	// Answering.
+	refused := ""
 	for ctx.Err() == nil {
 		if answers(ctx, k.URL) {
 			holder, why, replace := k.replaceable(ctx)
+			pid := 0
+			if replace {
+				if pid, refused = k.stoppable(ctx); refused != "" {
+					replace = false
+				}
+			}
 			if replace {
 				k.emit(Event{State: Replacing, Detail: why})
-				err := StopHolder(ctx, k.URL, stopGrace)
-				if err == nil {
+				err := k.stopHolder(ctx, pid)
+				if err == nil || errors.Is(err, errHolderChanged) {
 					continue
 				}
 				k.fail(fmt.Errorf("%s, and it could not be stopped: %w", why, err), "")
 			} else {
 				k.withPID(ctx, holder)
 				k.forgetReplace()
-				k.emit(Event{State: Answering, Holder: holder})
+				k.emit(Event{State: Answering, Holder: holder, Detail: refused})
+				refused = ""
 				want, asked := k.watch(ctx, holder)
 				if !asked {
 					continue
@@ -276,6 +296,9 @@ func (k *Keeper) Run(ctx context.Context) {
 				now, ok := k.pressHolds(ctx, want)
 				if !ok {
 					continue // whatever is on the port is reported again
+				}
+				if refused = k.pressRefusal(ctx, now.PID); refused != "" {
+					continue
 				}
 				why = fmt.Sprintf("the panel at %s (pid %d, %q), which this window did not start, is replaced at a person's request", k.URL, now.PID, now.Executable)
 				k.emit(Event{State: Replacing, Detail: why, Asked: true})
@@ -294,6 +317,76 @@ func (k *Keeper) Run(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// stopHolder stops what listens on the port in place of a panel a window left
+// behind: whoever it is for a keeper with no StopsOnly, and for one with it
+// only pid, which stoppable has checked.
+func (k *Keeper) stopHolder(ctx context.Context, pid int) error {
+	if k.StopsOnly == "" {
+		return StopHolder(ctx, k.URL, stopGrace)
+	}
+	return stopListener(ctx, k.URL, pid, stopGrace)
+}
+
+// stoppable is the process listening on the port, when this keeper may stop
+// it, and why not when it may not. A keeper with no StopsOnly may stop what
+// its other rules allow, and is told nothing here. One with it may stop only a
+// process running StopsOnly; stopListener then asks the kernel again before
+// each signal, so a port that changes hands in between is not signalled.
+func (k *Keeper) stoppable(ctx context.Context) (int, string) {
+	if k.StopsOnly == "" {
+		return 0, ""
+	}
+	port, err := portOf(k.URL)
+	if err != nil {
+		return 0, fmt.Sprintf("the port of %s is unknown (%v), and this dev app stops nothing", k.URL, err)
+	}
+	pid, err := listenerPID(ctx, port)
+	switch {
+	case err != nil:
+		return 0, fmt.Sprintf("who holds port %d is unknown (%v), and this dev app stops nothing", port, err)
+	case pid == 0:
+		// Nothing found is not the dev app's own panel.
+		return 0, fmt.Sprintf("the owner of port %d is unknown: nothing is found listening on it, and this dev app stops nothing", port)
+	}
+	exe, err := executableOf(ctx, pid)
+	if err != nil {
+		return 0, fmt.Sprintf("port %d is held by pid %d, whose binary is unknown (%v), not by this dev app", port, pid, err)
+	}
+	if exe != realPath(k.StopsOnly) {
+		return 0, fmt.Sprintf("port %d is held by %s, not by this dev app", port, exe)
+	}
+	return pid, ""
+}
+
+// pressRefusal says why a dev keeper stops nothing at a press for the panel
+// with pid: what stoppable says, or the kernel naming another process on the
+// port than the one the press was for. A keeper with no StopsOnly is not asked
+// this, and "" is its answer.
+func (k *Keeper) pressRefusal(ctx context.Context, pid int) string {
+	if k.StopsOnly == "" {
+		return ""
+	}
+	holder, refused := k.stoppable(ctx)
+	if refused != "" {
+		return refused
+	}
+	if holder != pid {
+		port, _ := portOf(k.URL)
+		return fmt.Sprintf("port %d is held by pid %d, not by the panel (pid %d) the press was for, and this dev app stops nothing", port, holder, pid)
+	}
+	return ""
+}
+
+// realPath is p with every symlink in it resolved, as the kernel names a
+// running binary (on macOS a temporary directory is under /var, a symlink to
+// /private/var); p as it is when it cannot be resolved.
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }
 
 // withPID sets b's PID to the process listening on the port, when it can be

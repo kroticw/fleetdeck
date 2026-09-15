@@ -23,7 +23,7 @@ func TestOnlyTheInstalledAppsStartRemovesALeftoverBundle(t *testing.T) {
 		{name: "a window started by an update", handover: "/Applications/.fleetdeck-update/handover", exe: staged, told: "/Applications/fleetdeck.app"},
 		{name: "a binary outside any bundle", exe: "/usr/local/bin/fleetdeck-window"},
 	} {
-		if got := retiresLeftover(c.handover, canonicalBundle(c.exe, c.told)); got != c.want {
+		if got := retiresLeftover(c.handover, canonicalBundle(c.exe, c.told), false); got != c.want {
 			t.Errorf("%s: removes a leftover bundle = %v, want %v", c.name, got, c.want)
 		}
 	}

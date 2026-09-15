@@ -2,6 +2,7 @@ package main
 
 /*
 #cgo LDFLAGS: -framework Cocoa
+#include <stdlib.h>
 #include "menu_darwin.h"
 */
 import "C"
@@ -37,8 +38,13 @@ func fleetdeckMenuReload() {
 // installMenu builds the app's menu bar. Call it any time after
 // webview.New() returns -- by then the app has already finished launching
 // (see main.go's package doc for why that is already true, not assumed).
-func installMenu() {
-	C.fleetdeck_install_menu()
+//
+// name is the app's name as its menu says it: the app menu, and its Quit
+// item -- "fleetdeck dev" for a dev app, so the two apps' menus differ.
+func installMenu(name string) {
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+	C.fleetdeck_install_menu(cname)
 }
 
 // installCloseToHide makes closing window hide it instead of tearing the

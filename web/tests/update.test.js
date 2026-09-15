@@ -166,6 +166,16 @@ test("a failed or refused update keeps its button, so it can be tried again", ()
   assert.match(updateHTML(busy, 1), /class="update-button"/);
 });
 
+// A dev app, opened beside the installed app, says it does not update rather
+// than leaving a code on screen.
+test("a dev app says it does not update, and offers no button", () => {
+  const state = onProgress(initialState(), { step: "cannot", reason: "dev" }, 0);
+  const html = updateHTML(state, 0);
+
+  assert.doesNotMatch(html, /update-button/, `a button for an update a dev app cannot do: ${html}`);
+  assert.ok(has(html, "update_cannot_dev"), `no reason on screen: ${html}`);
+});
+
 // A build that cannot update itself never finds anything to update to, so it
 // has no button to press; this answer only arrives if something calls the
 // update binding anyway. It is said in words, and still offers no button.

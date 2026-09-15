@@ -7,7 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
-import { watchBoardScroll, watchListScroll, watchTerminalScroll } from "./standreport.js";
+import { probeColumnScroll, watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
 import { watchOverflow } from "./standoverflow.js";
 import { renderDocs } from "./docs.js";
@@ -263,8 +263,12 @@ if (host) {
   // On a CI stand only: the board's scrolling, in the window's log.
   const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
+  // And whether a scrolled column keeps its place while the panel's snapshots come in.
+  if (boardEl) probeColumnScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the sessions list's scrollbar, from the sessions surface.
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And the grounds the sessions list lies on, which a screenshot of glass cannot tell from the glass.
+  if (host.stand && host.surface === "sessions" && column) watchGrounds(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the edges down the orchestrator's terminal, from the orchestrator surface.
   if (host.stand && host.surface === "orchestrator" && column) watchTerminalScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And which of the orchestrator surface's boxes do not fit, folded to a strip or not.
