@@ -26,7 +26,12 @@
 #                    one waiting and one stopped, and the orchestrator's terminal
 #                    has long lines and a status line. The panel's snapshot has to
 #                    list the daemon's sessions and the stopped card before the
-#                    screenshot is taken.
+#                    screenshot is taken. The done column is taller than the
+#                    window: the board's own box must not scroll down beside the
+#                    sessions glass, no bar down it or a column may be wider than
+#                    8 px, and its last column still has to come out from under
+#                    the sessions panel. The sessions surface's boxes must lie on
+#                    one ground: the glass, or the opaque panel's square body.
 #
 # FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
 # it is drawn in NSAppearanceNameDarkAqua for dark, NSAppearanceNameAqua for light.
@@ -263,6 +268,68 @@ if [ "$expect" = content ]; then
 	fi
 fi
 
+# For content, the board down its height, as the board measured it
+# (web/js/standreport.js): the stand's done column is taller than the window
+# (scripts/standdaemon), and v0.10.1's board then scrolled down its whole
+# height, with a classic 15 px bar at the sessions glass's edge that read as a
+# second island behind it. In the window the board's own box does not scroll
+# down, no bar down it or a column is wider than the islands' thin one, and its
+# last column still comes out from under the sessions panel.
+board_down=yes
+if [ "$expect" = content ]; then
+	board_said=$(sed -n 's/.*fleetdeck-window: the board reports its scrolling: \({.*}\)$/\1/p' "$out/window.log" | tail -n 1)
+	board_field() { printf '%s\n' "$board_said" | sed -n "s/.*\"$1\":\"\{0,1\}\([^,\"}]*\).*/\1/p"; }
+	taller=$(board_field contentTallerThanRoom)
+	overflow_y=$(board_field overflowY)
+	board_bar=$(board_field scrollbarWidth)
+	column_bar=$(board_field columnScrollbarWidth)
+	last_clear=$(board_field lastColumnClear)
+	echo "--- the board down its height: taller than its room ${taller:-not reported}, overflow-y ${overflow_y:-not reported}, its bar ${board_bar:-not reported} px, a column's bar ${column_bar:-not reported} px, last column clear of the sessions panel ${last_clear:-not reported}"
+	[ "$taller" = true ] || board_down=no
+	case $overflow_y in
+		auto | scroll | "") board_down=no ;;
+	esac
+	if [ -z "$board_bar" ] || [ "$board_bar" -gt 8 ] || [ -z "$column_bar" ] || [ "$column_bar" -gt 8 ]; then
+		board_down=no
+	fi
+	[ "$last_clear" = true ] || board_down=no
+fi
+
+# For content, the grounds the sessions list lies on, as the sessions surface
+# computed them (web/js/standreport.js, groundsReport): one island. On glass no
+# box paints a ground, an image, a shadow or a corner of its own; opaque, the
+# body paints the panel and its edge, square, and nothing else paints.
+grounds=yes
+if [ "$expect" = content ]; then
+	sed -n 's/.*fleetdeck-window: the sessions surface reports its grounds: \({.*}\)$/\1/p' "$out/window.log" | tail -n 1 >"$out/grounds.json"
+	material=$(plutil -extract glass raw -o - "$out/grounds.json" 2>/dev/null || true)
+	boxes=$(plutil -extract elements raw -o - "$out/grounds.json" 2>/dev/null || echo 0)
+	second=
+	i=0
+	while [ "$i" -lt "$boxes" ]; do
+		at() { plutil -extract "elements.$i.$1" raw -o - "$out/grounds.json" 2>/dev/null; }
+		selector=$(at selector)
+		ground=$(at background)
+		image=$(at image)
+		radius=$(at radius)
+		shadow=$(at shadow)
+		[ "$radius" = 0px ] || second="${second:+$second; }$selector rounds its corners $radius"
+		if [ "$material" != opaque ] || [ "$selector" != body ]; then
+			case $ground in
+				"rgba(0, 0, 0, 0)" | transparent) ;;
+				*) second="${second:+$second; }$selector paints $ground" ;;
+			esac
+			[ "$image" = none ] || second="${second:+$second; }$selector paints $image"
+			[ "$shadow" = none ] || second="${second:+$second; }$selector casts $shadow"
+		fi
+		i=$((i + 1))
+	done
+	echo "--- the sessions island's grounds (${material:-not reported}, $boxes boxes): ${second:-one ground}"
+	if [ "$boxes" -eq 0 ] || [ -z "$material" ] || [ -n "$second" ]; then
+		grounds=no
+	fi
+fi
+
 # The appearance the stand asked for, as AppKit reports the window drawn
 # (window_darwin.go).
 appearance=yes
@@ -304,5 +371,5 @@ if [ -n "${FLEETDECK_STAND_SYSTEM:-}" ]; then
 	[ "$system_said" = "$system_want" ] || system=no
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the board down its height as the islands ask: $board_down, the sessions island on one ground: $grounds, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$board_down" = yes ] && [ "$grounds" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]

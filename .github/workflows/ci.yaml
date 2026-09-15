@@ -319,17 +319,24 @@ jobs:
       # nothing of glass or of blur.
       #
       # The frame is shown with content (scripts/standdaemon): a card in every
-      # stage, more long-named sessions than the sessions panel shows, one
-      # waiting and one stopped, and an orchestrator terminal with long lines
-      # and a status line. An empty frame hid what the operator saw broken in
-      # v0.10.0's panels. The last frame has the new card form open.
+      # stage and a done column taller than the window, more long-named sessions
+      # than the sessions panel shows, one waiting and one stopped, and an
+      # orchestrator terminal with long lines and a status line. An empty frame
+      # hid what the operator saw broken in v0.10.0's panels. The last frame has
+      # the new card form open.
+      #
+      # Each stand runs whether or not the one before it failed: a gate that
+      # fails in the first one would otherwise leave the frames of the others,
+      # glass and opaque, dark and light, untaken.
       - name: This build's window in its frame, light
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
           FLEETDECK_STAND_CAPSULES: glass
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7795 out/light exec content
       - name: This build's window in its frame, dark
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
@@ -337,6 +344,7 @@ jobs:
           FLEETDECK_STAND_SYSTEM: light
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7797 out/dark exec content
       - name: This build's window in its frame, dark, with the new card form open
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
@@ -356,6 +364,7 @@ jobs:
       # (FLEETDECK_STAND_SYSTEM): glass menus and the Dock show the wallpaper, so
       # a screenshot cannot say, and `defaults` says only what was written.
       - name: This build's window in its frame, glass, the system dark and the app light
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
@@ -366,6 +375,7 @@ jobs:
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7801 out/glass-system-dark-app-light exec content
       - name: This build's window in its frame, opaque, the system dark and the app light
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: light
@@ -378,6 +388,7 @@ jobs:
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7803 out/opaque-system-dark-app-light exec content
       - name: This build's window in its frame, opaque, the system light and the app dark
+        if: ${{ !cancelled() }}
         env:
           FLEETDECK_STAND_WINDOW_SIZE: 1000x700
           FLEETDECK_STAND_APPEARANCE: dark
