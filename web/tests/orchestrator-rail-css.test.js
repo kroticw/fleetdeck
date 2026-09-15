@@ -49,6 +49,16 @@ test("the folded orchestrator strip in the window still shows its unfold control
   assert.doesNotMatch(ruleBody('.col[data-folded="1"] .col-size-unfold'), /display:\s*none/);
 });
 
+// Run 34941628912: with the head hidden the unfold control rose to the strip's
+// top, under the window's close and minimize buttons. Out of full screen the
+// folded strip keeps the header's room above it, the buttons' line twice; in
+// full screen there are no buttons.
+const FOLDED_STRIP = ':root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) .col-orchestrator[data-folded="1"]';
+
+test("the folded orchestrator strip keeps the room the window's buttons take above its unfold control", () => {
+  assert.match(ruleBody(FOLDED_STRIP), /padding-top:\s*calc\(var\(--host-titlebar-center\)\s*\*\s*2\)/);
+});
+
 // Only the window's: a browser tab keeps its header, folded column or not.
 test("in a browser tab the header stays whether the orchestrator column is folded or not", () => {
   for (const { selector, body } of rules()) {
