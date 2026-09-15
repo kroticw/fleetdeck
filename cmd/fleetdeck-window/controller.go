@@ -22,6 +22,9 @@ type (
 	createSurfaces struct {
 		Fleet, URL string
 		Glass      glassMode
+		// Gen is the pair's generation (surfacename.go): a word from a surface
+		// of another generation is not about these.
+		Gen int
 	}
 	destroySurfaces struct{}
 	sendTo          struct {
@@ -78,6 +81,9 @@ type controller struct {
 	// surface whose page has not said it loaded. now is the controller's clock.
 	loads map[string]*pageWatch
 	now   func() time.Time
+	// generation is that of the surfaces made last (layout): the side surfaces'
+	// words are taken only from it (current).
+	generation int
 	// dragging is the panel whose edge is being dragged, "" when none.
 	dragging string
 	// band is how far down from the top the board's page says nothing is
@@ -180,7 +186,8 @@ func (c *controller) layout(version int, mode, fleet string) []effect {
 		c.loads[side] = &pageWatch{}
 		c.loads[side].ask(c.now())
 	}
-	out = append(out, createSurfaces{Fleet: fleet, URL: c.pageURL(fleet), Glass: c.glass}, applyGeometry{G: c.geometry()})
+	c.generation++
+	out = append(out, createSurfaces{Fleet: fleet, URL: c.pageURL(fleet), Glass: c.glass, Gen: c.generation}, applyGeometry{G: c.geometry()})
 	out = append(out, c.boardInsets()...)
 	return append(out, c.glassMessage("board")...)
 }
@@ -221,6 +228,54 @@ func (c *controller) surfaceNavigated(surface string, e navEvent) []effect {
 	}
 	v, waited := w.navSays(e, c.now())
 	return c.follow(surface, v, waited)
+}
+
+// current is the kind of the side surface name names, and whether it is one of
+// the surfaces shown now: of the generation made last, with the frame up. A
+// word from a surface taken down, or under a name that is no surface's, is not
+// taken.
+//
+// The check and the word taken after it are not one critical section. They do
+// not need to be: every word reaches the controller on the main thread, as the
+// board's layout report that makes a new generation does, so no generation is
+// made between them.
+func (c *controller) current(name string) (string, bool) {
+	kind, gen, ok := parseSurfaceName(name)
+	if !ok {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return kind, c.framed && gen == c.generation
+}
+
+// surfaceNavigatedFrom is surfaceNavigated for the surface named name, and
+// nothing for a surface not shown now.
+func (c *controller) surfaceNavigatedFrom(name string, e navEvent) []effect {
+	kind, ok := c.current(name)
+	if !ok {
+		return nil
+	}
+	return c.surfaceNavigated(kind, e)
+}
+
+// pageLoadedFrom is pageLoaded for the surface named name, and nothing for a
+// surface not shown now.
+func (c *controller) pageLoadedFrom(name, state string) []effect {
+	kind, ok := c.current(name)
+	if !ok {
+		return nil
+	}
+	return c.pageLoaded(kind, state)
+}
+
+// navigateFrom is navigate for the surface named name. A surface not shown now
+// goes nowhere and does nothing: it is being taken down.
+func (c *controller) navigateFrom(name, target string, mainFrame bool) (allow bool, effects []effect) {
+	if _, ok := c.current(name); !ok {
+		return false, nil
+	}
+	return c.navigate(target, mainFrame)
 }
 
 // tick is time going by for the side surfaces' pages asked for.

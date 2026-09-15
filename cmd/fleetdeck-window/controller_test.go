@@ -53,7 +53,7 @@ func TestTheBoardsInsetsAreThoseOfTheFrameAsItIsNow(t *testing.T) {
 func TestAPageThatReportsTheCurrentVersionGetsItsSurfaces(t *testing.T) {
 	got := started().layout(1, "panel", "work")
 	want := []effect{
-		createSurfaces{Fleet: "work", URL: "http://127.0.0.1:7777/?fleet=work", Glass: glassModeGlass},
+		createSurfaces{Fleet: "work", URL: "http://127.0.0.1:7777/?fleet=work", Glass: glassModeGlass, Gen: 1},
 		applyGeometry{G: layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348})},
 		boardInsets(),
 		sendTo{Surface: "board", Message: map[string]any{"type": "glass", "glass": "glass"}},
@@ -70,7 +70,7 @@ func TestAWindowOpenedOnAFleetsPageGivesItsSurfacesTheirOwnAddress(t *testing.T)
 	c := newController("http://127.0.0.1:7791/?fleet=stand", panelWidths{Orchestrator: 368, Sessions: 348}, glassModeVibrancy)
 	c.resized(1512, 982, false)
 	got := c.layout(1, "panel", "stand")
-	if len(got) == 0 || got[0] != (createSurfaces{Fleet: "stand", URL: "http://127.0.0.1:7791/?fleet=stand", Glass: glassModeVibrancy}) {
+	if len(got) == 0 || got[0] != (createSurfaces{Fleet: "stand", URL: "http://127.0.0.1:7791/?fleet=stand", Glass: glassModeVibrancy, Gen: 1}) {
 		t.Fatalf("effects = %#v", got)
 	}
 }
