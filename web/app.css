@@ -4018,9 +4018,12 @@ body.is-resizing {
  *
  * A browser tab has no data-surface and keeps its bordered controls. */
 
+/* The unfold control keeps the look it has (.col[data-folded="1"]
+   .col-size-unfold): a bordered target of its own, the only way back to a
+   folded column, and no capsule. */
 :root[data-surface="orchestrator"] .o-name-edit,
 :root[data-surface="orchestrator"] .o-pick-select,
-:root[data-surface="orchestrator"] .col-size-btn,
+:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold),
 :root[data-surface="orchestrator"] .fleet-menu-button {
   min-height: 24px;
   padding: 2px 10px;
@@ -4043,16 +4046,37 @@ body.is-resizing {
   box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
 }
 
-:root[data-surface="orchestrator"] .o-name-edit:hover,
-:root[data-surface="orchestrator"] .o-pick-select:hover,
-:root[data-surface="orchestrator"] .col-size-btn:hover,
-:root[data-surface="orchestrator"] .fleet-menu-button:hover,
-:root[data-surface="orchestrator"] .fleet-menu-button[aria-expanded="true"],
-:root[data-surface="board"] .newcard-title:hover,
-:root[data-surface="board"] .newcard-zone:hover,
-:root[data-surface="board"] .newcard-create:hover,
-:root[data-surface="board"] .newcard-cancel:hover {
+/* A disabled capsule is not lit under the pointer: Create while the card is
+   being written looks as unpressable as it is. */
+:root[data-surface="orchestrator"] .o-name-edit:hover:not(:disabled),
+:root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
+:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):hover:not(:disabled),
+:root[data-surface="orchestrator"] .fleet-menu-button:hover:not(:disabled),
+:root[data-surface="board"] .newcard-title:hover:not(:disabled),
+:root[data-surface="board"] .newcard-zone:hover:not(:disabled),
+:root[data-surface="board"] .newcard-create:hover:not(:disabled),
+:root[data-surface="board"] .newcard-cancel:hover:not(:disabled) {
   background-color: var(--glass-control-hover);
+}
+
+:root[data-surface="board"] .newcard-create:disabled,
+:root[data-surface="board"] .newcard-cancel:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The fleet menu's button, its list open: lit, with the accent round it, as a
+   browser tab's has. */
+:root[data-surface="orchestrator"] .fleet-menu-button[aria-expanded="true"] {
+  background-color: var(--glass-control-hover);
+  box-shadow: inset 0 0 0 1px var(--accent), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+/* The title's placeholder is what an empty form shows: read like the muted text
+   beside it, not WebKit's pale default on a frosted panel. */
+:root[data-surface="board"] .newcard-title::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 /* The closed select is drawn by the page, its chevron in the text's colour; the
@@ -4081,7 +4105,7 @@ body.is-resizing {
    nothing blurred. */
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit,
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
-:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn,
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold),
 :root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone,
@@ -4091,16 +4115,20 @@ body.is-resizing {
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit:hover,
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover,
-:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:hover,
-:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button:hover,
-:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button[aria-expanded="true"],
-:root[data-surface="board"][data-glass="opaque"] .newcard-title:hover,
-:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover,
-:root[data-surface="board"][data-glass="opaque"] .newcard-create:hover,
-:root[data-surface="board"][data-glass="opaque"] .newcard-cancel:hover {
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit:hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-create:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-cancel:hover:not(:disabled) {
   background-color: var(--surface-hover);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button[aria-expanded="true"] {
+  background-color: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 :root[data-surface="board"][data-glass="opaque"] .newcard,
