@@ -55,3 +55,10 @@ func installCloseToHide(window unsafe.Pointer) {
 func windowShouldCloseForTest(window unsafe.Pointer) int {
 	return int(C.fleetdeck_window_should_close_for_test(window))
 }
+
+// windowFullScreenOptionsForTest asks the installed window delegate for the
+// presentation options of full screen, AppKit proposing proposed; -1 when the
+// delegate does not answer.
+func windowFullScreenOptionsForTest(window unsafe.Pointer, proposed uint) int {
+	return int(C.fleetdeck_window_full_screen_options_for_test(window, C.ulong(proposed)))
+}

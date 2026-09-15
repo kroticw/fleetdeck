@@ -146,6 +146,25 @@ static bool windowShouldClose(id self, SEL _cmd, id sender) {
   return false;
 }
 
+// In full screen the toolbar that places the window's buttons (frame_darwin.c)
+// hides with the menu bar and shows over the content when the pointer goes to
+// the top of the screen. Left as AppKit proposes, it stayed as a black band over
+// the capsule row and the panels' head rows (v0.10.2's first full screen stand).
+// AppKit takes auto-hiding the toolbar only together with full screen, and full
+// screen with it only together with an auto-hiding menu bar.
+enum {
+  presentationAutoHideMenuBar = 1UL << 2,
+  presentationFullScreen = 1UL << 10,
+  presentationAutoHideToolbar = 1UL << 11,
+};
+
+static unsigned long windowFullScreenOptions(id self, SEL _cmd, id window, unsigned long proposed) {
+  (void)self;
+  (void)_cmd;
+  (void)window;
+  return proposed | presentationFullScreen | presentationAutoHideMenuBar | presentationAutoHideToolbar;
+}
+
 static bool applicationShouldHandleReopen(id self, SEL _cmd, id app,
                                            bool hasVisibleWindows) {
   (void)_cmd;
@@ -178,6 +197,8 @@ void fleetdeck_install_close_to_hide(void *window) {
   id windowDelegate = create_delegate("FleetdeckHideOnCloseDelegate", "NSWindowDelegate");
   class_addMethod(object_getClass(windowDelegate), sel("windowShouldClose:"),
                    (IMP)windowShouldClose, "c@:@");
+  class_addMethod(object_getClass(windowDelegate), sel("window:willUseFullScreenPresentationOptions:"),
+                  (IMP)windowFullScreenOptions, "Q@:@Q");
   objc_setAssociatedObject(windowDelegate, "fleetdeck_window", nswindow,
                             OBJC_ASSOCIATION_ASSIGN);
   sendVoid1(nswindow, sel("setDelegate:"), windowDelegate);
@@ -203,4 +224,15 @@ int fleetdeck_window_should_close_for_test(void *window) {
   // the function exists.
   bool (*dispatch)(id, SEL, id) = (bool (*)(id, SEL, id))objc_msgSend;
   return dispatch(delegate, sel("windowShouldClose:"), nswindow) ? 1 : 0;
+}
+
+long fleetdeck_window_full_screen_options_for_test(void *window, unsigned long proposed) {
+  id nswindow = (id)window;
+  id delegate = ((id (*)(id, SEL))objc_msgSend)(nswindow, sel("delegate"));
+  SEL options = sel("window:willUseFullScreenPresentationOptions:");
+  if (!delegate || !((signed char (*)(id, SEL, SEL))objc_msgSend)(delegate, sel("respondsToSelector:"), options)) {
+    return -1;
+  }
+  // Through objc_msgSend, as AppKit asks it on entering full screen.
+  return (long)((unsigned long (*)(id, SEL, id, unsigned long))objc_msgSend)(delegate, options, nswindow, proposed);
 }

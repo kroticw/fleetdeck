@@ -20,4 +20,9 @@ void fleetdeck_install_close_to_hide(void *window);
 // the window and refuses the close, not just that it was attached.
 int fleetdeck_window_should_close_for_test(void *window);
 
+// fleetdeck_window_full_screen_options_for_test asks the installed window
+// delegate for the presentation options of full screen, AppKit proposing
+// proposed, as AppKit asks on entering it; -1 when the delegate does not answer.
+long fleetdeck_window_full_screen_options_for_test(void *window, unsigned long proposed);
+
 #endif
