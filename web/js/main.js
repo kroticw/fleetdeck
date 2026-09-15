@@ -9,6 +9,7 @@ import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
 import { probeColumnScroll, watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
+import { watchControls } from "./standcontrols.js";
 import { watchOverflow } from "./standoverflow.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
@@ -279,6 +280,11 @@ if (host) {
   // window's buttons are centred on (web/js/standheader.js).
   const standHeader = host.stand && host.surface === "orchestrator" ? document.getElementById("header") : null;
   if (standHeader) watchHeaderLine(window, standHeader, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And how the capsules the page draws read in the window's material: the
+  // orchestrator island's head and the board's new card form (web/js/standcontrols.js).
+  if (host.stand && (host.surface === "orchestrator" || host.surface === "board")) {
+    watchControls(window, host.surface, (report) => callHost(window, "fleetdeckStandReport", report));
+  }
   // The window's panel folds with the column: a fold the column makes itself
   // (its own button) is passed on, and one the window sends is not passed back.
   let panelFolded = column?.dataset.folded === "1";
