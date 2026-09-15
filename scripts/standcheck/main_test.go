@@ -47,7 +47,7 @@ func goodFrame(fullScreen bool) frameReport {
 }
 
 func goodHeader(fullScreen bool) headerReport {
-	return headerReport{Surface: "orchestrator", HeaderRowCenter: 18, BrandCenter: 18.4, FullScreen: fullScreen}
+	return headerReport{Surface: "orchestrator", HeaderRowCenter: 18, BrandCenter: 18.4, FleetCenter: at(18.2), FullScreen: fullScreen}
 }
 
 // The board between goodFrame's panels: its box from 2 pt past the orchestrator
@@ -258,6 +258,23 @@ func TestAHeaderRowOffTheButtonsLineIsAProblem(t *testing.T) {
 	problems := check(logOf(t, goodFrame(false), goodBoard(false), h), 0)
 	wantProblem(t, problems, "header row")
 	wantProblem(t, problems, "brand")
+}
+
+// T-070: the fleet menu button is a capsule beside the brand, and a capsule
+// taller than the brand's line can sit off the buttons' line with the brand on it.
+func TestAFleetMenuButtonOffTheButtonsLineIsAProblem(t *testing.T) {
+	h := goodHeader(false)
+	h.FleetCenter = at(22)
+	wantProblem(t, check(logOf(t, goodFrame(false), goodBoard(false), h), 0), "fleet menu")
+}
+
+// A header drawn before its fleet menu has no fleet menu to hold to the line.
+func TestAHeaderWithNoFleetMenuYetIsNotHeldToOne(t *testing.T) {
+	h := goodHeader(false)
+	h.FleetCenter = nil
+	if got := check(logOf(t, goodFrame(false), goodBoard(false), h), 0); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
 }
 
 func TestAHeaderInFullScreenIsNotHeldToButtonsItDoesNotHave(t *testing.T) {

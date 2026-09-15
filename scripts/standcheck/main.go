@@ -10,8 +10,8 @@
 //     comes out from under the sessions panel, in each of those;
 //   - the selected tab is a capsule, where the system has border shapes;
 //   - the window's buttons sit concentric in the orchestrator panel's corner,
-//     before full screen and after each time it left, and the header's row and
-//     its brand are centred on their line;
+//     before full screen and after each time it left, and the header's row, its
+//     brand and its fleet menu button are centred on their line;
 //   - in full screen nothing of the title bar keeps the window's top or lies
 //     shown over the capsule row.
 //
@@ -122,7 +122,9 @@ type headerReport struct {
 	Surface         string  `json:"surface"`
 	HeaderRowCenter float64 `json:"headerRowCenter"`
 	BrandCenter     float64 `json:"brandCenter"`
-	FullScreen      bool    `json:"fullscreen"`
+	// FleetCenter is the fleet menu button's, nil before the header draws one.
+	FleetCenter *float64 `json:"fleetCenter"`
+	FullScreen  bool     `json:"fullscreen"`
 }
 
 // boardReport is the board's word on its box, in points from the window's left
@@ -634,6 +636,11 @@ func headerProblems(f frameReport, headers []headerReport) []string {
 	}
 	if brand := f.Orchestrator.Y + header.BrandCenter; math.Abs(brand-cy) > brandSlack {
 		out = append(out, fmt.Sprintf("the brand is centred %v pt down, the window's buttons %v", brand, cy))
+	}
+	if header.FleetCenter != nil {
+		if fleet := f.Orchestrator.Y + *header.FleetCenter; math.Abs(fleet-cy) > brandSlack {
+			out = append(out, fmt.Sprintf("the fleet menu button is centred %v pt down, the window's buttons %v", fleet, cy))
+		}
 	}
 	return out
 }

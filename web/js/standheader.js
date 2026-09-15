@@ -10,14 +10,17 @@
 const tenth = (n) => Math.round(n * 10) / 10;
 const middle = (rect) => tenth(rect.top + rect.height / 2);
 
-// headerLineReport is what header (#header) in win says of where it is centred.
-// A header with no brand yet leaves brandCenter null.
+// headerLineReport is what header (#header) in win says of where it is centred:
+// its row, its brand and its fleet menu button, a capsule of glass beside the
+// brand. A header with no brand or no fleet menu yet leaves that centre null.
 export function headerLineReport(win, header) {
   const brand = header.querySelector(".brand");
+  const fleet = header.querySelector(".fleet-menu-button");
   return {
     surface: "orchestrator",
     headerRowCenter: middle(header.getBoundingClientRect()),
     brandCenter: brand ? middle(brand.getBoundingClientRect()) : null,
+    fleetCenter: fleet ? middle(fleet.getBoundingClientRect()) : null,
     fullscreen: win.document.documentElement.dataset.fullscreen === "1",
   };
 }
