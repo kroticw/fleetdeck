@@ -266,7 +266,11 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
       // The list is not grown here: the panel serves a made fleet before it
       // answers, and the entry comes with the snapshot that names it — never
       // a row this page invented for a fleet the panel may not have taken.
-      status.textContent = body?.ok === true ? t("start_made") : t("start_failed");
+      // A refusal at the panel step comes after the fleet was written: its
+      // folder and its configuration line are there, and only this panel does
+      // not serve it (cmd/fleetdeck/main.go, panelStep).
+      const notServed = Array.isArray(body?.steps) && body.steps.some((s) => s?.name === "panel" && s?.error);
+      status.textContent = body?.ok === true ? t("start_made") : t(notServed ? "start_not_served" : "start_failed");
     } catch (err) {
       error.textContent = String(err?.message ?? err);
     } finally {

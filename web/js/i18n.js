@@ -305,6 +305,10 @@ const en = {
   start_new_unavailable: "This panel does not make fleets: it is a test stand.",
   start_made: "The fleet is made. Open it from the list.",
   start_failed: "The fleet was not made. What stopped it is named above; nothing after that step was done.",
+  // A refusal at the last step, the running panel taking the fleet in: the
+  // folder and the configuration line are made by then, so start_failed would
+  // say two untrue things.
+  start_not_served: "The fleet is in the configuration and its folder is made, but this panel cannot serve it: what stopped it is named above. Restart the panel to pick it up.",
   start_offline: "The panel is not answering.",
   theme_auto: "theme: auto",
   theme_light: "theme: light",
@@ -568,6 +572,7 @@ const ru = {
   start_new_unavailable: "Эта панель не заводит флотов: это тестовый стенд.",
   start_made: "Флот заведён. Откройте его из списка.",
   start_failed: "Флот не заведён. Что помешало — написано выше; шаги после него не выполнялись.",
+  start_not_served: "Флот записан в настройку и его папка создана, но эта панель не может его обслуживать: что помешало — написано выше. Перезапустите панель, чтобы она его подхватила.",
   start_offline: "Панель не отвечает.",
   theme_auto: "тема: авто",
   theme_light: "тема: светлая",

@@ -231,6 +231,7 @@ const KEYS = [
   "start_new_unavailable",
   "start_made",
   "start_failed",
+  "start_not_served",
   "start_offline",
 
   // The fleet menu in the panel's header (web/js/header.js). It replaced the
