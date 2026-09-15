@@ -19,8 +19,8 @@ var errUnknownBinding = errors.New("unknown binding")
 var errBoardOnly = errors.New("binding is the board's only")
 
 // bridgeHandler answers one binding for the web view that called it. surface is
-// "board", "orchestrator" or "sessions"; args is the call's one argument as the
-// page sent it.
+// "board", or a side surface's name with its generation, "sessions@3"
+// (surfacename.go); args is the call's one argument as the page sent it.
 type bridgeHandler func(surface string, args json.RawMessage) (any, error)
 
 // bridge is the one place a binding is defined. The board's web view reaches it

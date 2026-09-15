@@ -203,7 +203,7 @@ func (g *glassWindow) tick() { g.run(g.ctl.tick()) }
 // thread.
 func (g *glassWindow) surfaceMessage(surface, message, origin string, mainFrame bool) {
 	if !acceptSurfaceMessage(g.panelURL, origin, mainFrame) {
-		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surface, origin, mainFrame)
+		log.Printf("fleetdeck-window: a binding call in the %s surface from %q (main frame: %v) is not the panel's page, and is refused", surfaceKind(surface), origin, mainFrame)
 		return
 	}
 	// Only into the queue of the surface of its generation: a call from a
@@ -237,8 +237,15 @@ func (g *glassWindow) surfaceNavigation(surface, target string, mainFrame bool) 
 	return allow
 }
 
+// pageLoaded is a side surface's page saying where its load is. A word from a
+// surface not shown now is not about the page shown now: it is not logged as
+// that page's, which scripts/ci-window-stand.sh waits for, and a stand does not
+// count it toward entering full screen.
 func (g *glassWindow) pageLoaded(name, state string) {
-	surface := surfaceKind(name)
+	surface, shown := g.ctl.current(name)
+	if !shown {
+		return
+	}
 	log.Printf("fleetdeck-window: %s", surfacePageSays(surface, state))
 	g.run(g.ctl.pageLoadedFrom(name, state))
 	if state != pagePanel {

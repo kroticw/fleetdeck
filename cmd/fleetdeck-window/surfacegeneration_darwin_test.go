@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"testing"
@@ -197,6 +199,50 @@ func TestASurfacesCallGoesOnlyToTheSurfaceOfItsGeneration(t *testing.T) {
 		if got := surfaceNamed(surfaces, name); got != nil {
 			t.Fatalf("a call under %q went to %v", name, got)
 		}
+	}
+}
+
+// logged is what the window's log says while f runs.
+func logged(f func()) string {
+	var out bytes.Buffer
+	defer log.SetOutput(log.Writer())
+	log.SetOutput(&out)
+	f()
+	return out.String()
+}
+
+// A page load report from a surface taken down is not the page shown now's: the
+// window's log does not say that page loaded, which scripts/ci-window-stand.sh
+// waits for, and a stand does not count it toward entering full screen.
+func TestAnEarlierGenerationsPageLoadIsNotLoggedOrCountedOnTheStand(t *testing.T) {
+	c, old, cur := switched(t)
+	g := &glassWindow{ctl: c, standFS: newStandFullScreen(true)}
+	out := logged(func() {
+		for _, kind := range sideSurfaces {
+			g.pageLoaded(surfaceName(kind, old), "loading")
+			g.pageLoaded(surfaceName(kind, old), pagePanel)
+		}
+	})
+	if strings.Contains(out, "page says") {
+		t.Fatalf("the surfaces taken down were logged as loading:\n%s", out)
+	}
+	if len(g.standFS.loaded) != 0 || g.standFS.asked {
+		t.Fatalf("the stand counted the surfaces taken down: %+v", *g.standFS)
+	}
+	// The control: the page shown now saying it loaded is logged and counted.
+	out = logged(func() { g.pageLoaded(surfaceName("sessions", cur), pagePanel) })
+	if !strings.Contains(out, `the sessions surface's page says "panel"`) || !g.standFS.loaded["sessions"] {
+		t.Fatalf("the page shown now: logged %q, stand %+v", out, *g.standFS)
+	}
+}
+
+// A binding call refused for its origin is logged under its surface's kind, as
+// every other line about a surface is.
+func TestARefusedBindingCallIsLoggedUnderItsSurfacesKind(t *testing.T) {
+	g := &glassWindow{panelURL: "http://127.0.0.1:7777/"}
+	out := logged(func() { g.surfaceMessage("sessions@2", `{}`, "https://example.com", true) })
+	if !strings.Contains(out, "a binding call in the sessions surface from") || strings.Contains(out, "@2") {
+		t.Fatalf("logged %q", out)
 	}
 }
 
