@@ -3669,6 +3669,12 @@ body.is-resizing {
   scrollbar-color: auto;
 }
 
+/* MUTANT, reverted by the next commit: a ground of its own under the sessions
+   list, to see the stand's one-ground gate fail at least once. */
+:root[data-surface="sessions"] #sessions {
+  background: var(--surface);
+}
+
 :root[data-surface="sessions"] .col-sessions::-webkit-scrollbar {
   width: 6px;
 }
