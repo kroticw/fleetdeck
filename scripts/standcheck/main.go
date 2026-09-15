@@ -215,7 +215,10 @@ func check(log string, trips int) []string {
 		problems = append(problems, l.boardProblems(when, r)...)
 		problems = append(problems, buttonProblems(when, f)...)
 		problems = append(problems, underButtonProblems(when, f)...)
-		if i == 0 {
+		// A folded orchestrator strip shows no header, only its unfold mark,
+		// with the buttons in the corner over it.
+		const foldedStripWidth = 48
+		if i == 0 && f.Orchestrator.W > foldedStripWidth+lineSlack {
 			problems = append(problems, headerProblems(f, l.headers)...)
 		}
 	}

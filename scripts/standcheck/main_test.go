@@ -175,6 +175,19 @@ func besideFoldedStrip(b boardReport) boardReport {
 	return b
 }
 
+// Run 34938432322, the orchestrator panel folded: the strip shows no header,
+// only its unfold mark, and the buttons sit in the corner over it. The page
+// still said its header was centred 27 pt down the surface, 35 down the window;
+// what it says of a header it does not show is not held to their line.
+func TestTheHeaderOfAFoldedOrchestratorStripIsNotHeldToTheButtonsLine(t *testing.T) {
+	header := goodHeader(false)
+	header.HeaderRowCenter, header.BrandCenter = 27, 27
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), header)
+	if got := check(log, 0); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
 func TestARowPastTheWindowsButtonsBesideTheFoldedStripIsNoProblem(t *testing.T) {
 	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false))
 	if got := check(log, 0); len(got) != 0 {
