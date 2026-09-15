@@ -34,6 +34,18 @@ typedef struct {
 int fd_test_capsule_count(void);
 const char *fd_test_segment_label(int i);
 int fd_test_selected_segment(void);
+// The tabs' NSControlBorderShape, -1 on a system without it (before macOS 26).
+long fd_test_segment_border_shape(void);
+// Where the selected segment's fill starts in its top row, as a share of its
+// height, drawn off screen; -1 when nothing is drawn.
+double fd_test_selected_segment_top_inset(void);
+// The same for a rounded rectangle in the tabs' place, drawn beside them; -1 on
+// a system without border shapes.
+double fd_test_rounded_segment_top_inset(void);
+typedef struct {
+  double left, right, top, bottom;
+} fd_capsule_insets;
+fd_capsule_insets fd_test_tabs_insets(void);
 const char *fd_test_new_card_title(void);
 const char *fd_test_theme_title(void);
 double fd_test_level_value(int i);

@@ -150,6 +150,25 @@ func windowContentSize(window unsafe.Pointer) (width, height float64) {
 
 func windowIsFullscreen(window unsafe.Pointer) bool { return C.fd_window_is_fullscreen(window) != 0 }
 
+// toggleFullScreen puts the window into full screen or out of it, as its green
+// button does; a stand's only (standfullscreen.go).
+func toggleFullScreen(window unsafe.Pointer) { C.fd_window_toggle_fullscreen(window) }
+
+// menuBarVisible is whether the menu bar is shown; a stand's only
+// (standframe_darwin.go).
+func menuBarVisible() bool { return C.fd_window_menu_bar_visible() != 0 }
+
+// menuBarHeight is the menu bar's height in points; a stand's only.
+func menuBarHeight() float64 { return float64(C.fd_window_menu_bar_height()) }
+
+// setToolbarVisible shows or hides window's toolbar: hidden in full screen
+// (controller.go showToolbar).
+func setToolbarVisible(window unsafe.Pointer, visible bool) {
+	C.fd_window_set_toolbar_visible(window, cBool(visible))
+}
+
+func toolbarVisible(window unsafe.Pointer) bool { return C.fd_window_toolbar_visible(window) != 0 }
+
 // windowEvents is where word of the window changing goes: glasswindow.go.
 var windowEvents = struct {
 	sync.Mutex

@@ -28,7 +28,38 @@ const (
 	// "newcard": the board opens its new card form as it loads, so a stand's
 	// screenshot shows the form without anyone pressing its capsule.
 	standOpenEnv = "FLEETDECK_STAND_OPEN"
+	// "on": once its surfaces have loaded, the window enters full screen, and
+	// after a while leaves it (standfullscreen.go), so a stand measures and
+	// shows the frame in full screen and after it. v0.10.1's capsules lay over
+	// the sessions panel in full screen, which no stand had entered.
+	standFullScreenEnv = "FLEETDECK_STAND_FULLSCREEN"
+	// "orchestrator", "sessions" or "both": the window opens with those panels
+	// folded and the others unfolded, whatever the stand's defaults say, and
+	// keeps no widths or folds (panelWidthsForStand, storesWidths). v0.10.2's
+	// capsule row lay under the window's buttons beside the folded
+	// orchestrator strip, which no stand had opened.
+	standFoldEnv = "FLEETDECK_STAND_FOLD"
 )
+
+// standFold is how a stand said to fold the panels, "" off a stand or when it
+// said nothing (main.go).
+var standFold string
+
+// panelWidthsForStand is the panels' widths and folds the window opens with:
+// loaded from its defaults, folded as fold says when a stand said.
+func panelWidthsForStand(loaded panelWidths, fold string) panelWidths {
+	if fold == "" {
+		return loaded
+	}
+	loaded.OrchestratorFolded = fold == "orchestrator" || fold == "both"
+	loaded.SessionsFolded = fold == "sessions" || fold == "both"
+	return loaded
+}
+
+// storesWidths is whether the window keeps the widths and folds its panels are
+// given: not on a stand told how to fold, whose next window from the same
+// defaults would otherwise open as this one's surfaces left it.
+func storesWidths(fold string) bool { return fold == "" }
 
 // standSettings is what a stand set; the zero value is a person's window.
 type standSettings struct {
@@ -36,6 +67,8 @@ type standSettings struct {
 	width, height     int
 	appearance        string
 	open              string
+	fullScreen        bool
+	fold              string
 }
 
 // Smaller than this the frame has no room for both panels and the board.
@@ -74,6 +107,18 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 			return standSettings{}, fmt.Errorf("%s=%q is not newcard", standOpenEnv, v)
 		}
 		s.open = v
+	}
+	if v, set := lookup(standFullScreenEnv); set {
+		if v != "on" {
+			return standSettings{}, fmt.Errorf("%s=%q is not on", standFullScreenEnv, v)
+		}
+		s.fullScreen = true
+	}
+	if v, set := lookup(standFoldEnv); set {
+		if v != "orchestrator" && v != "sessions" && v != "both" {
+			return standSettings{}, fmt.Errorf("%s=%q is not orchestrator, sessions or both", standFoldEnv, v)
+		}
+		s.fold = v
 	}
 	return s, nil
 }

@@ -54,9 +54,10 @@ export function wireHostActions(win, host, targets) {
         targets.setFullscreen(message.on === true);
         return;
       case "titlebar":
-        // Where the title bar's buttons end over this panel: the header starts
-        // past them.
-        targets.setTitlebarInset(message.inset);
+        // Where the title bar's buttons end over this panel and the line they
+        // are centred on, from its top: the header starts past them, its row on
+        // that line.
+        targets.setTitlebar({ inset: message.inset, center: message.center });
         return;
     }
   });
