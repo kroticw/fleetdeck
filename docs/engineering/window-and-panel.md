@@ -80,6 +80,8 @@ The panel answers on `127.0.0.1:7777`. Three things point at that port without a
 - the statusline reporter, `fleetdeck-status`, which posts every session's status to `http://127.0.0.1:7777/api/status` unless `FLEETDECK_ENDPOINT` is set;
 - whatever the operator has open in a browser.
 
+Where the window's panel listens is the window's to say, since v0.10.2: the window starts every panel with `--port`, the port of the URL it looks at (`panelArgs`, `panelPort` in `cmd/fleetdeck-window`), and the app, opened with no `-url`, passes `--port 7777`. Until then the window passed no port, and its panel listened on `server.port` from the config, whatever URL the window looked at. `server.port` is now only where a panel started without `--port` listens — one started from a terminal. A dev app on another URL relies on this (`dev-app.md`).
+
 A panel that moved to another port would be invisible to all three. The statusline reports would go nowhere, and the context and state they carry would silently vanish from the panel. The old panel would keep running unseen. So a panel that cannot take its port does not look for another one. It names what holds the port and exits (`portHolder` in `cmd/fleetdeck/portholder.go`), asking the holder for one second at most. There are three answers: another fleetdeck panel, by commit and binary path; something that is not fleetdeck; or something that took the connection and did not answer.
 
 ## Handing the panel to a new version
