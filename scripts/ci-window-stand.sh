@@ -28,10 +28,11 @@
 #                    list the daemon's sessions and the stopped card before the
 #                    screenshot is taken. The done column is taller than the
 #                    window: the board's own box must not scroll down beside the
-#                    sessions glass, no bar down it or a column may be wider than
-#                    8 px, and its last column still has to come out from under
-#                    the sessions panel. The sessions surface's boxes must lie on
-#                    one ground: the glass, or the opaque panel's square body.
+#                    sessions glass, and no bar down it or a column may be wider
+#                    than 8 px. Whether its last column comes out from under the
+#                    sessions panel is printed as the page measures it, not
+#                    gated. The sessions surface's boxes must lie on one ground:
+#                    the glass, or the opaque panel's square body.
 #
 # FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
 # it is drawn in NSAppearanceNameDarkAqua for dark, NSAppearanceNameAqua for light.
@@ -273,8 +274,10 @@ fi
 # (scripts/standdaemon), and v0.10.1's board then scrolled down its whole
 # height, with a classic 15 px bar at the sessions glass's edge that read as a
 # second island behind it. In the window the board's own box does not scroll
-# down, no bar down it or a column is wider than the islands' thin one, and its
-# last column still comes out from under the sessions panel.
+# down, and no bar down it or a column is wider than the islands' thin one.
+# Whether the last column comes out from under the sessions panel is printed
+# as the page says it, and not gated: the page measures against the inset it
+# was sent, not against the panel the window drew.
 board_down=yes
 if [ "$expect" = content ]; then
 	board_said=$(sed -n 's/.*fleetdeck-window: the board reports its scrolling: \({.*}\)$/\1/p' "$out/window.log" | tail -n 1)
@@ -284,7 +287,7 @@ if [ "$expect" = content ]; then
 	board_bar=$(board_field scrollbarWidth)
 	column_bar=$(board_field columnScrollbarWidth)
 	last_clear=$(board_field lastColumnClear)
-	echo "--- the board down its height: taller than its room ${taller:-not reported}, overflow-y ${overflow_y:-not reported}, its bar ${board_bar:-not reported} px, a column's bar ${column_bar:-not reported} px, last column clear of the sessions panel ${last_clear:-not reported}"
+	echo "--- the board down its height: taller than its room ${taller:-not reported}, overflow-y ${overflow_y:-not reported}, its bar ${board_bar:-not reported} px, a column's bar ${column_bar:-not reported} px, last column clear of the sessions panel as the page measures it (page-side, not gated) ${last_clear:-not reported}"
 	[ "$taller" = true ] || board_down=no
 	case $overflow_y in
 		auto | scroll | "") board_down=no ;;
@@ -292,7 +295,6 @@ if [ "$expect" = content ]; then
 	if [ -z "$board_bar" ] || [ "$board_bar" -gt 8 ] || [ -z "$column_bar" ] || [ "$column_bar" -gt 8 ]; then
 		board_down=no
 	fi
-	[ "$last_clear" = true ] || board_down=no
 fi
 
 # For content, the grounds the sessions list lies on, as the sessions surface
