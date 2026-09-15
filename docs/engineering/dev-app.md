@@ -31,7 +31,7 @@ ps -axo pid,command | grep '[f]leetdeck-dev.app'
 | Panel's port | `server.port` of the config, 7777 by default | `DEV_PORT`, 7778 by default |
 | Config the panel reads and writes | `~/.config/fleetdeck/config.yaml` | `~/.config/fleetdeck/dev/config.yaml`, a copy |
 | Banners | sent | off in the copy |
-| Panel's log | `~/Library/Logs/fleetdeck.log` | `~/Library/Logs/fleetdeck-dev.log` |
+| Panel's log | `~/Library/Logs/fleetdeck.log` | `~/Library/Logs/fleetdeck-dev.log`, one for every dev app, appended to |
 | Window's log | not kept | `~/Library/Logs/fleetdeck-dev-window.log` |
 | Panel widths | the app's own defaults | the suite `dev.fleetdeck.dev.widths` |
 | Updates | looks for a newer version | none |
@@ -48,7 +48,7 @@ ps -axo pid,command | grep '[f]leetdeck-dev.app'
 
 ## The config copy
 
-The dev app's window writes the copy at every start, from the operator's config as it is then, over whatever an earlier dev app left there, with `notify.enabled.*` off. What the dev panel wrote to it is gone at the next start. What a dev panel may write, each only when asked from its page:
+The dev app's window writes the copy at every start, from the operator's config as it is then, over whatever an earlier dev app left there, with `notify.enabled.*` off and `server.port` set to the dev app's port, so a dev panel started without `--port` would still keep off the installed panel's. What the dev panel wrote to it is gone at the next start. What a dev panel may write, each only when asked from its page:
 
 - `orchestrator.session`, pinning or unpinning the orchestrator;
 - `session_labels`, a session's name;
