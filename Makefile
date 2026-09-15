@@ -63,9 +63,10 @@ MACOS_MIN_VERSION := $(shell plutil -extract LSMinimumSystemVersion raw cmd/flee
 # macOS 27 machine on 2026-09-15 that SDK was 27.0 and Xcode's linker knew SDKs
 # up to 26.5, and every window build failed to link on Security.tbd's
 # arm64e.x1. On a runner with one toolchain both answers are the same SDK.
-# Recursive, so xcrun runs only for a target that builds against it, and never
-# off darwin.
-DARWIN_SDKROOT = $(or $(SDKROOT),$(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null))
+# scripts/darwin-sdkroot.sh makes the choice, so it can be tested without make.
+# Recursive, so it runs only for a target that builds against it, and never off
+# darwin.
+DARWIN_SDKROOT = $(shell SDKROOT="$(SDKROOT)" scripts/darwin-sdkroot.sh)
 endif
 DARWIN_SDK_ENV = $(if $(DARWIN_SDKROOT),SDKROOT="$(DARWIN_SDKROOT)")
 
@@ -400,9 +401,9 @@ dev-app:
 	@echo "dev-app: SDK $(DARWIN_SDKROOT)"
 	$(call app-bundle,$(DEV_APP),dev.fleetdeck.dev,fleetdeck dev,$(DEV_LDFLAGS))
 	@if [ "$(DEV_OPEN)" = 0 ]; then \
-		echo "dev-app: $(DEV_APP), not opened (DEV_OPEN=0); open it with: open -n --stdout $(HOME)/Library/Logs/fleetdeck-dev-window.log --stderr $(HOME)/Library/Logs/fleetdeck-dev-window.log $(DEV_APP) --args -url $(DEV_URL)"; \
+		echo "dev-app: $(DEV_APP), not opened (DEV_OPEN=0); open it with: open -n $(DEV_APP) --args -url $(DEV_URL)"; \
 	else \
-		open -n --stdout "$(HOME)/Library/Logs/fleetdeck-dev-window.log" --stderr "$(HOME)/Library/Logs/fleetdeck-dev-window.log" "$(DEV_APP)" --args -url "$(DEV_URL)"; \
+		open -n "$(DEV_APP)" --args -url "$(DEV_URL)"; \
 		echo "dev-app: opened $(DEV_APP) on $(DEV_URL)"; \
 	fi
 

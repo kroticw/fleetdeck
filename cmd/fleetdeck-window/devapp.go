@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	appconfig "github.com/kroticw/fleetdeck/internal/config"
+	"github.com/kroticw/fleetdeck/internal/fleet"
 )
 
 // A dev app is this window built from a working tree by `make dev-app`, opened
@@ -77,22 +78,38 @@ func devFlagsRefusal(handover, canonical string) error {
 	return nil
 }
 
-// devPortRefusal refuses a dev app on the installed panel's port: server.port
-// of the operator's config, or its default when there is no config.
+// devPortRefusal refuses a dev app on a port the installed panel may be on:
+// the port the installed app hands its panel, its default URL's, and
+// server.port of the operator's config -- its default when there is no config
+// -- where a panel started without --port listens.
 func devPortRefusal(port int, operatorConfig string) error {
+	installed, err := panelPort(defaultURL)
+	if err != nil {
+		return err
+	}
 	cfg, err := appconfig.Load(operatorConfig)
 	if err != nil {
 		return fmt.Errorf("read the operator's config to keep off the installed panel's port: %w", err)
 	}
-	if port == cfg.ServerPort {
-		return fmt.Errorf("port %d is the installed panel's (server.port in %s); a dev app takes a port of its own: make dev-app DEV_PORT=<port>", port, operatorConfig)
+	switch port {
+	case installed:
+		return fmt.Errorf("port %d is the one the installed app hands its panel; a dev app takes a port of its own: make dev-app DEV_PORT=<port>", port)
+	case cfg.ServerPort:
+		return fmt.Errorf("port %d is server.port in %s, where a panel started without --port listens; a dev app takes a port of its own: make dev-app DEV_PORT=<port>", port, operatorConfig)
 	}
 	return nil
 }
 
-// devConfigPath is the copy of the operator's config a dev app's panel runs
-// on.
-func devConfigPath(home string) string {
+// devConfigPath is the copy of the operator's config the panel of a dev app on
+// port runs on: one for each port, so dev apps from two trees on two ports do
+// not write over each other's.
+func devConfigPath(home string, port int) string {
+	return filepath.Join(home, ".config", "fleetdeck", "dev", strconv.Itoa(port), "config.yaml")
+}
+
+// legacyDevConfigPath is the one config copy every dev app shared before the
+// copies were kept per port.
+func legacyDevConfigPath(home string) string {
 	return filepath.Join(home, ".config", "fleetdeck", "dev", "config.yaml")
 }
 
@@ -104,7 +121,14 @@ func devConfigPath(home string) string {
 // to send. server.port is the dev app's port: the window hands its panel
 // --port anyway, and a dev panel ever started without it still keeps off the
 // installed panel's port.
-func copyDevConfig(operatorConfig, dev string, port int) error {
+//
+// One thing of the previous copy is kept: the fleets made from a dev panel,
+// which asks to be restarted to work in a new fleet. A fleet of the previous
+// copy -- dev's own, or legacy's when dev has none yet -- whose name no fleet
+// of the operator's config has is added to the new copy; a fleet of the same
+// name in the operator's config is the one kept. Nothing else of the previous
+// copy is.
+func copyDevConfig(operatorConfig, dev, legacy string, port int) error {
 	if _, err := os.Stat(operatorConfig); err != nil {
 		return fmt.Errorf("a dev app runs its panel on a copy of the operator's config, and there is none to copy: %w", err)
 	}
@@ -112,12 +136,52 @@ func copyDevConfig(operatorConfig, dev string, port int) error {
 	if err != nil {
 		return fmt.Errorf("read the operator's config to copy it: %w", err)
 	}
+	previous, err := previousDevFleets(dev, legacy)
+	if err != nil {
+		return err
+	}
+	named := map[string]bool{}
+	for _, f := range cfg.FleetList() {
+		named[f.Name] = true
+	}
+	for _, f := range previous {
+		if !named[f.Name] {
+			cfg.Fleets = append(cfg.Fleets, f)
+			named[f.Name] = true
+		}
+	}
 	cfg.Notify.Waiting, cfg.Notify.Failed, cfg.Notify.Silent, cfg.Notify.CardBlocked = false, false, false, false
 	cfg.ServerPort = port
 	if err := appconfig.Save(dev, cfg); err != nil {
 		return fmt.Errorf("write the dev app's config %s: %w", dev, err)
 	}
 	return nil
+}
+
+// previousDevFleets is every listed fleet of the previous config copy: dev
+// when it is there, and otherwise legacy when that is; none when neither is.
+// Listed only: a fleet a panel adds goes to the fleets list, and the top-level
+// fleet of a copy is the operator's as it was when that copy was made -- or,
+// for a copy with no board, none at all.
+func previousDevFleets(dev, legacy string) ([]fleet.Fleet, error) {
+	previous := ""
+	for _, path := range []string{dev, legacy} {
+		if path == "" {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			previous = path
+			break
+		}
+	}
+	if previous == "" {
+		return nil, nil
+	}
+	cfg, err := appconfig.Load(previous)
+	if err != nil {
+		return nil, fmt.Errorf("the dev app's previous config copy %s does not load, so the fleets made in it cannot be kept; remove it to start from the operator's config: %w", previous, err)
+	}
+	return cfg.Fleets, nil
 }
 
 // panelLogPath is the log the window's panels write to: the one the launch

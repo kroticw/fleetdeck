@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	appconfig "github.com/kroticw/fleetdeck/internal/config"
+	"github.com/kroticw/fleetdeck/internal/fleet"
 	"github.com/kroticw/fleetdeck/internal/supervisor"
 )
 
@@ -45,8 +46,8 @@ func TestTheInstalledAppStartsItsPanelOnThePortOfItsDefaultURL(t *testing.T) {
 // A window opened on another URL starts its panel on that URL's port: before,
 // the panel took server.port whatever the window looked at.
 func TestThePortOfTheWindowsURLReachesItsPanel(t *testing.T) {
-	got := strings.Join(panelArgs(4242, "", urlPort(t, "http://127.0.0.1:7778/"), "/h/.config/fleetdeck/dev/config.yaml"), " ")
-	if want := "--owner-pid 4242 --port 7778 --config /h/.config/fleetdeck/dev/config.yaml"; got != want {
+	got := strings.Join(panelArgs(4242, "", urlPort(t, "http://127.0.0.1:7778/"), "/h/.config/fleetdeck/dev/7778/config.yaml"), " ")
+	if want := "--owner-pid 4242 --port 7778 --config /h/.config/fleetdeck/dev/7778/config.yaml"; got != want {
 		t.Fatalf("panelArgs = %q, want %q", got, want)
 	}
 }
@@ -117,14 +118,19 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// The installed panel listens on server.port of the operator's config, and a
-// dev app on that port would be looking at the installed panel.
+// The installed app hands its panel the port of its default URL, 7777, and a
+// panel started some other way listens on server.port of the operator's
+// config: a dev app on either would be looking at the installed panel, which
+// writes the operator's real config.
 func TestADevAppRefusesThePortOfTheInstalledPanel(t *testing.T) {
 	dir := t.TempDir()
 	operatorPath := filepath.Join(dir, "config.yaml")
-	writeFile(t, operatorPath, operatorConfig)
+	writeFile(t, operatorPath, operatorConfig) // server.port 7801
 	if err := devPortRefusal(7801, operatorPath); err == nil || !strings.Contains(err.Error(), "7801") {
 		t.Fatalf("devPortRefusal on server.port = %v; want a refusal naming 7801", err)
+	}
+	if err := devPortRefusal(7777, operatorPath); err == nil || !strings.Contains(err.Error(), "7777") {
+		t.Fatalf("devPortRefusal on the installed app's port, with server.port 7801 = %v; want a refusal naming 7777", err)
 	}
 	if err := devPortRefusal(7802, operatorPath); err != nil {
 		t.Fatalf("devPortRefusal on another port = %v", err)
@@ -148,11 +154,11 @@ func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBannersOnItsOwnPort(t *testing
 	dir := t.TempDir()
 	operatorPath := filepath.Join(dir, "config.yaml")
 	writeFile(t, operatorPath, operatorConfig)
-	dev := devConfigPath(dir)
+	dev := devConfigPath(dir, 7778)
 	// What an earlier dev app left there is replaced, not kept.
 	writeFile(t, dev, "server:\n    port: 1\n")
 
-	if err := copyDevConfig(operatorPath, dev, 7778); err != nil {
+	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
 		t.Fatal(err)
 	}
 	want, err := appconfig.Load(operatorPath)
@@ -177,8 +183,8 @@ func TestADevAppsConfigIsACopyOfTheOperatorsWithNoBannersOnItsOwnPort(t *testing
 // config would start in setup, writing the operator's Claude Code settings.
 func TestADevAppWithNoOperatorConfigRefuses(t *testing.T) {
 	dir := t.TempDir()
-	dev := devConfigPath(dir)
-	if err := copyDevConfig(filepath.Join(dir, "none.yaml"), dev, 7778); err == nil {
+	dev := devConfigPath(dir, 7778)
+	if err := copyDevConfig(filepath.Join(dir, "none.yaml"), dev, "", 7778); err == nil {
 		t.Fatal("copyDevConfig with no operator's config: want a refusal")
 	}
 	if _, err := os.Stat(dev); err == nil {
@@ -186,8 +192,135 @@ func TestADevAppWithNoOperatorConfigRefuses(t *testing.T) {
 	}
 }
 
+// Dev apps from two trees run at once on two ports, and one's start must not
+// write over the copy the other's panel is running on.
+func TestTwoDevAppsOnTwoPortsKeepTwoConfigCopies(t *testing.T) {
+	dir := t.TempDir()
+	operatorPath := filepath.Join(dir, "config.yaml")
+	writeFile(t, operatorPath, operatorConfig)
+	first, second := devConfigPath(dir, 7778), devConfigPath(dir, 7779)
+	if first == second {
+		t.Fatalf("two dev ports share the config copy %s", first)
+	}
+	if err := copyDevConfig(operatorPath, first, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyDevConfig(operatorPath, second, "", 7779); err != nil {
+		t.Fatal(err)
+	}
+	for path, port := range map[string]int{first: 7778, second: 7779} {
+		cfg, err := appconfig.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ServerPort != port {
+			t.Errorf("%s has server.port %d, want %d", path, cfg.ServerPort, port)
+		}
+	}
+}
+
+// fleetsNamed is every fleet called name in the config at path.
+func fleetsNamed(t *testing.T, path, name string) []fleet.Fleet {
+	t.Helper()
+	cfg, err := appconfig.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var named []fleet.Fleet
+	for _, f := range cfg.FleetList() {
+		if f.Name == name {
+			named = append(named, f)
+		}
+	}
+	return named
+}
+
+// A fleet made from a dev app's panel is written to its config copy, and the
+// panel asks to be restarted to work in it: the copy that start makes keeps it.
+func TestAFleetMadeInADevAppIsKeptAtItsNextStart(t *testing.T) {
+	dir := t.TempDir()
+	operatorPath := filepath.Join(dir, "config.yaml")
+	writeFile(t, operatorPath, operatorConfig)
+	dev := devConfigPath(dir, 7778)
+	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	board := t.TempDir()
+	if err := appconfig.AddFleet(dev, fleet.Fleet{Name: "testdeck", BoardPath: board}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	if kept := fleetsNamed(t, dev, "testdeck"); len(kept) != 1 || kept[0].BoardPath != board {
+		t.Fatalf("after the next start the dev copy has fleets named testdeck %+v; want the one made in it, on %s", kept, board)
+	}
+	if data, _ := os.ReadFile(operatorPath); string(data) != operatorConfig {
+		t.Fatalf("the operator's config was changed:\n%s", data)
+	}
+}
+
+// A fleet the operator's config has is the operator's, whatever a dev panel
+// made under the same name.
+func TestTheOperatorsFleetWinsOverADevFleetOfTheSameName(t *testing.T) {
+	dir := t.TempDir()
+	operatorPath := filepath.Join(dir, "config.yaml")
+	writeFile(t, operatorPath, operatorConfig)
+	dev := devConfigPath(dir, 7778)
+	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	devBoard, operatorBoard := t.TempDir(), t.TempDir()
+	if err := appconfig.AddFleet(dev, fleet.Fleet{Name: "work", BoardPath: devBoard}); err != nil {
+		t.Fatal(err)
+	}
+	if err := appconfig.AddFleet(operatorPath, fleet.Fleet{Name: "work", BoardPath: operatorBoard}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDevConfig(operatorPath, dev, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	if kept := fleetsNamed(t, dev, "work"); len(kept) != 1 || kept[0].BoardPath != operatorBoard {
+		t.Fatalf("the dev copy has fleets named work %+v; want only the operator's, on %s", kept, operatorBoard)
+	}
+}
+
+// The copies were one shared file before they were kept per port. A dev app's
+// first start on a port with no copy of its own keeps the fleets made in the
+// shared one, and leaves that file as it was.
+func TestADevAppKeepsTheFleetsOfTheSharedCopyOnItsFirstStartOnAPort(t *testing.T) {
+	dir := t.TempDir()
+	operatorPath := filepath.Join(dir, "config.yaml")
+	writeFile(t, operatorPath, operatorConfig)
+	legacy := legacyDevConfigPath(dir)
+	if err := copyDevConfig(operatorPath, legacy, "", 7778); err != nil {
+		t.Fatal(err)
+	}
+	board := t.TempDir()
+	if err := appconfig.AddFleet(legacy, fleet.Fleet{Name: "testdeck", BoardPath: board}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dev := devConfigPath(dir, 7778)
+	if err := copyDevConfig(operatorPath, dev, legacy, 7778); err != nil {
+		t.Fatal(err)
+	}
+	if kept := fleetsNamed(t, dev, "testdeck"); len(kept) != 1 || kept[0].BoardPath != board {
+		t.Fatalf("the port's first copy has fleets named testdeck %+v; want the one made in the shared copy", kept)
+	}
+	if after, _ := os.ReadFile(legacy); string(after) != string(before) {
+		t.Fatalf("the shared copy was changed:\n%s", after)
+	}
+}
+
 func TestADevAppsConfigIsBesideTheOperatorsInADirectoryOfItsOwn(t *testing.T) {
-	if got, want := devConfigPath("/h"), "/h/.config/fleetdeck/dev/config.yaml"; got != want {
+	if got, want := devConfigPath("/h", 7778), "/h/.config/fleetdeck/dev/7778/config.yaml"; got != want {
 		t.Fatalf("devConfigPath = %q, want %q", got, want)
 	}
 }
@@ -215,43 +348,6 @@ func TestADevAppRemovesNoLeftoverBundle(t *testing.T) {
 	}
 	if !retiresLeftover("", bundle, false) {
 		t.Fatal("the same start of an app that is not a dev app removes none")
-	}
-}
-
-func TestADevAppKeepsItsOwnLogWidthsAndLock(t *testing.T) {
-	if got := panelLogPath("/h", false); got != "/h/Library/Logs/fleetdeck.log" {
-		t.Errorf("the app's log = %q", got)
-	}
-	if got := panelLogPath("/h", true); got != "/h/Library/Logs/fleetdeck-dev.log" {
-		t.Errorf("a dev app's log = %q", got)
-	}
-	if got := widthsSuite("", false); got != "" {
-		t.Errorf("the app's widths go to suite %q, want its own defaults", got)
-	}
-	if got := widthsSuite("", true); got != supervisor.DevBundleID+".widths" {
-		t.Errorf("a dev app's widths go to suite %q", got)
-	}
-	if dev, app := updateLockPath("/src/fleetdeck/bin/"+devBundleName), updateLockPath("/Applications/fleetdeck.app"); dev == app || dev == "" {
-		t.Errorf("a dev app's lock %q is the installed app's %q", dev, app)
-	}
-}
-
-func TestADevAppSaysItIsDev(t *testing.T) {
-	if got := windowTitle(false); got != "fleetdeck" {
-		t.Errorf("the app's title = %q", got)
-	}
-	if got := windowTitle(true); got != "fleetdeck dev" {
-		t.Errorf("a dev app's title = %q", got)
-	}
-}
-
-func TestADevAppsKeeperStopsOnlyItsOwnPanel(t *testing.T) {
-	const exe = "/src/fleetdeck/bin/" + devBundleName + "/Contents/MacOS/fleetdeck-window"
-	if got := stopsOnly(exe, true); got != panelBinary(exe) {
-		t.Errorf("a dev app's keeper stops only %q, want its own panel %q", got, panelBinary(exe))
-	}
-	if got := stopsOnly(exe, false); got != "" {
-		t.Errorf("the app's keeper stops only %q, want no such limit", got)
 	}
 }
 
@@ -337,6 +433,68 @@ func TestMakeDevAppBuildsTheDevBundleWithoutOpeningIt(t *testing.T) {
 	}
 	if strings.Contains(string(info), "main.treeDir") {
 		t.Errorf("the dev window carries a source tree to update from; its build record:\n%s", info)
+	}
+}
+
+// Which SDK a cgo build links against is scripts/darwin-sdkroot.sh's answer:
+// SDKROOT when it is set, and otherwise what xcrun says the selected developer
+// directory's SDK is. The script is run here with an xcrun of the test's own
+// first on PATH and no /usr/bin on it at all, so neither make nor any xcrun
+// shim runs under the made-up paths below.
+func TestTheSDKIsTheOneGivenOrTheSelectedDeveloperDirectorys(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "darwin-sdkroot.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeXcrun := func(answer string) (dir, calls string) {
+		dir = t.TempDir()
+		calls = filepath.Join(dir, "calls")
+		body := "#!/bin/sh\necho \"$*\" >> '" + calls + "'\n"
+		if answer != "" {
+			body += "echo '" + answer + "'\n"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "xcrun"), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return dir, calls
+	}
+	run := func(dir, sdkroot string) (string, string, error) {
+		cmd := exec.Command("/bin/sh", script)
+		cmd.Env = []string{"PATH=" + dir + ":/bin", "SDKROOT=" + sdkroot}
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		return strings.TrimSpace(string(out)), stderr.String(), err
+	}
+
+	dir, calls := fakeXcrun("/Selected/MacOSX.sdk")
+	if got, _, err := run(dir, "/Given/MacOSX.sdk"); err != nil || got != "/Given/MacOSX.sdk" {
+		t.Errorf("with SDKROOT given: %q, %v; want the given SDK", got, err)
+	}
+	if _, err := os.Stat(calls); err == nil {
+		t.Error("with SDKROOT given, xcrun was asked anyway")
+	}
+	if got, _, err := run(dir, ""); err != nil || got != "/Selected/MacOSX.sdk" {
+		t.Errorf("with no SDKROOT: %q, %v; want xcrun's answer", got, err)
+	}
+	if data, _ := os.ReadFile(calls); strings.TrimSpace(string(data)) != "--sdk macosx --show-sdk-path" {
+		t.Errorf("xcrun was asked %q, want the selected developer directory's SDK", data)
+	}
+
+	silent, _ := fakeXcrun("")
+	if got, stderr, err := run(silent, ""); err == nil || got != "" || !strings.Contains(stderr, "SDKROOT") {
+		t.Errorf("with xcrun answering nothing: %q, %v, %q; want a failure that says to set SDKROOT", got, err, stderr)
+	}
+
+	// An Xcode whose license is not accepted: xcrun exits 69 and says why,
+	// and the build says it too, rather than building against no SDK.
+	unlicensed := t.TempDir()
+	refusal := "#!/bin/sh\necho 'You have not agreed to the Xcode license agreements.' >&2\nexit 69\n"
+	if err := os.WriteFile(filepath.Join(unlicensed, "xcrun"), []byte(refusal), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, stderr, err := run(unlicensed, ""); err == nil || got != "" || !strings.Contains(stderr, "exit 69") || !strings.Contains(stderr, "license") {
+		t.Errorf("with xcrun refusing for its license: %q, %v, %q; want a failure naming exit 69 and what xcrun said", got, err, stderr)
 	}
 }
 
