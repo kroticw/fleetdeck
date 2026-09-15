@@ -39,6 +39,9 @@ long fd_test_segment_border_shape(void);
 // Where the selected segment's fill starts in its top row, as a share of its
 // height, drawn off screen; -1 when nothing is drawn.
 double fd_test_selected_segment_top_inset(void);
+// The same for a rounded rectangle in the tabs' place, drawn beside them; -1 on
+// a system without border shapes.
+double fd_test_rounded_segment_top_inset(void);
 typedef struct {
   double left, right, top, bottom;
 } fd_capsule_insets;

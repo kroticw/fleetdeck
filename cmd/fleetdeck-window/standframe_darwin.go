@@ -52,6 +52,9 @@ type standFrameReport struct {
 	Capsules           []measuredCapsule `json:"capsules"`
 	SegmentBorderShape int               `json:"segmentBorderShape"`
 	SelectedTopInset   float64           `json:"selectedTopInset"`
+	// RoundedTopInset is the same measure of a rounded rectangle drawn in the
+	// tabs' place, what the selected tab is held against.
+	RoundedTopInset float64 `json:"roundedTopInset"`
 	// ContentLayoutTop is how much of the window's top its title bar and
 	// toolbar keep from the content; Overlays what lies over the content
 	// there. In v0.10.2's first full screen stand the toolbar stayed as a black
@@ -78,6 +81,7 @@ func measureFrame(f *frame, window unsafe.Pointer, mode glassMode) standFrameRep
 		Row:                boxOf(C.fd_test_frame_of(f.capsules())),
 		SegmentBorderShape: int(C.fd_test_segment_border_shape()),
 		SelectedTopInset:   float64(C.fd_test_selected_segment_top_inset()),
+		RoundedTopInset:    float64(C.fd_test_rounded_segment_top_inset()),
 		ContentLayoutTop:   float64(C.fd_test_content_layout_top(window)),
 	}
 	var overlays [16]C.fd_overlay

@@ -96,6 +96,10 @@ func TestCapsulesDrawThePagesModel(t *testing.T) {
 // left automatic it draws a rounded rectangle at this size. Asked for a capsule,
 // its selected segment is one too, and with the same room on every side the two
 // capsules share their centres of curvature.
+// capsuleOverRoundedInset is how much further in a capsule's top row starts than
+// a rounded rectangle's, at the least: 0.46 against 0.19 on a 2x screen.
+const capsuleOverRoundedInset = 0.05
+
 func TestTheSelectedTabIsACapsuleInsideItsCapsule(t *testing.T) {
 	r := capsulesResult
 	if r.segmentBorderShape < 0 {
@@ -104,8 +108,8 @@ func TestTheSelectedTabIsACapsuleInsideItsCapsule(t *testing.T) {
 	if r.segmentBorderShape != 1 {
 		t.Errorf("the tabs' border shape is %d, want 1 (NSControlBorderShapeCapsule)", r.segmentBorderShape)
 	}
-	if r.selectedTopInset < 0.35 {
-		t.Errorf("the selected segment's fill starts %.2f of its height in at its top, want a capsule's, about 0.5; a rounded rectangle's is about 0.2", r.selectedTopInset)
+	if r.roundedTopInset <= 0 || r.selectedTopInset < r.roundedTopInset+capsuleOverRoundedInset {
+		t.Errorf("the selected segment's fill starts %.2f of its height in at its top, a rounded rectangle's drawn in its place %.2f: want a capsule's, at least %.2f further in", r.selectedTopInset, r.roundedTopInset, capsuleOverRoundedInset)
 	}
 }
 

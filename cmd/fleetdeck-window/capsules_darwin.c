@@ -520,14 +520,42 @@ long fd_test_segment_border_shape(void) {
 // fill's height. Drawn off screen, the control's track has nothing under it and
 // only the selected segment's fill is left: a capsule's top row starts about
 // half its height in, a rounded rectangle's a fifth. -1 when nothing is drawn.
-double fd_test_selected_segment_top_inset(void) {
-  if (!segmentedDrawn) return -1;
+static double topInsetOf(id control);
+
+double fd_test_selected_segment_top_inset(void) { return segmentedDrawn ? topInsetOf(segmentedDrawn) : -1; }
+
+// The same measure of a stand-in for the tabs: the same labels, selection, size
+// and place, as a rounded rectangle. On a 1x screen the drawn capsule's top row
+// starts nearer its edge than on a 2x one (0.375 against 0.46), so the tabs are
+// held to this reference drawn beside them, not to a number. -1 on a system
+// without border shapes.
+double fd_test_rounded_segment_top_inset(void) {
+  if (!segmentedDrawn || !respondsTo(segmentedDrawn, "setBorderShape:")) return -1;
   void *pool = objc_autoreleasePoolPush();
-  CGRect b = sendRect0(segmentedDrawn, sel("bounds"));
-  id rep = ((id (*)(id, SEL, CGRect))objc_msgSend)(segmentedDrawn, sel("bitmapImageRepForCachingDisplayInRect:"), b);
+  long count = sendLong0(segmentedDrawn, sel("segmentCount"));
+  id labels = send0(cls("NSMutableArray"), sel("array"));
+  for (long i = 0; i < count; i++) {
+    sendVoid1(labels, sel("addObject:"), ((id (*)(id, SEL, long))objc_msgSend)(segmentedDrawn, sel("labelForSegment:"), i));
+  }
+  id reference = ((id (*)(id, SEL, id, long, id, SEL))objc_msgSend)(
+      cls("NSSegmentedControl"), sel("segmentedControlWithLabels:trackingMode:target:action:"), labels, 0, (id)0, (SEL)0);
+  sendVoidLong(reference, sel("setSelectedSegment:"), sendLong0(segmentedDrawn, sel("selectedSegment")));
+  sendVoidLong(reference, sel("setBorderShape:"), 2);  // NSControlBorderShapeRoundedRectangle
+  sendVoidRect(reference, sel("setFrame:"), sendRect0(segmentedDrawn, sel("frame")));
+  sendVoid1(send0(segmentedDrawn, sel("superview")), sel("addSubview:"), reference);
+  double out = topInsetOf(reference);
+  sendVoid0(reference, sel("removeFromSuperview"));
+  objc_autoreleasePoolPop(pool);
+  return out;
+}
+
+static double topInsetOf(id control) {
+  void *pool = objc_autoreleasePoolPush();
+  CGRect b = sendRect0(control, sel("bounds"));
+  id rep = ((id (*)(id, SEL, CGRect))objc_msgSend)(control, sel("bitmapImageRepForCachingDisplayInRect:"), b);
   double out = -1;
   if (rep) {
-    ((void (*)(id, SEL, CGRect, id))objc_msgSend)(segmentedDrawn, sel("cacheDisplayInRect:toBitmapImageRep:"), b, rep);
+    ((void (*)(id, SEL, CGRect, id))objc_msgSend)(control, sel("cacheDisplayInRect:toBitmapImageRep:"), b, rep);
     long w = sendLong0(rep, sel("pixelsWide")), h = sendLong0(rep, sel("pixelsHigh"));
     long top = -1, bottom = -1, left = -1;
     for (long y = 0; y < h; y++) {

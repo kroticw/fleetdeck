@@ -18,6 +18,7 @@ func goodFrame(fullScreen bool) frameReport {
 		Row:                box{X: 278, Y: 10, W: 442, H: 32},
 		SegmentBorderShape: 1,
 		SelectedTopInset:   0.46,
+		RoundedTopInset:    0.19,
 		Capsules: []capsule{
 			{Name: "tabs", box: box{X: 278, Y: 10, W: 123, H: 32}},
 			{Name: "newCard", box: box{X: 409, Y: 10, W: 83, H: 32}},
@@ -182,7 +183,37 @@ func TestARoundedSelectedTabIsAProblem(t *testing.T) {
 	f.SegmentBorderShape, f.SelectedTopInset = 0, 0.19
 	problems := check(logOf(t, f, goodBoard(false), goodHeader(false)), 0)
 	wantProblem(t, problems, "border shape")
-	wantProblem(t, problems, "selected tab")
+	wantProblem(t, problems, "selected tab", "0.19", "rounded rectangle's in its place 0.19")
+}
+
+// On the 1x runner (run 34932941637) a capsule measured 0.375, and 0.29 once
+// the window had been in full screen, against a rounded rectangle's lower
+// numbers on the same screen: a capsule, whatever its number.
+func TestACapsuleOnA1xScreenIsNoProblemInAndAfterFullScreen(t *testing.T) {
+	before, in, after := goodFrame(false), goodFrame(true), goodFrame(false)
+	before.SelectedTopInset, before.RoundedTopInset = 0.375, 0.17
+	in.SelectedTopInset, in.RoundedTopInset = 0.29, 0.17
+	after.SelectedTopInset, after.RoundedTopInset = 0.29, 0.17
+	log := logOf(t, before, goodBoard(false), goodHeader(false), in, goodBoard(true), after, goodBoard(false))
+	if got := check(log, 1); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
+func TestARoundedSelectedTabInOrAfterFullScreenIsAProblem(t *testing.T) {
+	in, after := goodFrame(true), goodFrame(false)
+	in.SelectedTopInset, in.RoundedTopInset = 0.2, 0.19
+	after.SegmentBorderShape = 2
+	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), in, goodBoard(true), after, goodBoard(false))
+	problems := check(log, 1)
+	wantProblem(t, problems, "in full screen 1", "selected tab")
+	wantProblem(t, problems, "after full screen 1", "border shape is 2")
+}
+
+func TestNoRoundedReferenceIsAProblem(t *testing.T) {
+	f := goodFrame(false)
+	f.RoundedTopInset = -1
+	wantProblem(t, check(logOf(t, f, goodBoard(false), goodHeader(false)), 0), "no rounded rectangle")
 }
 
 // Before macOS 26 a segmented control has no border shape, and its selected

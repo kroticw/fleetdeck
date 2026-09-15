@@ -52,9 +52,11 @@ const (
 	edgeSlack  = 0.5
 	lineSlack  = 1
 	brandSlack = 2
-	// A capsule's top row starts about half its height in, a rounded
-	// rectangle's a fifth.
-	minCapsuleTopInset = 0.35
+	// A capsule's top row starts further in than a rounded rectangle's drawn
+	// in its place, by this much at the least: 0.46 against 0.19 on a 2x
+	// screen. On the 1x runner a capsule measured 0.375, and 0.29 once the
+	// window had been in full screen, so no fixed number holds a capsule.
+	capsuleOverRoundedInset = 0.05
 	// An overlay this transparent shows nothing.
 	clearAlpha = 0.01
 )
@@ -95,6 +97,9 @@ type frameReport struct {
 	// its top row, as a share of its height.
 	SegmentBorderShape int     `json:"segmentBorderShape"`
 	SelectedTopInset   float64 `json:"selectedTopInset"`
+	// RoundedTopInset is the same measure of a rounded rectangle drawn in the
+	// tabs' place.
+	RoundedTopInset float64 `json:"roundedTopInset"`
 	// ContentLayoutTop is how much of the window's top its title bar and
 	// toolbar keep from the content; Overlays what lies over it there.
 	ContentLayoutTop float64   `json:"contentLayoutTop"`
@@ -177,6 +182,7 @@ func check(log string, trips int) []string {
 			in++
 			when := fmt.Sprintf("in full screen %d: ", in)
 			problems = append(problems, capsuleProblems(when, f)...)
+			problems = append(problems, tabProblems(when, f)...)
 			problems = append(problems, l.boardProblems(when, r)...)
 			problems = append(problems, coverProblems(when, f)...)
 			continue
@@ -187,10 +193,10 @@ func check(log string, trips int) []string {
 			when = fmt.Sprintf("after full screen %d: ", in)
 		}
 		problems = append(problems, capsuleProblems(when, f)...)
+		problems = append(problems, tabProblems(when, f)...)
 		problems = append(problems, l.boardProblems(when, r)...)
 		problems = append(problems, buttonProblems(when, f)...)
 		if i == 0 {
-			problems = append(problems, tabProblems(f)...)
 			problems = append(problems, headerProblems(f, l.headers)...)
 		}
 	}
@@ -316,16 +322,20 @@ func (l standLog) boardProblems(when string, r run) []string {
 	return []string{when + "no board report beside the frame"}
 }
 
-func tabProblems(f frameReport) []string {
+// tabProblems holds the tabs to a capsule: their border shape, and the selected
+// tab's fill against a rounded rectangle drawn in its place.
+func tabProblems(when string, f frameReport) []string {
 	if f.SegmentBorderShape < 0 {
 		return nil
 	}
 	var out []string
 	if f.SegmentBorderShape != 1 {
-		out = append(out, fmt.Sprintf("the tabs' border shape is %d, want 1 (a capsule)", f.SegmentBorderShape))
+		out = append(out, fmt.Sprintf("%sthe tabs' border shape is %d, want 1 (a capsule)", when, f.SegmentBorderShape))
 	}
-	if f.SelectedTopInset < minCapsuleTopInset {
-		out = append(out, fmt.Sprintf("the selected tab's fill starts %.2f of its height in at its top, want a capsule's, about 0.5", f.SelectedTopInset))
+	if f.RoundedTopInset <= 0 {
+		out = append(out, when+"no rounded rectangle measured to hold the selected tab against")
+	} else if f.SelectedTopInset < f.RoundedTopInset+capsuleOverRoundedInset {
+		out = append(out, fmt.Sprintf("%sthe selected tab's fill starts %.2f of its height in at its top, a rounded rectangle's in its place %.2f: want a capsule's, at least %.2f further in", when, f.SelectedTopInset, f.RoundedTopInset, capsuleOverRoundedInset))
 	}
 	return out
 }

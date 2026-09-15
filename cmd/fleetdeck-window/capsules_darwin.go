@@ -100,6 +100,7 @@ type capsulesProbe struct {
 	// room around the tabs in their capsule: left, right, top, bottom.
 	segmentBorderShape int
 	selectedTopInset   float64
+	roundedTopInset    float64
 	tabsInsets         [4]float64
 	newCardTitle       string
 	themeTitle         string
@@ -131,6 +132,7 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	out.selectedSegment = int(C.fd_test_selected_segment())
 	out.segmentBorderShape = int(C.fd_test_segment_border_shape())
 	out.selectedTopInset = float64(C.fd_test_selected_segment_top_inset())
+	out.roundedTopInset = float64(C.fd_test_rounded_segment_top_inset())
 	insets := C.fd_test_tabs_insets()
 	out.tabsInsets = [4]float64{float64(insets.left), float64(insets.right), float64(insets.top), float64(insets.bottom)}
 	out.newCardTitle = C.GoString(C.fd_test_new_card_title())
