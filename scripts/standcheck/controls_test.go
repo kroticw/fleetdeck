@@ -18,9 +18,9 @@ func goodCapsule(name, glass string) control {
 
 // A panel floating over content: frosted on glass, solid with no glass.
 func goodPanel(name, glass string) control {
-	c := control{Name: name, Height: 90, Radius: 18, FillAlpha: 0.8, Backdrop: "blur(24px) saturate(160%)", Floating: true, Contrast: 12.4}
+	c := control{Name: name, Height: 90, Radius: 18, FillAlpha: 0.8, Backdrop: "blur(24px) saturate(160%)", Contrast: 12.4}
 	if glass == "opaque" {
-		c.FillAlpha, c.Backdrop, c.Floating = 1, "none", false
+		c.FillAlpha, c.Backdrop = 1, "none"
 	}
 	return c
 }
@@ -46,6 +46,11 @@ func controlsLog(t *testing.T, glass string, reports ...controlsReport) string {
 	t.Helper()
 	f := goodFrame(false)
 	f.Glass = glass
+	return controlsLogOf(t, f, reports...)
+}
+
+func controlsLogOf(t *testing.T, f frameReport, reports ...controlsReport) string {
+	t.Helper()
 	log := logLine(t, "11:00:00.000000", f)
 	for _, r := range reports {
 		raw, err := json.Marshal(r)
@@ -99,7 +104,7 @@ func TestACapsuleThatBlursIsAProblem(t *testing.T) {
 
 func TestAFloatingPanelNotFrostedOnGlassOrBlurredWithNoGlassIsAProblem(t *testing.T) {
 	b := goodBoardControls("glass")
-	b.Controls[0].Backdrop, b.Controls[0].Floating = "none", false
+	b.Controls[0].Backdrop = "none"
 	wantProblem(t, controlsCheck(controlsLog(t, "glass", goodOrchestratorControls("glass"), b), bothOpen), "newCard", "blur")
 
 	o := goodOrchestratorControls("opaque")
@@ -134,6 +139,39 @@ func TestWhatTheStandOpenedButDidNotReportIsAProblem(t *testing.T) {
 	wantProblem(t, problems, "newCard")
 	if got := controlsCheck(controlsLog(t, "glass", o, b), nil); len(got) != 0 {
 		t.Fatalf("problems %q, want none: the stand opened nothing", got)
+	}
+}
+
+// Review of #185: folded, the island is a strip with no head, and its capsules
+// are not on screen to report.
+func TestAFoldedIslandIsNotAskedForItsHead(t *testing.T) {
+	o := goodOrchestratorControls("glass")
+	o.Controls = nil
+	log := controlsLogOf(t, foldedOrchestrator(goodFrame(false), 89), o, goodBoardControls("glass"))
+	if got := controlsCheck(log, nil); len(got) != 0 {
+		t.Fatalf("problems %q, want none: a folded island shows no head", got)
+	}
+}
+
+// Review of #185: a stand's form opens empty, and its title shows the
+// placeholder.
+func TestAPlaceholderUnderFourAndAHalfToOneIsAProblem(t *testing.T) {
+	b := goodBoardControls("glass")
+	b.Controls[1].PlaceholderContrast = at(2.3)
+	wantProblem(t, controlsCheck(controlsLog(t, "glass", goodOrchestratorControls("glass"), b), bothOpen), "newCardTitle", "placeholder", "2.3")
+	b.Controls[1].PlaceholderContrast = at(6.1)
+	if got := controlsCheck(controlsLog(t, "glass", goodOrchestratorControls("glass"), b), bothOpen); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
+// A disabled capsule is dimmed on purpose (web/app.css): its fill is not held to
+// the material, as its text is not held to 4.5:1.
+func TestADimmedDisabledCapsuleIsNoProblem(t *testing.T) {
+	b := goodBoardControls("opaque")
+	b.Controls[3].FillAlpha, b.Controls[3].Contrast, b.Controls[3].Disabled = 0.45, 2.1, true
+	if got := controlsCheck(controlsLog(t, "opaque", goodOrchestratorControls("opaque"), b), bothOpen); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
 	}
 }
 

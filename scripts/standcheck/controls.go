@@ -19,15 +19,20 @@ const (
 // The contrast WCAG asks of text: 4.5:1.
 const minContrast = 4.5
 
+// control is one capsule or panel as its page measured it. FillAlpha already
+// takes in the opacity of the control and of what it lies in. Whether it floats
+// is not read from the page: floatingPanels says which do.
 type control struct {
 	Name      string  `json:"name"`
 	Height    float64 `json:"height"`
 	Radius    float64 `json:"radius"`
 	FillAlpha float64 `json:"fillAlpha"`
 	Backdrop  string  `json:"backdrop"`
-	Floating  bool    `json:"floating"`
 	Contrast  float64 `json:"contrast"`
-	Disabled  bool    `json:"disabled"`
+	// PlaceholderContrast is an empty field's placeholder's, nil for a control
+	// showing none.
+	PlaceholderContrast *float64 `json:"placeholderContrast"`
+	Disabled            bool     `json:"disabled"`
 }
 
 type controlsReport struct {
@@ -129,7 +134,10 @@ func controlProblems(surface, glass string, c control) []string {
 	}
 	solid := glass == "opaque"
 	blurred := c.Backdrop != "" && c.Backdrop != "none"
+	// A disabled control is dimmed on purpose (web/app.css): its fill is not
+	// held to the material, nor its text to the contrast.
 	switch {
+	case c.Disabled:
 	case solid && c.FillAlpha < 1:
 		say("is see-through (fill %v) with no glass: it has to be solid", c.FillAlpha)
 	case !solid && c.FillAlpha >= 1:
@@ -152,6 +160,9 @@ func controlProblems(surface, glass string, c control) []string {
 	}
 	if !c.Disabled && c.Contrast < minContrast {
 		say("text has a contrast of %v over the worst ground under it, under %v:1", c.Contrast, minContrast)
+	}
+	if !c.Disabled && c.PlaceholderContrast != nil && *c.PlaceholderContrast < minContrast {
+		say("placeholder has a contrast of %v over the worst ground under it, under %v:1", *c.PlaceholderContrast, minContrast)
 	}
 	return out
 }
