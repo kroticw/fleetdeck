@@ -6,17 +6,31 @@
 // scrollbar -- how much wider its content is than it, and how tall the bar
 // under it is. The second is where that box and its bar are, against the
 // sessions panel's left edge, and whether the last column can be scrolled out
-// from under that panel -- answered by the board itself, as true or false.
+// from under that panel -- answered by the board itself, as true or false. The
+// third is the bars down the board's height: its own, at the sessions glass's
+// edge, and its columns'.
+//
+// The side surfaces say theirs: the sessions list's bar, the edges down the
+// orchestrator's terminal, and the grounds and corners of the boxes the
+// sessions list lies in.
 
 // Sub-pixel layout rounding, not a column under the panel.
 const EDGE_SLACK_PX = 1;
 
 const tenth = (n) => Math.round(n * 10) / 10;
 
-// boardScrollReport is what board (#board) in win says of its horizontal
-// scrolling. The sessions panel's left edge is the page's width less the inset
-// the window sends for it; a page the window sent no inset leaves it, and every
-// answer that needs it, null. So does a board with no columns for the last one.
+// barWidth is how wide the bar down el's right side is: what its box is wider
+// than the room it leaves its content, less its borders.
+function barWidth(win, el) {
+  const style = win.getComputedStyle(el);
+  const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
+  return (el.offsetWidth ?? 0) - (el.clientWidth ?? 0) - border;
+}
+
+// boardScrollReport is what board (#board) in win says of its scrolling. The
+// sessions panel's left edge is the page's width less the inset the window
+// sends for it; a page the window sent no inset leaves it, and every answer
+// that needs it, null. So does a board with no columns for the last one.
 export function boardScrollReport(win, board) {
   const style = win.getComputedStyle(board);
   const root = win.document.documentElement;
@@ -26,7 +40,7 @@ export function boardScrollReport(win, board) {
   const sessionsLeft = Number.isFinite(inset) ? root.clientWidth - inset : null;
   // Scrolling moves every column by the same distance, so where the last one
   // ends at the end of the scroll is where it ends now, moved by what is left.
-  const columns = board.querySelectorAll(":scope > .kcol");
+  const columns = [...board.querySelectorAll(":scope > .kcol")];
   const last = columns.length ? columns[columns.length - 1] : null;
   const end = board.scrollWidth - board.clientWidth;
   const lastRight = last ? last.getBoundingClientRect().right - (end - board.scrollLeft) : null;
@@ -42,6 +56,14 @@ export function boardScrollReport(win, board) {
     lastColumnRightAtEnd: lastRight === null ? null : tenth(lastRight),
     lastColumnClear: clear(lastRight),
     boardClearOfSessions: clear(box.right),
+    // Down the board's height: whether anything on it is taller than the room
+    // it has -- without that, no bar is no proof -- and the bars that draws.
+    scrollHeight: board.scrollHeight,
+    clientHeight: board.clientHeight,
+    overflowY: style.overflowY,
+    scrollbarWidth: barWidth(win, board),
+    columnScrollbarWidth: columns.reduce((widest, c) => Math.max(widest, barWidth(win, c)), 0),
+    contentTallerThanRoom: board.scrollHeight > board.clientHeight || columns.some((c) => c.scrollHeight > c.clientHeight),
   };
 }
 
@@ -50,27 +72,50 @@ export function boardScrollReport(win, board) {
 // the bar beside it is. macOS draws a classic 15 px bar for a mouse; the islands
 // ask WebKit for 6 (web/app.css).
 export function listScrollReport(win, list) {
-  const style = win.getComputedStyle(list);
-  const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
   return {
     surface: "sessions",
     scrollHeight: list.scrollHeight,
     clientHeight: list.clientHeight,
-    scrollbarWidth: list.offsetWidth - list.clientWidth - border,
-    overflowY: style.overflowY,
+    scrollbarWidth: barWidth(win, list),
+    overflowY: win.getComputedStyle(list).overflowY,
   };
 }
 
-// watchListScroll reports list's scrolling as watchBoardScroll does the
-// board's: once laid out, on a resize, whenever the list draws its rows, and
-// when the returned function is called; at most once a frame, and only when the
-// report changed.
-export function watchListScroll(win, list, report) {
+// The boxes the sessions list lies in, outermost first. On glass none paints a
+// ground or rounds a corner of its own: the glass is the island. Opaque, the
+// body paints the panel, square, and the window's frame rounds it.
+const GROUND_SELECTORS = ["html", "body", "main", "#sessions", "#header", ".col-size", ".slist-head", ".fleet-group-head"];
+
+// groundsReport is what surface's page in win says of those boxes: each one
+// there is, with its computed ground, image, corners and shadow, and the
+// material the window said the page lies on (data-glass), null if none.
+export function groundsReport(win, surface) {
+  const doc = win.document;
+  const elements = [];
+  for (const selector of GROUND_SELECTORS) {
+    for (const el of doc.querySelectorAll(selector)) {
+      const style = win.getComputedStyle(el);
+      elements.push({
+        selector,
+        background: style.backgroundColor,
+        image: style.backgroundImage,
+        radius: style.borderRadius,
+        shadow: style.boxShadow,
+      });
+    }
+  }
+  return { surface, report: "grounds", glass: doc.documentElement.dataset.glass ?? null, elements };
+}
+
+// watch reports what measure says of target once laid out, on a resize,
+// whenever target's children change as observed, and when the returned
+// function is called; at most once a frame, and only when the report changed.
+function watch(win, target, observed, measure, report) {
   let last = "";
   let queued = false;
-  const measure = () => {
+  const run = () => {
     queued = false;
-    const now = listScrollReport(win, list);
+    const now = measure();
     const text = JSON.stringify(now);
     if (text === last) return;
     last = text;
@@ -79,12 +124,23 @@ export function watchListScroll(win, list, report) {
   const later = () => {
     if (queued) return;
     queued = true;
-    win.requestAnimationFrame(measure);
+    win.requestAnimationFrame(run);
   };
   win.addEventListener("resize", later);
-  if (typeof win.MutationObserver === "function") new win.MutationObserver(later).observe(list, { childList: true });
+  if (typeof win.MutationObserver === "function") new win.MutationObserver(later).observe(target, observed);
   later();
   return later;
+}
+
+// watchListScroll reports list's scrolling whenever the list draws its rows.
+export function watchListScroll(win, list, report) {
+  return watch(win, list, { childList: true }, () => listScrollReport(win, list), report);
+}
+
+// watchGrounds reports the sessions surface's grounds whenever anything in its
+// list is drawn: a head or a group heading comes with the first rows.
+export function watchGrounds(win, list, report) {
+  return watch(win, list, { childList: true, subtree: true }, () => groundsReport(win, "sessions"), report);
 }
 
 // How long after a change the terminal is measured again: xterm's own bar fades
@@ -100,11 +156,9 @@ export function terminalScrollReport(win, column) {
   const viewport = column.querySelector(".xterm-viewport");
   const bar = column.querySelector(".xterm-scrollable-element > .scrollbar.vertical");
   if (!viewport || !bar) return null;
-  const style = win.getComputedStyle(viewport);
-  const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
   return {
     surface: "orchestrator",
-    viewportScrollbarWidth: viewport.offsetWidth - viewport.clientWidth - border,
+    viewportScrollbarWidth: barWidth(win, viewport),
     ownBarOpacity: Number(win.getComputedStyle(bar).opacity),
   };
 }
@@ -141,28 +195,9 @@ export function watchTerminalScroll(win, column, report) {
   return later;
 }
 
-// watchBoardScroll reports board's scrolling once the page has laid it out,
-// whenever the window is resized, whenever the board draws its columns, and
-// whenever the returned function is called -- after the window's insets change
-// -- at most once a frame, and only when the report differs from the last one.
+// watchBoardScroll reports board's scrolling whenever the board draws its
+// columns, and whenever the returned function is called -- after the window's
+// insets change.
 export function watchBoardScroll(win, board, report) {
-  let last = "";
-  let queued = false;
-  const measure = () => {
-    queued = false;
-    const now = boardScrollReport(win, board);
-    const text = JSON.stringify(now);
-    if (text === last) return;
-    last = text;
-    report(now);
-  };
-  const later = () => {
-    if (queued) return;
-    queued = true;
-    win.requestAnimationFrame(measure);
-  };
-  win.addEventListener("resize", later);
-  if (typeof win.MutationObserver === "function") new win.MutationObserver(later).observe(board, { childList: true });
-  later();
-  return later;
+  return watch(win, board, { childList: true }, () => boardScrollReport(win, board), report);
 }

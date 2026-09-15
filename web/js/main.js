@@ -7,7 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
-import { watchBoardScroll, watchListScroll, watchTerminalScroll } from "./standreport.js";
+import { watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll } from "./standreport.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -263,6 +263,8 @@ if (host) {
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
   // And the sessions list's scrollbar, from the sessions surface.
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And the grounds the sessions list lies on, which a screenshot of glass cannot tell from the glass.
+  if (host.stand && host.surface === "sessions" && column) watchGrounds(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the edges down the orchestrator's terminal, from the orchestrator surface.
   if (host.stand && host.surface === "orchestrator" && column) watchTerminalScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // The window's panel folds with the column: a fold the column makes itself

@@ -62,6 +62,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -358,8 +359,8 @@ func main() {
 	}
 	// On a stand the board says what a screenshot cannot (web/js/standreport.js).
 	if hostOnStand {
-		if err := w.Bind("fleetdeckStandReport", func(report map[string]any) {
-			log.Printf("fleetdeck-window: the board reports its scrolling: %v", report)
+		if err := w.Bind("fleetdeckStandReport", func(report json.RawMessage) {
+			log.Print(boardStandReportLine(report))
 		}); err != nil {
 			log.Printf("fleetdeck-window: the board will not report its scrolling: %v", err)
 		}
