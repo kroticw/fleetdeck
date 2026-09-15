@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -13,6 +14,43 @@ import (
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/fleet"
 )
+
+// A fleet added from a dev app's panel leaves Claude Code's statusline to the
+// installed app, and says so as a step done, not as one skipped: the reporter
+// beside a dev panel is a dev build, and the statusline is every session's on
+// the machine. The reporter is there, so the step is left out on purpose.
+func TestAFleetAddedFromADevAppLeavesTheStatuslineAlone(t *testing.T) {
+	home, cfgPath := firstFleet(t)
+	before := readSettings(t, settingsPathOf(home))["statusLine"]
+
+	macos := filepath.Join(t.TempDir(), devBundleName, "Contents", "MacOS")
+	if err := os.MkdirAll(macos, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"fleetdeck", statusBinaryName} {
+		if err := os.WriteFile(filepath.Join(macos, name), []byte("binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(t.TempDir(), "dev-fleet")
+	steps := fleetSteps(cfgPath, initEnv{home: home, binary: filepath.Join(macos, "fleetdeck"), workspace: root, fleet: "devfleet", out: io.Discard})
+
+	var statusline *initStep
+	for i := range steps {
+		if steps[i].name == "statusline" {
+			statusline = &steps[i]
+		}
+	}
+	if statusline == nil {
+		t.Fatalf("no statusline step among %+v", steps)
+	}
+	if statusline.err != nil || !strings.Contains(statusline.note, "not set by a dev app") {
+		t.Fatalf("statusline step = %+v; want a note that a dev app does not set it, and no error", *statusline)
+	}
+	if after := readSettings(t, settingsPathOf(home))["statusLine"]; !reflect.DeepEqual(after, before) {
+		t.Fatalf("a dev app's fleet changed the statusline from %v to %v", before, after)
+	}
+}
 
 // firstFleet runs the plain init a first launch runs and returns the home and
 // the configuration file it made.

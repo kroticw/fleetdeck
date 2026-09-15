@@ -88,5 +88,27 @@ func fleetSteps(cfgPath string, env initEnv) []initStep {
 		cfgStep.note = fmt.Sprintf("%s (fleet %s added, board: %s)", cfgPath, fl.Name, fl.BoardPath)
 		cfgStep.detail = "a running panel shows the new fleet after it is restarted"
 	}
-	return []initStep{boardStep, cfgStep, ensureStatusline(env), ensurePermissions(env, allow)}
+	return []initStep{boardStep, cfgStep, statuslineStep(env), ensurePermissions(env, allow)}
+}
+
+// devBundleName is what `make dev-app` calls the bundle of a dev app, a build
+// from a working tree run beside the installed app; cmd/fleetdeck-window names
+// it the same (devBundleName there), and the two must agree.
+const devBundleName = "fleetdeck-dev.app"
+
+// statuslineStep is ensureStatusline, except for a panel inside a dev app:
+// Claude Code's statusline is every session's on the machine, and stays the
+// installed app's. Said as a step done, not skipped -- nothing is missing.
+func statuslineStep(env initEnv) initStep {
+	if inDevApp(env.binary) {
+		return initStep{name: "statusline", note: "not set by a dev app: Claude Code's statusline stays the installed app's"}
+	}
+	return ensureStatusline(env)
+}
+
+// inDevApp says whether binary is in a dev app's bundle, in its Contents/MacOS.
+func inDevApp(binary string) bool {
+	macos := filepath.Dir(binary)
+	contents := filepath.Dir(macos)
+	return filepath.Base(macos) == "MacOS" && filepath.Base(contents) == "Contents" && filepath.Base(filepath.Dir(contents)) == devBundleName
 }
