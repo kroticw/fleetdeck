@@ -559,7 +559,9 @@ test("on the board the box that scrolls is the room between the panels", () => {
 // columns do (web/tests/board-columns-css.test.js).
 test("on the board the box still scrolls sideways under a trackpad or a wheel", () => {
   const board = ruleBody(':root[data-surface="board"] #board');
-  assert.doesNotMatch(board, /overflow-x|overflow:/);
+  // Any overflow property but overflow-y: overflow, overflow-x, overflow-inline
+  // and overflow-block all reach the sideways scrolling.
+  assert.doesNotMatch(board, /overflow(?!-y\s*:)[a-z-]*\s*:/);
   assert.doesNotMatch(board, /pointer-events/);
   assert.doesNotMatch(board, /touch-action/);
 });

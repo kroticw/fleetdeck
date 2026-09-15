@@ -44,9 +44,12 @@ test("in the window the board does not scroll down its height, its columns do", 
   assert.match(board, /overflow-y:\s*hidden/);
   // The columns take the board's height, so a long one scrolls inside it.
   assert.match(board, /align-items:\s*stretch/);
+  // The column scrolls by the base rule, which the window's does not undo.
+  const base = ruleBody(".kcol");
+  assert.match(base, /min-height:\s*0/);
+  assert.match(base, /overflow-y:\s*auto/);
   const column = ruleBody(`${BOARD} .kcol`);
-  assert.match(column, /min-height:\s*0/);
-  assert.match(column, /overflow-y:\s*auto/);
+  assert.doesNotMatch(column, /overflow|min-height/);
 });
 
 // A scrollbar-width or scrollbar-color other than auto makes WebKit ignore

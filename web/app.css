@@ -3823,8 +3823,6 @@ body.is-resizing {
   border: none;
   padding: 0;
   gap: var(--gap);
-  min-height: 0;
-  overflow-y: auto;
   scrollbar-width: auto;
   scrollbar-color: auto;
 }
