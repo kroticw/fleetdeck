@@ -750,21 +750,20 @@ func panelStep(configPath, name string, serve func(fleet.Fleet) error) initStep 
 	return s
 }
 
-// servedSteps is steps with the panel step after the configuration's. The
-// configuration step's detail is for a terminal — a running panel shows a
-// fleet init added after a restart — and the panel step is what answers that
-// here.
+// servedSteps is steps with the panel step last. Last, because it is taken
+// last: init's statusline and permission are written before the panel takes
+// the fleet, and the page reads a refused step as the end of what was done.
+// The configuration step's detail is for a terminal — a running panel shows a
+// fleet init added after a restart — and the panel step answers that here.
 func servedSteps(steps []initStep, panel initStep) []initStep {
 	out := make([]initStep, 0, len(steps)+1)
 	for _, s := range steps {
 		if s.name == "config" {
 			s.detail = ""
-			out = append(out, s, panel)
-			continue
 		}
 		out = append(out, s)
 	}
-	return out
+	return append(out, panel)
 }
 
 // liveFleets starts what the panel runs for each fleet — a watch of its board
@@ -796,11 +795,9 @@ func (l *liveFleets) watchBoard(f fleet.Fleet) {
 	l.start(f)
 }
 
-// start is watchBoard with mu held; nothing once ctx is done.
+// start is watchBoard with mu held. Whether the panel is stopping is add's to
+// check, under the same lock.
 func (l *liveFleets) start(f fleet.Fleet) {
-	if l.ctx.Err() != nil {
-		return
-	}
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()

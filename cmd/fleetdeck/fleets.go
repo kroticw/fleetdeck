@@ -92,8 +92,8 @@ func pinOrchestrator(configPath string, collector *Collector, name, id string) e
 	if err := config.SetFleetOrchestrator(configPath, name, id); err != nil {
 		return err
 	}
-	// Found: name was resolved from the fleets the panel started with, which
-	// are the collector's.
+	// Found: name was resolved from the collector's fleets (newFleets), the
+	// same list SetFleetOrchestrator edits.
 	collector.SetFleetOrchestrator(name, id)
 	return nil
 }

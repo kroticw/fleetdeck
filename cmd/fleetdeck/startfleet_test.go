@@ -64,7 +64,9 @@ func panelOnOneFleetWatched(t *testing.T) startPanel {
 	cfg.UsageEnabled = false
 	cfg.ServerPort = freePort(t)
 	cfg.DaemonPollInterval = time.Hour
-	cfgPath := config.DefaultPath()
+	// Not config.DefaultPath(): a panel started with --config, as a dev copy
+	// is, makes and serves fleets in the file it was given and no other.
+	cfgPath := filepath.Join(home, "dev", "config.yaml")
 	if err := config.Save(cfgPath, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +109,27 @@ func (p startPanel) snapshotOf(t *testing.T, name string) (int, state.Snapshot, 
 		}
 	}
 	return code, snap, body
+}
+
+// untilCard waits for the card at path in the snapshot of the fleet named
+// name, writing the card again once a second while it waits. A watch counted
+// as started may not be listening yet, and the one write it missed must not be
+// the only one; the poll is an hour away either way, so only a watch brings it
+// in. Not on every ask: a write every 50 ms keeps resetting the watch's
+// coalescing timer (board.Watch waits for 300 ms of quiet) and it never fires.
+func (p startPanel) untilCard(t *testing.T, what, name, path string) {
+	t.Helper()
+	written := time.Now()
+	until(t, what, func() (bool, string) {
+		if time.Since(written) > time.Second {
+			if raw, err := os.ReadFile(path); err == nil {
+				_ = os.WriteFile(path, raw, 0o600)
+			}
+			written = time.Now()
+		}
+		_, snap, body := p.snapshotOf(t, name)
+		return hasCard(snap, path), body
+	})
 }
 
 func hasCard(snap state.Snapshot, path string) bool {
@@ -194,10 +217,7 @@ func TestAFleetMadeFromTheStartPageIsServedAtOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	until(t, "the card written on vpn's board in vpn's snapshot", func() (bool, string) {
-		_, snap, body := p.snapshotOf(t, "vpn")
-		return hasCard(snap, byHand), body
-	})
+	p.untilCard(t, "the card written on vpn's board in vpn's snapshot", "vpn", byHand)
 	if n := p.watches.of(vpnBoard); n != 1 {
 		t.Fatalf("fleet vpn's board is watched %d times, want once", n)
 	}
@@ -212,10 +232,7 @@ func TestMakingAFleetLeavesTheServedFleetsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	until(t, "the first fleet's card", func() (bool, string) {
-		_, snap, body := p.snapshotOf(t, "")
-		return hasCard(snap, before), body
-	})
+	p.untilCard(t, "the first fleet's card", "", before)
 
 	makeVPN(t, p.c, filepath.Join(p.home, "work", "vpn"))
 
@@ -234,10 +251,7 @@ func TestMakingAFleetLeavesTheServedFleetsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	until(t, "a card written on the first board after a fleet was made", func() (bool, string) {
-		_, snap, body := p.snapshotOf(t, "")
-		return hasCard(snap, after), body
-	})
+	p.untilCard(t, "a card written on the first board after a fleet was made", "", after)
 }
 
 // Making the same fleet twice keeps what is there rather than refusing or
@@ -308,6 +322,11 @@ func TestAFleetTheRunningPanelCannotServeIsNotReportedAsMade(t *testing.T) {
 	if i < 0 || !strings.Contains(out.Steps[i].Error, "restart") {
 		t.Fatalf("no panel step saying why it is not served and what brings it in: %s", body)
 	}
+	// Last: the page's verdict on a refused step says nothing after it was
+	// done, and the statusline and the permission are written before it.
+	if i != len(out.Steps)-1 {
+		t.Fatalf("the panel step is step %d of %d, want the last: %s", i+1, len(out.Steps), body)
+	}
 
 	_, snap, body := p.snapshotOf(t, "vpn")
 	if !slices.Equal(snap.Fleets, []string{"obsidian", "vpn"}) {
@@ -315,6 +334,30 @@ func TestAFleetTheRunningPanelCannotServeIsNotReportedAsMade(t *testing.T) {
 	}
 	if n := p.watches.of(workspace.BoardDir(elsewhere)); n != 0 {
 		t.Fatalf("a board the panel does not serve is watched %d times", n)
+	}
+}
+
+// A fleet added past the running panel — `fleetdeck init --fleet` from a
+// terminal writes the same file — is not served by it: the panel does not
+// watch its configuration, and only the fleets its own start page makes are
+// taken in while it runs. The docs send such a fleet to a restart.
+func TestAFleetInitAddsPastTheRunningPanelIsNotServedByIt(t *testing.T) {
+	p := panelOnOneFleetWatched(t)
+	root := filepath.Join(p.home, "work", "vpn")
+
+	steps := fleetSteps(p.cfgPath, initEnv{home: p.home, workspace: root, config: p.cfgPath, fleet: "vpn"})
+	if !fleetMade(steps) {
+		t.Fatalf("init --fleet did not add the fleet: %+v", steps)
+	}
+
+	if code, body := p.c.do(http.MethodGet, "/api/snapshot?fleet=vpn", ""); code != http.StatusNotFound {
+		t.Fatalf("the running panel serves a fleet init added past it: %d %s", code, body)
+	}
+	if _, snap, body := p.snapshotOf(t, ""); !slices.Equal(snap.Fleets, []string{"obsidian"}) {
+		t.Fatalf("the running panel lists a fleet init added past it: %s", body)
+	}
+	if n := p.watches.of(workspace.BoardDir(root)); n != 0 {
+		t.Fatalf("the board of a fleet the panel does not serve is watched %d times", n)
 	}
 }
 

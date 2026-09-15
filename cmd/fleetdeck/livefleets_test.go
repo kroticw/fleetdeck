@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/fleet"
@@ -33,6 +34,45 @@ func TestAFleetMadeWhileThePanelStopsIsNotServed(t *testing.T) {
 	}
 	if got := collector.Config().Fleets; len(got) != 0 {
 		t.Fatalf("a stopping panel added fleets: %+v", got)
+	}
+}
+
+// wait holds the lock add holds, so a watch an add is about to start is one
+// wait waits for, and no watch is started after wait has returned. The test
+// holds the lock the way an add past its shutdown check does: wait must not
+// return until that add has started its watch and let go. Without the lock
+// wait returns at once, which the select sees; with it, wait cannot return
+// early however slow the machine is, so the timeout cannot fail it.
+func TestWaitWaitsForTheWatchAnAddInProgressStarts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var ended atomic.Int32
+	live := &liveFleets{
+		ctx:       ctx,
+		collector: NewCollector(config.Config{BoardPath: "/fleets/first/board"}, nil, nil, ""),
+		watch: func(ctx context.Context, _ string, _ func()) {
+			<-ctx.Done()
+			ended.Add(1)
+		},
+		refresh: func(context.Context) {},
+	}
+
+	live.mu.Lock()
+	cancel()
+	waited := make(chan struct{})
+	go func() {
+		live.wait()
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("wait returned while an add held the lock: the watch that add starts next is waited for by nobody")
+	case <-time.After(100 * time.Millisecond):
+	}
+	live.start(fleet.Fleet{Name: "vpn", BoardPath: "/fleets/vpn/board"})
+	live.mu.Unlock()
+	<-waited
+	if ended.Load() != 1 {
+		t.Fatal("wait returned before the watch it had to wait for ended")
 	}
 }
 
