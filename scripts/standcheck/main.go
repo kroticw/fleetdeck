@@ -196,6 +196,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "standcheck: %v\n", err)
 		os.Exit(2)
 	}
+	for _, n := range revealedNotes(string(raw)) {
+		fmt.Println("frame: " + n)
+	}
 	problems := check(string(raw), *trips)
 	for _, p := range problems {
 		fmt.Println("frame: " + p)
@@ -229,18 +232,6 @@ func check(log string, trips int) []string {
 			problems = append(problems, l.boardProblems(when, r)...)
 			problems = append(problems, coverProblems(when, f)...)
 			problems = append(problems, l.stripProblems(when, r, false)...)
-			// Every frame after the window settled, the menu bar hidden: the
-			// stand brings the pointer to the top of the screen meanwhile, and
-			// what that brings out over the content need not change anything
-			// else the window says. The window goes in with the menu bar still
-			// shown from before, under the transition's overlay, which is not
-			// that. The first frame with a problem is enough.
-			for _, k := range settledFrames(l.frames, r) {
-				if p := coverProblems(fmt.Sprintf("in full screen %d, a frame after it settled: ", in), l.frames[k]); len(p) > 0 {
-					problems = append(problems, p...)
-					break
-				}
-			}
 			continue
 		}
 		out++
@@ -367,8 +358,60 @@ func coverProblems(when string, f frameReport) []string {
 
 // boardProblems holds the board's last report among the frames of r to r's last
 // frame.
+// revealedNotes is what a pointer at the top of the screen brought out over the
+// capsule row in each time in full screen, as the window measured its frame
+// after it settled, the menu bar hidden: the stand brings the pointer there
+// meanwhile. The operator accepted it for v0.10.2 — in full screen the menu bar
+// and the title bar's strip lie over the capsule row, and no room is kept for
+// them — so it is said, and never a problem.
+func revealedNotes(log string) []string {
+	l, _ := parse(log)
+	if len(l.frames) == 0 {
+		return nil
+	}
+	var out []string
+	in := 0
+	for _, r := range runsOf(l.frames) {
+		if !r.fullScreen {
+			continue
+		}
+		in++
+		for _, k := range settledFrames(l.frames, r) {
+			if top, bottom, ok := revealedCover(l.frames[k]); ok {
+				out = append(out, fmt.Sprintf("revealed: title bar covers y %v..%v over the capsule row (accepted), in full screen %d", top, bottom, in))
+				break
+			}
+		}
+	}
+	return out
+}
+
+// revealedCover is how far down from the top what is shown over f's capsule row
+// reaches: from the menu bar's top when it lies just under the menu bar, which
+// is not one of the app's windows.
+func revealedCover(f frameReport) (top, bottom float64, ok bool) {
+	for _, o := range f.Overlays {
+		if !o.Visible || o.Alpha <= clearAlpha || !overlaps(o.box, f.Row) {
+			continue
+		}
+		if !ok || o.Y < top {
+			top = o.Y
+		}
+		if !ok || o.Y+o.H > bottom {
+			bottom = o.Y + o.H
+		}
+		ok = true
+	}
+	if ok && f.MenuBarHeight > 0 && top <= f.MenuBarHeight+lineSlack {
+		top = 0
+	}
+	return top, bottom, ok
+}
+
 // settledFrames is the frames of r after the first with the menu bar hidden,
-// short of r's last, which is held to the cover property on its own.
+// short of r's last, which is held to the cover property on its own. The window
+// goes in with the menu bar still shown from before, under the transition's
+// overlay.
 func settledFrames(frames []frameReport, r run) []int {
 	var out []int
 	settled := false

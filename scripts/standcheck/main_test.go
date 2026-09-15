@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -403,26 +404,53 @@ func TestAShownTitleBarOverTheCapsuleRowInFullScreenIsAProblem(t *testing.T) {
 	}
 }
 
-// v0.10.2's dev build on macOS 27 (the operator's frame 1369): in full screen,
-// the pointer at the top of the screen, the menu bar came out with the title bar
-// and its toolbar under it, a dark band over the capsule row. At rest the
-// frame kept its properties.
-func TestATitleBarOverTheRowWithTheMenuBarShownInFullScreenIsAProblem(t *testing.T) {
-	rest, shown := goodFrame(true), goodFrame(true)
-	shown.MenuBarVisible = true
-	shown.ContentLayoutTop = 0
-	shown.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: 21, W: 1024, H: 52}, Visible: true, Alpha: 1}}
-	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, shown, rest, goodBoard(true), goodFrame(false), goodBoard(false))
-	wantProblem(t, check(log, 1), "in full screen 1, a frame after it settled", "NSToolbarFullScreenWindow", "capsule row")
+// revealedLog is a stand's log with one time in full screen: the frame at rest,
+// revealed, and at rest again.
+func revealedLog(t *testing.T, revealed frameReport) string {
+	t.Helper()
+	rest := goodFrame(true)
+	return logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, revealed, rest, goodBoard(true), goodFrame(false), goodBoard(false))
 }
 
-// A pointer at the top of the screen brings the title bar out without the
-// menu bar reported shown: the frame in between is held all the same.
-func TestATitleBarBroughtOutOverTheRowByThePointerIsAProblem(t *testing.T) {
-	rest, revealed := goodFrame(true), goodFrame(true)
-	revealed.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: 0, W: 1024, H: 32}, Visible: true, Alpha: 1}}
-	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, revealed, rest, goodBoard(true), goodFrame(false), goodBoard(false))
-	wantProblem(t, check(log, 1), "in full screen 1, a frame after it settled", "NSToolbarFullScreenWindow")
+// v0.10.2's dev build on macOS 27 (the operator's frame 1369): in full screen,
+// the pointer at the top of the screen, the menu bar came out with the title bar
+// and its toolbar under it, a dark band over the capsule row. The operator
+// accepted it for v0.10.2 and keeps no room for them: the checker says what was
+// covered, and it fails nothing.
+func TestATitleBarOverTheRowWithTheMenuBarShownInFullScreenIsSaidAndAccepted(t *testing.T) {
+	shown := goodFrame(true)
+	shown.MenuBarVisible = true
+	shown.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: 21, W: 1024, H: 52}, Visible: true, Alpha: 1}}
+	log := revealedLog(t, shown)
+	if got := check(log, 1); len(got) != 0 {
+		t.Fatalf("problems %q, want none: the covered row is accepted", got)
+	}
+	if got, want := revealedNotes(log), []string{"revealed: title bar covers y 21..73 over the capsule row (accepted), in full screen 1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notes %q, want %q", got, want)
+	}
+}
+
+// Run 34939308969: the pointer brought out the menu bar, 30 pt, and under it
+// the title bar's strip at y 30..62 without the toolbar. What is covered is
+// said from the menu bar's top; the menu bar is not one of the app's windows.
+func TestATitleBarBroughtOutByThePointerUnderTheMenuBarIsSaidFromTheTop(t *testing.T) {
+	revealed := goodFrame(true)
+	revealed.MenuBarHeight = 30
+	revealed.Overlays = []overlay{{Kind: "NSKVONotifying_NSToolbarFullScreenWindow", box: box{Y: 30, W: 1024, H: 32}, Visible: true, Alpha: 1}}
+	log := revealedLog(t, revealed)
+	if got := check(log, 1); len(got) != 0 {
+		t.Fatalf("problems %q, want none: the covered row is accepted", got)
+	}
+	if got, want := revealedNotes(log), []string{"revealed: title bar covers y 0..62 over the capsule row (accepted), in full screen 1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notes %q, want %q", got, want)
+	}
+}
+
+// Nothing brought out over the row is nothing said.
+func TestNothingBroughtOutOverTheRowSaysNothing(t *testing.T) {
+	if got := revealedNotes(revealedLog(t, goodFrame(true))); len(got) != 0 {
+		t.Fatalf("notes %q, want none", got)
+	}
 }
 
 // Run 34936628225: the window goes into full screen with the menu bar still
