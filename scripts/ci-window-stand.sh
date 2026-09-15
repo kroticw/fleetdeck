@@ -57,7 +57,8 @@
 # opens with those panels folded, whatever the stand's defaults say, and keeps no
 # widths (cmd/fleetdeck-window/standsettings.go); its log has to say it opened so.
 # standcheck holds the folded frame to the same properties, among them that no
-# capsule lies under the window's buttons.
+# capsule lies under the window's buttons, and each folded strip to nothing
+# wider than it or past its edge and an unfold control a press reaches.
 #
 # FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
 # it is drawn in NSAppearanceNameDarkAqua for dark, NSAppearanceNameAqua for light.
