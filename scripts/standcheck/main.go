@@ -576,11 +576,46 @@ func (l standLog) stripProblems(when string, r run, buttons bool) []string {
 	var out []string
 	if orchestratorFolded(f) {
 		out = append(out, l.foldedStripProblems(when, r, "orchestrator", f.Orchestrator, buttons)...)
+	} else {
+		out = append(out, l.unfoldedOrchestratorProblems(when, r)...)
 	}
 	// The window's buttons sit in the orchestrator panel's corner, never over
 	// the sessions panel.
 	if sessionsFolded(f) {
 		out = append(out, l.foldedStripProblems(when, r, "sessions", f.Sessions, false)...)
+	}
+	return out
+}
+
+// unfoldedOrchestratorProblems is what is wrong with the unfolded orchestrator
+// surface's fit in the run r, by its last word on it up to the frame at r's end:
+// a page that scrolls sideways under the island, or the fleet menu's list past
+// either edge of the surface. Run 34949576998 (#185): the list ran from the
+// button's left edge past the surface's right one, and the page scrolled
+// sideways. A text cut with an ellipsis is no problem, and a surface that never
+// reported unfolded is not held here.
+func (l standLog) unfoldedOrchestratorProblems(when string, r run) []string {
+	var s *stripReport
+	for k := len(l.strips) - 1; k >= 0; k-- {
+		if l.strips[k].frame <= r.to && l.strips[k].Surface == "orchestrator" && !l.strips[k].Folded {
+			s = &l.strips[k].stripReport
+			break
+		}
+	}
+	if s == nil {
+		return nil
+	}
+	var out []string
+	if s.ScrollWidth > s.Width+lineSlack {
+		out = append(out, fmt.Sprintf("%sthe orchestrator surface's page is %v wide in %v: it scrolls sideways", when, s.ScrollWidth, s.Width))
+	}
+	for _, o := range s.Overflowing {
+		if !strings.HasPrefix(o.Element, "div.fleet-menu-list") {
+			continue
+		}
+		if o.Left < -lineSlack || o.Right > s.Width+lineSlack {
+			out = append(out, fmt.Sprintf("%sthe fleet menu's list at %v..%v reaches past the orchestrator surface %v wide", when, o.Left, o.Right, s.Width))
+		}
 	}
 	return out
 }
