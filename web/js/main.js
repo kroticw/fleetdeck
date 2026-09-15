@@ -193,7 +193,9 @@ const headerParts = regions.has("header")
   ? HEADER_PARTS
   : HEADER_PARTS.filter((part) => regions.has(part === "update" ? "brand" : part));
 if (headerParts.length > 0) {
-  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts });
+  // A stand's frame with the fleet menu open (web/js/host.js, open).
+  const openMenu = host?.open?.includes("fleetmenu") ?? false;
+  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu });
 } else {
   initTheme();
 }
@@ -234,7 +236,7 @@ if (regions.has("center")) {
   // After the tabs, not before: createSections replaces the row's children.
   newCard = createNewCard(document.getElementById("tabs"));
   // A stand's frame with the form open (web/js/host.js, open).
-  if (host?.open === "newcard") newCard.open();
+  if (host?.open?.includes("newcard")) newCard.open();
 }
 
 // The window's capsules (web/js/capsules.js), handed over by the board whenever

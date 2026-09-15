@@ -19,8 +19,9 @@ import (
 // alone cannot prove (web/js/standreport.js). Never set in a person's window.
 var hostOnStand bool
 
-// hostStandOpen is what a stand's board opens as it loads (standOpenEnv):
-// "newcard" or nothing. Read only when hostOnStand.
+// hostStandOpen is what a stand's surfaces open as they load (standOpenEnv):
+// "newcard", "fleetmenu", both comma-separated, or nothing. Read only when
+// hostOnStand.
 var hostStandOpen string
 
 func hostScript(surface string, glass glassMode, bindings []string) string {

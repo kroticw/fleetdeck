@@ -25,8 +25,9 @@ const (
 	// appearance cannot be relied on to reach a window started after it
 	// changed.
 	standAppearanceEnv = "FLEETDECK_STAND_APPEARANCE"
-	// "newcard": the board opens its new card form as it loads, so a stand's
-	// screenshot shows the form without anyone pressing its capsule.
+	// "newcard", "fleetmenu" or "newcard,fleetmenu": the board opens its new
+	// card form, the orchestrator surface its fleet menu, as they load, so a
+	// stand's screenshot shows them open without anyone pressing either.
 	standOpenEnv = "FLEETDECK_STAND_OPEN"
 	// "on": once its surfaces have loaded, the window enters full screen, and
 	// after a while leaves it (standfullscreen.go), so a stand measures and
@@ -103,8 +104,10 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 		s.appearance = v
 	}
 	if v, set := lookup(standOpenEnv); set {
-		if v != "newcard" {
-			return standSettings{}, fmt.Errorf("%s=%q is not newcard", standOpenEnv, v)
+		for _, name := range strings.Split(v, ",") {
+			if name != "newcard" && name != "fleetmenu" {
+				return standSettings{}, fmt.Errorf("%s=%q is not newcard, fleetmenu or both, comma-separated", standOpenEnv, v)
+			}
 		}
 		s.open = v
 	}
