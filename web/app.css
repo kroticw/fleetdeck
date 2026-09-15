@@ -94,7 +94,9 @@
      a session or a document opens as over the board. */
   --on-glass-muted: #434a54;
   --glass-control: rgb(255 255 255 / 52%);
+  --glass-control-hover: rgb(255 255 255 / 74%);
   --glass-control-edge: rgb(20 22 26 / 11%);
+  --glass-control-highlight: rgb(255 255 255 / 70%);
   --surface-on-glass: rgb(255 255 255 / 80%);
   --island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%);
   --sheet-shadow: 0 2px 6px rgb(20 22 26 / 10%), 0 18px 48px rgb(20 22 26 / 24%);
@@ -143,7 +145,9 @@ html {
 
     --on-glass-muted: #c1c7cf;
     --glass-control: rgb(255 255 255 / 9%);
+    --glass-control-hover: rgb(255 255 255 / 16%);
     --glass-control-edge: rgb(255 255 255 / 15%);
+    --glass-control-highlight: rgb(255 255 255 / 10%);
     --surface-on-glass: rgb(27 30 36 / 80%);
     --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
     --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
@@ -175,7 +179,9 @@ html {
 
   --on-glass-muted: #c1c7cf;
   --glass-control: rgb(255 255 255 / 9%);
+  --glass-control-hover: rgb(255 255 255 / 16%);
   --glass-control-edge: rgb(255 255 255 / 15%);
+  --glass-control-highlight: rgb(255 255 255 / 10%);
   --surface-on-glass: rgb(27 30 36 / 80%);
   --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
   --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
@@ -3809,6 +3815,13 @@ body.is-resizing {
   left: 0;
   right: auto;
   width: min(28rem, calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px) - 2 * var(--gap-lg)));
+  padding: 10px;
+  border: none;
+  border-radius: var(--radius-xl);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--island-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
 }
 
 /* The box that scrolls is the open room between the panels, so its scrollbar is
@@ -3986,4 +3999,114 @@ body.is-resizing {
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--island-shadow);
+}
+
+/* --- the page's controls as capsules of glass ---
+ *
+ * The window's own capsules over the board are the system's glass; the controls
+ * the page draws beside them are capsules too: the orchestrator island's head
+ * (the edit pencil, the orchestrator picker, the terminal's font buttons and the
+ * fold button, the fleet menu) and the new card form's fields.
+ *
+ * Measured on macOS 27 (T-070): a page cannot ask WebKit for the system's
+ * material, and a backdrop-filter in a transparent web view blurs the window's
+ * layers under it, the island's glass included. A control lying on the island is
+ * a translucent fill and a rim, with no blur of its own: glass on glass. What
+ * floats over content, the new card form over the board and the fleet menu's
+ * list over the island, is frosted: a dense fill and a blur, read the same
+ * whatever is under it. With no glass all of it is solid.
+ *
+ * A browser tab has no data-surface and keeps its bordered controls. */
+
+:root[data-surface="orchestrator"] .o-name-edit,
+:root[data-surface="orchestrator"] .o-pick-select,
+:root[data-surface="orchestrator"] .col-size-btn,
+:root[data-surface="orchestrator"] .fleet-menu-button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+:root[data-surface="board"] .newcard-title,
+:root[data-surface="board"] .newcard-zone,
+:root[data-surface="board"] .newcard-create,
+:root[data-surface="board"] .newcard-cancel {
+  min-height: 30px;
+  padding: 4px 14px;
+  border: none;
+  border-radius: 999px;
+  color: var(--text);
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+:root[data-surface="orchestrator"] .o-name-edit:hover,
+:root[data-surface="orchestrator"] .o-pick-select:hover,
+:root[data-surface="orchestrator"] .col-size-btn:hover,
+:root[data-surface="orchestrator"] .fleet-menu-button:hover,
+:root[data-surface="orchestrator"] .fleet-menu-button[aria-expanded="true"],
+:root[data-surface="board"] .newcard-title:hover,
+:root[data-surface="board"] .newcard-zone:hover,
+:root[data-surface="board"] .newcard-create:hover,
+:root[data-surface="board"] .newcard-cancel:hover {
+  background-color: var(--glass-control-hover);
+}
+
+/* The closed select is drawn by the page, its chevron in the text's colour; the
+   list it opens stays the system's menu. */
+:root[data-surface="orchestrator"] .o-pick-select,
+:root[data-surface="board"] .newcard-zone {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+:root[data-surface="orchestrator"] .fleet-menu-list {
+  border: none;
+  border-radius: var(--radius-lg);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--island-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
+}
+
+/* No glass: solid capsules with the border a column's controls have, and
+   nothing blurred. */
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit,
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn,
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button,
+:root[data-surface="board"][data-glass="opaque"] .newcard-title,
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone,
+:root[data-surface="board"][data-glass="opaque"] .newcard-create,
+:root[data-surface="board"][data-glass="opaque"] .newcard-cancel {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit:hover,
+:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover,
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:hover,
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button:hover,
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button[aria-expanded="true"],
+:root[data-surface="board"][data-glass="opaque"] .newcard-title:hover,
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover,
+:root[data-surface="board"][data-glass="opaque"] .newcard-create:hover,
+:root[data-surface="board"][data-glass="opaque"] .newcard-cancel:hover {
+  background-color: var(--surface-hover);
+}
+
+:root[data-surface="board"][data-glass="opaque"] .newcard,
+:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-list {
+  background-color: var(--surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--island-shadow), inset 0 0 0 1px var(--border-strong);
 }
