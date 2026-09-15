@@ -92,6 +92,8 @@ type frameReport struct {
 	MenuBarVisible bool      `json:"menuBarVisible"`
 	ToolbarVisible bool      `json:"toolbarVisible"`
 	Close          box       `json:"close"`
+	Minimize       box       `json:"minimize"`
+	Zoom           box       `json:"zoom"`
 	Orchestrator   box       `json:"orchestrator"`
 	Sessions       box       `json:"sessions"`
 	Row            box       `json:"row"`
@@ -189,13 +191,12 @@ func check(log string, trips int) []string {
 			problems = append(problems, tabProblems(when, f)...)
 			problems = append(problems, l.boardProblems(when, r)...)
 			problems = append(problems, coverProblems(when, f)...)
-			// With the menu bar shown: what a pointer at the top of the screen
-			// brings out over the content.
-			for k := r.to; k >= r.from; k-- {
-				if l.frames[k].MenuBarVisible {
-					problems = append(problems, coverProblems(fmt.Sprintf("in full screen %d, the menu bar shown: ", in), l.frames[k])...)
-					break
-				}
+			// With the menu bar shown again after it hid: what a pointer at the
+			// top of the screen brings out over the content. The window goes
+			// in with the menu bar still shown from before, under the
+			// transition's overlay, which is not that.
+			if k, ok := menuBarShownAgain(l.frames, r); ok {
+				problems = append(problems, coverProblems(fmt.Sprintf("in full screen %d, the menu bar shown: ", in), l.frames[k])...)
 			}
 			continue
 		}
@@ -208,6 +209,7 @@ func check(log string, trips int) []string {
 		problems = append(problems, tabProblems(when, f)...)
 		problems = append(problems, l.boardProblems(when, r)...)
 		problems = append(problems, buttonProblems(when, f)...)
+		problems = append(problems, underButtonProblems(when, f)...)
 		if i == 0 {
 			problems = append(problems, headerProblems(f, l.headers)...)
 		}
@@ -311,10 +313,36 @@ func coverProblems(when string, f frameReport) []string {
 
 // boardProblems holds the board's last report among the frames of r to r's last
 // frame.
+// menuBarShownAgain is the last frame of r with the menu bar shown after a frame
+// of r with it hidden.
+func menuBarShownAgain(frames []frameReport, r run) (int, bool) {
+	hidden := -1
+	for k := r.from; k <= r.to; k++ {
+		if !frames[k].MenuBarVisible {
+			hidden = k
+			break
+		}
+	}
+	if hidden < 0 {
+		return 0, false
+	}
+	for k := r.to; k > hidden; k-- {
+		if frames[k].MenuBarVisible {
+			return k, true
+		}
+	}
+	return 0, false
+}
+
 func (l standLog) boardProblems(when string, r run) []string {
 	f := l.frames[r.to]
 	for k := len(l.boards) - 1; k >= 0; k-- {
 		b := l.boards[k]
+		// A report before the window first measured its frame is of the first
+		// frame: the board's page can report first by a few milliseconds.
+		if b.frame < 0 {
+			b.frame = 0
+		}
 		if b.frame < r.from || b.frame > r.to {
 			continue
 		}
@@ -367,6 +395,24 @@ func buttonProblems(when string, f frameReport) []string {
 		return []string{fmt.Sprintf("%sthe close button is centred at (%v, %v), want (%v, %v), concentric in the orchestrator panel's corner", when, cx, cy, wx, wy)}
 	}
 	return nil
+}
+
+// underButtonProblems is each capsule that lies under one of the window's
+// buttons, out of full screen. v0.10.2's dev build laid the tabs under the zoom
+// button beside the folded orchestrator strip (the operator's frame 1374).
+func underButtonProblems(when string, f frameReport) []string {
+	var out []string
+	for _, c := range f.Capsules {
+		for _, button := range []struct {
+			name string
+			b    box
+		}{{"close", f.Close}, {"minimize", f.Minimize}, {"zoom", f.Zoom}} {
+			if overlaps(c.box, button.b) {
+				out = append(out, fmt.Sprintf("%s%s at %s lies under the window's %s button at %s", when, c.Name, c.span(), button.name, button.b.span()))
+			}
+		}
+	}
+	return out
 }
 
 func headerProblems(f frameReport, headers []headerReport) []string {

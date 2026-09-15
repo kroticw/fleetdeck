@@ -45,6 +45,12 @@
 # nothing of the title bar keeps the window's top or shows over the capsules. v0.10.1's capsules lay over the
 # sessions panel in full screen, which no stand had entered.
 #
+# FLEETDECK_STAND_FOLD=orchestrator, sessions or both, for content: the window
+# opens with those panels folded, whatever the stand's defaults say, and keeps no
+# widths (cmd/fleetdeck-window/standsettings.go); its log has to say it opened so.
+# standcheck holds the folded frame to the same properties, among them that no
+# capsule lies under the window's buttons.
+#
 # FLEETDECK_STAND_APPEARANCE, when set, has to reach the window: its log has to say
 # it is drawn in NSAppearanceNameDarkAqua for dark, NSAppearanceNameAqua for light.
 #
@@ -249,13 +255,13 @@ if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
 		capture_screen "$out/window-fullscreen-$((trips + 1)).png"
 		# The frame with the menu bar shown, as a pointer at the top of the
 		# screen shows it: the window shows it on its own a while after it went in.
+		# Only after the menu bar hid in full screen: the window goes in with it
+		# still shown from before.
 		shown=
 		for _ in $(seq 20); do
-			n=$(tail -n "+$went_in" "$out/window.log" | grep -n 'fleetdeck-window: the frame measures .*"fullScreen":true,"menuBarVisible":true' | head -n 1 | cut -d: -f1)
-			if [ -n "$n" ]; then
-				shown=$((went_in + n - 1))
-				break
-			fi
+			rest=$(measure_from "$went_in" 'true,"menuBarVisible":false')
+			[ -n "$rest" ] && shown=$(measure_from "$rest" 'true,"menuBarVisible":true')
+			[ -n "$shown" ] && break
 			sleep 1
 		done
 		if [ -n "$shown" ]; then
@@ -349,6 +355,12 @@ if [ "$expect" = content ]; then
 	cat "$out/standcheck.txt"
 fi
 
+# The panels folded as the stand asked, as the window says it opened them.
+folded=yes
+if [ -n "${FLEETDECK_STAND_FOLD:-}" ]; then
+	grep -q "fleetdeck-window: on this stand: .*, panels folded \"$FLEETDECK_STAND_FOLD\"" "$out/window.log" || folded=no
+fi
+
 # The appearance the stand asked for, as AppKit reports the window drawn
 # (window_darwin.go).
 appearance=yes
@@ -390,9 +402,9 @@ if [ -n "${FLEETDECK_STAND_SYSTEM:-}" ]; then
 	[ "$system_said" = "$system_want" ] || system=no
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the frame's properties: $frame, full screen ${FLEETDECK_STAND_FULLSCREEN:-off}: $fullscreen, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the frame's properties: $frame, full screen ${FLEETDECK_STAND_FULLSCREEN:-off}: $fullscreen, panels folded ${FLEETDECK_STAND_FOLD:-unset}: $folded, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
 full_screen_ok=yes
 if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ] && [ "$fullscreen" = no ]; then
 	full_screen_ok=no
 fi
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$frame" = yes ] && [ "$full_screen_ok" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$frame" = yes ] && [ "$full_screen_ok" = yes ] && [ "$folded" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]

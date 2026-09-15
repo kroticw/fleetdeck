@@ -13,6 +13,8 @@ func goodFrame(fullScreen bool) frameReport {
 		Glass:              "glass",
 		FullScreen:         fullScreen,
 		Close:              box{X: 19, Y: 19, W: 14, H: 14},
+		Minimize:           box{X: 42, Y: 19, W: 14, H: 14},
+		Zoom:               box{X: 65, Y: 19, W: 14, H: 14},
 		Orchestrator:       box{X: 8, Y: 8, W: 260, H: 684},
 		Sessions:           box{X: 732, Y: 8, W: 260, H: 684},
 		Row:                box{X: 278, Y: 10, W: 442, H: 32},
@@ -148,6 +150,38 @@ func TestButtonsOnThePanelsEdgeAreAProblem(t *testing.T) {
 }
 
 // Coming out of full screen must put the buttons back where they were.
+// foldedOrchestrator is f with the orchestrator panel folded to its strip and
+// the capsule row from x.
+func foldedOrchestrator(f frameReport, x float64) frameReport {
+	f.Orchestrator.W = 48
+	shift := x - f.Row.X
+	f.Row.X, f.Row.W = x, f.Row.W-shift
+	f.Capsules = append([]capsule(nil), f.Capsules...)
+	f.Capsules[0].X += shift
+	f.Capsules[1].X += shift
+	return f
+}
+
+// v0.10.2's dev build on macOS 27 (the operator's frame 1374): beside the
+// folded orchestrator strip the tabs lay under the window's zoom button.
+func TestATabUnderTheWindowsButtonsIsAProblem(t *testing.T) {
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 66), besideFoldedStrip(goodBoard(false)), goodHeader(false))
+	wantProblem(t, check(log, 0), "tabs", "zoom button")
+}
+
+// besideFoldedStrip is b starting its gap past the folded orchestrator strip.
+func besideFoldedStrip(b boardReport) boardReport {
+	b.BoardLeft = 8 + 48 + 18
+	return b
+}
+
+func TestARowPastTheWindowsButtonsBesideTheFoldedStripIsNoProblem(t *testing.T) {
+	log := logOf(t, foldedOrchestrator(goodFrame(false), 89), besideFoldedStrip(goodBoard(false)), goodHeader(false))
+	if got := check(log, 0); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
 func TestButtonsOffTheirPlaceAfterFullScreenAreAProblem(t *testing.T) {
 	after := goodFrame(false)
 	after.Close = box{X: 9, Y: 9, W: 14, H: 14}
@@ -311,6 +345,31 @@ func TestATitleBarOverTheRowWithTheMenuBarShownInFullScreenIsAProblem(t *testing
 	shown.Overlays = []overlay{{Kind: "NSToolbarFullScreenWindow", box: box{Y: 21, W: 1024, H: 52}, Visible: true, Alpha: 1}}
 	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), rest, shown, rest, goodBoard(true), goodFrame(false), goodBoard(false))
 	wantProblem(t, check(log, 1), "in full screen 1, the menu bar shown", "NSToolbarFullScreenWindow", "capsule row")
+}
+
+// Run 34936628225: the window goes into full screen with the menu bar still
+// shown from before it, under the full screen transition's overlay over the
+// whole screen. That frame is not the menu bar shown again in full screen.
+func TestTheMenuBarStillShownAsTheWindowGoesIntoFullScreenIsNotItShownAgain(t *testing.T) {
+	entering, rest := goodFrame(true), goodFrame(true)
+	entering.MenuBarVisible = true
+	entering.Overlays = []overlay{{Kind: "_NSFullScreenTransitionOverlayWindow", box: box{W: 1024, H: 768}, Visible: true, Alpha: 1}}
+	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), entering, rest, goodBoard(true), goodFrame(false), goodBoard(false))
+	if got := check(log, 1); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
+// Run 34936628225, the opaque stand: the board reported itself 30 ms before the
+// window first measured its frame. That report is held to the first frame.
+func TestABoardReportJustBeforeTheFirstFrameIsHeldToIt(t *testing.T) {
+	log := logOf(t, goodBoard(false), goodFrame(false), goodHeader(false))
+	if got := check(log, 0); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+	wrong := goodBoard(false)
+	wrong.BoardRight = 600
+	wantProblem(t, check(logOf(t, wrong, goodFrame(false), goodHeader(false)), 0), "the board ends at 600")
 }
 
 func TestATitleBarClearOfTheRowWithTheMenuBarShownIsNoProblem(t *testing.T) {
