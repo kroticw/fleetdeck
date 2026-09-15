@@ -403,7 +403,10 @@ jobs:
         if: always()
         run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
       # The frame on hidden windows: glass, the capsules inside it, the drag band.
+      # They run when a stand above failed too: a red job still says whether the
+      # window's own tests pass.
       - name: The window's tests on macOS 26
+        if: ${{ !cancelled() }}
         run: go test -count=1 ./cmd/fleetdeck-window/
       - name: The runner's transparency and contrast as they were
         if: always()

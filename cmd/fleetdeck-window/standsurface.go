@@ -27,14 +27,23 @@ func handleStandReports(b *bridge, onStand bool, logf func(format string, args .
 	})
 }
 
-// reportSubject is what a surface's report is of: its grounds when it says so,
-// its scrolling otherwise, as every report was before grounds.
+// reportSubjects names what a page's report is of, by the report field it
+// carries; a report without one is of scrolling, as every report was first.
+var reportSubjects = map[string]string{
+	"grounds":      "grounds",
+	"columnScroll": "column scroll",
+}
+
+// reportSubject is what a page's report is of: each kind is a log line of its
+// own, since scripts/ci-window-stand.sh reads the last line of each.
 func reportSubject(report json.RawMessage) string {
 	var kind struct {
 		Report string `json:"report"`
 	}
-	if json.Unmarshal(report, &kind) == nil && kind.Report == "grounds" {
-		return "grounds"
+	if json.Unmarshal(report, &kind) == nil {
+		if subject, ok := reportSubjects[kind.Report]; ok {
+			return subject
+		}
 	}
 	return "scrolling"
 }
@@ -42,5 +51,5 @@ func reportSubject(report json.RawMessage) string {
 // boardStandReportLine is the window's log line for the board's report, the
 // JSON the page sent as it sent it: scripts/ci-window-stand.sh reads its fields.
 func boardStandReportLine(report json.RawMessage) string {
-	return fmt.Sprintf("fleetdeck-window: the board reports its scrolling: %s", report)
+	return fmt.Sprintf("fleetdeck-window: the board reports its %s: %s", reportSubject(report), report)
 }

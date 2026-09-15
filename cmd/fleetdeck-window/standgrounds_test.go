@@ -35,3 +35,14 @@ func TestTheBoardsReportGoesToTheLogAsTheJSONThePageSent(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+// The board's word on a scrolled column after the panel's next snapshots is a
+// line of its own: the stand's gate on the board's scrolling reads the last
+// scrolling line, and this is not one.
+func TestTheBoardsColumnScrollGoesToTheLogAsALineOfItsOwn(t *testing.T) {
+	report := json.RawMessage(`{"report":"columnScroll","stage":"done","asked":120,"renders":2,"scrollTop":120}`)
+	want := `fleetdeck-window: the board reports its column scroll: {"report":"columnScroll","stage":"done","asked":120,"renders":2,"scrollTop":120}`
+	if got := boardStandReportLine(report); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

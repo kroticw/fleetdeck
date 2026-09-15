@@ -7,7 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
-import { watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll } from "./standreport.js";
+import { probeColumnScroll, watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll } from "./standreport.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
@@ -261,6 +261,8 @@ if (host) {
   // On a CI stand only: the board's scrolling, in the window's log.
   const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
+  // And whether a scrolled column keeps its place while the panel's snapshots come in.
+  if (boardEl) probeColumnScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the sessions list's scrollbar, from the sessions surface.
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the grounds the sessions list lies on, which a screenshot of glass cannot tell from the glass.

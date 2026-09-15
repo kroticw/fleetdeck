@@ -195,6 +195,36 @@ export function watchTerminalScroll(win, column, report) {
   return later;
 }
 
+// The column the stand scrolls, how far, and after how many more snapshots
+// drawn it is measured: the panel sends one a second (internal/server/ws.go).
+const PROBED_STAGE = "done";
+const PROBED_TOP = 120;
+const PROBED_RENDERS = 2;
+
+// probeColumnScroll scrolls board's done column once it is drawn taller than its
+// room, and reports where that column is after the board has drawn its columns
+// twice more: a column drawn anew at its top is one no one can read to its end.
+// Nothing is reported for a board whose column never grows taller than its room.
+export function probeColumnScroll(win, board, report) {
+  let asked = false;
+  let renders = 0;
+  const column = () => board.querySelector(`:scope > .kcol[data-stage="${PROBED_STAGE}"]`);
+  const observer = new win.MutationObserver(() => {
+    const c = column();
+    if (!asked) {
+      if (!c || c.scrollHeight <= c.clientHeight) return;
+      c.scrollTop = PROBED_TOP;
+      asked = true;
+      return;
+    }
+    renders += 1;
+    if (renders < PROBED_RENDERS) return;
+    observer.disconnect();
+    report({ report: "columnScroll", stage: PROBED_STAGE, asked: PROBED_TOP, renders, scrollTop: c ? c.scrollTop : null });
+  });
+  observer.observe(board, { childList: true });
+}
+
 // watchBoardScroll reports board's scrolling whenever the board draws its
 // columns, and whenever the returned function is called -- after the window's
 // insets change.

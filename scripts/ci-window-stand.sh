@@ -278,6 +278,14 @@ fi
 # Whether the last column comes out from under the sessions panel is printed
 # as the page says it, and not gated: the page measures against the inset it
 # was sent, not against the panel the window drew.
+# whole says whether its argument is a whole number of no sign, the only form a
+# width or a count the pages report may take to be compared.
+whole() {
+	case $1 in
+		'' | *[!0-9]*) return 1 ;;
+	esac
+}
+
 board_down=yes
 if [ "$expect" = content ]; then
 	board_said=$(sed -n 's/.*fleetdeck-window: the board reports its scrolling: \({.*}\)$/\1/p' "$out/window.log" | tail -n 1)
@@ -292,8 +300,29 @@ if [ "$expect" = content ]; then
 	case $overflow_y in
 		auto | scroll | "") board_down=no ;;
 	esac
-	if [ -z "$board_bar" ] || [ "$board_bar" -gt 8 ] || [ -z "$column_bar" ] || [ "$column_bar" -gt 8 ]; then
+	# A width that is not a whole number fails the gate rather than the test
+	# beside it: [ 14.5 -gt 8 ] is an error, and an error is not "wider".
+	if ! whole "$board_bar" || [ "$board_bar" -gt 8 ] || ! whole "$column_bar" || [ "$column_bar" -gt 8 ]; then
 		board_down=no
+	fi
+fi
+
+# For content, a scrolled column across the panel's snapshots, as the board
+# measured it (web/js/standreport.js, probeColumnScroll): the board scrolls its
+# done column once and reports where it is after two more snapshots. The panel
+# sends one a second, and the board draws its columns again for each; a column
+# drawn back at its top could never be read to its end, and a screenshot of a
+# still frame does not show it.
+column_kept=yes
+if [ "$expect" = content ]; then
+	kept_said=$(sed -n 's/.*fleetdeck-window: the board reports its column scroll: \({.*}\)$/\1/p' "$out/window.log" | tail -n 1)
+	kept_field() { printf '%s\n' "$kept_said" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+	asked=$(kept_field asked)
+	renders=$(kept_field renders)
+	kept_top=$(kept_field scrollTop)
+	echo "--- the done column scrolled to ${asked:-not reported} px: after ${renders:-no} snapshots drawn it is at ${kept_top:-not reported} px"
+	if ! whole "$asked" || ! whole "$renders" || ! whole "$kept_top" || [ "$renders" -lt 2 ] || [ "$asked" -eq 0 ] || [ "$kept_top" != "$asked" ]; then
+		column_kept=no
 	fi
 fi
 
@@ -373,5 +402,5 @@ if [ -n "${FLEETDECK_STAND_SYSTEM:-}" ]; then
 	[ "$system_said" = "$system_want" ] || system=no
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the board down its height as the islands ask: $board_down, the sessions island on one ground: $grounds, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$board_down" = yes ] && [ "$grounds" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the board down its height as the islands ask: $board_down, a scrolled column kept across snapshots: $column_kept, the sessions island on one ground: $grounds, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$board_down" = yes ] && [ "$column_kept" = yes ] && [ "$grounds" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
