@@ -56,7 +56,20 @@ endif
 # a macOS tool.
 ifeq ($(HOST_GOOS),darwin)
 MACOS_MIN_VERSION := $(shell plutil -extract LSMinimumSystemVersion raw cmd/fleetdeck-window/Info.plist)
+# DARWIN_SDKROOT is the macOS SDK every cgo build links against: SDKROOT when
+# one is given, and otherwise the SDK of the developer directory xcode-select
+# chose, which is the one its linker understands. Left to itself, clang takes
+# the Command Line Tools' MacOSX.sdk even when the linker is Xcode's: on a
+# macOS 27 machine on 2026-09-15 that SDK was 27.0 and Xcode's linker knew SDKs
+# up to 26.5, and every window build failed to link on Security.tbd's
+# arm64e.x1. On a runner with one toolchain both answers are the same SDK.
+# scripts/darwin-sdkroot.sh makes the choice, so it can be tested without make.
+# Recursive, so it runs only for a target that builds against it, and never off
+# darwin; and asked once, the answer kept, so what it says when it names no SDK
+# is said once.
+DARWIN_SDKROOT = $(eval DARWIN_SDKROOT := $(shell SDKROOT="$(SDKROOT)" scripts/darwin-sdkroot.sh))$(DARWIN_SDKROOT)
 endif
+DARWIN_SDK_ENV = $(if $(DARWIN_SDKROOT),SDKROOT="$(DARWIN_SDKROOT)")
 
 # DARWIN_CGO_ENV tells clang the macOS to build for, and prefixes every go build of a
 # binary the app carries. Without it clang builds for the macOS of the machine it
@@ -68,7 +81,7 @@ endif
 # own default for each variable, which setting it replaces. The Go linker writes
 # 13.0 into the binaries it links on its own and takes no flag for it, which is
 # where the panel's minimum comes from.
-DARWIN_CGO_ENV = $(if $(MACOS_MIN_VERSION),,$(error cannot read LSMinimumSystemVersion from cmd/fleetdeck-window/Info.plist))CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_CXXFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)"
+DARWIN_CGO_ENV = $(if $(MACOS_MIN_VERSION),,$(error cannot read LSMinimumSystemVersion from cmd/fleetdeck-window/Info.plist))$(if $(DARWIN_SDKROOT),,$(error cannot find a macOS SDK: scripts/darwin-sdkroot.sh named none, and said why above; set SDKROOT to build against one))$(DARWIN_SDK_ENV) CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_CXXFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)" CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$(MACOS_MIN_VERSION)"
 
 ifeq ($(strip $(BIN_NAMES)),)
 $(error no command directories found under cmd/: there is nothing to build)
@@ -103,7 +116,7 @@ else
 EXPECT_SEAL := developer-id
 endif
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app notarize-app dist-dmg verify-dist-dmg notarize-dmg publish-release dmg-background dmg-layout window-app install icon
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app notarize-app dist-dmg verify-dist-dmg notarize-dmg publish-release dmg-background dmg-layout window-app dev-app install icon
 
 # Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
 # see BUILD_BIN_NAMES above.
@@ -115,8 +128,10 @@ build:
 # test runs every Go test and, through go test, the board's Python tests as well
 # (plugin/templates/board_scripts_test.go), so it needs python3 and fails in words
 # without it: a skipped Python run would read exactly like a passing one.
+#
+# On darwin the window's tests build it with cgo, against DARWIN_SDKROOT.
 test:
-	go test ./... -race -count=1
+	$(DARWIN_SDK_ENV) go test ./... -race -count=1
 
 # The frontend's own tests. Kept out of `make test` deliberately: node is not a
 # build requirement of this project, so a contributor without node still gets a
@@ -244,6 +259,7 @@ verify-dist:
 # under any identifier but the app's own, so a stand's cannot be published.
 BUNDLE_ID ?= dev.fleetdeck.window
 dist-app:
+	@echo "dist-app: SDK $(DARWIN_SDKROOT)"
 	@$(DARWIN_CGO_ENV) scripts/build-dist-app.sh "$(DISTDIR)" "$(VERSION)" "$(DIST_ARCHES)" "$(BIN_NAMES)" "$(LDFLAGS)" "$(SIGN_IDENTITY)" "$(BUNDLE_ID)"
 	@$(MAKE) --no-print-directory verify-dist-app
 
@@ -346,15 +362,51 @@ WINDOW_LDFLAGS = $(LDFLAGS) \
 	-X 'main.goPath=$(shell go env GOROOT)/bin/go' \
 	-X 'main.makePath=$(shell command -v make)'
 window-app:
-	@rm -rf "$(BINDIR)/fleetdeck.app"
-	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/MacOS"
-	@mkdir -p "$(BINDIR)/fleetdeck.app/Contents/Resources"
-	@cp cmd/fleetdeck-window/Info.plist "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
-	@plutil -replace CFBundleIdentifier -string "$(BUNDLE_ID)" "$(BINDIR)/fleetdeck.app/Contents/Info.plist"
-	@cp cmd/fleetdeck-window/icon.icns "$(BINDIR)/fleetdeck.app/Contents/Resources/icon.icns"
-	$(DARWIN_CGO_ENV) go build -ldflags "$(WINDOW_LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
-	$(DARWIN_CGO_ENV) go build -ldflags "$(LDFLAGS)" -o "$(BINDIR)/fleetdeck.app/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
+	@echo "window-app: SDK $(DARWIN_SDKROOT)"
+	$(call app-bundle,$(BINDIR)/fleetdeck.app,$(BUNDLE_ID),fleetdeck,$(WINDOW_LDFLAGS))
 	@echo "window-app: $(BINDIR)/fleetdeck.app (open it, or: open $(BINDIR)/fleetdeck.app)"
+
+# app-bundle stages an app bundle at $(1) under identifier $(2) and name $(3):
+# the window built with -ldflags $(4) and the panel beside it.
+define app-bundle
+	@rm -rf "$(1)"
+	@mkdir -p "$(1)/Contents/MacOS"
+	@mkdir -p "$(1)/Contents/Resources"
+	@cp cmd/fleetdeck-window/Info.plist "$(1)/Contents/Info.plist"
+	@plutil -replace CFBundleIdentifier -string "$(2)" "$(1)/Contents/Info.plist"
+	@plutil -replace CFBundleName -string "$(3)" "$(1)/Contents/Info.plist"
+	@plutil -replace CFBundleDisplayName -string "$(3)" "$(1)/Contents/Info.plist"
+	@cp cmd/fleetdeck-window/icon.icns "$(1)/Contents/Resources/icon.icns"
+	$(DARWIN_CGO_ENV) go build -ldflags "$(4)" -o "$(1)/Contents/MacOS/fleetdeck-window" ./cmd/fleetdeck-window
+	$(DARWIN_CGO_ENV) go build -ldflags "$(LDFLAGS)" -o "$(1)/Contents/MacOS/fleetdeck" ./cmd/fleetdeck
+endef
+
+# dev-app builds a dev app from this tree and opens it beside the installed app:
+# $(BINDIR)/fleetdeck-dev.app, under its own identifier (supervisor.DevBundleID)
+# and name, on DEV_PORT. What it keeps apart from the installed app and what it
+# shares is in docs/engineering/dev-app.md. DEV_OPEN=0 builds it and opens
+# nothing -- for tests, and for a session that is to hand the command to open it
+# to somebody watching the screen. The window's own log goes to
+# ~/Library/Logs/fleetdeck-dev-window.log.
+#
+# No tree, git, go or make is written into it, as window-app writes them: a dev
+# app does not update. VERSION stays dev, so the panel's header says dev and the
+# commit.
+DEV_PORT ?= 7778
+DEV_OPEN ?= 1
+# Absolute, so the command dev-app prints opens it from any directory.
+DEV_APP = $(abspath $(BINDIR))/fleetdeck-dev.app
+DEV_URL = http://127.0.0.1:$(DEV_PORT)/
+DEV_LDFLAGS = $(LDFLAGS) -X 'main.devBuild=true' -X 'main.devURL=$(DEV_URL)'
+dev-app:
+	@echo "dev-app: SDK $(DARWIN_SDKROOT)"
+	$(call app-bundle,$(DEV_APP),dev.fleetdeck.dev,fleetdeck dev,$(DEV_LDFLAGS))
+	@if [ "$(DEV_OPEN)" = 0 ]; then \
+		echo "dev-app: $(DEV_APP), not opened (DEV_OPEN=0); open it with: open -n $(DEV_APP) --args -url $(DEV_URL)"; \
+	else \
+		open -n "$(DEV_APP)" --args -url "$(DEV_URL)"; \
+		echo "dev-app: opened $(DEV_APP) on $(DEV_URL)"; \
+	fi
 
 # icon rebuilds cmd/fleetdeck-window/icon.icns from icon-source.svg. A human tool,
 # not part of window-app/dist/CI -- see scripts/build-icon.sh's own comment for why:
