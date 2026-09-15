@@ -164,8 +164,8 @@ func main() {
 	}
 	width, height := stand.size()
 	if stand != (standSettings{}) {
-		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q, full screen %v",
-			stand.startTimeout(), width, height, stand.appearance, stand.fullScreen)
+		log.Printf("fleetdeck-window: on this stand: the panel has %s to answer, the window is %dx%d, appearance %q, full screen %v, panels folded %q",
+			stand.startTimeout(), width, height, stand.appearance, stand.fullScreen, stand.fold)
 	}
 
 	// The keeper's word waits in keeperEvents until the window can act on it:
@@ -238,6 +238,7 @@ func main() {
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand, hostStandOpen = standSocket != "", stand.open
 	standFullScreenOn = stand.fullScreen
+	standFold = stand.fold
 	if stand.appearance != "" {
 		standAppearance = stand.appearance
 		applyAppearance("auto")

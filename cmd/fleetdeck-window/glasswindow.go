@@ -58,7 +58,7 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		putUp:    putUp,
 		standFS:  newStandFullScreen(hostOnStand && standFullScreenOn),
 	}
-	g.ctl = newController(panelURL, loadPanelWidths(), mode)
+	g.ctl = newController(panelURL, panelWidthsForStand(loadPanelWidths(), standFold), mode)
 	g.frame.setMode(mode)
 	logFrameMode(mode)
 	width, height := windowContentSize(w.Window())
@@ -426,7 +426,11 @@ func (g *glassWindow) applyGeometry(geo geometry) {
 	g.run(g.ctl.laidOut(geo))
 	g.reportFrame()
 }
-func (g *glassWindow) saveWidths(w panelWidths) { storePanelWidths(w) }
+func (g *glassWindow) saveWidths(w panelWidths) {
+	if storesWidths(standFold) {
+		storePanelWidths(w)
+	}
+}
 
 func (g *glassWindow) setCapsules(model json.RawMessage) {
 	g.model = model
