@@ -4028,12 +4028,10 @@ body.is-resizing {
  *
  * A browser tab has no data-surface and keeps its bordered controls. */
 
-/* The unfold control keeps the look it has (.col[data-folded="1"]
-   .col-size-unfold): a bordered target of its own, the only way back to a
-   folded column, and no capsule. */
+/* The fold and unfold buttons are round glass buttons of their own, below. */
 :root[data-surface="orchestrator"] .o-name-edit,
 :root[data-surface="orchestrator"] .o-pick-select,
-:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold),
+:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold),
 :root[data-surface="orchestrator"] .fleet-menu-button {
   min-height: 24px;
   padding: 2px 10px;
@@ -4060,7 +4058,7 @@ body.is-resizing {
    being written looks as unpressable as it is. */
 :root[data-surface="orchestrator"] .o-name-edit:hover:not(:disabled),
 :root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
-:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):hover:not(:disabled),
+:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold):hover:not(:disabled),
 :root[data-surface="orchestrator"] .fleet-menu-button:hover:not(:disabled),
 :root[data-surface="board"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"] .newcard-zone:hover:not(:disabled),
@@ -4132,7 +4130,7 @@ body.is-resizing {
    nothing blurred. */
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit,
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
-:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold),
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold),
 :root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone,
@@ -4144,7 +4142,7 @@ body.is-resizing {
 
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit:hover:not(:disabled),
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
-:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold):hover:not(:disabled),
 :root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
@@ -4164,4 +4162,55 @@ body.is-resizing {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   box-shadow: var(--island-shadow), inset 0 0 0 1px var(--border-strong);
+}
+
+/* The panels' fold and unfold buttons, round glass. The operator on v0.10.2's
+   dev build: "the buttons that hide and show the panels do not look good, make
+   them liquid glass and round". The unfold control is the only way back to a
+   folded panel: 40 pt across, a target no smaller than the bordered one it
+   replaces (26 by 40 on the stand), centred in the 48 pt strip. Which of the two
+   shows is still the folded state's to say (.col[data-folded="1"]). */
+:root[data-surface="orchestrator"] .col-size-fold,
+:root[data-surface="sessions"] .col-size-fold {
+  width: 28px;
+  height: 28px;
+}
+
+:root[data-surface="orchestrator"] .col-size-unfold,
+:root[data-surface="sessions"] .col-size-unfold {
+  width: 40px;
+  height: 40px;
+}
+
+:root[data-surface="orchestrator"] .col-size-fold,
+:root[data-surface="sessions"] .col-size-fold,
+:root[data-surface="orchestrator"] .col-size-unfold,
+:root[data-surface="sessions"] .col-size-unfold {
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+:root[data-surface="orchestrator"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="sessions"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="orchestrator"] .col-size-unfold:hover:not(:disabled),
+:root[data-surface="sessions"] .col-size-unfold:hover:not(:disabled) {
+  background-color: var(--glass-control-hover);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-fold,
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-fold,
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-unfold,
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-unfold {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-fold:hover:not(:disabled),
+:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled),
+:root[data-surface="sessions"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled) {
+  background-color: var(--surface-hover);
 }

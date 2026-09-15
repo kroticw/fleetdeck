@@ -50,7 +50,7 @@ const OPAQUE_BOARD = ':root[data-surface="board"][data-glass="opaque"]';
 const ISLAND_CONTROLS = [
   { class: ".o-name-edit", control: ".o-name-edit" },
   { class: ".o-pick-select", control: ".o-pick-select" },
-  { class: ".col-size-btn", control: ".col-size-btn:not(.col-size-unfold)" },
+  { class: ".col-size-btn", control: ".col-size-btn:not(.col-size-unfold):not(.col-size-fold)" },
   { class: ".fleet-menu-button", control: ".fleet-menu-button" },
 ];
 const FORM_CONTROLS = [".newcard-title", ".newcard-zone", ".newcard-create", ".newcard-cancel"].map((c) => ({ class: c, control: c }));
@@ -76,17 +76,46 @@ test("in the window the island's head controls and the new card form's fields ar
   }
 });
 
-// Review of #185: the fold button's capsule rule reached the unfold control in
-// the folded strip at the same specificity, later in the sheet, and turned the
-// only way back to a folded column into a 24 px capsule.
-test("the folded strip's unfold control is no capsule: no rule of the window's restyles it", () => {
-  for (const { selector, body } of rules()) {
-    if (!selector.includes("data-surface")) continue;
-    const excluded = selector.includes(":not(.col-size-unfold)");
-    const reaches = mentions(selector.replaceAll(":not(.col-size-unfold)", ""), ".col-size-unfold") || (mentions(selector, ".col-size-btn") && !excluded);
-    if (!reaches) continue;
-    assert.doesNotMatch(body, /background|border|padding|box-shadow|min-height/, selector);
+// The operator on v0.10.2's dev build: "the buttons that hide and show the
+// panels do not look good, make them liquid glass and round". The fold button
+// in each island's head and the unfold control in each folded strip are round
+// glass buttons, as the capsules are: a see-through fill and a rim on glass,
+// solid with a border with no glass. The unfold control is the only way back
+// to a folded panel, and its round target is no smaller than the bordered one
+// it replaces (26 by 40 pt on the stand): 40 pt across, centred in the 48 pt
+// strip. The folded strip and the unfold control's own rules stay as a browser
+// tab has them.
+const FOLDS = [
+  { surface: ':root[data-surface="orchestrator"]', opaque: ':root[data-surface="orchestrator"][data-glass="opaque"]' },
+  { surface: ':root[data-surface="sessions"]', opaque: ':root[data-surface="sessions"][data-glass="opaque"]' },
+];
+
+const px = (body, property) => {
+  const found = body.match(new RegExp(`(^|[;\\s])${property}:\\s*(\\d+)px`));
+  return found ? Number(found[2]) : null;
+};
+
+test("in the window the panels' fold and unfold buttons are round glass, the unfold one no smaller a target than before", () => {
+  for (const { surface, opaque } of FOLDS) {
+    for (const [button, least] of [[".col-size-fold", 28], [".col-size-unfold", 40]]) {
+      const body = ruleBody(`${surface} ${button}`);
+      const width = px(body, "width");
+      const height = px(body, "height");
+      assert.ok(width >= least && height === width, `${surface} ${button}: ${width} by ${height}, want a circle at least ${least} across`);
+      assert.match(body, /border-radius:\s*999px/, button);
+      assert.match(body, /padding:\s*0/, button);
+      assert.match(body, /border:\s*none/, button);
+      assert.match(body, /background-color:\s*var\(--glass-control\)/, button);
+      assert.match(body, /box-shadow:\s*inset 0 0 0 0\.5px var\(--glass-control-edge\),\s*inset 0 1px 0 var\(--glass-control-highlight\)/, button);
+      assert.doesNotMatch(body, /display:/, `${button}: which of the two shows is the folded state's to say`);
+      assert.match(ruleBody(`${surface} ${button}:hover:not(:disabled)`), /background-color:\s*var\(--glass-control-hover\)/, button);
+      const solid = ruleBody(`${opaque} ${button}`);
+      assert.match(solid, /background-color:\s*var\(--surface-raised\)/, button);
+      assert.match(solid, /box-shadow:\s*inset 0 0 0 1px var\(--border-strong\)/, button);
+      assert.match(ruleBody(`${opaque} ${button}:hover:not(:disabled)`), /background-color:\s*var\(--surface-hover\)/, button);
+    }
   }
+  // A browser tab keeps its bordered unfold control.
   const unfold = ruleBody('.col[data-folded="1"] .col-size-unfold');
   assert.match(unfold, /background:\s*var\(--surface-raised\)/);
   assert.match(unfold, /border-color:\s*var\(--border-strong\)/);
