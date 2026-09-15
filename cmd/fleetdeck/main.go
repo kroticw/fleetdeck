@@ -29,6 +29,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/fleet"
 	"github.com/kroticw/fleetdeck/internal/notify"
 	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
@@ -380,6 +381,17 @@ type runOpts struct {
 	// configuration file has no server.port of its own but the default, and a
 	// test stand must not take the default: it belongs to the operator's panel.
 	port int
+	// watch watches one fleet's board; nil is watchBoard. A test counts the
+	// watches a panel starts through it.
+	watch func(ctx context.Context, boardDir string, onChange func())
+}
+
+// boardWatch is o.watch, or watchBoard when none was given.
+func (o runOpts) boardWatch() func(ctx context.Context, boardDir string, onChange func()) {
+	if o.watch != nil {
+		return o.watch
+	}
+	return watchBoard
 }
 
 // runWith is run with every option, serving until a signal arrives.
@@ -488,11 +500,13 @@ func serve(parent context.Context, o runOpts) error {
 		func(err error) { log.Printf("notify: %v", err) },
 	)
 
+	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
 	d := deps(p, dc, collector, cfg, o.configPath)
+	d.CreateFleet = fleetMaker(o.configPath, live.add)
 	// Every fleet's board, docs, pin and wizard, the first fleet's also in
 	// d's own fields, so a request naming no fleet is served as before. Made
 	// before anything below is started, so there is nothing to stop if it fails.
-	d.Fleet = newFleets(o, cfg, dc, collector)
+	d.Fleet = newFleets(o, dc, collector)
 	first, err := d.Fleet("")
 	if err != nil {
 		return err
@@ -508,11 +522,7 @@ func serve(parent context.Context, o runOpts) error {
 	// Every fleet's board is watched, not only the first: a card moved on any
 	// of them raises its banner at once rather than at the next poll.
 	for _, f := range cfg.FleetList() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			watchBoard(ctx, f.BoardPath, func() { p.refresh(ctx) })
-		}()
+		live.watchBoard(f)
 	}
 	if d.Build != nil {
 		// Which window this panel belongs to, for a window that finds it answering.
@@ -528,6 +538,7 @@ func serve(parent context.Context, o runOpts) error {
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			stop()
 			wg.Wait()
+			live.wait()
 			return err
 		}
 	case <-ctx.Done():
@@ -538,6 +549,7 @@ func serve(parent context.Context, o runOpts) error {
 	// the server is draining.
 	stop()
 	wg.Wait()
+	live.wait()
 	return shutdown(srv, quiet)
 }
 
@@ -679,16 +691,15 @@ func fleetMade(steps []initStep) bool {
 }
 
 // fleetMaker is the start page's one write: `fleetdeck init --fleet`, the same
-// steps and the same report, against the configuration file this panel reads.
+// steps and the same report, against the configuration file this panel reads
+// — and then one step init does not have: serve, which puts the fleet into
+// this running panel, so it is worked in at once.
 //
 // Serialised, because two of these at once would each read the configuration,
 // each append a fleet to what they read, and the second would write over the
 // first. The wizard's own write is on the setup surface, which no longer
 // exists by the time this one can be reached.
-//
-// The fleet is not served until the panel is restarted, and nothing here
-// pretends otherwise (internal/server/fleets.go says why).
-func fleetMaker(configPath string) func(name, path string) ([]server.SetupStep, bool, error) {
+func fleetMaker(configPath string, serve func(fleet.Fleet) error) func(name, path string) ([]server.SetupStep, bool, error) {
 	home, _ := os.UserHomeDir()
 	binary, _ := os.Executable()
 	var mu sync.Mutex
@@ -704,8 +715,128 @@ func fleetMaker(configPath string) func(name, path string) ([]server.SetupStep, 
 			return nil, false, err
 		}
 		steps := fleetSteps(configPath, initEnv{home: home, binary: binary, workspace: root, config: configPath, fleet: named})
+		if fleetMade(steps) {
+			steps = servedSteps(steps, panelStep(configPath, named, serve))
+		}
 		return reportedSteps(steps), fleetMade(steps), nil
 	}
+}
+
+// panelStep puts the fleet named name, as the configuration file now has it,
+// into the running panel. Read back from the file rather than taken from what
+// init planned, so what is served is what the next start would serve too.
+//
+// A fleet the running panel cannot take is said as a failed step, with the one
+// thing that brings it in: the configuration is read whole at the next start.
+// The fleet is in the file by then, so "made" would be half true, and the page
+// would show a fleet that answers 404.
+func panelStep(configPath, name string, serve func(fleet.Fleet) error) initStep {
+	s := initStep{name: "panel"}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		s.err = fmt.Errorf("fleet %s is in %s, but the file does not load now, so this panel does not serve it: %w; restart the panel once it loads", name, configPath, err)
+		return s
+	}
+	f, err := fleet.Select(cfg.FleetList(), name)
+	if err != nil {
+		s.err = fmt.Errorf("fleet %s is not in %s after it was added: %w; restart the panel to read the file again", name, configPath, err)
+		return s
+	}
+	if err := serve(f); err != nil {
+		s.err = fmt.Errorf("fleet %s is in %s, but this panel cannot serve it: %w; restart the panel to read the file again", name, configPath, err)
+		return s
+	}
+	s.note = fmt.Sprintf("fleet %s is served now", name)
+	return s
+}
+
+// servedSteps is steps with the panel step after the configuration's. The
+// configuration step's detail is for a terminal — a running panel shows a
+// fleet init added after a restart — and the panel step is what answers that
+// here.
+func servedSteps(steps []initStep, panel initStep) []initStep {
+	out := make([]initStep, 0, len(steps)+1)
+	for _, s := range steps {
+		if s.name == "config" {
+			s.detail = ""
+			out = append(out, s, panel)
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// liveFleets starts what the panel runs for each fleet — a watch of its board
+// — for the fleets it starts with and for every fleet made while it runs.
+//
+// A fleet is added to the collector first, and it alone decides whether the
+// fleet is new, so a fleet made twice is watched once. The panel refreshes
+// before add returns: the page that made the fleet may open it straight away,
+// and a snapshot a poll behind would not know it.
+//
+// No watch is started once ctx is done. mu is what makes that hold against
+// wait, which holds it while it waits: a watch started before wait takes mu is
+// one wg.Wait waits for, and one after sees ctx done. A watch never takes mu,
+// so nothing it waits for is waiting on it.
+type liveFleets struct {
+	ctx       context.Context
+	collector *Collector
+	watch     func(ctx context.Context, boardDir string, onChange func())
+	refresh   func(context.Context)
+
+	mu sync.Mutex
+	wg sync.WaitGroup
+}
+
+// watchBoard starts the watch of f's board.
+func (l *liveFleets) watchBoard(f fleet.Fleet) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.start(f)
+}
+
+// start is watchBoard with mu held; nothing once ctx is done.
+func (l *liveFleets) start(f fleet.Fleet) {
+	if l.ctx.Err() != nil {
+		return
+	}
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		l.watch(l.ctx, f.BoardPath, func() { l.refresh(l.ctx) })
+	}()
+}
+
+// add serves f from now on: in the collector, the fleets a request can name
+// and every snapshot, with its board watched. A fleet already served on the
+// same board is kept as it is.
+func (l *liveFleets) add(f fleet.Fleet) error {
+	l.mu.Lock()
+	if l.ctx.Err() != nil {
+		l.mu.Unlock()
+		return errors.New("the panel is shutting down")
+	}
+	added, err := l.collector.AddFleet(f)
+	if err != nil {
+		l.mu.Unlock()
+		return err
+	}
+	if added {
+		l.start(f)
+	}
+	l.mu.Unlock()
+	if added {
+		l.refresh(l.ctx)
+	}
+	return nil
+}
+
+// wait waits for every watch, once ctx is done.
+func (l *liveFleets) wait() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.wg.Wait()
 }
 
 // workspacePath is the path the setup page sent, made absolute: "~" and "~/..."
@@ -797,8 +928,7 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		}
 	}
 	return server.Deps{
-		Snapshot:    p.snapshot,
-		CreateFleet: fleetMaker(configPath),
+		Snapshot: p.snapshot,
 		// Resuming reads the job store and the transcripts on every press
 		// rather than off the snapshot: the button in front of the operator
 		// was drawn from a reading that may be hours old, and a working

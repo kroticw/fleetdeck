@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -15,29 +16,38 @@ import (
 // newFleets is server.Deps.Fleet: for a fleet named in a request, its board,
 // documentation, card start, orchestrator pin and orchestrator wizard.
 //
-// The fleets are the ones the panel started with; a fleet added while it runs
-// (init --fleet) is served after a restart, which init says. Each fleet's
-// wizard is made once, here, because an appointer holds the one-at-a-time
-// lock that keeps two appointments of the same fleet from racing.
-func newFleets(o runOpts, cfg config.Config, dc *daemon.Client, collector *Collector) func(name string) (server.FleetDeps, error) {
-	fleets := cfg.FleetList()
+// The fleets are the collector's, read on every request: the ones the panel
+// started with and every fleet made from the start page since
+// (liveFleets.add). A fleet written into the file any other way — init
+// --fleet from a terminal, an edit by hand — is served after a restart, which
+// init says. Each fleet's wizard is made once, the first time its fleet is
+// asked for, because an appointer holds the one-at-a-time lock that keeps two
+// appointments of the same fleet from racing.
+func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name string) (server.FleetDeps, error) {
+	var mu sync.Mutex
 	wizards := map[string]*orchestrator.Appointer{}
-	for _, f := range fleets {
-		wizards[f.Name] = fleetAppointer(o, f, dc, collector)
+	wizardOf := func(f fleet.Fleet) *orchestrator.Appointer {
+		mu.Lock()
+		defer mu.Unlock()
+		if wizards[f.Name] == nil {
+			wizards[f.Name] = fleetAppointer(o, f, dc, collector)
+		}
+		return wizards[f.Name]
 	}
 	return func(name string) (server.FleetDeps, error) {
-		f, err := fleet.Select(fleets, name)
+		f, err := fleet.Select(collector.Config().FleetList(), name)
 		if err != nil {
 			return server.FleetDeps{}, err
 		}
+		wizard := wizardOf(f)
 		fd := server.FleetDeps{
 			BoardDir:  f.BoardPath,
 			DocsRoots: f.DocsPaths,
 			SetOrchestratorSession: func(id string) error {
 				return pinOrchestrator(o.configPath, collector, f.Name, id)
 			},
-			OrchestratorPreview: wizards[f.Name].Preview,
-			Appoint:             wizards[f.Name].Appoint,
+			OrchestratorPreview: wizard.Preview,
+			Appoint:             wizard.Appoint,
 		}
 		// Left nil without a board, as deps leaves the first fleet's: the route
 		// then says this fleet has no board instead of writing somewhere else.
