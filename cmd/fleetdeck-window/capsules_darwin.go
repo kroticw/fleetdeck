@@ -93,15 +93,21 @@ func fleetdeckCapsulePressed(action *C.char) {
 // What capsules_darwin_test.go reads; Go test files cannot use cgo.
 
 type capsulesProbe struct {
-	segmentLabels    [2]string
-	selectedSegment  int
-	newCardTitle     string
-	themeTitle       string
-	levelValue       float64
-	capsuleCount     int
-	countAfterRedraw int
-	rowPassesThrough bool
-	presses          []string
+	segmentLabels   [2]string
+	selectedSegment int
+	// The tabs' border shape (-1 before macOS 26), where the selected
+	// segment's fill starts in its top row as a share of its height, and the
+	// room around the tabs in their capsule: left, right, top, bottom.
+	segmentBorderShape int
+	selectedTopInset   float64
+	tabsInsets         [4]float64
+	newCardTitle       string
+	themeTitle         string
+	levelValue         float64
+	capsuleCount       int
+	countAfterRedraw   int
+	rowPassesThrough   bool
+	presses            []string
 	// clicksReach: a click at the middle of the tabs, the new card button and
 	// the theme button, drawn on glass, reaches that control.
 	clicksReach [3]bool
@@ -121,6 +127,10 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	drawCapsules(f.capsules(), m, glassModeGlass)
 	out.segmentLabels = [2]string{C.GoString(C.fd_test_segment_label(0)), C.GoString(C.fd_test_segment_label(1))}
 	out.selectedSegment = int(C.fd_test_selected_segment())
+	out.segmentBorderShape = int(C.fd_test_segment_border_shape())
+	out.selectedTopInset = float64(C.fd_test_selected_segment_top_inset())
+	insets := C.fd_test_tabs_insets()
+	out.tabsInsets = [4]float64{float64(insets.left), float64(insets.right), float64(insets.top), float64(insets.bottom)}
 	out.newCardTitle = C.GoString(C.fd_test_new_card_title())
 	out.themeTitle = C.GoString(C.fd_test_theme_title())
 	out.levelValue = float64(C.fd_test_level_value(0))

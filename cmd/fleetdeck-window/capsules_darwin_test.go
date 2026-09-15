@@ -91,6 +91,37 @@ func TestCapsulesDrawThePagesModel(t *testing.T) {
 	}
 }
 
+// v0.10.1 on the operator's macOS: the selected tab was a rounded rectangle in
+// its round capsule. From macOS 26 a segmented control has a border shape, and
+// left automatic it draws a rounded rectangle at this size. Asked for a capsule,
+// its selected segment is one too, and with the same room on every side the two
+// capsules share their centres of curvature.
+func TestTheSelectedTabIsACapsuleInsideItsCapsule(t *testing.T) {
+	r := capsulesResult
+	if r.segmentBorderShape < 0 {
+		t.Skip("NSControl.borderShape is not on this system (before macOS 26)")
+	}
+	if r.segmentBorderShape != 1 {
+		t.Errorf("the tabs' border shape is %d, want 1 (NSControlBorderShapeCapsule)", r.segmentBorderShape)
+	}
+	if r.selectedTopInset < 0.35 {
+		t.Errorf("the selected segment's fill starts %.2f of its height in at its top, want a capsule's, about 0.5; a rounded rectangle's is about 0.2", r.selectedTopInset)
+	}
+}
+
+func TestTheTabsHaveTheSameRoomOnEverySideOfTheirCapsule(t *testing.T) {
+	r := capsulesResult
+	if r.segmentBorderShape < 0 {
+		t.Skip("NSControl.borderShape is not on this system (before macOS 26): the tabs are no capsule to keep concentric")
+	}
+	in := r.tabsInsets
+	for i, side := range []string{"right", "top", "bottom"} {
+		if math.Abs(in[i+1]-in[0]) > 0.5 {
+			t.Errorf("the tabs have %v pt of room on the left and %v on the %s, want the same", in[0], in[i+1], side)
+		}
+	}
+}
+
 func TestADrawnAgainRowReplacesTheCapsulesInsteadOfAddingThem(t *testing.T) {
 	if capsulesResult.countAfterRedraw != 4 {
 		t.Fatalf("after a second draw: %d, want the same four capsules in one row", capsulesResult.countAfterRedraw)

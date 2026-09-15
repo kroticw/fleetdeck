@@ -179,12 +179,13 @@ static id target(void) {
 
 static const double capsuleHeight = 32, capsulePadding = 12, capsuleGap = 8;
 
-// A capsule of the row's material around content, width fitted to it. The row
-// places it (placeCapsules); it never moves by autoresizing.
-static id capsule(const char *mode, id content, double x) {
+// A capsule of the row's material around content, width fitted to it with
+// padding on either side. The row places it (placeCapsules); it never moves by
+// autoresizing.
+static id capsule(const char *mode, id content, double x, double padding) {
   CGSize fit = fittingSize(content);
-  CGRect frame = CGRectMake(x, 0, fit.width + 2 * capsulePadding, capsuleHeight);
-  CGRect inner = CGRectMake(capsulePadding, (capsuleHeight - fit.height) / 2, fit.width, fit.height);
+  CGRect frame = CGRectMake(x, 0, fit.width + 2 * padding, capsuleHeight);
+  CGRect inner = CGRectMake(padding, (capsuleHeight - fit.height) / 2, fit.width, fit.height);
   id wrapper;
   id holder = initWithFrame(cls("NSView"), CGRectMake(0, 0, frame.size.width, frame.size.height));
   sendVoidRect(content, sel("setFrame:"), inner);
@@ -432,11 +433,19 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
       0 /* select one */, target(), sel("pressed:"));
   sendVoidLong(segmentedDrawn, sel("setTag:"), tagTabs);
   sendVoidLong(segmentedDrawn, sel("setSelectedSegment:"), selectedTab);
-  tabsCapsule = capsule(mode, segmentedDrawn, 0);
+  // A capsule in the capsule, from macOS 26: left automatic, the control and its
+  // selected segment are rounded rectangles at this size (NSControlBorderShape).
+  // With the same room on every side the two capsules are concentric.
+  double tabsPadding = capsulePadding;
+  if (respondsTo(segmentedDrawn, "setBorderShape:")) {
+    sendVoidLong(segmentedDrawn, sel("setBorderShape:"), 1);  // NSControlBorderShapeCapsule
+    tabsPadding = (capsuleHeight - fittingSize(segmentedDrawn).height) / 2;
+  }
+  tabsCapsule = capsule(mode, segmentedDrawn, 0, tabsPadding);
   adopt(into, tabsCapsule);
 
   newCardDrawn = button(newCardLabel, tagNewCard);
-  newCardCapsule = capsule(mode, newCardDrawn, 0);
+  newCardCapsule = capsule(mode, newCardDrawn, 0, capsulePadding);
   adopt(into, newCardCapsule);
 
   limitsDrawn = limitCount < maxLimits ? limitCount : maxLimits;
@@ -452,7 +461,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id views[3] = {label(limitLabels[i]), level, label(limitTexts[i])};
     id content = row(views, 3);
     sendVoid0(level, sel("release"));
-    limitCapsules[i] = capsule(mode, content, 0);
+    limitCapsules[i] = capsule(mode, content, 0, capsulePadding);
     adopt(into, limitCapsules[i]);
   }
 
@@ -464,12 +473,12 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id colour = srgb(compactRGB);
     if (colour) sendVoid1(compactLabelDrawn, sel("setTextColor:"), colour);
     sendVoid1(compactLabelDrawn, sel("setToolTip:"), nsstring(compactTooltip));
-    compactCapsule = capsule(mode, compactLabelDrawn, 0);
+    compactCapsule = capsule(mode, compactLabelDrawn, 0, capsulePadding);
     adopt(into, compactCapsule);
   }
 
   themeDrawn = button(themeLabel, tagTheme);
-  themeCapsule = capsule(mode, themeDrawn, 0);
+  themeCapsule = capsule(mode, themeDrawn, 0, capsulePadding);
   adopt(into, themeCapsule);
 
   // The theme with no room for its label: the same press, and the label -- the
@@ -477,7 +486,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   themeIconDrawn = button("◐", tagTheme);
   sendVoid1(themeIconDrawn, sel("setToolTip:"), nsstring(themeLabel));
   sendVoid1(themeIconDrawn, sel("setAccessibilityLabel:"), nsstring(themeLabel));
-  themeIconCapsule = capsule(mode, themeIconDrawn, 0);
+  themeIconCapsule = capsule(mode, themeIconDrawn, 0, capsulePadding);
   adopt(into, themeIconCapsule);
 
   rowDrawn = rowView;
@@ -500,6 +509,55 @@ const char *fd_test_segment_label(int i) {
 }
 
 int fd_test_selected_segment(void) { return (int)sendLong0(segmentedDrawn, sel("selectedSegment")); }
+
+long fd_test_segment_border_shape(void) {
+  if (!segmentedDrawn || !respondsTo(segmentedDrawn, "borderShape")) return -1;
+  return sendLong0(segmentedDrawn, sel("borderShape"));
+}
+
+// The tabs drawn into a bitmap of their own -- the control alone, not the
+// screen -- and where the drawn fill starts in its top row, as a share of the
+// fill's height. Drawn off screen, the control's track has nothing under it and
+// only the selected segment's fill is left: a capsule's top row starts about
+// half its height in, a rounded rectangle's a fifth. -1 when nothing is drawn.
+double fd_test_selected_segment_top_inset(void) {
+  if (!segmentedDrawn) return -1;
+  void *pool = objc_autoreleasePoolPush();
+  CGRect b = sendRect0(segmentedDrawn, sel("bounds"));
+  id rep = ((id (*)(id, SEL, CGRect))objc_msgSend)(segmentedDrawn, sel("bitmapImageRepForCachingDisplayInRect:"), b);
+  double out = -1;
+  if (rep) {
+    ((void (*)(id, SEL, CGRect, id))objc_msgSend)(segmentedDrawn, sel("cacheDisplayInRect:toBitmapImageRep:"), b, rep);
+    long w = sendLong0(rep, sel("pixelsWide")), h = sendLong0(rep, sel("pixelsHigh"));
+    long top = -1, bottom = -1, left = -1;
+    for (long y = 0; y < h; y++) {
+      for (long x = 0; x < w; x++) {
+        id c = ((id (*)(id, SEL, long, long))objc_msgSend)(rep, sel("colorAtX:y:"), x, y);
+        if (c && sendDouble0(c, sel("alphaComponent")) > 0.08) {
+          if (top < 0) top = y, left = x;
+          bottom = y;
+          break;
+        }
+      }
+    }
+    if (top >= 0 && bottom > top) out = (double)left / (double)(bottom - top + 1);
+  }
+  objc_autoreleasePoolPop(pool);
+  return out;
+}
+
+// The room between the tabs and the edges of their capsule, on each side.
+fd_capsule_insets fd_test_tabs_insets(void) {
+  fd_capsule_insets out = {-1, -1, -1, -1};
+  if (!segmentedDrawn || !tabsCapsule) return out;
+  CGRect inner = sendRect0(segmentedDrawn, sel("frame"));
+  CGRect outer = sendRect0(tabsCapsule, sel("frame"));
+  out.left = inner.origin.x;
+  out.right = outer.size.width - inner.origin.x - inner.size.width;
+  out.bottom = inner.origin.y;
+  out.top = outer.size.height - inner.origin.y - inner.size.height;
+  return out;
+}
 const char *fd_test_new_card_title(void) { return cstring(send0(newCardDrawn, sel("title"))); }
 const char *fd_test_theme_title(void) { return cstring(send0(themeDrawn, sel("title"))); }
 double fd_test_level_value(int i) { return sendDouble0(levelsDrawn[i], sel("doubleValue")); }
