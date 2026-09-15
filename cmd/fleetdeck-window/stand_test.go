@@ -91,7 +91,7 @@ func TestAStandInstalledFromAReleaseUpdatesItself(t *testing.T) {
 	keeper := &supervisor.Keeper{
 		URL:          url,
 		Bin:          supervisor.PanelIn(canonical),
-		Args:         panelArgs(os.Getpid(), os.Getenv(standSocketEnv)),
+		Args:         panelArgs(os.Getpid(), os.Getenv(standSocketEnv), urlPort(t, url), ""),
 		Owner:        os.Getpid(),
 		Env:          env,
 		LogPath:      filepath.Join(home, "panel.log"),

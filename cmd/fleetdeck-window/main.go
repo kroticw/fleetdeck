@@ -66,13 +66,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	webview "github.com/webview/webview_go"
 
+	appconfig "github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/supervisor"
 	"github.com/kroticw/fleetdeck/internal/version"
 )
@@ -105,7 +105,7 @@ func reloadBinding(dispatch func(func()), navigate func(string), url string) fun
 }
 
 func main() {
-	url := flag.String("url", defaultURL, "URL the panel answers on")
+	url := flag.String("url", startURL(isDevBuild(), devURL), "URL the panel answers on")
 	handover := flag.String("handover", "", "set by an update: the handover file of the window taking the panel over")
 	toldCanonical := flag.String("canonical", "", "set by an update: the installed app bundle this window replaces")
 	toldHandoverTimeout := flag.Duration(handoverTimeoutFlag, 0, "set by an update: how long the window that started this one gives the handover, from this window's start")
@@ -128,9 +128,31 @@ func main() {
 	if err != nil {
 		log.Fatalf("fleetdeck-window: locate home directory: %v", err)
 	}
-	// The same log the launch agent wrote the panel's output to, so a panel's
-	// history does not split in two at the day the window took over.
-	logPath := filepath.Join(home, "Library", "Logs", "fleetdeck.log")
+	// Where the panel listens: the port of the URL this window looks at,
+	// handed to every panel it starts.
+	port, err := panelPort(*url)
+	if err != nil {
+		log.Fatalf("fleetdeck-window: %v", err)
+	}
+	// A dev app keeps off everything of the installed app's but the fleet
+	// daemon and the board, and its panel runs on a copy of the operator's
+	// config (devapp.go).
+	dev := isDevBuild()
+	panelConfig := ""
+	if dev {
+		if err := devFlagsRefusal(*handover, *toldCanonical); err != nil {
+			log.Fatalf("fleetdeck-window: %v", err)
+		}
+		if err := devPortRefusal(port, appconfig.DefaultPath()); err != nil {
+			log.Fatalf("fleetdeck-window: %v", err)
+		}
+		panelConfig = devConfigPath(home)
+		if err := copyDevConfig(appconfig.DefaultPath(), panelConfig); err != nil {
+			log.Fatalf("fleetdeck-window: %v", err)
+		}
+		log.Printf("fleetdeck-window: a dev app on %s; its panel runs on %s, a copy of the operator's config with banners off", *url, panelConfig)
+	}
+	logPath := panelLogPath(home, dev)
 
 	// A stand's socket, when this window runs on a stand, handed to every panel
 	// it starts; a stand that names none is refused before anything starts.
@@ -139,7 +161,7 @@ func main() {
 		log.Fatalf("fleetdeck-window: %v", err)
 	}
 	// A stand's panel widths stay out of the operator's app's defaults.
-	useWidthsSuite(widthsSuite(standSocket))
+	useWidthsSuite(widthsSuite(standSocket, dev))
 
 	// A window in an update's staging directory opens the installed app and
 	// goes, before it has a window to flash (staged.go).
@@ -174,7 +196,9 @@ func main() {
 	keeper := &supervisor.Keeper{
 		URL:  *url,
 		Bin:  panelBinary(exe),
-		Args: panelArgs(os.Getpid(), standSocket),
+		Args: panelArgs(os.Getpid(), standSocket, port, panelConfig),
+		// A dev app stops no process but its own panel's.
+		StopsOnly: stopsOnly(exe, dev),
 		// This window: its panels report it as their owner and go when it
 		// goes, and a panel whose window is gone is replaced.
 		Owner:        os.Getpid(),
@@ -233,7 +257,7 @@ func main() {
 	w := webview.New(false)
 	startupStep("the web view is made")
 	defer w.Destroy()
-	w.SetTitle("fleetdeck")
+	w.SetTitle(windowTitle(dev))
 	w.SetSize(width, height, webview.HintNone)
 	hostOnStand, hostStandOpen = standSocket != "", stand.open
 	if stand.appearance != "" {
@@ -423,6 +447,7 @@ func main() {
 			version:   version.String(),
 			teamID:    ownTeamID(exe),
 			canonical: *toldCanonical,
+			dev:       dev,
 		})
 		startupStep("worked out how this build updates")
 		if how.Refusal != "" {
@@ -509,7 +534,7 @@ func main() {
 	// window quit while the old one still ran out of it -- is removed now, beside
 	// the start, unless an update runs or something still runs out of it
 	// (supervisor.RetireLeftover, leftoverstart.go).
-	if retiresLeftover(*handover, canonical) {
+	if retiresLeftover(*handover, canonical, dev) {
 		go supervisor.RetireLeftover(context.Background(), canonical, updateLockPath(canonical),
 			supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath},
 			func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) })

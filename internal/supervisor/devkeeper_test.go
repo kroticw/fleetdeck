@@ -47,11 +47,11 @@ func refusalFor(t *testing.T, addr, exe string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	real, err := filepath.EvalSymlinks(exe)
+	resolved, err := filepath.EvalSymlinks(exe)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fmt.Sprintf("port %s is held by %s, not by this dev app", port, real)
+	return fmt.Sprintf("port %s is held by %s, not by this dev app", port, resolved)
 }
 
 func TestADevKeeperLeavesAnOrphanOfAnotherBinaryAlone(t *testing.T) {
