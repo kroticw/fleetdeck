@@ -244,6 +244,95 @@ func TestARowPastTheWindowsButtonsBesideTheFoldedStripIsNoProblem(t *testing.T) 
 	}
 }
 
+// foldedSessions is f with the sessions panel folded to its strip at the
+// window's right edge.
+func foldedSessions(f frameReport) frameReport {
+	f.Sessions.X += f.Sessions.W - foldedStripWidth
+	f.Sessions.W = foldedStripWidth
+	return f
+}
+
+// besideFoldedSessions is b ending at the folded sessions strip, its last
+// column out in the open before it.
+func besideFoldedSessions(b boardReport) boardReport {
+	b.BoardRight = 944
+	b.LastColumnRightAtEnd = at(928)
+	return b
+}
+
+// goodSessionsStrip is the folded sessions strip's word on its fit when
+// everything fits: no head, its unfold control and its marks inside it.
+func goodSessionsStrip() stripReport {
+	var s stripReport
+	if err := json.Unmarshal([]byte(`{"surface":"sessions","report":"overflow","folded":true,"width":48,"scrollWidth":48,"overflowing":[],"shown":["main","aside.col.col-sessions","div.col-size.col-size-right","button.col-size-btn.col-size-unfold","div.sfold","div.sfold-count","button.sfold-mark"],"unfold":{"left":7,"top":8,"right":41,"bottom":42,"reachable":true}}`), &s); err != nil {
+		panic(err)
+	}
+	return s
+}
+
+func TestAFoldedSessionsStripWhereEverythingFitsIsNoProblem(t *testing.T) {
+	log := logOf(t, foldedSessions(goodFrame(false)), besideFoldedSessions(goodBoard(false)), goodHeader(false), goodSessionsStrip())
+	if got := check(log, 0); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
+// v0.10.2's dev build on the operator's glass (frame 1368): folded, the
+// sessions strip kept the page's header, and its counters wrapped word by word
+// and ran off the strip's edge.
+func TestAFoldedSessionsStripWhoseCountersRunPastItsEdgeIsAProblem(t *testing.T) {
+	s := goodSessionsStrip()
+	if err := json.Unmarshal([]byte(`{"overflowing":[{"element":"div.counters","scrollWidth":131,"clientWidth":48,"left":0,"right":48},{"element":"span.counter.counter-waiting","scrollWidth":0,"clientWidth":0,"left":20,"right":92}]}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	log := logOf(t, foldedSessions(goodFrame(false)), besideFoldedSessions(goodBoard(false)), goodHeader(false), s)
+	problems := check(log, 0)
+	wantProblem(t, problems, "in the folded sessions strip div.counters is 131 wide for 48")
+	wantProblem(t, problems, "in the folded sessions strip span.counter.counter-waiting", "from 20 to 92")
+}
+
+func TestAFoldedSessionsStripWithNoReportIsAProblem(t *testing.T) {
+	log := logOf(t, foldedSessions(goodFrame(false)), besideFoldedSessions(goodBoard(false)), goodHeader(false))
+	wantProblem(t, check(log, 0), "no overflow report from the folded sessions strip")
+}
+
+// The orchestrator strip's report does not stand for the sessions strip's.
+func TestAnOrchestratorStripReportIsNotTheFoldedSessionsStrips(t *testing.T) {
+	log := logOf(t, foldedSessions(goodFrame(false)), besideFoldedSessions(goodBoard(false)), goodHeader(false), goodStrip())
+	wantProblem(t, check(log, 0), "no overflow report from the folded sessions strip")
+}
+
+func TestAFoldedSessionsStripsUnfoldControlNotReachedOrOutsideIsAProblem(t *testing.T) {
+	for _, c := range []struct {
+		patch string
+		words string
+	}{
+		{`{"unfold":null}`, "the folded sessions strip shows no unfold control"},
+		{`{"unfold":{"left":7,"top":8,"right":41,"bottom":42,"reachable":false}}`, "a press on the folded sessions strip's unfold control reaches something else"},
+		{`{"unfold":{"left":30,"top":8,"right":64,"bottom":42,"reachable":true}}`, "the folded sessions strip's unfold control at 30..64 is outside the strip"},
+	} {
+		s := goodSessionsStrip()
+		s.Unfold = nil
+		if err := json.Unmarshal([]byte(c.patch), &s); err != nil {
+			t.Fatal(err)
+		}
+		log := logOf(t, foldedSessions(goodFrame(false)), besideFoldedSessions(goodBoard(false)), goodHeader(false), s)
+		wantProblem(t, check(log, 0), c.words)
+	}
+}
+
+// An open sessions panel is not held to a strip's properties, whatever its
+// surface says of its fit.
+func TestAnOpenSessionsPanelIsNotHeldToTheStrip(t *testing.T) {
+	s := goodSessionsStrip()
+	if err := json.Unmarshal([]byte(`{"folded":false,"width":260,"overflowing":[{"element":"div.counters","scrollWidth":300,"clientWidth":260,"left":0,"right":260}]}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if got := check(logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), s), 0); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
 func TestButtonsOffTheirPlaceAfterFullScreenAreAProblem(t *testing.T) {
 	after := goodFrame(false)
 	after.Close = box{X: 9, Y: 9, W: 14, H: 14}
@@ -496,11 +585,13 @@ func logLine(t *testing.T, clock string, r any) string {
 		t.Fatal(err)
 	}
 	var words string
-	switch r.(type) {
+	switch v := r.(type) {
 	case frameReport:
 		words = "the frame measures "
-	case headerReport, stripReport:
+	case headerReport:
 		words = "the orchestrator surface reports its scrolling: "
+	case stripReport:
+		words = "the " + v.Surface + " surface reports its scrolling: "
 	case boardReport:
 		words = "the board reports its scrolling: "
 	default:
