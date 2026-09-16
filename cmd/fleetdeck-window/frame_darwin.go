@@ -264,6 +264,10 @@ type bandProbe struct {
 	boardBelowAShortBand, bandAboveAShortBand, boardWithNoBand bool
 	// On the band the open new card form leaves.
 	cancelOnTheOpenFormReachesTheBoard bool
+	// On the band an open sheet leaves: whether a press at the middle of it,
+	// routed from the window, lands on the band, and whether a press on the
+	// sheet's own first row reaches the board.
+	bandWithASheetOpen, sheetBelowTheBandReachesTheBoard bool
 	// Counts of drag, zoom, fill, minimize.
 	press       [4]int
 	doubleClick map[string][4]int
@@ -318,6 +322,16 @@ func probeBandForTest(g geometry) bandProbe {
 	C.fd_test_press_band(f.p, 2)
 	out.fullScreen = windowCalls()
 	C.fd_test_set_full_screen(0)
+
+	// A card, a document or a session open as a sheet over the dimmed board: the
+	// sheet's top is the board's inset less 4 pt (web/app.css), and the dimmed
+	// board above it is the board, so the page ends the band there. v0.12.0 sent
+	// 0 instead -- the scrim was not marked as the page's ground -- and the
+	// window could not be moved at all while a session was open (T-079).
+	sheetTop := boardInsetTop - 4
+	f.setDragBand(sheetTop)
+	out.bandWithASheetOpen = fromWindow(boardX, sheetTop/2, band)
+	out.sheetBelowTheBandReachesTheBoard = within(boardX, sheetTop+2, f.board())
 
 	// The new card form open under the capsules: the page ends the band at the
 	// form's top, and a press on its Cancel, a row down, is the board's.
