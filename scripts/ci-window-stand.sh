@@ -41,6 +41,16 @@
 #                    buttons concentric in the orchestrator panel's corner with
 #                    the header's row on their line.
 #
+# FLEETDECK_STAND_OPEN=session, for content: the board opens the first session
+# the panel lists, as a sheet over the dimmed board
+# (cmd/fleetdeck-window/standsettings.go, web/js/main.js). The band the window is
+# dragged by has to survive it: the board says what stands in the way of its own
+# top (web/js/standreport.js, topBandReport) and the height it reports must be
+# more than nothing, and the window's own measurement of the band -- its height,
+# and whether a press in the middle of it lands on it -- is held to the same by
+# scripts/standcheck. v0.12.0 reported no band the moment a session opened and
+# could not be moved at all, and no stand had ever opened one (T-079).
+#
 # FLEETDECK_STAND_FULLSCREEN=on, for content: the window goes into full screen
 # once its surfaces have loaded, comes out of it after a while, and goes in and
 # out a second time (cmd/fleetdeck-window/standfullscreen.go). The stand takes
@@ -237,6 +247,27 @@ if [ "$expect" = content ]; then
 		sleep 1
 	done
 fi
+# opens_a_session: the stand was told to take the frame with a session open.
+opens_a_session() {
+	case ",${FLEETDECK_STAND_OPEN:-}," in
+		*,session,*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+# A session opens as a sheet over the dimmed board, and the sheet is what the
+# band is measured against: the gates below run once the board has said it is
+# open, not before.
+sheet_open=yes
+if [ "$expect" = content ] && opens_a_session; then
+	sheet_open=no
+	for _ in $(seq 20); do
+		if grep -q 'the board reports its top band: .*"sheetOpen":\["session-panel"\]' "$out/window.log" 2>/dev/null; then
+			sheet_open=yes
+			break
+		fi
+		sleep 1
+	done
+fi
 # measure_from <line> <true|false>: the number of the first line from <line> on
 # where the window measures its frame in full screen (true) or out of it
 # (false); nothing before there is one.
@@ -352,6 +383,28 @@ if [ "$expect" = content ]; then
 	echo "--- the orchestrator's terminal at rest: native bar ${native:-not reported} px, xterm's own bar opacity ${own:-not reported}"
 	if [ "$rest" = no ]; then
 		scrollbar=no
+	fi
+fi
+
+# For content with a session open, the band the window is dragged by, as the
+# board measures its own top (web/js/standreport.js, topBandReport). The window's
+# own word on the band -- its height, and whether a press in the middle of it
+# lands on it -- is in the frame report, which scripts/standcheck holds to below;
+# this says what took the band when there is none. v0.12.0 reported 0 here, and
+# the window could not be moved at all while a session was open (T-079).
+band=unset
+if [ "$expect" = content ] && opens_a_session; then
+	band=yes
+	said=$(grep 'the board reports its top band' "$out/window.log" | tail -n 1)
+	height=$(printf '%s\n' "$said" | sed -n 's/.*"height":\([0-9]*\).*/\1/p')
+	echo "--- the band with a session open: ${height:-not reported} pt"
+	echo "--- the board's own word on its top: ${said:-none}"
+	if [ "$sheet_open" = no ]; then
+		echo "--- no session was ever open: the band below proves nothing"
+		band=no
+	fi
+	if [ -z "$height" ] || [ "$height" -le 0 ]; then
+		band=no
 	fi
 fi
 
@@ -509,9 +562,9 @@ if [ -n "${FLEETDECK_STAND_SYSTEM:-}" ]; then
 	[ "$system_said" = "$system_want" ] || system=no
 fi
 
-echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the board down its height as the islands ask: $board_down, a scrolled column kept across snapshots: $column_kept, the sessions island on one ground: $grounds, the frame's properties: $frame, full screen ${FLEETDECK_STAND_FULLSCREEN:-off}: $fullscreen, panels folded ${FLEETDECK_STAND_FOLD:-unset}: $folded, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
+echo "--- $app ($how, $expect): every page said panel: $loaded${missing:+ (not yet: $missing)}, window still running: $alive, panel looks for no daemon: $discovery, content shown: $content_shown, scroll bars as the islands ask: $scrollbar, the board down its height as the islands ask: $board_down, a scrolled column kept across snapshots: $column_kept, the sessions island on one ground: $grounds, the band with a session open: $band, the frame's properties: $frame, full screen ${FLEETDECK_STAND_FULLSCREEN:-off}: $fullscreen, panels folded ${FLEETDECK_STAND_FOLD:-unset}: $folded, appearance ${FLEETDECK_STAND_APPEARANCE:-unset}: $appearance, capsules ${FLEETDECK_STAND_CAPSULES:-unset}: $capsules${capsules_said:+ ($capsules_said)}, system ${FLEETDECK_STAND_SYSTEM:-unset}: $system${system_said:+ ($system_said)}"
 full_screen_ok=yes
 if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ] && [ "$fullscreen" = no ]; then
 	full_screen_ok=no
 fi
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$board_down" = yes ] && [ "$column_kept" = yes ] && [ "$grounds" = yes ] && [ "$frame" = yes ] && [ "$full_screen_ok" = yes ] && [ "$folded" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$board_down" = yes ] && [ "$column_kept" = yes ] && [ "$grounds" = yes ] && [ "$band" != no ] && [ "$frame" = yes ] && [ "$full_screen_ok" = yes ] && [ "$folded" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]

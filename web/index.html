@@ -21,8 +21,20 @@
       <div id="board" data-window-ground></div>
       <div id="docs" data-window-ground hidden></div>
       <!-- Dims the board under an open card, document or session in the
-           fleetdeck window; shown by web/app.css alone. -->
-      <div id="sheet-scrim"></div>
+           fleetdeck window; shown by web/app.css alone.
+
+           data-window-ground: this is the board, drawn darker, and nothing
+           else. It covers the whole column from its very top, so without the
+           mark the band the window is dragged by (js/topband.js) ends at y = 0
+           the moment any sheet opens -- across the whole width, including the
+           room beside the sheet where nothing is drawn. That is v0.12.0's
+           window, which could not be moved while a session was open.
+
+           The mark says the scrim is nothing to click or read, and that is what
+           it is: it takes a press and does nothing with it. If it is ever given
+           something to do with one -- closing the sheet, say -- the mark has to
+           go, and the band found another way. -->
+      <div id="sheet-scrim" data-window-ground></div>
       <div id="card-panel" hidden></div>
       <div id="reader-panel" hidden></div>
       <div id="session-panel" class="session-panel" hidden></div>
