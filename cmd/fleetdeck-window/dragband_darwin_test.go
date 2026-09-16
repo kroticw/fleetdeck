@@ -8,8 +8,11 @@ import "testing"
 
 var bandResult bandProbe
 
+var bandStates []bandStateProbe
+
 func collectBandResults() {
 	bandResult = probeBandForTest(frameGeometry)
+	bandStates = probeBandStatesForTest()
 }
 
 const (
@@ -106,5 +109,23 @@ func TestADoubleClickOnTheBandDoesWhatTheSystemSettingSays(t *testing.T) {
 func TestTheBandDoesNothingInFullScreen(t *testing.T) {
 	if bandResult.fullScreen != [4]int{} {
 		t.Fatalf("in full screen a press and a double click asked for %v (drag, zoom, fill, minimize), want nothing", bandResult.fullScreen)
+	}
+}
+
+// The window is dragged by the band wherever the page's top is empty, and the
+// page's top is empty in every state its panels can be in. v0.11.0's window
+// never heard what the page said and kept a band of no height, so it could not
+// be moved with either panel out or folded (T-076).
+func TestTheWindowHasABandToBeDraggedByInEveryStateOfThePanels(t *testing.T) {
+	if len(bandStates) != 4 {
+		t.Fatalf("the band was probed in %d states of the panels, want all four", len(bandStates))
+	}
+	for _, s := range bandStates {
+		if s.height <= 0 {
+			t.Errorf("with %s the band is %v pt tall, want the board's top inset", s.state, s.height)
+		}
+		if !s.hit {
+			t.Errorf("with %s a press over the board at the middle of the band does not land on the band", s.state)
+		}
 	}
 }

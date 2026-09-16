@@ -71,6 +71,31 @@ type standFrameReport struct {
 	// band over the capsule row.
 	ContentLayoutTop float64           `json:"contentLayoutTop"`
 	Overlays         []measuredOverlay `json:"overlays"`
+	// DragBand is the band at the window's top the window is dragged by, as the
+	// frame has it, and DragBandHit whether a press over the board in the middle
+	// of that band, routed from the window, lands on it. Both are measured, not
+	// the page's word: v0.11.0's window was left with no band at all and could
+	// not be moved (T-076).
+	DragBand      measuredBox   `json:"dragBand"`
+	DragBandPress measuredPoint `json:"dragBandPress"`
+	DragBandHit   bool          `json:"dragBandHit"`
+}
+
+// measuredPoint is a point in the window, in points from its top left.
+type measuredPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// dragBandPress is where a press is tried for the band: over the board, halfway
+// across the capsule row, and above the row itself -- a capsule there is the
+// capsule's press, not the band's, however tall the band is.
+func dragBandPress(row, band measuredBox) measuredPoint {
+	y := band.H
+	if row.H > 0 && row.Y < y {
+		y = row.Y
+	}
+	return measuredPoint{X: row.X + row.W/2, Y: y / 2}
 }
 
 func boxOf(r C.fd_rect) measuredBox {
@@ -98,7 +123,11 @@ func measureFrame(f *frame, window unsafe.Pointer, mode glassMode) standFrameRep
 		SelectedTopInset:   float64(C.fd_test_selected_segment_top_inset()),
 		RoundedTopInset:    float64(C.fd_test_rounded_segment_top_inset()),
 		ContentLayoutTop:   float64(C.fd_test_content_layout_top(window)),
+		DragBand:           boxOf(C.fd_test_frame_of(C.fd_test_band(f.p))),
 	}
+	out.DragBandPress = dragBandPress(out.Row, out.DragBand)
+	out.DragBandHit = out.DragBand.H > 0 &&
+		C.fd_test_window_hit_within(window, C.double(out.DragBandPress.X), C.double(out.DragBandPress.Y), C.fd_test_band(f.p)) != 0
 	var overlays [16]C.fd_overlay
 	for i, n := 0, int(C.fd_test_overlays(window, &overlays[0], C.int(len(overlays)))); i < n; i++ {
 		o := overlays[i]

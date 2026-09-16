@@ -333,6 +333,48 @@ func probeBandForTest(g geometry) bandProbe {
 	return out
 }
 
+// bandStateProbe is the band in one state of the panels: its height, and
+// whether a press over the board at the middle of it, routed from the window,
+// lands on the band.
+type bandStateProbe struct {
+	state  string
+	height float64
+	hit    bool
+}
+
+// probeBandStatesForTest is the band in each state the panels can be in, given
+// the page's word that its whole top inset is empty. The operator could not
+// move v0.11.0's window in any of them (T-076).
+func probeBandStatesForTest() []bandStateProbe {
+	window := C.fd_test_counting_window(1512, 982)
+	f := installFrame(window)
+	f.setMode(glassModeGlass)
+	var out []bandStateProbe
+	for _, s := range []struct {
+		state  string
+		widths panelWidths
+	}{
+		{"both panels out", panelWidths{Orchestrator: 368, Sessions: 348}},
+		{"the orchestrator panel folded", panelWidths{Orchestrator: 368, Sessions: 348, OrchestratorFolded: true}},
+		{"the sessions panel folded", panelWidths{Orchestrator: 368, Sessions: 348, SessionsFolded: true}},
+		{"both panels folded", panelWidths{Orchestrator: 368, Sessions: 348, OrchestratorFolded: true, SessionsFolded: true}},
+	} {
+		g := layoutFor(1512, 982, s.widths)
+		f.layout(g)
+		f.setDragBand(boardInsetTop)
+		band := C.fd_test_band(f.p)
+		// Between the panels, halfway down the band: the board's own top, where
+		// the page says nothing is.
+		x := (g.Orchestrator.X + g.Orchestrator.W + g.Sessions.X) / 2
+		out = append(out, bandStateProbe{
+			state:  s.state,
+			height: float64(C.fd_test_frame_of(band).h),
+			hit:    C.fd_test_window_hit_within(window, C.double(x), C.double(boardInsetTop/2), band) != 0,
+		})
+	}
+	return out
+}
+
 func windowCalls() [4]int {
 	var calls [4]int
 	for kind := range calls {
