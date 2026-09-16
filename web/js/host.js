@@ -17,14 +17,14 @@ export function readHost(win) {
   // hostOnStand), never a person's window.
   if (host.stand !== true) return { surface: host.surface, glass: host.glass };
   // open: what a stand's frame is taken with open, without a press
-  // (FLEETDECK_STAND_OPEN): the new card form, the fleet menu, or both. Anything
-  // else asked opens nothing.
+  // (FLEETDECK_STAND_OPEN): the new card form, the fleet menu, a session, or any
+  // of them. Anything else asked opens nothing.
   const asked = typeof host.standOpen === "string" ? host.standOpen.split(",") : [];
   const open = asked.length > 0 && asked.every((name) => STAND_OPENS.has(name)) ? { open: asked } : {};
   return { surface: host.surface, glass: host.glass, stand: true, ...open };
 }
 
-const STAND_OPENS = new Set(["newcard", "fleetmenu"]);
+const STAND_OPENS = new Set(["newcard", "fleetmenu", "session"]);
 
 export function callHost(win, name, payload) {
   const fn = win?.[name];

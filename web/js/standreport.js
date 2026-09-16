@@ -14,6 +14,8 @@
 // orchestrator's terminal, and the grounds and corners of the boxes the
 // sessions list lies in.
 
+import { TOP_BAND_MAX, isGround } from "./topband.js";
+
 // Sub-pixel layout rounding, not a column under the panel.
 const EDGE_SLACK_PX = 1;
 
@@ -223,6 +225,49 @@ export function probeColumnScroll(win, board, report) {
     report({ report: "columnScroll", stage: PROBED_STAGE, asked: PROBED_TOP, renders, scrollTop: c ? c.scrollTop : null });
   });
   observer.observe(board, { childList: true });
+}
+
+// --- the band the window is dragged by ----------------------------------------
+//
+// The window's own word on the band is in its frame report (standcheck): a
+// height, and whether a press in the middle of it lands on the band. That says
+// the band is gone but never what took it, and on v0.12.0 what took it was one
+// element nobody suspected -- #sheet-scrim, the dimmed board under an open
+// sheet, covering the whole column from y = 0 (T-079). This is the page's side
+// of the same number: the height it reports, and for every row the window looks
+// at, the first point across the width that is not the page's ground, with its
+// x and what stands there.
+
+// The same grid web/js/topband.js sweeps, so the report names the points the
+// window's own measurement stops at and no others.
+const BAND_ROW = 4;
+const BAND_COLUMN = 24;
+
+export function topBandReport(win, { max = TOP_BAND_MAX } = {}) {
+  const doc = win.document;
+  const width = win.innerWidth;
+  const rows = [];
+  let height = max;
+  for (let y = 0; y < max; y += BAND_ROW) {
+    let stood = null;
+    for (let x = BAND_COLUMN / 2; x < width; x += BAND_COLUMN) {
+      const el = doc.elementFromPoint(x, y);
+      if (isGround(el)) continue;
+      stood = { y, x, tag: el.tagName, id: el.id || "", class: typeof el.className === "string" ? el.className : "" };
+      break;
+    }
+    if (!stood) continue;
+    if (rows.length === 0) height = y;
+    rows.push(stood);
+  }
+  const open = ["session-panel", "card-panel", "reader-panel"].filter((id) => doc.getElementById(id)?.hidden === false);
+  return { report: "topband", width, max, height, sheetOpen: open, rows };
+}
+
+// watchTopBand reports the band whenever anything in the centre column changes:
+// a sheet opening is what this is here for.
+export function watchTopBandOnStand(win, centre, report) {
+  return watch(win, centre, { childList: true, subtree: true, attributes: true }, () => topBandReport(win), report);
 }
 
 // watchBoardScroll reports board's scrolling whenever the board draws its
