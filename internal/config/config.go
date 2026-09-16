@@ -66,6 +66,29 @@ type NotifyConfig struct {
 	SilenceAfter time.Duration
 }
 
+// AgentConfig names the Claude Code installation this panel drives, for a machine
+// carrying more than one. The case it was written for is a wrapper command that runs
+// the same claude binary against a configuration directory of its own, which makes it
+// a separate installation with its own daemon, job store, transcripts and control key.
+//
+// Both fields are empty by default and describe one installation together — a command
+// pointed at one installation with a ConfigDir naming another would start sessions the
+// panel then cannot see. Neither is validated against the other, because nothing here
+// can tell which directory a command will end up using.
+type AgentConfig struct {
+	// Command starts a background session, with `--bg --name <name>` appended to it:
+	// a wrapper and its own arguments, or a single-element command for a plain
+	// binary. Empty means the claude found on PATH and in the places Claude Code
+	// installs itself (internal/orchestrator's FindClaude).
+	Command []string
+	// ConfigDir is the installation's configuration directory — what Claude Code
+	// itself would read CLAUDE_CONFIG_DIR for. Empty means ~/.claude. Must be
+	// absolute: the daemon's runtime directory is named after this path as written,
+	// so a relative one would resolve differently depending on where the panel was
+	// launched from.
+	ConfigDir string
+}
+
 // Config is never serialised directly — Save/Load marshal the nested unexported
 // file type below, so Config carries no yaml tags of its own.
 type Config struct {
@@ -100,6 +123,9 @@ type Config struct {
 	// package doc) came from that file having an implicit default that a
 	// hand-run invocation touched without meaning to.
 	StatuslineRateLimitsPath string
+	// Agent is the Claude Code installation this panel drives; the zero value is
+	// the default installation. See AgentConfig.
+	Agent AgentConfig
 
 	// Name names the fleet the top-level board, docs and orchestrator keys
 	// describe. Empty means the folder above its board (fleet.DefaultName).
@@ -261,6 +287,13 @@ type file struct {
 		Wrap           string `yaml:"wrap"`
 		RateLimitsPath string `yaml:"rate_limits_path"`
 	} `yaml:"statusline"`
+	// Agent came after every key above it and is omitted when unused, so a file
+	// that drives the default installation is written exactly as it was before
+	// this section existed.
+	Agent struct {
+		Command   []string `yaml:"command,omitempty"`
+		ConfigDir string   `yaml:"config_dir,omitempty"`
+	} `yaml:"agent,omitempty"`
 	// Name and Fleets came after every key above and are omitted when unused,
 	// so a file that does not use them is written exactly as before they
 	// existed (pinned by TestSaveOutputOfASingleFleetConfigIsPinned).
@@ -310,6 +343,8 @@ func configToFile(c Config) file {
 	f.Server.Port = c.ServerPort
 	f.Statusline.Wrap = c.StatuslineWrap
 	f.Statusline.RateLimitsPath = c.StatuslineRateLimitsPath
+	f.Agent.Command = c.Agent.Command
+	f.Agent.ConfigDir = c.Agent.ConfigDir
 	f.Name = c.Name
 	for _, fl := range c.Fleets {
 		var ff fleetFile
@@ -341,8 +376,12 @@ func fileToConfig(f file) Config {
 		ServerPort:               f.Server.Port,
 		StatuslineWrap:           f.Statusline.Wrap,
 		StatuslineRateLimitsPath: f.Statusline.RateLimitsPath,
-		Name:                     f.Name,
-		Fleets:                   fleetsFromFile(f.Fleets),
+		Agent: AgentConfig{
+			Command:   f.Agent.Command,
+			ConfigDir: f.Agent.ConfigDir,
+		},
+		Name:   f.Name,
+		Fleets: fleetsFromFile(f.Fleets),
 	}
 }
 
@@ -509,6 +548,19 @@ func validate(c Config) error {
 	}
 	if c.Notify.SilenceAfter < 0 {
 		return fmt.Errorf("notify.silence_after must not be negative, got %s", c.Notify.SilenceAfter)
+	}
+	// Neither ~ nor a relative path: the daemon's runtime directory is named after
+	// this path exactly as written, so anything that resolves differently depending
+	// on who expands it finds a daemon from one launcher and none from another.
+	if dir := c.Agent.ConfigDir; dir != "" && !filepath.IsAbs(dir) {
+		return fmt.Errorf("agent.config_dir must be an absolute path, got %q", dir)
+	}
+	// A window opened from the Dock hands its panel PATH=/usr/bin:/bin:/usr/sbin:/sbin
+	// and nothing else, so a command named by its bare name is found from a terminal
+	// and not from the Dock — and only at the moment a session is started, long after
+	// the panel came up looking healthy. Refused here, where the message can say it.
+	if cmd := c.Agent.Command; len(cmd) > 0 && !filepath.IsAbs(cmd[0]) {
+		return fmt.Errorf("agent.command must start with an absolute path, got %q: a panel opened from the Dock has almost nothing on PATH", cmd[0])
 	}
 	return validateFleets(c)
 }

@@ -30,21 +30,31 @@ func ParseShort(out string) string {
 	return ""
 }
 
-// StartWith is Appointer.Start for the claude at bin: `claude --bg --name
-// <name>` run in cwd, with no prompt — the session's first message is the
+// StartWith is Appointer.Start for the command in argv: `--bg --name <name>`
+// appended to it and run in cwd, with no prompt — the session's first message is the
 // appointment's own, delivered the way an existing session's is.
-func StartWith(bin string) func(ctx context.Context, cwd, name string) (string, error) {
+//
+// A command rather than a path, because an installation is not always reached by
+// running a binary: a wrapper that sets up an environment and a configuration
+// directory and then execs claude is reached by its own words, and they have to
+// arrive before the first argument this function adds.
+func StartWith(argv []string) func(ctx context.Context, cwd, name string) (string, error) {
 	return func(ctx context.Context, cwd, name string) (string, error) {
-		cmd := exec.CommandContext(ctx, bin, "--bg", "--name", name)
+		if len(argv) == 0 {
+			return "", errors.New("no command to start a session with")
+		}
+		args := append(append([]string{}, argv[1:]...), "--bg", "--name", name)
+		cmd := exec.CommandContext(ctx, argv[0], args...)
 		cmd.Dir = cwd
 		out, err := cmd.CombinedOutput()
 		text := strings.TrimSpace(ansi.ReplaceAllString(string(out), ""))
+		spoken := strings.Join(argv, " ")
 		if err != nil {
-			return "", fmt.Errorf("%s --bg: %w: %s", bin, err, text)
+			return "", fmt.Errorf("%s --bg: %w: %s", spoken, err, text)
 		}
 		short := ParseShort(string(out))
 		if short == "" {
-			return "", fmt.Errorf("%s --bg printed no session id: %s", bin, text)
+			return "", fmt.Errorf("%s --bg printed no session id: %s", spoken, text)
 		}
 		return short, nil
 	}

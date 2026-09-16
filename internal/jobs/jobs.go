@@ -148,19 +148,29 @@ type state struct {
 	LinkScanPath    string   `json:"linkScanPath"`
 }
 
-// Dir returns the job store's location, ~/.claude/jobs.
+// Dir returns the default installation's job store, ~/.claude/jobs.
 //
-// Hardcoded under the home directory, the same way internal/daemon finds the
-// control key and cmd/fleetdeck finds the transcripts: Claude Code itself
-// hardcodes it too (claude-agents-mcp's jobsDir does the same), so a
-// configurable path here would only be able to point at somewhere the daemon
-// never writes.
+// Fixed relative to the configuration directory, not configurable in its own right:
+// Claude Code writes the store there and nowhere else (claude-agents-mcp's jobsDir
+// does the same), so a path of its own could only point somewhere the daemon never
+// writes. Which configuration directory is in play is a different question, and the
+// one DirIn answers.
 func Dir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locate home directory: %w", err)
 	}
-	return filepath.Join(home, ".claude", "jobs"), nil
+	return DirIn(filepath.Join(home, ".claude")), nil
+}
+
+// DirIn returns the job store of the installation rooted at claudeDir. An empty
+// claudeDir yields an empty path, which callers read as "no store to look in" rather
+// than as the root of the filesystem.
+func DirIn(claudeDir string) string {
+	if claudeDir == "" {
+		return ""
+	}
+	return filepath.Join(claudeDir, "jobs")
 }
 
 // Load reads every session record in the store at dir, sorted by short id.
