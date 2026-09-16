@@ -30,7 +30,7 @@ func TestAFrameReportLineIsWhatTheStandsCheckerReads(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, words)), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "dragBand", "dragBandHit", "fullScreen", "glass", "menuBarHeight", "menuBarVisible", "minimize", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions", "toolbarVisible", "zoom"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(fields), []string{"capsules", "close", "contentLayoutTop", "dragBand", "dragBandHit", "dragBandPress", "fullScreen", "glass", "menuBarHeight", "menuBarVisible", "minimize", "orchestrator", "overlays", "roundedTopInset", "row", "segmentBorderShape", "selectedTopInset", "sessions", "toolbarVisible", "zoom"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields %v, want %v", got, want)
 	}
 	var overlays []map[string]json.RawMessage
@@ -92,5 +92,24 @@ func TestTheFrameMeasuresWhereTheGeometryPutItsPanelsAndCapsules(t *testing.T) {
 	}
 	if !container {
 		t.Errorf("overlays %+v, want the title bar's container at the window's top", m.Overlays)
+	}
+}
+
+// The press that says whether the window can be dragged is tried over the
+// board and above the capsule row: a capsule is the capsule's press, not the
+// band's, and on CI's 1000 pt window the middle of the band was a capsule.
+func TestTheBandsPressIsOverTheBoardAndAboveTheCapsuleRow(t *testing.T) {
+	row := measuredBox{X: 278, Y: 10, W: 442, H: 32}
+	for _, band := range []measuredBox{{W: 1000, H: 64}, {W: 1000, H: 56}, {W: 1000, H: 8}} {
+		p := dragBandPress(row, band)
+		if p.X <= row.X || p.X >= row.X+row.W {
+			t.Errorf("on a %v pt band the press is at x %v, want it between %v and %v, over the board", band.H, p.X, row.X, row.X+row.W)
+		}
+		if p.Y <= 0 || p.Y >= band.H {
+			t.Errorf("on a %v pt band the press is at y %v, want it inside the band", band.H, p.Y)
+		}
+		if p.Y >= row.Y {
+			t.Errorf("on a %v pt band the press is at y %v, want it above the capsule row at %v", band.H, p.Y, row.Y)
+		}
 	}
 }

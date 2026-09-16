@@ -133,8 +133,15 @@ type frameReport struct {
 	// of it lands on the band. Out of full screen the board page's empty top
 	// gives the band its height; in full screen a window is not moved and there
 	// is no band.
-	DragBand    box  `json:"dragBand"`
-	DragBandHit bool `json:"dragBandHit"`
+	DragBand      box   `json:"dragBand"`
+	DragBandPress point `json:"dragBandPress"`
+	DragBandHit   bool  `json:"dragBandHit"`
+}
+
+// point is a point in the window, in points from its top left.
+type point struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // headerReport is the orchestrator surface's word on its header, in points
@@ -554,7 +561,7 @@ func dragBandProblems(when string, f frameReport) []string {
 		out = append(out, fmt.Sprintf("%sthe drag band is %v pt wide and the capsule row ends at %v: the window's top is not covered", when, f.DragBand.W, f.Row.X+f.Row.W))
 	}
 	if !f.DragBandHit {
-		out = append(out, fmt.Sprintf("%sa press over the board %v pt from the window's top does not land on the drag band", when, f.DragBand.H/2))
+		out = append(out, fmt.Sprintf("%sa press over the board at %v, %v pt does not land on the drag band", when, f.DragBandPress.X, f.DragBandPress.Y))
 	}
 	return out
 }
