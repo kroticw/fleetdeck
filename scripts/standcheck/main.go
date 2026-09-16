@@ -12,6 +12,9 @@
 //   - the window's buttons sit concentric in the orchestrator panel's corner,
 //     before full screen and after each time it left, and the header's row, its
 //     brand and its fleet menu button are centred on their line;
+//   - out of full screen the window has a drag band over the board's empty top
+//     that a press there lands on, so the window can be moved, and in full
+//     screen, where a window is not moved, it has none;
 //   - in full screen nothing of the title bar keeps the window's top or lies
 //     shown over the capsule row;
 //   - a folded strip, the orchestrator's or the sessions', has nothing wider
@@ -125,6 +128,13 @@ type frameReport struct {
 	// toolbar keep from the content; Overlays what lies over it there.
 	ContentLayoutTop float64   `json:"contentLayoutTop"`
 	Overlays         []overlay `json:"overlays"`
+	// DragBand is the band at the window's top the window is dragged by, as the
+	// frame has it, and DragBandHit whether a press over the board in the middle
+	// of it lands on the band. Out of full screen the board page's empty top
+	// gives the band its height; in full screen a window is not moved and there
+	// is no band.
+	DragBand    box  `json:"dragBand"`
+	DragBandHit bool `json:"dragBandHit"`
 }
 
 // headerReport is the orchestrator surface's word on its header, in points
@@ -278,6 +288,7 @@ func check(log string, trips int) []string {
 			problems = append(problems, tabProblems(when, f)...)
 			problems = append(problems, l.boardProblems(when, r)...)
 			problems = append(problems, coverProblems(when, f)...)
+			problems = append(problems, dragBandProblems(when, f)...)
 			problems = append(problems, l.stripProblems(when, r, false)...)
 			continue
 		}
@@ -291,6 +302,7 @@ func check(log string, trips int) []string {
 		problems = append(problems, l.boardProblems(when, r)...)
 		problems = append(problems, buttonProblems(when, f)...)
 		problems = append(problems, underButtonProblems(when, f)...)
+		problems = append(problems, dragBandProblems(when, f)...)
 		problems = append(problems, l.stripProblems(when, r, true)...)
 		// A folded orchestrator strip shows no header, only its unfold mark,
 		// with the buttons in the corner over it.
@@ -522,6 +534,31 @@ func (l standLog) boardProblems(when string, r run) []string {
 
 // tabProblems holds the tabs to a capsule: their border shape, and the selected
 // tab's fill against a rounded rectangle drawn in its place.
+// dragBandProblems is the window left with no way of being moved: out of full
+// screen the board page's empty top is the band, and a press over the board
+// there must land on it; in full screen a window is not moved and the band is
+// gone. v0.11.0 heard nothing from the page and kept a band of no height, so
+// the window could not be dragged anywhere (T-076).
+func dragBandProblems(when string, f frameReport) []string {
+	var out []string
+	if f.FullScreen {
+		if f.DragBand.H > 0 {
+			out = append(out, fmt.Sprintf("%sthe window keeps a %v pt drag band in full screen, where it is not moved", when, f.DragBand.H))
+		}
+		return out
+	}
+	if f.DragBand.H <= 0 {
+		return append(out, when+"the window has no drag band: nothing of its top is the page's empty ground, and it cannot be moved")
+	}
+	if f.DragBand.W < f.Row.X+f.Row.W {
+		out = append(out, fmt.Sprintf("%sthe drag band is %v pt wide and the capsule row ends at %v: the window's top is not covered", when, f.DragBand.W, f.Row.X+f.Row.W))
+	}
+	if !f.DragBandHit {
+		out = append(out, fmt.Sprintf("%sa press over the board %v pt from the window's top does not land on the drag band", when, f.DragBand.H/2))
+	}
+	return out
+}
+
 func tabProblems(when string, f frameReport) []string {
 	if f.SegmentBorderShape < 0 {
 		return nil

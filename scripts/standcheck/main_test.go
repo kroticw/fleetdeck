@@ -33,6 +33,9 @@ func goodFrame(fullScreen bool) frameReport {
 		// the top of the window, over the capsule row.
 		ContentLayoutTop: 52,
 		Overlays:         []overlay{{Kind: "NSTitlebarContainerView", box: box{W: 1000, H: 52}, Visible: true, Alpha: 1}},
+		// The board page's empty top, which the window is dragged by.
+		DragBand:    box{W: 1000, H: 64},
+		DragBandHit: true,
 	}
 	if fullScreen {
 		// The screen's width: the sessions panel and the row's right end move;
@@ -42,6 +45,8 @@ func goodFrame(fullScreen bool) frameReport {
 		f.Capsules[2].X, f.Capsules[3].X = 1317, 1268
 		f.ContentLayoutTop = 0
 		f.Overlays = []overlay{{Kind: "NSTitlebarContainerView", box: box{W: 1024, H: 52}, Visible: false, Alpha: 1}}
+		// A window in full screen is not moved, and keeps no band.
+		f.DragBand, f.DragBandHit = box{W: 1024}, false
 	}
 	return f
 }
@@ -670,4 +675,37 @@ func TestATitleBarThatShowsNothingOverTheRowIsNoProblem(t *testing.T) {
 			t.Errorf("%+v: problems %q, want none", over, got)
 		}
 	}
+}
+
+// v0.11.0's window heard nothing from the board page about its empty top and
+// kept a band of no height: it could not be dragged in any state of its panels,
+// while everything else in it worked (T-076).
+func TestAWindowWithNoDragBandIsAProblem(t *testing.T) {
+	f := goodFrame(false)
+	f.DragBand, f.DragBandHit = box{W: 1000}, false
+	problems := check(logOf(t, f, goodBoard(false), goodHeader(false)), 0)
+	wantProblem(t, problems, "no drag band", "cannot be moved")
+}
+
+func TestADragBandNoPressLandsOnIsAProblem(t *testing.T) {
+	f := goodFrame(false)
+	f.DragBandHit = false
+	problems := check(logOf(t, f, goodBoard(false), goodHeader(false)), 0)
+	wantProblem(t, problems, "does not land on the drag band")
+}
+
+func TestADragBandShorterThanTheWindowIsAProblem(t *testing.T) {
+	f := goodFrame(false)
+	f.DragBand.W = 300
+	problems := check(logOf(t, f, goodBoard(false), goodHeader(false)), 0)
+	wantProblem(t, problems, "drag band is 300 pt wide")
+}
+
+// A window in full screen is not moved, and the band must be gone: a press at
+// the top there belongs to the page.
+func TestADragBandKeptInFullScreenIsAProblem(t *testing.T) {
+	fs := goodFrame(true)
+	fs.DragBand, fs.DragBandHit = box{W: 1024, H: 64}, true
+	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), fs, goodBoard(true), goodFrame(false), goodBoard(false))
+	wantProblem(t, check(log, 1), "drag band in full screen")
 }

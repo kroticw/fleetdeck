@@ -458,7 +458,13 @@ func logFrameMode(m glassMode) {
 
 func (g *glassWindow) reloadBoard() { g.askBoard() }
 
-func (g *glassWindow) setDragBand(height float64) { g.frame.setDragBand(height) }
+func (g *glassWindow) setDragBand(height float64) {
+	g.frame.setDragBand(height)
+	// The band is what the window is dragged by, and the page's word about it
+	// comes long after the frame is first laid out: a stand measures the frame
+	// again with it (standframe_darwin.go).
+	g.reportFrame()
+}
 
 func (g *glassWindow) showToolbar(visible bool) { setToolbarVisible(g.w.Window(), visible) }
 
