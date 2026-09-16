@@ -66,7 +66,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 // session is vetted first, so another fleet's orchestrator is refused before
 // it is handed this fleet's working order.
 func fleetAppointer(o runOpts, f fleet.Fleet, dc *daemon.Client, collector *Collector) *orchestrator.Appointer {
-	a := appointer(o, config.Config{BoardPath: f.BoardPath, DocsPaths: f.DocsPaths}, dc, collector)
+	a := appointer(o, fleetConfig(collector.Config(), f), dc, collector)
 	a.Pin = func(short string) error {
 		return pinOrchestrator(o.configPath, collector, f.Name, short)
 	}
@@ -74,6 +74,20 @@ func fleetAppointer(o runOpts, f fleet.Fleet, dc *daemon.Client, collector *Coll
 		return vetPin(collector.Config(), f.Name, short)
 	}
 	return a
+}
+
+// fleetConfig is the whole configuration seen as one fleet's: its board and its docs
+// in place of the top-level ones, and no fleet list, so a wizard reads this fleet
+// wherever it would have read the first. Everything else stays — the installation
+// sessions are started in above all, which belongs to the panel rather than to any one
+// fleet and which a configuration built from a board alone silently dropped.
+func fleetConfig(cfg config.Config, f fleet.Fleet) config.Config {
+	cfg.BoardPath = f.BoardPath
+	cfg.DocsPaths = f.DocsPaths
+	cfg.Name = f.Name
+	cfg.OrchestratorSession = f.Orchestrator
+	cfg.Fleets = nil
+	return cfg
 }
 
 // pinOrchestrator pins, or given an empty id unpins, the orchestrator of the

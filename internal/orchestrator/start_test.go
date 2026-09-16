@@ -55,7 +55,7 @@ func fakeClaude(t *testing.T, out string, code int) (bin, record string) {
 func TestStartRunsClaudeInTheBackgroundInTheWorkspace(t *testing.T) {
 	bin, record := fakeClaude(t, bgOutput, 0)
 	cwd := t.TempDir()
-	short, err := StartWith(bin)(context.Background(), cwd, "оркестратор")
+	short, err := StartWith([]string{bin})(context.Background(), cwd, "оркестратор")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +73,38 @@ func TestStartRunsClaudeInTheBackgroundInTheWorkspace(t *testing.T) {
 	}
 }
 
+// An installation reached through a wrapper is a whole command, not a path: the
+// wrapper's own words come before the first argument this package adds, and they must
+// arrive ahead of --bg rather than being lost or reordered.
+func TestStartRunsAWrapperWithItsOwnArgumentsFirst(t *testing.T) {
+	bin, record := fakeClaude(t, bgOutput, 0)
+	short, err := StartWith([]string{bin, "run", "claude"})(context.Background(), t.TempDir(), "оркестратор")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if short != "0a1b2c3d" {
+		t.Errorf("short = %q", short)
+	}
+	got, _ := os.ReadFile(record)
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	want := []string{"run", "claude", "--bg", "--name", "оркестратор"}
+	if strings.Join(lines[1:], " ") != strings.Join(want, " ") {
+		t.Errorf("the wrapper was given %q, want %q", lines[1:], want)
+	}
+}
+
+// Nothing to run is a refusal with a sentence, not a panic on argv[0] of an empty
+// slice: a configuration file can say `command: []` and that reaches here.
+func TestStartWithNothingToRunRefuses(t *testing.T) {
+	_, err := StartWith(nil)(context.Background(), t.TempDir(), "orchestrator")
+	if err == nil {
+		t.Fatal("an empty command started something")
+	}
+}
+
 func TestStartReportsClaudeFailingInItsOwnWords(t *testing.T) {
 	bin, _ := fakeClaude(t, "Error: not logged in", 1)
-	_, err := StartWith(bin)(context.Background(), t.TempDir(), "orchestrator")
+	_, err := StartWith([]string{bin})(context.Background(), t.TempDir(), "orchestrator")
 	if err == nil || !strings.Contains(err.Error(), "not logged in") {
 		t.Errorf("err = %v, want claude's own words", err)
 	}
@@ -83,7 +112,7 @@ func TestStartReportsClaudeFailingInItsOwnWords(t *testing.T) {
 
 func TestStartReportsOutputWithNoSession(t *testing.T) {
 	bin, _ := fakeClaude(t, "something else entirely", 0)
-	_, err := StartWith(bin)(context.Background(), t.TempDir(), "orchestrator")
+	_, err := StartWith([]string{bin})(context.Background(), t.TempDir(), "orchestrator")
 	if err == nil || !strings.Contains(err.Error(), "something else entirely") {
 		t.Errorf("err = %v, want the output it could not read", err)
 	}

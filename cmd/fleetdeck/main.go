@@ -30,6 +30,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/fleet"
+	"github.com/kroticw/fleetdeck/internal/jobs"
 	"github.com/kroticw/fleetdeck/internal/notify"
 	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
@@ -343,13 +344,34 @@ func main() {
 	}
 }
 
-// projectsDir is where Claude Code keeps session transcripts.
-func projectsDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+// projectsDir is where the installation rooted at claudeDir keeps session
+// transcripts.
+func projectsDir(claudeDir string) string {
+	if claudeDir == "" {
 		return ""
 	}
-	return filepath.Join(home, ".claude", "projects")
+	return filepath.Join(claudeDir, "projects")
+}
+
+// claudeDirOf is the installation this configuration drives: the one it names, or the
+// default one when it names none. Every path the panel reads out of Claude Code — the
+// control key, the daemon's socket, the job store, the transcripts — hangs off this
+// one directory, so they can never end up describing two different installations.
+func claudeDirOf(cfg config.Config) string {
+	return claudeDirUnder(cfg, "")
+}
+
+// claudeDirUnder is claudeDirOf against a named home rather than this process's own,
+// for init: its steps run against a temporary home in the tests, and a default read
+// from the real one would write this machine's own settings from a test.
+func claudeDirUnder(cfg config.Config, home string) string {
+	if cfg.Agent.ConfigDir != "" {
+		return cfg.Agent.ConfigDir
+	}
+	if home == "" {
+		return daemon.DefaultConfigDir()
+	}
+	return filepath.Join(home, ".claude")
 }
 
 // run assembles the panel and serves it until a signal arrives.
@@ -489,9 +511,15 @@ func serve(parent context.Context, o runOpts) error {
 		log.Printf("fleetdeck: set up with the board at %s", cfg.BoardPath)
 	}
 
-	dc := daemonClient(o.standSocket)
+	claudeDir := claudeDirOf(cfg)
+	// The job store is a package-level variable so a test can point it at a store it
+	// built; here is where the configured installation's own store replaces the
+	// default one, before anything reads it.
+	jobStoreDir = jobs.DirIn(claudeDir)
+
+	dc := daemonClient(o.standSocket, claudeDir)
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
-	collector := NewCollector(cfg, dc, uf, projectsDir())
+	collector := NewCollector(cfg, dc, uf, projectsDir(claudeDir))
 
 	p := newPanel(
 		collector.Collect,
@@ -893,12 +921,13 @@ func checkStandSocket(given bool, value string) error {
 // restarting under a new socket, unlike Discover. A one-shot acceptance
 // stand never runs long enough to care; a long-lived test fleet built on
 // this flag would need restarting alongside its daemon.
-func daemonClient(standSocket string) *daemon.Client {
+func daemonClient(standSocket, claudeDir string) *daemon.Client {
+	key := func() (string, error) { return daemon.ControlKeyIn(claudeDir) }
 	if standSocket == "" {
-		return daemon.Discover(daemon.ControlKey)
+		return daemon.DiscoverIn(claudeDir, key)
 	}
 	log.Printf("fleetdeck: daemon discovery disabled — bound to %s (-stand-socket), the real fleet daemon is not reachable from this panel", standSocket)
-	return daemon.New(standSocket, daemon.ControlKey)
+	return daemon.New(standSocket, key)
 }
 
 // listedAlive reports whether short is in the daemon's list and not dying. A dying
@@ -933,7 +962,7 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// dispatch into. See resume.go.
 		ResumeSession: resumeSession(resumeDeps{
 			jobStore: jobStoreDir,
-			projects: projectsDir(),
+			projects: projectsDir(claudeDirOf(cfg)),
 			listed:   func(lctx context.Context) ([]daemon.Session, error) { return dc.ListSessions(lctx) },
 			resume:   func(rctx context.Context, spec daemon.ResumeSpec) error { return dc.Resume(rctx, spec) },
 		}),

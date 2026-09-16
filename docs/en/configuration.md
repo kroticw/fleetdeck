@@ -22,6 +22,8 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 | `server.port` | integer | `7777` | outside the range 1 to 65535: `server.port must be between 1 and 65535, got %d` |
 | `statusline.wrap` | string (shell command) | unset (no wrapping) | not validated before it runs; a command that cannot be run, or that exits non-zero, is taken as no wrapping at all and `fleetdeck-status` prints its own line |
 | `statusline.rate_limits_path` | string (file path) | unset (nothing is written) | not validated; a path that cannot be written is reported nowhere, and the panel reads the account's limits over the network instead |
+| `agent.command` | list of strings | unset (the `claude` on `PATH`, then where Claude Code installs itself) | not starting with an absolute path: `agent.command must start with an absolute path, got %q: a panel opened from the Dock has almost nothing on PATH`; a command that is not there, or that prints no session id, is reported with whatever it did print |
+| `agent.config_dir` | string (absolute path) | unset (`~/.claude`) | relative or starting with `~`: `agent.config_dir must be an absolute path, got %q`; a directory whose daemon is not running: the daemon is reported unavailable rather than another installation's being used |
 | `name` | string | the folder above `board.path`, `main` when that says nothing | empty, spaces around it or a control character: `the top-level fleet: name ...`; the name of another fleet: see [Several fleets](#several-fleets) |
 | `fleets` | list of fleets | unset (empty) | see [Several fleets](#several-fleets) |
 | `fleets[].name` | string | none: required | empty, spaces around it or a control character: `fleets[N]: name ...`; the name of another fleet: `fleets[1]: name "clining" is already the name of fleets[0]` |
@@ -132,6 +134,24 @@ A file containing more than one YAML document (separated by a `---` line partway
 ## Where the configuration file lives
 
 `fleetdeck` reads its configuration from the path the `--config` flag names, defaulting to `~/.config/fleetdeck/config.yaml` (`defaultConfigPath` in `cmd/fleetdeck/main.go`) when the flag is not given. `fleetdeck init` writes that default path the first time it runs, if nothing is there yet. A panel that finds no file at its path serves the setup page instead of the board and writes the file there once a workspace is chosen — see [`getting-started.md`](getting-started.md#first-launch-choosing-the-workspace). A file that exists and does not parse is an error, never a reason to offer setup.
+
+## Driving another Claude Code installation
+
+Claude Code reads `CLAUDE_CONFIG_DIR` and falls back to `~/.claude`, so a wrapper command that exports a different value is a second installation on the same machine: its own daemon, its own job store, its own transcripts, its own control key. The `agent` section names which installation a panel drives:
+
+```yaml
+agent:
+  command: [/usr/local/bin/claude-wrapper, run, claude]
+  config_dir: /Users/you/.claude-work
+```
+
+`command` is what starts a session — `--bg --name <name>` is appended to it — and `config_dir` is where everything the panel reads about sessions lives. The command starts with an absolute path because a window opened from the Dock hands its panel `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and nothing else: a bare name works from a terminal and is not found from the Dock, which is why it is refused when the file is read rather than when a session is started. They are set together: a command that starts sessions in one installation with a `config_dir` naming another leaves the panel unable to see what it just started. Neither key is required, and a file that sets neither drives `~/.claude` with the `claude` on `PATH`, exactly as before this section existed.
+
+`CLAUDE_CONFIG_DIR` in the panel's own environment is deliberately ignored: a window started from the Dock inherits no environment, so honouring it would mean the same machine showing one fleet from a terminal and another from the Dock.
+
+The two installations are told apart by their daemons, and a daemon's runtime directory under `/tmp` is named after its configuration directory — so `config_dir` must be an absolute path, written the same way Claude Code sees it. When that daemon is not running, the panel reports the daemon as unavailable rather than falling back to the other installation's.
+
+`fleetdeck init` writes the statusline and the board permission into the installation the configuration names, not into `~/.claude`. Run it after setting the `agent` section, or move those two settings across by hand.
 
 ## Running an isolated stand
 

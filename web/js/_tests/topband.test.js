@@ -50,9 +50,16 @@ test("a button or text is never ground", () => {
   assert.equal(isGround({ tagName: "SPAN" }), false);
 });
 
-function fakeWindow(elementAt) {
+// A window whose page never draws a frame: the window that takes over from an
+// updated one comes up behind it, and its board page loads with nothing of it
+// on screen. WebKit runs no frame callback for a page that is not drawn, so a
+// band measured only in one is never measured at all: v0.11.0's window, started
+// by an update, heard nothing about its band and could not be dragged anywhere.
+function fakeWindow(elementAt, { drawsFrames = true } = {}) {
   const listeners = {};
   let observer = null;
+  const timers = [];
+  const frames = [];
   const win = {
     innerWidth: 1440,
     document: {
@@ -60,7 +67,11 @@ function fakeWindow(elementAt) {
       elementFromPoint: (x, y) => elementAt.current(x, y),
       addEventListener() {},
     },
-    requestAnimationFrame: (f) => f(),
+    requestAnimationFrame: (f) => {
+      if (drawsFrames) f();
+      else frames.push(f);
+    },
+    setTimeout: (f) => timers.push(f),
     addEventListener: (name, f) => {
       listeners[name] = f;
     },
@@ -71,15 +82,20 @@ function fakeWindow(elementAt) {
       observe() {}
     },
   };
-  return { win, listeners, mutate: () => observer() };
+  const run = (queue) => {
+    for (const f of queue.splice(0, queue.length)) f();
+  };
+  return { win, listeners, mutate: () => observer(), tick: () => run(timers), draw: () => run(frames) };
 }
 
 test("the window hears the band at once, and again only when it changes", () => {
   const elementAt = { current: () => BODY };
-  const { win, listeners, mutate } = fakeWindow(elementAt);
+  const { win, listeners, mutate, tick } = fakeWindow(elementAt);
   const heard = [];
   watchTopBand(win, (height) => heard.push(height));
   assert.deepEqual(heard, [TOP_BAND_MAX]);
+  tick();
+  assert.deepEqual(heard, [TOP_BAND_MAX], "the frame measured it; the timer behind it must not measure it again");
   mutate();
   listeners.resize();
   assert.deepEqual(heard, [TOP_BAND_MAX], "nothing changed at the top");
@@ -88,4 +104,52 @@ test("the window hears the band at once, and again only when it changes", () => 
   mutate();
   listeners.scroll();
   assert.deepEqual(heard, [TOP_BAND_MAX, 0]);
+});
+
+test("a page that never draws still tells the window its band", () => {
+  const elementAt = { current: () => BODY };
+  const { win, tick } = fakeWindow(elementAt, { drawsFrames: false });
+  const heard = [];
+  watchTopBand(win, (height) => heard.push(height));
+  tick();
+  assert.deepEqual(heard, [TOP_BAND_MAX], "the page drew no frame, so the window was left with no band");
+});
+
+test("a page that never draws is still heard every time its top changes", () => {
+  const elementAt = { current: () => BODY };
+  const { win, listeners, mutate, tick } = fakeWindow(elementAt, { drawsFrames: false });
+  const heard = [];
+  watchTopBand(win, (height) => heard.push(height));
+  tick();
+  const sheet = el("SECTION");
+  elementAt.current = () => sheet;
+  mutate();
+  tick();
+  elementAt.current = () => BODY;
+  listeners.resize();
+  tick();
+  assert.deepEqual(heard, [TOP_BAND_MAX, 0, TOP_BAND_MAX], "a frame that never came left every later word unasked");
+});
+
+test("a frame that comes late does not report the band twice", () => {
+  const elementAt = { current: () => BODY };
+  const { win, tick, draw } = fakeWindow(elementAt, { drawsFrames: false });
+  const heard = [];
+  watchTopBand(win, (height) => heard.push(height));
+  tick();
+  draw();
+  assert.deepEqual(heard, [TOP_BAND_MAX]);
+});
+
+test("a page that draws is measured once for one change, not again on the timer behind it", () => {
+  const elementAt = { current: () => BODY, sweeps: 0 };
+  const at = (x, y) => {
+    if (x === 12 && y === 0) elementAt.sweeps += 1;
+    return elementAt.current(x, y);
+  };
+  const { win, mutate, tick } = fakeWindow({ current: at });
+  watchTopBand(win, () => {});
+  mutate();
+  tick();
+  assert.equal(elementAt.sweeps, 2, "one measurement on the load and one for the change, none from the timers behind them");
 });
