@@ -392,8 +392,9 @@ fi
 # lands on it -- is in the frame report, which scripts/standcheck holds to below;
 # this says what took the band when there is none. v0.12.0 reported 0 here, and
 # the window could not be moved at all while a session was open (T-079).
-band=yes
+band=unset
 if [ "$expect" = content ] && opens_a_session; then
+	band=yes
 	said=$(grep 'the board reports its top band' "$out/window.log" | tail -n 1)
 	height=$(printf '%s\n' "$said" | sed -n 's/.*"height":\([0-9]*\).*/\1/p')
 	echo "--- the band with a session open: ${height:-not reported} pt"
@@ -566,4 +567,4 @@ full_screen_ok=yes
 if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ] && [ "$fullscreen" = no ]; then
 	full_screen_ok=no
 fi
-[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$board_down" = yes ] && [ "$column_kept" = yes ] && [ "$grounds" = yes ] && [ "$band" = yes ] && [ "$frame" = yes ] && [ "$full_screen_ok" = yes ] && [ "$folded" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
+[ "$loaded" = yes ] && [ "$alive" = yes ] && [ "$discovery" = yes ] && [ "$content_shown" = yes ] && [ "$scrollbar" = yes ] && [ "$board_down" = yes ] && [ "$column_kept" = yes ] && [ "$grounds" = yes ] && [ "$band" != no ] && [ "$frame" = yes ] && [ "$full_screen_ok" = yes ] && [ "$folded" = yes ] && [ "$appearance" = yes ] && [ "$capsules" = yes ] && [ "$system" = yes ]
