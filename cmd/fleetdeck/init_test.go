@@ -217,6 +217,36 @@ func TestInitOnAFreshHomeCreatesBoardAndConfigNamingIt(t *testing.T) {
 	}
 }
 
+// The statusline and the permissions are settings of one Claude Code installation,
+// and a configuration naming another one means that installation. Writing them to
+// ~/.claude instead would leave the agents that actually run without permission to
+// touch the board, and would change the statusline of an installation this panel does
+// not drive.
+func TestInitWritesSettingsIntoTheConfiguredInstallation(t *testing.T) {
+	home := t.TempDir()
+	claudeDir := filepath.Join(t.TempDir(), "second-claude")
+	cfgPath := filepath.Join(home, ".config", "fleetdeck", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "board:\n  path: " + filepath.Join(home, "cards") + "\nagent:\n  config_dir: " + claudeDir + "\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := runInit(initEnv{home: home, binary: fakeInstall(t, true), out: &out}); err != nil {
+		t.Fatalf("init: %v\n%s", err, out.String())
+	}
+
+	if got := statuslineCommand(t, filepath.Join(claudeDir, "settings.json")); !strings.HasSuffix(got, statusBinaryName) {
+		t.Fatalf("statusline command in the configured installation = %q", got)
+	}
+	if _, err := os.Stat(settingsPathOf(home)); err == nil {
+		t.Fatal("init wrote settings into ~/.claude, which this configuration does not drive")
+	}
+}
+
 func TestInitHonoursTheBoardFlagOnAFreshHome(t *testing.T) {
 	home := t.TempDir()
 	want := filepath.Join(t.TempDir(), "elsewhere", "board")

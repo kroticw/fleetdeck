@@ -46,7 +46,7 @@ func ran(path string) bool {
 func TestAStandWithoutItsOwnClaudeStartsNoSession(t *testing.T) {
 	onPath, ranOnPath := claudeThatRecords(t, "0a1b2c3d")
 	t.Setenv("PATH", filepath.Dir(onPath))
-	if start := sessionStarter(runOpts{standSocket: "/tmp/no.sock"}); start != nil {
+	if start := sessionStarter(runOpts{standSocket: "/tmp/no.sock"}, nil); start != nil {
 		_, _ = start(context.Background(), t.TempDir(), "orchestrator")
 		t.Error("a stand given no claude of its own can start sessions")
 	}
@@ -60,7 +60,7 @@ func TestAStandStartsSessionsOnlyWithItsOwnClaude(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(onPath))
 	standBin, ranStand := claudeThatRecords(t, "22222222")
 
-	start := sessionStarter(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin})
+	start := sessionStarter(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, nil)
 	if start == nil {
 		t.Fatal("a stand with its own claude cannot start sessions")
 	}
@@ -86,7 +86,7 @@ func TestAPanelStartsSessionsWithTheClaudeItFinds(t *testing.T) {
 	t.Cleanup(func() { claudePlaces = saved })
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
-	start := sessionStarter(runOpts{})
+	start := sessionStarter(runOpts{}, nil)
 	if start == nil {
 		t.Fatal("a panel cannot start sessions")
 	}

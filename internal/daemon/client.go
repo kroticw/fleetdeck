@@ -339,7 +339,8 @@ func (c *Client) setDeadline(ctx context.Context, conn net.Conn) {
 	}
 }
 
-// ControlKey reads the control key from ~/.claude/daemon/control.key.
+// ControlKey reads the control key of the default installation — see
+// DefaultConfigDir, and ControlKeyIn for a named one.
 //
 // Per docs/protocol/daemon-control-socket.md section 6, the key file is expected to be
 // mode 0600, owned by the user, inside a 0700 directory. checkKeyFileSecurity is the
@@ -350,28 +351,7 @@ func (c *Client) setDeadline(ctx context.Context, conn net.Conn) {
 // unreadable key names neither the file's path nor its contents, and that same rule
 // applies to a key file that fails this security check.
 func ControlKey() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", wrapNoControlKey(err)
-	}
-
-	keyPath := filepath.Join(homeDir, ".claude", "daemon", "control.key")
-
-	if err := checkKeyFileSecurity(keyPath, os.Getuid()); err != nil {
-		return "", wrapNoControlKey(err)
-	}
-
-	data, err := os.ReadFile(keyPath)
-	if err != nil {
-		return "", wrapNoControlKey(err)
-	}
-
-	key := strings.TrimSpace(string(data))
-	if key == "" {
-		return "", wrapNoControlKey(errors.New("control key file is empty"))
-	}
-
-	return key, nil
+	return ControlKeyIn(DefaultConfigDir())
 }
 
 // errNoControlKeyWithCause wraps ErrNoControlKey with an internal diagnostic cause

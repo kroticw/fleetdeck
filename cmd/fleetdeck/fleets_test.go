@@ -16,6 +16,34 @@ import (
 	"github.com/kroticw/fleetdeck/internal/workspace"
 )
 
+// A listed fleet's wizard starts sessions with the same installation as the rest of
+// the panel. It used to be handed a configuration built out of the fleet's board and
+// docs alone, which left agent.command unset — so appointing an orchestrator for a
+// listed fleet ran the plain claude on PATH and put the session in another
+// installation's fleet, where the panel then waited a minute for a session it could
+// never see.
+func TestAListedFleetKeepsTheConfiguredAgent(t *testing.T) {
+	cfg := config.Default()
+	cfg.BoardPath = "/top/board"
+	cfg.DocsPaths = []string{"/top/docs"}
+	cfg.Agent = config.AgentConfig{Command: []string{"/opt/wrapper", "run", "claude"}, ConfigDir: "/installation/.claude"}
+	cfg.Fleets = []fleet.Fleet{{Name: "second", BoardPath: "/second/board"}}
+
+	got := fleetConfig(cfg, fleet.Fleet{Name: "second", BoardPath: "/second/board", DocsPaths: []string{"/second/docs"}})
+
+	if strings.Join(got.Agent.Command, " ") != "/opt/wrapper run claude" || got.Agent.ConfigDir != "/installation/.claude" {
+		t.Fatalf("the fleet's configuration lost the agent: %+v", got.Agent)
+	}
+	if got.BoardPath != "/second/board" || strings.Join(got.DocsPaths, " ") != "/second/docs" {
+		t.Fatalf("board and docs = %q, %q; want the fleet's own", got.BoardPath, got.DocsPaths)
+	}
+	// The fleet list belongs to the whole configuration, not to one fleet's wizard:
+	// carrying it would make this fleet's own entry a second fleet beside itself.
+	if len(got.Fleets) != 0 {
+		t.Fatalf("the fleet's configuration carries %d other fleets", len(got.Fleets))
+	}
+}
+
 // twoFleetPanel is a configuration file with two fleets made the way init
 // makes them — workspaces with git boards — and a collector over it. A card
 // started on either board is committed, so git gets a home of its own: an

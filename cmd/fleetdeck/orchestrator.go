@@ -24,7 +24,7 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 		Paths: orchestrator.Paths{Board: cfg.BoardPath, Docs: cfg.DocsPaths, Config: o.configPath},
 		List:  dc.ListSessions,
 		Send:  dc.SendText,
-		Start: sessionStarter(o),
+		Start: sessionStarter(o, cfg.Agent.Command),
 		Pin: func(short string) error {
 			return setOrchestratorSession(o.configPath, collector, short)
 		},
@@ -40,14 +40,20 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 // sessions in the operator's fleet — the thing -stand-socket exists to rule
 // out. As there, the guarantee is a path that does not exist, not a check.
 //
-// A panel looks claude up each time it starts one, so a claude installed
-// while the panel runs is found without a restart.
-func sessionStarter(o runOpts) func(ctx context.Context, cwd, name string) (string, error) {
+// A configured command (agent.command) is run as written — it is how an installation
+// other than the default one is reached, and looking for a claude of our own instead
+// would start sessions in the wrong fleet. With no command configured, a panel looks
+// claude up each time it starts one, so a claude installed while the panel runs is
+// found without a restart.
+func sessionStarter(o runOpts, command []string) func(ctx context.Context, cwd, name string) (string, error) {
 	if o.standSocket != "" {
 		if o.standClaude == "" {
 			return nil
 		}
-		return orchestrator.StartWith(o.standClaude)
+		return orchestrator.StartWith([]string{o.standClaude})
+	}
+	if len(command) > 0 {
+		return orchestrator.StartWith(command)
 	}
 	return func(ctx context.Context, cwd, name string) (string, error) {
 		home, _ := os.UserHomeDir()
@@ -55,7 +61,7 @@ func sessionStarter(o runOpts) func(ctx context.Context, cwd, name string) (stri
 		if err != nil {
 			return "", err
 		}
-		return orchestrator.StartWith(bin)(ctx, cwd, name)
+		return orchestrator.StartWith([]string{bin})(ctx, cwd, name)
 	}
 }
 

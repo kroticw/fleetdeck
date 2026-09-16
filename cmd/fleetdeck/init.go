@@ -164,11 +164,14 @@ func initSteps(env initEnv) []initStep {
 		// refuse the corrected path on the next run.
 		cfgStep = saveNewConfig(cfgPath, cfg, boardStep.err)
 	}
+	// The settings steps write into the installation the configuration names, which
+	// is only known once ensureConfig has read or planned it.
+	claudeDir := claudeDirUnder(cfg, env.home)
 	return []initStep{
 		cfgStep,
 		boardStep,
-		ensureStatusline(env),
-		ensurePermissions(env, allow),
+		ensureStatusline(env, claudeDir),
+		ensurePermissions(env, claudeDir, allow),
 	}
 }
 
@@ -352,7 +355,7 @@ func repoDetail(err error) string {
 
 // ensureStatusline points Claude Code's statusline at the reporter, having first
 // checked that the reporter is actually there.
-func ensureStatusline(env initEnv) initStep {
+func ensureStatusline(env initEnv, claudeDir string) initStep {
 	s := initStep{name: "statusline"}
 
 	statusBinary := filepath.Join(filepath.Dir(env.binary), statusBinaryName)
@@ -364,7 +367,7 @@ func ensureStatusline(env initEnv) initStep {
 		return s
 	}
 
-	settingsPath := filepath.Join(env.home, ".claude", "settings.json")
+	settingsPath := filepath.Join(claudeDir, "settings.json")
 	result, err := wireStatusline(settingsPath, statusBinary, env.force)
 	if err != nil {
 		s.err = err
@@ -586,13 +589,13 @@ func saveSettings(settingsPath string, settings map[string]any) error {
 // the board alone — through permissions.additionalDirectories. An agent keeps
 // its card on the board, which is outside its own working directory; without
 // this entry every card write is a permission prompt nobody is there to answer.
-func ensurePermissions(env initEnv, dir string) initStep {
+func ensurePermissions(env initEnv, claudeDir, dir string) initStep {
 	s := initStep{name: "permissions"}
 	if dir == "" {
 		s.err = errors.New("the board step was refused, so there is no directory to let agents into")
 		return s
 	}
-	settingsPath := filepath.Join(env.home, ".claude", "settings.json")
+	settingsPath := filepath.Join(claudeDir, "settings.json")
 	what, reformatted, err := allowDirectory(settingsPath, dir, env.home)
 	if err != nil {
 		s.err = err

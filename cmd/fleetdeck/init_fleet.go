@@ -88,7 +88,12 @@ func fleetSteps(cfgPath string, env initEnv) []initStep {
 		cfgStep.note = fmt.Sprintf("%s (fleet %s added, board: %s)", cfgPath, fl.Name, fl.BoardPath)
 		cfgStep.detail = "a running panel shows the new fleet after it is restarted"
 	}
-	return []initStep{boardStep, cfgStep, statuslineStep(env), ensurePermissions(env, allow)}
+	// Re-read rather than threaded out of plannedFleet: it has already loaded this
+	// file successfully by the time control reaches here, and the settings steps
+	// need the installation it names.
+	cfg, _ := config.Load(cfgPath)
+	claudeDir := claudeDirUnder(cfg, env.home)
+	return []initStep{boardStep, cfgStep, statuslineStep(env, claudeDir), ensurePermissions(env, claudeDir, allow)}
 }
 
 // devBundleName is what `make dev-app` calls the bundle of a dev app, a build
@@ -99,11 +104,11 @@ const devBundleName = "fleetdeck-dev.app"
 // statuslineStep is ensureStatusline, except for a panel inside a dev app:
 // Claude Code's statusline is every session's on the machine, and stays the
 // installed app's. Said as a step done, not skipped -- nothing is missing.
-func statuslineStep(env initEnv) initStep {
+func statuslineStep(env initEnv, claudeDir string) initStep {
 	if inDevApp(env.binary) {
 		return initStep{name: "statusline", note: "not set by a dev app: Claude Code's statusline stays the installed app's"}
 	}
-	return ensureStatusline(env)
+	return ensureStatusline(env, claudeDir)
 }
 
 // inDevApp says whether binary is in a dev app's bundle, in its Contents/MacOS.

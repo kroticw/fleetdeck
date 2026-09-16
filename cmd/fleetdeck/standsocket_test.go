@@ -63,7 +63,7 @@ func fakeDaemonSocket(t *testing.T) string {
 func TestDaemonClientOverrideReachesTheGivenSocket(t *testing.T) {
 	sockPath := fakeDaemonSocket(t)
 
-	client := daemonClient(sockPath)
+	client := daemonClient(sockPath, t.TempDir())
 	info, err := client.Ping(context.Background())
 	if err != nil {
 		t.Fatalf("daemonClient(%q).Ping: %v", sockPath, err)
@@ -77,7 +77,7 @@ func TestDaemonClientOverrideReachesTheGivenSocket(t *testing.T) {
 // silently answered by something else -- there is nowhere else for
 // daemonClient's override branch to go looking.
 func TestDaemonClientOverrideToNothingListeningFailsCleanly(t *testing.T) {
-	client := daemonClient(os.TempDir() + "/fleetdeck-test-nothing-here.sock")
+	client := daemonClient(os.TempDir()+"/fleetdeck-test-nothing-here.sock", t.TempDir())
 	if _, err := client.Ping(context.Background()); err == nil {
 		t.Fatal("want an error dialing a socket nothing listens on, got nil")
 	}
