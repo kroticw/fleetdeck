@@ -290,6 +290,7 @@ export function cardSheetReport(win) {
   const term = shown ? part(".card-dock-term") : null;
   const tab = part('.card-tab[aria-selected="true"]');
   const control = shown ? part(".card-dock-open") : null;
+  const docBody = part(".card-doc-body");
   return {
     report: "cardSheet",
     open,
@@ -307,6 +308,9 @@ export function cardSheetReport(win) {
     // The session's open/fold button, held inside the session's place: on a
     // narrow sheet the handle had cut it off past the sheet's edge.
     control: control ? rectOf(control) : null,
+    // The start of the open document's text as drawn: the boxes say where it
+    // is, this what is in it -- a frontmatter drawn as text passed every box.
+    body: docBody ? String(docBody.textContent ?? "").trim().slice(0, 300) : null,
   };
 }
 

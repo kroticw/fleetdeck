@@ -19,6 +19,7 @@ func goodSheet() cardSheet {
 		Tab:      "/stand/board/docs/reports/q.md",
 		Author:   &sheetAuthor{Short: "5e55a002", From: "document"},
 		Control:  &box{X: 1150, Y: 125, W: 60, H: 24},
+		Body:     ptr("Booking branch: questions before the release candidate"),
 	}
 }
 
@@ -53,6 +54,26 @@ func TestASessionWhoseControlIsCutOffIsCaught(t *testing.T) {
 		t.Fatalf("no control: verdicts %q", got)
 	}
 }
+
+// The document's body is its text, not its frontmatter: on run 36340008873 the
+// tab drew "---", "session: 5e55a002", "---" above the title while every box
+// held. A body not drawn at all fails too.
+func TestADocumentBodyShowingItsFrontmatterIsCaught(t *testing.T) {
+	for name, body := range map[string]*string{
+		"the session line":      ptr("---\nsession: 5e55a002\n---\nBooking branch: questions"),
+		"the session line late": ptr("Booking branch\nsession: 5e55a002\n"),
+		"a rule on top":         ptr("---\nBooking branch: questions"),
+		"no body":               nil,
+	} {
+		s := goodSheet()
+		s.Body = body
+		if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the document's body is not its text") {
+			t.Errorf("%s: verdicts %q", name, got)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }
 
 func TestACardSheetWithItsSessionBesideTheDocumentHolds(t *testing.T) {
 	if got := cardSheetVerdicts(goodSheet(), "right"); len(got) != 0 {
@@ -151,7 +172,8 @@ func TestTheLastCardSheetReportInTheLogIsTheOneHeld(t *testing.T) {
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":null,"pane":null,"dock":null,"terminal":null,"place":null,"chosen":null}`,
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":{"x":400,"y":120,"w":820,"h":560},"pane":{"x":400,"y":120,"w":450,"h":560},` +
 			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"x":858,"y":160,"w":362,"h":480},"place":"right","chosen":"right",` +
-			`"tab":"/stand/board/docs/reports/q.md","author":{"short":"5e55a002","from":"document"},"control":{"x":1150,"y":125,"w":60,"h":24}}`,
+			`"tab":"/stand/board/docs/reports/q.md","author":{"short":"5e55a002","from":"document"},"control":{"x":1150,"y":125,"w":60,"h":24},` +
+			`"body":"Booking branch: questions"}`,
 	}, "\n")
 	if got := cardSheetCheck(log, []string{"carddoc-right"}); len(got) != 0 {
 		t.Fatalf("verdicts %v", got)

@@ -239,7 +239,7 @@ function box(x, y, w, h, extra = {}) {
   return { getBoundingClientRect: () => ({ left: x, top: y, width: w, height: h }), dataset: {}, hidden: false, ...extra };
 }
 
-function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, dock = null, term = null, tab = null, control = null } = {}) {
+function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, dock = null, term = null, tab = null, control = null, body = null } = {}) {
   const parts = {
     ".card-stage": stage,
     ".card-pane": pane,
@@ -247,6 +247,7 @@ function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, d
     ".card-dock-term": term,
     '.card-tab[aria-selected="true"]': tab,
     ".card-dock-open": control,
+    ".card-doc-body": body,
   };
   const panel = { hidden: panelHidden, querySelector: (sel) => parts[sel] ?? null };
   return { document: { getElementById: (id) => (id === "card-panel" ? panel : null) } };
@@ -266,6 +267,7 @@ test("a closed card sheet reports itself closed and nothing in it", () => {
     tab: null,
     author: null,
     control: null,
+    body: null,
   });
 });
 
@@ -304,11 +306,14 @@ test("a card sheet reports the open tab and whose session is docked, from where"
       dock: box(508, 0, 392, 500, { dataset: { open: "true", short: "5e55a002", from: "document" } }),
       tab: { dataset: { key: "/stand/board/docs/reports/q.md" } },
       control: box(850, 4, 44, 24),
+      body: { textContent: `\n  Booking branch: questions${" x".repeat(400)}` },
     }),
   );
   assert.equal(report.tab, "/stand/board/docs/reports/q.md");
   assert.deepEqual(report.author, { short: "5e55a002", from: "document" });
   assert.deepEqual(report.control, { x: 850, y: 4, w: 44, h: 24 }, "the session's open/fold control, to hold it inside the place");
+  assert.ok(report.body.startsWith("Booking branch: questions"), "the start of the document's text as drawn, trimmed");
+  assert.equal(report.body.length, 300, "no more of it than the gate needs");
 });
 
 test("a hidden session place is no session", () => {

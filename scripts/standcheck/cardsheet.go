@@ -47,6 +47,9 @@ type cardSheet struct {
 	// Control is the session's open/fold button: on a narrow sheet the
 	// handle cut it off past the sheet's edge while every box above held.
 	Control *box `json:"control"`
+	// Body is the start of the open document's text as drawn: the gates
+	// above hold its place, this holds what is in it.
+	Body *string `json:"body"`
 }
 
 type sheetAuthor struct {
@@ -109,6 +112,17 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 	}
 	if s.Pane == nil || s.Pane.W < minDockedW || s.Pane.H < minDockedH || (s.Dock != nil && overlaps(*s.Pane, *s.Dock)) {
 		problems = append(problems, fmt.Sprintf("the session covers the document: document %v, session %v", s.Pane, s.Dock))
+	}
+	// The body is the document's text, not its frontmatter: on run 36340008873
+	// the tab drew "---", "session: <id>", "---" above the title while every
+	// box held.
+	if s.Body == nil || strings.HasPrefix(strings.TrimSpace(*s.Body), "---") ||
+		(s.Author != nil && strings.Contains(*s.Body, "session: "+s.Author.Short)) {
+		body := "none"
+		if s.Body != nil {
+			body = fmt.Sprintf("%.120q", *s.Body)
+		}
+		problems = append(problems, "the document's body is not its text: it starts "+body)
 	}
 	if s.Dock != nil && (s.Control == nil || !within(*s.Control, *s.Dock)) {
 		problems = append(problems, fmt.Sprintf("the session's control lies outside its place: control %v, place %v", s.Control, s.Dock))
