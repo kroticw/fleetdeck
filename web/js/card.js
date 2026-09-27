@@ -121,6 +121,23 @@ export function renderCard(root, path, onClose, options = {}) {
   let docs = null;
   let disposed = false;
 
+  // The sheet's frame, built once: the head, the row of tabs, and the stage
+  // holding the open tab's pane and the place the author's session lives in
+  // (T-091). Snapshots redraw the head and the pane and leave the rest alone: a
+  // live terminal in the session's place would otherwise be torn down and
+  // reconnected once a second.
+  const headHost = el("div", "card-sheet-head");
+  const tabsHost = el("div", "card-tabs");
+  const stage = el("div", "card-stage");
+  const pane = el("div", "card-pane");
+  const grip = el("div", "card-dock-grip");
+  const dock = el("div", "card-dock");
+  grip.hidden = true;
+  dock.hidden = true;
+  stage.dataset.dock = "bottom";
+  stage.append(pane, grip, dock);
+  root.replaceChildren(headHost, tabsHost, stage);
+
   const shownValue = (card, field) =>
     pending.has(field) ? pending.get(field) : String(card?.[field] ?? "");
 
@@ -375,7 +392,9 @@ export function renderCard(root, path, onClose, options = {}) {
     painted = signature;
 
     root.hidden = false;
-    root.replaceChildren(...build(latest, card, known, orphan, stopped, backlinks, documents, broken));
+    const [headNode, ...paneNodes] = build(latest, card, known, orphan, stopped, backlinks, documents, broken);
+    headHost.replaceChildren(headNode);
+    pane.replaceChildren(...paneNodes);
     // After the panel is in the page, never while it is being built: a node
     // outside the document has no layout, so both widths read zero and every
     // box "fits". Measured there, the mark never appeared at all — and looked

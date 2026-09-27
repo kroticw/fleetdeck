@@ -907,3 +907,31 @@ test("the close control is a round button with a drawn cross, not a bare glyph",
   assert.match(close.innerHTML, /^<svg[^>]*aria-hidden="true"/, "the cross is an svg so it sits centred in the round button");
   assert.equal(close.textContent, "", "the old glyph is still in the button beside the drawing");
 });
+
+// T-091: the sheet is a frame built once -- a head, a row of tabs, and a stage
+// holding the open tab's pane and the place the author's session lives in.
+// Snapshots redraw the head and the pane; the session's place outlives them, or
+// a live terminal in it would be torn down once a second.
+test("a snapshot redraws the card without replacing where its session lives", () => {
+  const { root, store } = open(snapshot());
+  const dock = root.querySelector(".card-dock");
+  const stage = root.querySelector(".card-stage");
+  assert.ok(dock, "the sheet has a place for the session");
+  assert.ok(stage && stage.contains(dock));
+  const next = snapshot();
+  next.cards[0].progress = 60;
+  store.push(next);
+  assert.equal(root.querySelector(".card-dock"), dock);
+  assert.equal(root.querySelector(".card-stage"), stage);
+  assert.equal(root.querySelector(".card-pane").querySelector("select[data-field=progress]").value, "60");
+});
+
+test("the card's fields, meta, body and backlinks sit in the pane, its head above the tabs", () => {
+  const { root } = open(snapshot());
+  const pane = root.querySelector(".card-pane");
+  assert.ok(pane, "the sheet has a pane");
+  for (const sel of [".card-fields", ".card-meta", ".card-body"]) assert.ok(pane.querySelector(sel), sel);
+  assert.ok(root.querySelector(".card-head"));
+  assert.equal(pane.querySelector(".card-head"), null, "the head stays above the tabs");
+  assert.ok(root.querySelector(".card-tabs"), "the sheet has a row of tabs");
+});
