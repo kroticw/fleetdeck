@@ -391,6 +391,16 @@ test("dragging the grip sizes the session as it moves and remembers it once, whe
   assert.equal(m.stage.style.getPropertyValue("--card-dock-size"), "80%", "a move after letting go sizes nothing");
 });
 
+test("a drag the system cancels ends there: later moves size nothing", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  fireEvent(m.grip, "pointerdown", { clientX: 500, clientY: 300, preventDefault() {} });
+  fireDocumentEvent(dom.document, "pointermove", { clientX: 500, clientY: 240 });
+  fireDocumentEvent(dom.document, "pointercancel", {});
+  fireDocumentEvent(dom.document, "pointermove", { clientX: 500, clientY: 500 });
+  assert.equal(m.stage.style.getPropertyValue("--card-dock-size"), "60%");
+});
+
 test("the keys under the terminal press into it", () => {
   const m = mount({ extra: { expand: true } });
   m.dock.show({ short: ASK, from: "document" }, snap());

@@ -341,6 +341,9 @@ export function createCardDock(host, options) {
   });
   document.addEventListener("pointermove", onMove);
   document.addEventListener("pointerup", onUp);
+  // A drag the system takes away (a gesture, a window losing the pointer) ends
+  // where it was, as if let go: otherwise plain moves go on sizing the session.
+  document.addEventListener("pointercancel", onUp);
 
   const unobserve = observe(stage, (w) => {
     width = w;
@@ -359,6 +362,7 @@ export function createCardDock(host, options) {
       unobserve();
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
     },
   };
 }
