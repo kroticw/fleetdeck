@@ -26,6 +26,9 @@ const (
 // it rather than folded to its handle.
 type terminalBox struct {
 	Open bool `json:"open"`
+	// Attached: the bridge has attached to the session -- a box of the right
+	// size with nothing in it passed before this was held.
+	Attached bool `json:"attached"`
 	box
 }
 
@@ -107,7 +110,7 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 		problems = append(problems, fmt.Sprintf("the sheet is not on a document with its author docked: tab %q, author %v", s.Tab, s.Author))
 	}
 	t := s.Terminal
-	if !s.Open || s.Dock == nil || t == nil || !t.Open || t.W < minDockedW || t.H < minDockedH {
+	if !s.Open || s.Dock == nil || t == nil || !t.Open || !t.Attached || t.W < minDockedW || t.H < minDockedH {
 		problems = append(problems, fmt.Sprintf("the session is not open next to the document: sheet open %v, session %v, terminal %v", s.Open, s.Dock, t))
 	}
 	if s.Pane == nil || s.Pane.W < minDockedW || s.Pane.H < minDockedH || (s.Dock != nil && overlaps(*s.Pane, *s.Dock)) {

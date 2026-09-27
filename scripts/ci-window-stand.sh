@@ -277,6 +277,20 @@ if [ "$expect" = content ] && opens_a_session; then
 		sleep 1
 	done
 fi
+# A card sheet's docked terminal attaches after the documents are listed and
+# the tab opens, later than the sheet itself: the frame is taken once the board
+# says it has attached, and a moment after, for its first screen to be drawn.
+# A frame taken before showed an empty terminal (run 36341858143); the gate
+# (scripts/standcheck) holds the terminal to having attached either way.
+if [ "$expect" = content ] && [ "$(opened_sheet)" = card-panel ]; then
+	for _ in $(seq 20); do
+		if grep -q 'the board reports its card sheet: .*"attached":true' "$out/window.log" 2>/dev/null; then
+			sleep 2
+			break
+		fi
+		sleep 1
+	done
+fi
 # measure_from <line> <true|false>: the number of the first line from <line> on
 # where the window measures its frame in full screen (true) or out of it
 # (false); nothing before there is one.

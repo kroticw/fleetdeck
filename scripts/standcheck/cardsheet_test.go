@@ -13,7 +13,7 @@ func goodSheet() cardSheet {
 		Stage:    &box{X: 400, Y: 120, W: 820, H: 560},
 		Pane:     &box{X: 400, Y: 120, W: 450, H: 560},
 		Dock:     &box{X: 858, Y: 120, W: 362, H: 560},
-		Terminal: &terminalBox{Open: true, box: box{X: 858, Y: 160, W: 362, H: 480}},
+		Terminal: &terminalBox{Open: true, Attached: true, box: box{X: 858, Y: 160, W: 362, H: 480}},
 		Place:    "right",
 		Chosen:   "right",
 		Tab:      "/stand/board/docs/reports/q.md",
@@ -83,13 +83,14 @@ func TestACardSheetWithItsSessionBesideTheDocumentHolds(t *testing.T) {
 
 func TestACardSheetWithoutItsSessionIsCaught(t *testing.T) {
 	for name, edit := range map[string]func(*cardSheet){
-		"no session place":    func(s *cardSheet) { s.Dock = nil; s.Terminal = nil },
-		"no terminal":         func(s *cardSheet) { s.Terminal = nil },
-		"terminal folded":     func(s *cardSheet) { s.Terminal.Open = false },
-		"terminal too narrow": func(s *cardSheet) { s.Terminal.W = 149 },
-		"terminal too low":    func(s *cardSheet) { s.Terminal.H = 99 },
-		"sheet without panes": func(s *cardSheet) { s.Pane, s.Dock, s.Terminal = nil, nil, nil },
-		"sheet closed":        func(s *cardSheet) { s.Open = false },
+		"no session place":      func(s *cardSheet) { s.Dock = nil; s.Terminal = nil },
+		"no terminal":           func(s *cardSheet) { s.Terminal = nil },
+		"terminal folded":       func(s *cardSheet) { s.Terminal.Open = false },
+		"terminal not attached": func(s *cardSheet) { s.Terminal.Attached = false },
+		"terminal too narrow":   func(s *cardSheet) { s.Terminal.W = 149 },
+		"terminal too low":      func(s *cardSheet) { s.Terminal.H = 99 },
+		"sheet without panes":   func(s *cardSheet) { s.Pane, s.Dock, s.Terminal = nil, nil, nil },
+		"sheet closed":          func(s *cardSheet) { s.Open = false },
 	} {
 		s := goodSheet()
 		edit(&s)
@@ -137,7 +138,7 @@ func TestASessionAskedRightGoesBelowOnANarrowSheetOnly(t *testing.T) {
 	narrow.Place = "bottom"
 	narrow.Pane = &box{X: 400, Y: 120, W: 639, H: 250}
 	narrow.Dock = &box{X: 400, Y: 378, W: 639, H: 302}
-	narrow.Terminal = &terminalBox{Open: true, box: box{X: 400, Y: 410, W: 639, H: 230}}
+	narrow.Terminal = &terminalBox{Open: true, Attached: true, box: box{X: 400, Y: 410, W: 639, H: 230}}
 	narrow.Control = &box{X: 980, Y: 382, W: 50, H: 24}
 	if got := cardSheetVerdicts(narrow, "right"); len(got) != 0 {
 		t.Errorf("639 wide, bottom: %v", got)
@@ -171,7 +172,7 @@ func TestTheLastCardSheetReportInTheLogIsTheOneHeld(t *testing.T) {
 	log := strings.Join([]string{
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":null,"pane":null,"dock":null,"terminal":null,"place":null,"chosen":null}`,
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":{"x":400,"y":120,"w":820,"h":560},"pane":{"x":400,"y":120,"w":450,"h":560},` +
-			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"x":858,"y":160,"w":362,"h":480},"place":"right","chosen":"right",` +
+			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"attached":true,"x":858,"y":160,"w":362,"h":480},"place":"right","chosen":"right",` +
 			`"tab":"/stand/board/docs/reports/q.md","author":{"short":"5e55a002","from":"document"},"control":{"x":1150,"y":125,"w":60,"h":24},` +
 			`"body":"Booking branch: questions"}`,
 	}, "\n")

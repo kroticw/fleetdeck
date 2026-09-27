@@ -278,6 +278,19 @@ func TestTheSessionOnAQuestionShowsItsChoices(t *testing.T) {
 	}
 }
 
+// A card sheet's frame is taken once its docked terminal has attached: the
+// session attaches after the documents are listed and the tab opens, and a
+// frame taken before showed an empty terminal (run 36341858143).
+func TestTheWindowStandWaitsForTheDockedTerminal(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "ci-window-stand.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), `the board reports its card sheet: .*"attached":true`) {
+		t.Error("scripts/ci-window-stand.sh takes a card sheet's frame without waiting for its terminal to attach")
+	}
+}
+
 // The stand's fleet reads documents from the board's docs directory, where
 // layout puts them.
 func TestTheWindowStandPointsItsFleetAtTheDocuments(t *testing.T) {

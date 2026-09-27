@@ -290,7 +290,7 @@ test("a card sheet reports its document, its session, where the session is and w
   );
   assert.deepEqual(report.stage, { x: 400, y: 120, w: 820, h: 560 });
   assert.deepEqual(report.pane, { x: 400, y: 120, w: 450.3, h: 560 });
-  assert.deepEqual(report.terminal, { open: true, x: 858, y: 160, w: 362, h: 480 });
+  assert.deepEqual(report.terminal, { open: true, attached: false, x: 858, y: 160, w: 362, h: 480 });
   assert.equal(report.place, "right");
   assert.equal(report.chosen, "right");
 });
@@ -303,12 +303,14 @@ test("a card sheet reports the open tab and whose session is docked, from where"
     fakeCardSheetWindow({
       stage: box(0, 0, 900, 500),
       pane: box(0, 0, 500, 500),
-      dock: box(508, 0, 392, 500, { dataset: { open: "true", short: "5e55a002", from: "document" } }),
+      dock: box(508, 0, 392, 500, { dataset: { open: "true", attached: "true", short: "5e55a002", from: "document" } }),
+      term: box(508, 40, 392, 400),
       tab: { dataset: { key: "/stand/board/docs/reports/q.md" } },
       control: box(850, 4, 44, 24),
       body: { textContent: `\n  Booking branch: questions${" x".repeat(400)}` },
     }),
   );
+  assert.equal(report.terminal.attached, true, "whether the docked terminal has attached");
   assert.equal(report.tab, "/stand/board/docs/reports/q.md");
   assert.deepEqual(report.author, { short: "5e55a002", from: "document" });
   assert.deepEqual(report.control, { x: 850, y: 4, w: 44, h: 24 }, "the session's open/fold control, to hold it inside the place");

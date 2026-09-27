@@ -297,7 +297,7 @@ export function cardSheetReport(win) {
     stage: stage ? rectOf(stage) : null,
     pane: pane ? rectOf(pane) : null,
     dock: shown ? rectOf(shown) : null,
-    terminal: term ? { open: shown.dataset.open === "true", ...rectOf(term) } : null,
+    terminal: term ? { open: shown.dataset.open === "true", attached: shown.dataset.attached === "true", ...rectOf(term) } : null,
     place: stage?.dataset.dock ?? null,
     chosen: stage?.dataset.chosen ?? null,
     // The open tab, and whose session is docked and where the sheet learnt who

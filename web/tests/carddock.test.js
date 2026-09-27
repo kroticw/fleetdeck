@@ -247,6 +247,18 @@ test("the place says whose session it holds and where the sheet learnt who that 
   assert.equal(m.host.dataset.from, "card");
 });
 
+// The stand takes its frame once the terminal has attached, and its gate holds
+// the terminal to it: a box of the right size with nothing in it passed before.
+test("the place says when its terminal has attached, and stops saying it when it lets go", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  assert.notEqual(m.host.dataset.attached, "true", "not before the bridge says so");
+  m.terms.made[0].opts.report.ready();
+  assert.equal(m.host.dataset.attached, "true");
+  fireEvent(openButton(m.host), "click");
+  assert.equal(m.host.dataset.attached, "false");
+});
+
 test("opening attaches the author's terminal; folding lets it go", () => {
   const m = mount();
   m.dock.show({ short: ASK, from: "document" }, snap());

@@ -206,6 +206,7 @@ export function createCardDock(host, options) {
     live = null;
     attached = "";
     streamError = "";
+    host.dataset.attached = "false";
   };
 
   const attach = (short) => {
@@ -220,6 +221,12 @@ export function createCardDock(host, options) {
         actionError: (message) => {
           streamError = message ?? "";
           paint();
+        },
+        // The bridge has attached: said on the place, for the stand's report
+        // (web/js/standreport.js) -- a terminal that never attached is a box
+        // of the right size with nothing in it.
+        ready: () => {
+          host.dataset.attached = "true";
         },
       },
     });
