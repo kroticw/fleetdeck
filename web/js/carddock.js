@@ -244,6 +244,8 @@ export function createCardDock(host, options) {
     host.dataset.open = String(open);
     host.dataset.place = where;
     host.dataset.state = state;
+    host.dataset.short = author.short;
+    host.dataset.from = author.from;
     grip.hidden = !open;
 
     dot.dataset.state = state;

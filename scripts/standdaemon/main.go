@@ -50,6 +50,9 @@ const askShort = "5e55a002"
 
 // docCardFile is the card whose document tabs a stand opens; askDoc and
 // workDoc are its two documents, signed by askShort and by a working session.
+// The card names a session of its own (silentShort): a sheet that failed to
+// read who wrote a document would dock that one instead, and the stand's gates
+// tell the two apart.
 const (
 	docCardFile = "T-103.md"
 	askDoc      = "2026-09-26-booking-review-questions"
@@ -106,7 +109,7 @@ type card struct {
 var cards = append([]card{
 	{File: "T-101.md", ID: "T-101", Zone: "planned", Stage: "new", Title: "Measure how long the panel takes to answer under a loaded machine before choosing its deadline"},
 	{File: "T-102.md", ID: "T-102", Zone: "urgent", Stage: "active", Progress: 60, Session: "5e55a001", Title: "fleetdeck: Liquid Glass window with native panels over the board, the v0.10.1 fixes"},
-	{File: docCardFile, ID: "T-103", Zone: "unplanned", Stage: "active", Progress: 20, Session: askShort, Title: "cruises: full review of the booking branch before the release candidate goes out",
+	{File: docCardFile, ID: "T-103", Zone: "unplanned", Stage: "active", Progress: 20, Session: silentShort, Title: "cruises: full review of the booking branch before the release candidate goes out",
 		Body: "## Log\n\n- review written: [[" + askDoc + "]]\n- the reconciliation job's notes: [[" + workDoc + "]]\n"},
 	{File: "T-104.md", ID: "T-104", Zone: "planned", Stage: "review", Progress: 80, Session: "5e55a003", Title: "BS-27572: rewrite the payment reconciliation job so that it survives a restart halfway"},
 	{File: "T-105.md", ID: "T-105", Zone: "niceToHave", Stage: "blocked", Progress: 40, Session: stoppedShort, Title: "fleetdeck: release v0.10.0 and hand the checklist to the operator"},

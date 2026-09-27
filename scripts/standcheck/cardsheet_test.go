@@ -16,6 +16,26 @@ func goodSheet() cardSheet {
 		Terminal: &terminalBox{Open: true, box: box{X: 858, Y: 160, W: 362, H: 480}},
 		Place:    "right",
 		Chosen:   "right",
+		Tab:      "/stand/board/docs/reports/q.md",
+		Author:   &sheetAuthor{Short: "5e55a002", From: "document"},
+	}
+}
+
+// The sheet has to be on a document's tab with that document's author docked:
+// on the card's own tab, or with the card's session docked because the
+// document's author was not read, every other gate would pass for nothing.
+func TestASheetNotOnItsDocumentWithItsAuthorIsCaught(t *testing.T) {
+	for name, edit := range map[string]func(*cardSheet){
+		"the card's tab":          func(s *cardSheet) { s.Tab = "card" },
+		"no tab":                  func(s *cardSheet) { s.Tab = "" },
+		"the card's session":      func(s *cardSheet) { s.Author.From = "card" },
+		"nobody's session docked": func(s *cardSheet) { s.Author = nil },
+	} {
+		s := goodSheet()
+		edit(&s)
+		if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the sheet is not on a document with its author docked") {
+			t.Errorf("%s: verdicts %q", name, got)
+		}
 	}
 }
 
@@ -114,7 +134,8 @@ func TestTheLastCardSheetReportInTheLogIsTheOneHeld(t *testing.T) {
 	log := strings.Join([]string{
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":null,"pane":null,"dock":null,"terminal":null,"place":null,"chosen":null}`,
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":{"x":400,"y":120,"w":820,"h":560},"pane":{"x":400,"y":120,"w":450,"h":560},` +
-			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"x":858,"y":160,"w":362,"h":480},"place":"right","chosen":"right"}`,
+			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"x":858,"y":160,"w":362,"h":480},"place":"right","chosen":"right",` +
+			`"tab":"/stand/board/docs/reports/q.md","author":{"short":"5e55a002","from":"document"}}`,
 	}, "\n")
 	if got := cardSheetCheck(log, []string{"carddoc-right"}); len(got) != 0 {
 		t.Fatalf("verdicts %v", got)

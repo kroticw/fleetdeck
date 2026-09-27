@@ -251,8 +251,11 @@ func TestTheStandsCardLinksTwoDocumentsSignedByTheirSessions(t *testing.T) {
 			t.Errorf("%s is signed by %q, want %q", name, got, short)
 		}
 	}
-	if c.Session != askShort {
-		t.Errorf("the card's session is %q, want the one on a question", c.Session)
+	// The card names a session of its own, not its documents': a sheet that
+	// failed to open the document, or to read who wrote it, would dock the
+	// card's session, and the stand's gates tell the two apart.
+	if c.Session == "" || c.Session == askShort || c.Session == "5e55a003" {
+		t.Errorf("the card's session is %q, want one of its own, apart from its documents' authors", c.Session)
 	}
 }
 

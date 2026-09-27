@@ -239,15 +239,32 @@ function box(x, y, w, h, extra = {}) {
   return { getBoundingClientRect: () => ({ left: x, top: y, width: w, height: h }), dataset: {}, hidden: false, ...extra };
 }
 
-function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, dock = null, term = null } = {}) {
-  const parts = { ".card-stage": stage, ".card-pane": pane, ".card-dock": dock, ".card-dock-term": term };
+function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, dock = null, term = null, tab = null } = {}) {
+  const parts = {
+    ".card-stage": stage,
+    ".card-pane": pane,
+    ".card-dock": dock,
+    ".card-dock-term": term,
+    '.card-tab[aria-selected="true"]': tab,
+  };
   const panel = { hidden: panelHidden, querySelector: (sel) => parts[sel] ?? null };
   return { document: { getElementById: (id) => (id === "card-panel" ? panel : null) } };
 }
 
 test("a closed card sheet reports itself closed and nothing in it", () => {
   const report = cardSheetReport(fakeCardSheetWindow({ panelHidden: true }));
-  assert.deepEqual(report, { report: "cardSheet", open: false, stage: null, pane: null, dock: null, terminal: null, place: null, chosen: null });
+  assert.deepEqual(report, {
+    report: "cardSheet",
+    open: false,
+    stage: null,
+    pane: null,
+    dock: null,
+    terminal: null,
+    place: null,
+    chosen: null,
+    tab: null,
+    author: null,
+  });
 });
 
 test("a card sheet without tabs reports no pane and no session", () => {
@@ -272,6 +289,22 @@ test("a card sheet reports its document, its session, where the session is and w
   assert.deepEqual(report.terminal, { open: true, x: 858, y: 160, w: 362, h: 480 });
   assert.equal(report.place, "right");
   assert.equal(report.chosen, "right");
+});
+
+// Which tab is open and whose session is docked, and where the sheet learnt who
+// that is: a sheet that failed to open the document, or to read its author,
+// would dock the card's own session, and only this tells the two apart.
+test("a card sheet reports the open tab and whose session is docked, from where", () => {
+  const report = cardSheetReport(
+    fakeCardSheetWindow({
+      stage: box(0, 0, 900, 500),
+      pane: box(0, 0, 500, 500),
+      dock: box(508, 0, 392, 500, { dataset: { open: "true", short: "5e55a002", from: "document" } }),
+      tab: { dataset: { key: "/stand/board/docs/reports/q.md" } },
+    }),
+  );
+  assert.equal(report.tab, "/stand/board/docs/reports/q.md");
+  assert.deepEqual(report.author, { short: "5e55a002", from: "document" });
 });
 
 test("a hidden session place is no session", () => {

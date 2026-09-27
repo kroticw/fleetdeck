@@ -238,6 +238,15 @@ test("the session's place starts folded: its handle says who and what, and no te
   assert.equal(m.host.querySelector(".card-dock-dot").dataset.state, "waiting");
 });
 
+test("the place says whose session it holds and where the sheet learnt who that is", () => {
+  const m = mount();
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  assert.equal(m.host.dataset.short, ASK);
+  assert.equal(m.host.dataset.from, "document");
+  m.dock.show({ short: WORK, from: "card" }, snap());
+  assert.equal(m.host.dataset.from, "card");
+});
+
 test("opening attaches the author's terminal; folding lets it go", () => {
   const m = mount();
   m.dock.show({ short: ASK, from: "document" }, snap());

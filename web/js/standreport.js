@@ -288,6 +288,7 @@ export function cardSheetReport(win) {
   const dock = part(".card-dock");
   const shown = dock && dock.hidden !== true ? dock : null;
   const term = shown ? part(".card-dock-term") : null;
+  const tab = part('.card-tab[aria-selected="true"]');
   return {
     report: "cardSheet",
     open,
@@ -297,6 +298,11 @@ export function cardSheetReport(win) {
     terminal: term ? { open: shown.dataset.open === "true", ...rectOf(term) } : null,
     place: stage?.dataset.dock ?? null,
     chosen: stage?.dataset.chosen ?? null,
+    // The open tab, and whose session is docked and where the sheet learnt who
+    // that is: a sheet that failed to open the document, or to read its author,
+    // docks the card's own session, and only these tell the two apart.
+    tab: tab?.dataset.key ?? null,
+    author: shown?.dataset.short ? { short: shown.dataset.short, from: shown.dataset.from ?? null } : null,
   };
 }
 

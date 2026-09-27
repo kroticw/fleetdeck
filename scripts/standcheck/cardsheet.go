@@ -39,6 +39,16 @@ type cardSheet struct {
 	Terminal *terminalBox `json:"terminal"`
 	Place    string       `json:"place"`
 	Chosen   string       `json:"chosen"`
+	// Tab is the open tab's key: "card", or a document's path.
+	Tab string `json:"tab"`
+	// Author is whose session is docked, and where the sheet learnt who that
+	// is: the document's frontmatter ("document") or the card ("card").
+	Author *sheetAuthor `json:"author"`
+}
+
+type sheetAuthor struct {
+	Short string `json:"short"`
+	From  string `json:"from"`
 }
 
 // cardSheetCheck holds the log's last card sheet report to the sheet's gates,
@@ -79,6 +89,11 @@ func cardSheetCheck(log string, open []string) []string {
 // sheet has room, below otherwise. Nothing, when the sheet keeps all three.
 func cardSheetVerdicts(s cardSheet, chosen string) []string {
 	var problems []string
+	// On the card's own tab, or with the card's session docked because the
+	// document's author was not read, every gate below would pass for nothing.
+	if s.Tab == "" || s.Tab == "card" || s.Author == nil || s.Author.From != "document" {
+		problems = append(problems, fmt.Sprintf("the sheet is not on a document with its author docked: tab %q, author %v", s.Tab, s.Author))
+	}
 	t := s.Terminal
 	if !s.Open || s.Dock == nil || t == nil || !t.Open || t.W < minDockedW || t.H < minDockedH {
 		problems = append(problems, fmt.Sprintf("the session is not open next to the document: sheet open %v, session %v, terminal %v", s.Open, s.Dock, t))
