@@ -24,7 +24,7 @@ import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
 import { listDocs as serverDocs, fetchDoc as serverDoc } from "./docs.js";
-import { brokenLinksOf, cardsLinkingTo, docForLink, docTitle, documentsOf, noteName } from "./docnames.js";
+import { brokenLinksOf, cardsLinkingTo, docForLink, docTitle, documentBody, documentsOf, noteName } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
 import { CARD_TAB, renderTabs, tabsOf } from "./cardtabs.js";
 import { authorOf, authorState } from "./docauthor.js";
@@ -316,7 +316,7 @@ export function renderCard(root, path, onClose, options = {}) {
     if (state.error !== undefined) return [head, el("p", "card-error", `${t("card_doc_failed")}: ${state.error}`)];
     const body = el("article", "card-doc-body");
     body.innerHTML = renderMarkdown(
-      state.text,
+      documentBody(state.text),
       new Set(known),
       { has: (name) => docForLink(docs, name) !== null },
       { missingTitle: t("card_doc_missing") },

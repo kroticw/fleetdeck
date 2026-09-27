@@ -22,7 +22,7 @@ import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { listDocs as serverDocs, fetchDoc as serverDoc } from "./docs.js";
 import { cardPathForLink } from "./card.js";
-import { cardsLinkingTo, docForLink, docTitle, noteName } from "./docnames.js";
+import { cardsLinkingTo, docForLink, docTitle, documentBody, noteName } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
 import { t } from "./i18n.js";
 import { closeCrossHTML } from "./icon.js";
@@ -99,7 +99,7 @@ export function renderReader(root, path, onClose, options = {}) {
   const paintBody = () => {
     if (text === null) return;
     const cardNames = new Set(cards.map((card) => noteName(card.path)));
-    body.innerHTML = renderMarkdown(text, cardNames, { has: (name) => docForLink(docs, name) !== null });
+    body.innerHTML = renderMarkdown(documentBody(text), cardNames, { has: (name) => docForLink(docs, name) !== null });
     markScrollablesWithin(body, ".md-table, pre");
   };
 

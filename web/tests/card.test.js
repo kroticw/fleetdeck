@@ -971,6 +971,28 @@ test("a document's tab shows the document, the cards linking it and who wrote it
   }
 });
 
+// The frontmatter names who wrote the document and is read for that; on the tab
+// it is not text (T-091: the stand's frame showed "---", "session: …", "---"
+// above the title).
+test("a document's tab draws its body without its frontmatter, and a plain document whole", async () => {
+  const bodies = {
+    "/board/docs/reports/2026-09-12-report.md": "---\nsession: a41c09d2\n---\n\n# Report\n\nThe questions.\n",
+    "/board/docs/reports/2026-09-13-design.md": "First words.\n\n# Design\n",
+  };
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, { listDocs: async () => DOCS, fetchDoc: async (path) => bodies[path] });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  const signed = root.querySelector(".card-pane").querySelector(".card-doc-body").innerHTML;
+  assert.doesNotMatch(signed, /session:/);
+  assert.doesNotMatch(signed, /^\s*<hr/);
+  assert.match(signed, /<h2>Report<\/h2>/);
+
+  fireEvent(root.querySelectorAll(".card-tab")[2], "click");
+  await settle();
+  assert.match(root.querySelector(".card-pane").querySelector(".card-doc-body").innerHTML, /First words\./);
+});
+
 test("a document's body is fetched once, not again on its tab or on every snapshot", async () => {
   const fetched = [];
   const { root, store } = open(withDocuments(snapshot()), FLEET_UI, {
