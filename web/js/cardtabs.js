@@ -119,7 +119,13 @@ export function renderTabs(root, tabs, options = {}) {
     const next = index + step;
     if (step === 0 || next < 0 || next >= tabs.length) return;
     event.preventDefault?.();
-    onPick(tabs[next].key);
+    const key = tabs[next].key;
+    onPick(key);
+    // The pick draws the row again and the button that had the focus is gone:
+    // the picked tab takes it, so the next arrow key reaches the row.
+    Array.from(root.querySelectorAll(".card-tab"))
+      .find((b) => b.dataset.key === key)
+      ?.focus?.();
   };
   keyListeners.set(root, onKey);
   root.addEventListener("keydown", onKey);

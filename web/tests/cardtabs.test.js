@@ -114,6 +114,29 @@ test("a row drawn again answers an arrow key once, from where the latest drawing
   assert.deepEqual(picked, ["/d/reports/doc-a.md"]);
 });
 
+// The sheet draws the row again for every tab picked (card.js), so the button
+// that had the focus is gone: the new tab takes it, and the next arrow goes on.
+test("the arrow keys walk the whole row, the focus following the picked tab", () => {
+  const root = dom.element("div");
+  dom.document.body.appendChild(root);
+  const tabs = tabsOf(CARD, CARDS, DOCS);
+  const picked = [];
+  const draw = (active) =>
+    renderTabs(root, tabs, {
+      active,
+      onPick: (key) => {
+        picked.push(key);
+        draw(key);
+      },
+    });
+  draw("card");
+  fireEvent(root, "keydown", { key: "ArrowRight" });
+  const focused = root.querySelectorAll(".card-tab").find((b) => b.focused);
+  assert.equal(focused?.dataset.key, "/d/reports/doc-b.md", "the picked tab has the focus");
+  fireEvent(root, "keydown", { key: "ArrowRight" });
+  assert.deepEqual(picked, ["/d/reports/doc-b.md", "/d/reports/doc-a.md"]);
+});
+
 test("tabs past the row's right edge are counted on a button that lists every tab", () => {
   // The row is 300 wide: the card's tab and the first document's fit, the last does not.
   const { root, picked } = draw({ measure: () => ({ row: 300, tabs: [{ right: 90 }, { right: 250 }, { right: 410 }] }) });
