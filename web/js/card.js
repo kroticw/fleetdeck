@@ -593,6 +593,10 @@ export function renderCard(root, path, onClose, options = {}) {
   // and goes on to its own target, as it did before.
   const onKey = (event) => {
     if (event.key !== "Escape") return;
+    // The card's own docked terminal (T-091) is where the operator answers the
+    // document's author: Escape there is the session's -- AskUserQuestion's
+    // "Esc to cancel", or interrupting a turn -- and the card stays open.
+    if (dock.contains(event.target)) return;
     if (event.target?.closest?.("[data-terminal]")) {
       event.stopPropagation?.();
       event.preventDefault?.();

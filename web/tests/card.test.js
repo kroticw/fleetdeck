@@ -384,6 +384,21 @@ test("while a card is open, Escape pressed inside a live terminal closes the car
   assert.equal(event.defaultPrevented, true);
 });
 
+// T-091: the card's own docked terminal is where the operator answers the
+// document's author -- Escape there is for the session (AskUserQuestion's
+// "Esc to cancel", or interrupting a turn), and leaves the card open.
+test("Escape in the card's own docked terminal goes to the session and leaves the card open", () => {
+  const { root, closed } = open(snapshot());
+  const term = root.querySelector(".card-dock-term");
+  const typedInto = dom.element("textarea");
+  term.appendChild(typedInto);
+
+  const event = fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: typedInto });
+
+  assert.equal(closed.length, 0, "the card closed under an Escape meant for its own session");
+  assert.notEqual(event.propagationStopped, true, "the docked terminal never saw the Escape");
+});
+
 test("an Escape from anywhere else closes the card and is left to its own target too", () => {
   const { closed } = open(snapshot());
 
