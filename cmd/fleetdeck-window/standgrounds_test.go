@@ -65,3 +65,14 @@ func TestTheBoardsColumnScrollGoesToTheLogAsALineOfItsOwn(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+// T-079: what stands in the way of the band the window is dragged by, with a
+// sheet open, is a line of its own -- the stand's gate on the band reads it, and
+// it is not a report of scrolling.
+func TestTheBoardsTopBandGoesToTheLogAsALineOfItsOwn(t *testing.T) {
+	report := json.RawMessage(`{"report":"topband","width":1000,"max":64,"height":60,"sheetOpen":["session-panel"],"rows":[{"y":60,"x":396,"tag":"DIV","id":"session-panel","class":"session-panel"}]}`)
+	want := `fleetdeck-window: the board reports its top band: ` + string(report)
+	if got := boardStandReportLine(report); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

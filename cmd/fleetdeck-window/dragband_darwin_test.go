@@ -129,3 +129,16 @@ func TestTheWindowHasABandToBeDraggedByInEveryStateOfThePanels(t *testing.T) {
 		}
 	}
 }
+
+// v0.12.0 could not be moved with a session open: the page reported no band at
+// all, so there was nothing over the board to press. With the band an open
+// sheet leaves, the window is dragged above the sheet and the sheet keeps every
+// press of its own.
+func TestTheWindowIsDraggedByTheBandAnOpenSheetLeaves(t *testing.T) {
+	if !bandResult.bandWithASheetOpen {
+		t.Error("with a sheet open a press at the middle of the band, routed from the window, does not land on the band")
+	}
+	if !bandResult.sheetBelowTheBandReachesTheBoard {
+		t.Error("a press on the open sheet's own first row lands on a native view, not the board")
+	}
+}

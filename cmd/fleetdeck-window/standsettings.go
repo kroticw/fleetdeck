@@ -25,9 +25,11 @@ const (
 	// appearance cannot be relied on to reach a window started after it
 	// changed.
 	standAppearanceEnv = "FLEETDECK_STAND_APPEARANCE"
-	// "newcard", "fleetmenu" or "newcard,fleetmenu": the board opens its new
-	// card form, the orchestrator surface its fleet menu, as they load, so a
-	// stand's screenshot shows them open without anyone pressing either.
+	// "newcard", "fleetmenu", "session", or any of them comma-separated: the
+	// board opens its new card form and the first session the panel lists, the
+	// orchestrator surface its fleet menu, as they load, so a stand shows them
+	// open without anyone pressing anything. A session open is what took
+	// v0.12.0's drag band away (T-079), and no stand had opened one.
 	standOpenEnv = "FLEETDECK_STAND_OPEN"
 	// "on": once its surfaces have loaded, the window enters full screen, and
 	// after a while leaves it (standfullscreen.go), so a stand measures and
@@ -105,8 +107,8 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 	}
 	if v, set := lookup(standOpenEnv); set {
 		for _, name := range strings.Split(v, ",") {
-			if name != "newcard" && name != "fleetmenu" {
-				return standSettings{}, fmt.Errorf("%s=%q is not newcard, fleetmenu or both, comma-separated", standOpenEnv, v)
+			if name != "newcard" && name != "fleetmenu" && name != "session" {
+				return standSettings{}, fmt.Errorf("%s=%q is not newcard, fleetmenu or session, comma-separated", standOpenEnv, v)
 			}
 		}
 		s.open = v

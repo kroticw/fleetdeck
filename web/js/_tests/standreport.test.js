@@ -4,7 +4,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { boardScrollReport, watchBoardScroll } from "../standreport.js";
+import { boardScrollReport, topBandReport, watchBoardScroll } from "../standreport.js";
+import { TOP_BAND_MAX } from "../topband.js";
 
 // A window of the given width whose page carries the insets the fleetdeck
 // window sends ("" when it has sent none).
@@ -172,4 +173,58 @@ test("the window hears the board again when it draws its columns", () => {
   onMutation();
   assert.equal(heard.length, 2);
   assert.equal(heard[1].lastColumnRightAtEnd, 628);
+});
+
+// --- the band the window is dragged by ---------------------------------------
+//
+// topBandReport is the board's own side of the number the window measures for
+// itself: the height the page reports, and for every row the window looks at,
+// the first point across the width that is not the page's ground. With a session
+// open v0.12.0 reported 0 and said nothing about what took it (T-079).
+
+// A page whose centre column is ground everywhere, with a sheet and the dimmed
+// board under it placed as web/app.css places them.
+function fakeTopBandWindow({ sheetTop = null, sheetLeft = 396, scrimGround = true, width = 1000 } = {}) {
+  const ground = (tagName, id) => ({ tagName, id, className: "", hasAttribute: (name) => name === "data-window-ground" });
+  const plain = (tagName, id, className = "") => ({ tagName, id, className, hasAttribute: () => false });
+  const board = ground("DIV", "board");
+  const scrim = scrimGround ? ground("DIV", "sheet-scrim") : plain("DIV", "sheet-scrim");
+  const sheet = plain("DIV", "session-panel", "session-panel");
+  const open = sheetTop !== null;
+  return {
+    innerWidth: width,
+    document: {
+      elementFromPoint: (x, y) => {
+        if (open && y >= sheetTop && x >= sheetLeft) return sheet;
+        return open ? scrim : board;
+      },
+      getElementById: (id) => (id === "session-panel" ? { hidden: !open } : { hidden: true }),
+    },
+  };
+}
+
+test("with nothing open the board reports the whole band and nothing in its way", () => {
+  const report = topBandReport(fakeTopBandWindow());
+  assert.equal(report.report, "topband");
+  assert.equal(report.height, TOP_BAND_MAX);
+  assert.deepEqual(report.rows, []);
+  assert.deepEqual(report.sheetOpen, []);
+});
+
+test("with a session open the board reports the band the sheet leaves, and the sheet as what ends it", () => {
+  const report = topBandReport(fakeTopBandWindow({ sheetTop: 60 }));
+  assert.equal(report.height, 60);
+  assert.deepEqual(report.sheetOpen, ["session-panel"]);
+  assert.equal(report.rows.length, 1);
+  assert.deepEqual(report.rows[0], { y: 60, x: 396, tag: "DIV", id: "session-panel", class: "session-panel" });
+});
+
+// The defect itself: an unmarked scrim over the whole column takes the band from
+// the very top, and the report has to name it rather than only say 0.
+test("a dimmed board that is not the page's ground is reported as what took the band", () => {
+  const report = topBandReport(fakeTopBandWindow({ sheetTop: 60, scrimGround: false }));
+  assert.equal(report.height, 0);
+  assert.equal(report.rows[0].id, "sheet-scrim");
+  assert.equal(report.rows[0].y, 0);
+  assert.equal(report.rows.length, TOP_BAND_MAX / 4, "every row the window looks at is reported, not the first alone");
 });
