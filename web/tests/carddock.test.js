@@ -2,10 +2,26 @@
 // document or beside it, the choice remembered, and below whatever was chosen
 // when the sheet has no room beside it (T-091).
 
-import { test } from "node:test";
+import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { DOCK_KEYS, DOCK_RIGHT_MIN, clampDockSize, effectiveDock, readDockPrefs, writeDockPref } from "../js/carddock.js";
+import { installDOM, fireEvent, fireDocumentEvent, settle } from "./fake-dom.js";
+import { t } from "../js/i18n.js";
+import {
+  DOCK_KEYS,
+  DOCK_RIGHT_MIN,
+  clampDockSize,
+  createCardDock,
+  effectiveDock,
+  readDockPrefs,
+  writeDockPref,
+} from "../js/carddock.js";
+
+let dom;
+beforeEach(() => {
+  dom = installDOM();
+});
+afterEach(() => dom.restore());
 
 function memoryStorage(initial = {}) {
   const data = new Map(Object.entries(initial));
@@ -84,4 +100,280 @@ test("the keys are the ones the spec names", () => {
     height: "fleetdeck-card-session-height-pct",
     width: "fleetdeck-card-session-width-pct",
   });
+});
+
+// --- the place itself ----------------------------------------------------------
+
+const ASK = "a41c09d2";
+const WORK = "909bf9b2";
+const ORCH = "0c7e1a2b";
+
+function snap(overrides = {}) {
+  return {
+    orchestratorSession: ORCH,
+    sessions: [
+      { short: ASK, needs: "answer: fold by double click, by a button, or both?", lifecycle: "live" },
+      { short: WORK, needs: "", lifecycle: "live" },
+      { short: ORCH, needs: "", lifecycle: "live" },
+      { short: "5e55a0ff", lifecycle: "stopped" },
+      { short: "deadbeef", lifecycle: "dead" },
+    ],
+    ...overrides,
+  };
+}
+
+// A terminal that records what the place asks of it.
+function terminals() {
+  const made = [];
+  const factory = (host, short, opts) => {
+    const term = {
+      host,
+      short,
+      opts,
+      opened: 0,
+      stopped: 0,
+      typed: [],
+      open() {
+        this.opened += 1;
+      },
+      stop() {
+        this.stopped += 1;
+      },
+      type(bytes) {
+        this.typed.push(bytes);
+      },
+    };
+    made.push(term);
+    return term;
+  };
+  return { made, factory };
+}
+
+// A stage whose width the test sets, the way a ResizeObserver would report it.
+function mount(options = {}) {
+  const stage = dom.element("div");
+  const grip = dom.element("div");
+  const host = dom.element("div");
+  stage.append(grip, host);
+  dom.document.body.appendChild(stage);
+  let widthListener = null;
+  let unobserved = 0;
+  const storage = options.storage ?? memoryStorage();
+  const terms = terminals();
+  const calls = { resume: [], orchestrator: 0 };
+  const dock = createCardDock(host, {
+    stage,
+    grip,
+    storage,
+    terminal: terms.factory,
+    observe: (el, fn) => {
+      widthListener = fn;
+      fn(options.width ?? 800);
+      return () => {
+        unobserved += 1;
+      };
+    },
+    rect: () => ({ left: 0, top: 0, right: 1000, bottom: 600, width: 1000, height: 600 }),
+    resume: options.resume ?? (async (short) => calls.resume.push(short)),
+    toOrchestrator: () => {
+      calls.orchestrator += 1;
+    },
+    ...options.extra,
+  });
+  return {
+    dock,
+    stage,
+    grip,
+    host,
+    storage,
+    terms,
+    calls,
+    resize: (w) => widthListener(w),
+    get unobserved() {
+      return unobserved;
+    },
+  };
+}
+
+const openButton = (host) => host.querySelector(".card-dock-open");
+
+test("the session's place starts folded: its handle says who and what, and no terminal is attached", () => {
+  const m = mount();
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  assert.equal(m.host.hidden, false);
+  assert.equal(m.host.dataset.open, "false");
+  assert.equal(m.terms.made.length, 0, "a folded handle holds no attach and resizes nobody's terminal");
+  assert.ok(m.host.textContent.includes(ASK));
+  assert.ok(m.host.textContent.includes(t("dock_state_waiting")));
+  assert.ok(m.host.textContent.includes("fold by double click"), "the question the session is on is on the handle");
+  assert.equal(m.host.querySelector(".card-dock-dot").dataset.state, "waiting");
+});
+
+test("opening attaches the author's terminal; folding lets it go", () => {
+  const m = mount();
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  fireEvent(openButton(m.host), "click");
+  assert.equal(m.terms.made.length, 1);
+  assert.equal(m.terms.made[0].short, ASK);
+  assert.equal(m.terms.made[0].opened, 1);
+  assert.equal(m.host.dataset.open, "true");
+  fireEvent(openButton(m.host), "click");
+  assert.equal(m.terms.made[0].stopped, 1);
+  assert.equal(m.host.dataset.open, "false");
+});
+
+test("the same author shown again and again keeps the one terminal", () => {
+  const m = mount({ extra: { expand: true } });
+  for (let i = 0; i < 10; i += 1) m.dock.show({ short: ASK, from: "document" }, snap());
+  assert.equal(m.terms.made.length, 1);
+  assert.equal(m.terms.made[0].opened, 1);
+  assert.equal(m.terms.made[0].stopped, 0);
+});
+
+test("another author while open: the old terminal goes, the new author's comes", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  m.dock.show({ short: WORK, from: "document" }, snap());
+  assert.equal(m.terms.made.length, 2);
+  assert.equal(m.terms.made[0].stopped, 1);
+  assert.equal(m.terms.made[1].short, WORK);
+  assert.ok(m.host.textContent.includes(WORK));
+});
+
+test("no author, no place: hidden, and a terminal it held is let go", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "card" }, snap());
+  m.dock.show(null, snap());
+  assert.equal(m.host.hidden, true);
+  assert.equal(m.grip.hidden, true);
+  assert.equal(m.terms.made[0].stopped, 1);
+});
+
+test("the orchestrator's terminal is never opened a second time: the place sends to it", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ORCH, from: "document" }, snap());
+  assert.equal(m.terms.made.length, 0);
+  const go = m.host.querySelector(".card-dock-orchestrator");
+  assert.ok(go && !go.hidden);
+  assert.equal(go.textContent, t("dock_to_orchestrator"));
+  fireEvent(go, "click");
+  assert.equal(m.calls.orchestrator, 1);
+});
+
+test("a gone session, or one the panel does not know, sends to the orchestrator too", () => {
+  for (const short of ["deadbeef", "0000beef"]) {
+    const m = mount({ extra: { expand: true } });
+    m.dock.show({ short, from: "document" }, snap());
+    assert.equal(m.terms.made.length, 0, short);
+    const go = m.host.querySelector(".card-dock-gone");
+    assert.ok(go && !go.hidden, short);
+    fireEvent(go.querySelector("button"), "click");
+    assert.equal(m.calls.orchestrator, 1, short);
+  }
+});
+
+test("a stopped session is brought back from the place, and its terminal comes once it is live", async () => {
+  let release;
+  const m = mount({
+    extra: { expand: true },
+    resume: (short) =>
+      new Promise((resolve) => {
+        m.calls.resume.push(short);
+        release = resolve;
+      }),
+  });
+  m.dock.show({ short: "5e55a0ff", from: "card" }, snap());
+  assert.equal(m.terms.made.length, 0);
+  const button = m.host.querySelector(".card-dock-resume");
+  assert.ok(button && !button.hidden);
+  assert.ok(m.host.textContent.includes(t("dock_stopped_note")));
+  fireEvent(button, "click");
+  assert.deepEqual(m.calls.resume, ["5e55a0ff"]);
+  assert.equal(button.disabled, true);
+  assert.equal(button.textContent, t("dock_resuming"));
+  release();
+  await settle();
+  const live = snap();
+  live.sessions.find((s) => s.short === "5e55a0ff").lifecycle = "live";
+  m.dock.show({ short: "5e55a0ff", from: "card" }, live);
+  assert.equal(m.terms.made.length, 1);
+  assert.equal(m.terms.made[0].short, "5e55a0ff");
+});
+
+test("a return that fails says why and can be tried again", async () => {
+  const m = mount({
+    extra: { expand: true },
+    resume: async () => {
+      throw new Error("the session's directory is gone");
+    },
+  });
+  m.dock.show({ short: "5e55a0ff", from: "card" }, snap());
+  fireEvent(m.host.querySelector(".card-dock-resume"), "click");
+  await settle();
+  assert.ok(m.host.textContent.includes("the session's directory is gone"));
+  assert.equal(m.host.querySelector(".card-dock-resume").disabled, false);
+});
+
+test("beside when chosen and there is room; below when there is not; the choice kept either way", () => {
+  const m = mount({ storage: memoryStorage({ "fleetdeck-card-session-dock": "right" }), width: 639 });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  const right = m.host.querySelector(".card-dock-place-right");
+  assert.equal(m.stage.dataset.dock, "bottom");
+  assert.equal(m.stage.dataset.chosen, "right");
+  assert.equal(right.disabled, true);
+  assert.equal(right.getAttribute("title"), t("dock_right_no_room"));
+  m.resize(640);
+  assert.equal(m.stage.dataset.dock, "right");
+  assert.equal(right.disabled, false);
+  m.resize(639);
+  assert.equal(m.stage.dataset.dock, "bottom");
+  assert.equal(m.storage.getItem("fleetdeck-card-session-dock"), "right", "a narrow sheet does not forget the choice");
+});
+
+test("the place buttons move the session and remember the choice; a stand's place is not remembered", () => {
+  const m = mount({ width: 900 });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  fireEvent(m.host.querySelector(".card-dock-place-right"), "click");
+  assert.equal(m.stage.dataset.dock, "right");
+  assert.equal(m.storage.getItem("fleetdeck-card-session-dock"), "right");
+  assert.equal(m.host.querySelector(".card-dock-place-right").getAttribute("aria-pressed"), "true");
+  fireEvent(m.host.querySelector(".card-dock-place-bottom"), "click");
+  assert.equal(m.storage.getItem("fleetdeck-card-session-dock"), "bottom");
+
+  const stand = mount({ width: 900, extra: { place: "right" } });
+  stand.dock.show({ short: ASK, from: "document" }, snap());
+  assert.equal(stand.stage.dataset.dock, "right");
+  assert.equal(stand.storage.getItem("fleetdeck-card-session-dock"), null);
+});
+
+test("dragging the grip sizes the session as it moves and remembers it once, where it was let go", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  assert.equal(m.grip.hidden, false);
+  fireEvent(m.grip, "pointerdown", { clientX: 500, clientY: 300, preventDefault() {} });
+  fireDocumentEvent(dom.document, "pointermove", { clientX: 500, clientY: 240 });
+  assert.equal(m.stage.style.getPropertyValue("--card-dock-size"), "60%");
+  assert.equal(m.storage.getItem("fleetdeck-card-session-height-pct"), null, "nothing is written while dragging");
+  fireDocumentEvent(dom.document, "pointermove", { clientX: 500, clientY: 10 });
+  fireDocumentEvent(dom.document, "pointerup", {});
+  assert.equal(m.stage.style.getPropertyValue("--card-dock-size"), "80%", "held to its most");
+  assert.equal(m.storage.getItem("fleetdeck-card-session-height-pct"), "80");
+  fireDocumentEvent(dom.document, "pointermove", { clientX: 500, clientY: 500 });
+  assert.equal(m.stage.style.getPropertyValue("--card-dock-size"), "80%", "a move after letting go sizes nothing");
+});
+
+test("the keys under the terminal press into it", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  const enter = m.host.querySelectorAll(".s-key").find((b) => b.dataset.key === "enter");
+  fireEvent(enter, "click");
+  assert.deepEqual(m.terms.made[0].typed, ["\r"]);
+});
+
+test("letting the place go stops its terminal and its watch on the width", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  m.dock.dispose();
+  assert.equal(m.terms.made[0].stopped, 1);
+  assert.equal(m.unobserved, 1);
 });
