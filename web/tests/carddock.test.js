@@ -94,6 +94,29 @@ test("a storage that refuses is not an error: the defaults hold and a write is d
   assert.deepEqual(readDockPrefs(undefined), { place: "bottom", height: 55, width: 45 });
 });
 
+// A browser with site data blocked throws on reading localStorage itself, not
+// on getItem: a card must still open, at the defaults.
+test("a page whose localStorage cannot even be read still opens the session's place", () => {
+  const had = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    get() {
+      throw new Error("SecurityError: access denied");
+    },
+  });
+  try {
+    assert.deepEqual(readDockPrefs(), { place: "bottom", height: 55, width: 45 });
+    assert.doesNotThrow(() => writeDockPref("place", "right"));
+    const stage = dom.element("div");
+    const grip = dom.element("div");
+    const host = dom.element("div");
+    assert.doesNotThrow(() => createCardDock(host, { stage, grip, observe: () => () => {} }));
+  } finally {
+    if (had) Object.defineProperty(globalThis, "localStorage", had);
+    else delete globalThis.localStorage;
+  }
+});
+
 test("writing the place stores exactly that key", () => {
   const s = memoryStorage();
   writeDockPref("place", "right", s);

@@ -44,6 +44,16 @@ export function clampDockSize(place, pct) {
   return Math.min(most, Math.max(least, n));
 }
 
+// pageStorage is the page's localStorage, or null where even reading it throws
+// -- a browser with site data blocked does, on the property itself.
+function pageStorage() {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function read(storage, key) {
   try {
     return storage?.getItem(key) ?? null;
@@ -54,7 +64,7 @@ function read(storage, key) {
 
 // readDockPrefs is the remembered choice and sizes. A storage that refuses --
 // a private window, a page without one -- gives the defaults.
-export function readDockPrefs(storage = globalThis.localStorage, keys = DOCK_KEYS) {
+export function readDockPrefs(storage = pageStorage(), keys = DOCK_KEYS) {
   return {
     place: read(storage, keys.place) === "right" ? "right" : "bottom",
     height: clampDockSize("bottom", read(storage, keys.height)),
@@ -62,7 +72,7 @@ export function readDockPrefs(storage = globalThis.localStorage, keys = DOCK_KEY
   };
 }
 
-export function writeDockPref(name, value, storage = globalThis.localStorage, keys = DOCK_KEYS) {
+export function writeDockPref(name, value, storage = pageStorage(), keys = DOCK_KEYS) {
   try {
     storage?.setItem(keys[name], String(value));
   } catch {
@@ -127,7 +137,7 @@ function observeWidth(el, fn) {
 export function createCardDock(host, options) {
   const { stage, grip, pressKeys = KEYS, toOrchestrator = () => {}, resume = resumeSession } = options;
   const terminal = options.terminal ?? createLiveTerminal;
-  const storage = options.storage ?? globalThis.localStorage;
+  const storage = options.storage ?? pageStorage();
   const keyNames = options.storageKeys ?? DOCK_KEYS;
   const rect = options.rect ?? ((node) => node.getBoundingClientRect());
   const observe = options.observe ?? observeWidth;
