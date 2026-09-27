@@ -56,8 +56,13 @@ func TestTheStandsOrchestratorHasItsBriefAndItsTerminalAKey(t *testing.T) {
 	if err := layout(home, boardDir); err != nil {
 		t.Fatal(err)
 	}
-	if got := orchestrator.ReadBriefState(orchestrator.BriefPath(orchestrator.Paths{Board: boardDir})); got != orchestrator.BriefOurs {
-		t.Fatalf("the brief on the stand's board reads as %v, want the wizard's own", got)
+	// Where the panel looks for it: the stand's fleet has a documentation
+	// directory (scripts/ci-window-stand.sh), and the brief lives in the first
+	// one (orchestrator.BriefPath). Written beside the board instead, the
+	// orchestrator panel said the working order was not on disk (T-091).
+	panel := orchestrator.Paths{Board: boardDir, Docs: []string{filepath.Join(boardDir, "docs")}}
+	if got := orchestrator.ReadBriefState(orchestrator.BriefPath(panel)); got != orchestrator.BriefOurs {
+		t.Fatalf("the brief where the stand's panel looks for it reads as %v, want the wizard's own", got)
 	}
 	t.Setenv("HOME", home)
 	if _, err := daemon.ControlKey(); err != nil {

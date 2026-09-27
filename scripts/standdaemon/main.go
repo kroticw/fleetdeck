@@ -159,11 +159,18 @@ func layout(home, board string) error {
 	// daemon's control key, both only in the stand's own HOME and board: the
 	// orchestrator panel shows neither the missing brief's warning nor a
 	// read-only terminal, which the operator's panel does not.
-	brief, err := orchestrator.Brief("en", orchestrator.Paths{Board: board})
+	// The panel's paths as scripts/ci-window-stand.sh configures the fleet: its
+	// documentation directory is the board's docs, and the brief is looked for
+	// in the first documentation directory (orchestrator.BriefPath).
+	paths := orchestrator.Paths{Board: board, Docs: []string{filepath.Join(board, "docs")}}
+	brief, err := orchestrator.Brief("en", paths)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(orchestrator.BriefPath(orchestrator.Paths{Board: board}), brief, 0o644); err != nil {
+	if err := os.MkdirAll(paths.Docs[0], 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(orchestrator.BriefPath(paths), brief, 0o644); err != nil {
 		return err
 	}
 	if err := writeSilentTranscript(home); err != nil {
