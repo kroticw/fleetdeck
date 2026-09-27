@@ -239,13 +239,14 @@ function box(x, y, w, h, extra = {}) {
   return { getBoundingClientRect: () => ({ left: x, top: y, width: w, height: h }), dataset: {}, hidden: false, ...extra };
 }
 
-function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, dock = null, term = null, tab = null } = {}) {
+function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, dock = null, term = null, tab = null, control = null } = {}) {
   const parts = {
     ".card-stage": stage,
     ".card-pane": pane,
     ".card-dock": dock,
     ".card-dock-term": term,
     '.card-tab[aria-selected="true"]': tab,
+    ".card-dock-open": control,
   };
   const panel = { hidden: panelHidden, querySelector: (sel) => parts[sel] ?? null };
   return { document: { getElementById: (id) => (id === "card-panel" ? panel : null) } };
@@ -264,6 +265,7 @@ test("a closed card sheet reports itself closed and nothing in it", () => {
     chosen: null,
     tab: null,
     author: null,
+    control: null,
   });
 });
 
@@ -301,10 +303,12 @@ test("a card sheet reports the open tab and whose session is docked, from where"
       pane: box(0, 0, 500, 500),
       dock: box(508, 0, 392, 500, { dataset: { open: "true", short: "5e55a002", from: "document" } }),
       tab: { dataset: { key: "/stand/board/docs/reports/q.md" } },
+      control: box(850, 4, 44, 24),
     }),
   );
   assert.equal(report.tab, "/stand/board/docs/reports/q.md");
   assert.deepEqual(report.author, { short: "5e55a002", from: "document" });
+  assert.deepEqual(report.control, { x: 850, y: 4, w: 44, h: 24 }, "the session's open/fold control, to hold it inside the place");
 });
 
 test("a hidden session place is no session", () => {

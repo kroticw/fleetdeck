@@ -649,6 +649,12 @@ test("the session sits below the document or beside it, as the stage says, at th
   assert.match(ruleBody('.card-dock[data-open="false"]'), /flex:\s*none/, "a folded session takes only its handle");
 });
 
+// On a narrow sheet the handle's controls wrap to a line of their own rather
+// than going out past the sheet's edge (the stand's 1000 pt frames, T-091).
+test("the session's handle wraps rather than cutting off its controls", () => {
+  assert.match(ruleBody(".card-dock-handle"), /flex-wrap:\s*wrap/);
+});
+
 test("the dots say each author's state in the palette's own colours", () => {
   const colours = {
     waiting: "--attn",

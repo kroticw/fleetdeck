@@ -44,11 +44,20 @@ type cardSheet struct {
 	// Author is whose session is docked, and where the sheet learnt who that
 	// is: the document's frontmatter ("document") or the card ("card").
 	Author *sheetAuthor `json:"author"`
+	// Control is the session's open/fold button: on a narrow sheet the
+	// handle cut it off past the sheet's edge while every box above held.
+	Control *box `json:"control"`
 }
 
 type sheetAuthor struct {
 	Short string `json:"short"`
 	From  string `json:"from"`
+}
+
+// within is whether inner lies inside outer, to layout rounding.
+func within(inner, outer box) bool {
+	return inner.X >= outer.X-edgeSlack && inner.Y >= outer.Y-edgeSlack &&
+		inner.X+inner.W <= outer.X+outer.W+edgeSlack && inner.Y+inner.H <= outer.Y+outer.H+edgeSlack
 }
 
 // cardSheetCheck holds the log's last card sheet report to the sheet's gates,
@@ -100,6 +109,9 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 	}
 	if s.Pane == nil || s.Pane.W < minDockedW || s.Pane.H < minDockedH || (s.Dock != nil && overlaps(*s.Pane, *s.Dock)) {
 		problems = append(problems, fmt.Sprintf("the session covers the document: document %v, session %v", s.Pane, s.Dock))
+	}
+	if s.Dock != nil && (s.Control == nil || !within(*s.Control, *s.Dock)) {
+		problems = append(problems, fmt.Sprintf("the session's control lies outside its place: control %v, place %v", s.Control, s.Dock))
 	}
 	if s.Stage == nil {
 		// Without the stage there is no telling where the session is, or should

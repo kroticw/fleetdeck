@@ -18,6 +18,7 @@ func goodSheet() cardSheet {
 		Chosen:   "right",
 		Tab:      "/stand/board/docs/reports/q.md",
 		Author:   &sheetAuthor{Short: "5e55a002", From: "document"},
+		Control:  &box{X: 1150, Y: 125, W: 60, H: 24},
 	}
 }
 
@@ -36,6 +37,20 @@ func TestASheetNotOnItsDocumentWithItsAuthorIsCaught(t *testing.T) {
 		if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the sheet is not on a document with its author docked") {
 			t.Errorf("%s: verdicts %q", name, got)
 		}
+	}
+}
+
+// The session's own control -- open, fold -- has to be inside its place: on a
+// narrow sheet it was cut off past the sheet's edge while every box held.
+func TestASessionWhoseControlIsCutOffIsCaught(t *testing.T) {
+	s := goodSheet()
+	s.Control = &box{X: s.Dock.X + s.Dock.W - 20, Y: 125, W: 60, H: 24}
+	if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the session's control lies outside its place") {
+		t.Fatalf("verdicts %q", got)
+	}
+	s.Control = nil
+	if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the session's control lies outside its place") {
+		t.Fatalf("no control: verdicts %q", got)
 	}
 }
 
@@ -102,6 +117,7 @@ func TestASessionAskedRightGoesBelowOnANarrowSheetOnly(t *testing.T) {
 	narrow.Pane = &box{X: 400, Y: 120, W: 639, H: 250}
 	narrow.Dock = &box{X: 400, Y: 378, W: 639, H: 302}
 	narrow.Terminal = &terminalBox{Open: true, box: box{X: 400, Y: 410, W: 639, H: 230}}
+	narrow.Control = &box{X: 980, Y: 382, W: 50, H: 24}
 	if got := cardSheetVerdicts(narrow, "right"); len(got) != 0 {
 		t.Errorf("639 wide, bottom: %v", got)
 	}
@@ -135,7 +151,7 @@ func TestTheLastCardSheetReportInTheLogIsTheOneHeld(t *testing.T) {
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":null,"pane":null,"dock":null,"terminal":null,"place":null,"chosen":null}`,
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":{"x":400,"y":120,"w":820,"h":560},"pane":{"x":400,"y":120,"w":450,"h":560},` +
 			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"x":858,"y":160,"w":362,"h":480},"place":"right","chosen":"right",` +
-			`"tab":"/stand/board/docs/reports/q.md","author":{"short":"5e55a002","from":"document"}}`,
+			`"tab":"/stand/board/docs/reports/q.md","author":{"short":"5e55a002","from":"document"},"control":{"x":1150,"y":125,"w":60,"h":24}}`,
 	}, "\n")
 	if got := cardSheetCheck(log, []string{"carddoc-right"}); len(got) != 0 {
 		t.Fatalf("verdicts %v", got)

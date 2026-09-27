@@ -289,6 +289,7 @@ export function cardSheetReport(win) {
   const shown = dock && dock.hidden !== true ? dock : null;
   const term = shown ? part(".card-dock-term") : null;
   const tab = part('.card-tab[aria-selected="true"]');
+  const control = shown ? part(".card-dock-open") : null;
   return {
     report: "cardSheet",
     open,
@@ -303,6 +304,9 @@ export function cardSheetReport(win) {
     // docks the card's own session, and only these tell the two apart.
     tab: tab?.dataset.key ?? null,
     author: shown?.dataset.short ? { short: shown.dataset.short, from: shown.dataset.from ?? null } : null,
+    // The session's open/fold button, held inside the session's place: on a
+    // narrow sheet the handle had cut it off past the sheet's edge.
+    control: control ? rectOf(control) : null,
   };
 }
 

@@ -1642,6 +1642,7 @@ main {
 .card-dock-handle {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--gap);
   min-width: 0;
