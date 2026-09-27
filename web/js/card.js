@@ -23,8 +23,11 @@ import { setCardField } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t } from "./i18n.js";
-import { listDocs as serverDocs } from "./docs.js";
-import { brokenLinksOf, docForLink, docTitle, documentsOf, noteName } from "./docnames.js";
+import { listDocs as serverDocs, fetchDoc as serverDoc } from "./docs.js";
+import { brokenLinksOf, cardsLinkingTo, docForLink, docTitle, documentsOf, noteName } from "./docnames.js";
+import { docCardsRow } from "./doccards.js";
+import { CARD_TAB, renderTabs, tabsOf } from "./cardtabs.js";
+import { authorOf, authorState } from "./docauthor.js";
 import { closeCrossHTML } from "./icon.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
@@ -84,6 +87,7 @@ export function renderCard(root, path, onClose, options = {}) {
   const onOpenSession = options.onOpenSession ?? null;
   const onOpenDoc = options.onOpenDoc ?? null;
   const listDocs = options.listDocs ?? serverDocs;
+  const fetchBody = options.fetchDoc ?? serverDoc;
 
   // Which card the panel is showing. A wiki link or a backlink moves it, which
   // is why this is not simply the `path` argument everywhere below.
@@ -120,6 +124,16 @@ export function renderCard(root, path, onClose, options = {}) {
   // arrives. A card's documents are the links in it that name a document there.
   let docs = null;
   let disposed = false;
+  // The open tab: the card itself, or one of its documents by path (T-091).
+  // Back to the card whenever the panel moves to another card.
+  let active = CARD_TAB;
+  // A document the sheet was asked to open on (options.doc, a link name or a
+  // path), taken up once the documents are listed and forgotten after.
+  let wanted = options.doc ?? null;
+  // path -> {text} | {error} | {loading}: a document's body, fetched the first
+  // time its tab opens and kept for the life of the sheet, so neither a snapshot
+  // nor going back to the tab asks for it again.
+  const bodies = new Map();
 
   // The sheet's frame, built once: the head, the row of tabs, and the stage
   // holding the open tab's pane and the place the author's session lives in
@@ -210,6 +224,81 @@ export function renderCard(root, path, onClose, options = {}) {
     close.addEventListener("click", onClose);
     box.append(close);
     return box;
+  };
+
+  // pick opens a tab: the card's, or one of its documents' by path.
+  const pick = (key) => {
+    if (key === active) return;
+    active = key;
+    if (key !== CARD_TAB) load(key);
+    painted = null;
+    draw(latest);
+    pane.scrollTop = 0;
+  };
+
+  const load = (docPath) => {
+    if (bodies.has(docPath)) return;
+    bodies.set(docPath, { loading: true });
+    Promise.resolve()
+      .then(() => fetchBody(docPath))
+      .then(
+        (text) => ({ text: String(text ?? "") }),
+        (err) => ({ error: err?.message ?? String(err) }),
+      )
+      .then((result) => {
+        if (disposed) return;
+        bodies.set(docPath, result);
+        painted = null;
+        draw(latest);
+      });
+  };
+
+  // goToCard moves the panel to another card, on that card's own tab. Answers
+  // still in flight find `current` changed and discard themselves.
+  //
+  // `writes` is deliberately NOT cleared: it holds edit identities, not
+  // display state, and its tokens are unique for the life of the panel.
+  // Clearing it here would make every in-flight answer stale for the token
+  // reason as well, which would leave the "is this still the same card?" half
+  // of the guard in onFieldChange covering nothing and untestable — true today
+  // and silently untrue the moment this line moved.
+  const goToCard = (target) => {
+    current = target;
+    active = CARD_TAB;
+    pending.clear();
+    outcomes.clear();
+    painted = null;
+    draw(latest);
+  };
+
+  // The line naming who wrote the document, and where the panel learnt it: the
+  // document's own frontmatter, or, failing that, the card it is opened from.
+  const authorLine = (author) => {
+    const from = author.from === "document" ? t("card_doc_author_from_document") : t("card_doc_author_from_card");
+    return el("p", "card-doc-author", `${t("card_doc_author").replace("{short}", author.short)} · ${from}`);
+  };
+
+  // docPane is a document's tab: its title, the cards linking it, who wrote it,
+  // and its body once fetched.
+  const docPane = (doc, card, cards, known) => {
+    const head = el("div", "card-doc-head");
+    head.append(el("h3", "card-doc-title", docTitle(doc)));
+    const row = docCardsRow(cardsLinkingTo(doc, cards, docs), goToCard);
+    if (row) head.append(row);
+    const author = authorOf(doc, card);
+    if (author) head.append(authorLine(author));
+
+    const state = bodies.get(doc.path);
+    if (!state || state.loading) return [head, el("p", "card-doc-loading", t("card_doc_loading"))];
+    if (state.error !== undefined) return [head, el("p", "card-error", `${t("card_doc_failed")}: ${state.error}`)];
+    const body = el("article", "card-doc-body");
+    body.innerHTML = renderMarkdown(
+      state.text,
+      new Set(known),
+      { has: (name) => docForLink(docs, name) !== null },
+      { missingTitle: t("card_doc_missing") },
+    );
+    return [head, body];
   };
 
   const build = (snap, card, known, orphan, stopped, backlinks, documents, broken) => {
@@ -305,7 +394,8 @@ export function renderCard(root, path, onClose, options = {}) {
       for (const doc of documents) {
         const entry = el("button", "card-doc", docTitle(doc));
         entry.setAttribute("type", "button");
-        entry.addEventListener("click", () => onOpenDoc?.(doc.path));
+        // The card's own document: its tab, not the reader over the board.
+        entry.addEventListener("click", () => pick(doc.path));
         box.append(entry);
       }
       for (const name of broken) {
@@ -375,6 +465,28 @@ export function renderCard(root, path, onClose, options = {}) {
     const documents = card ? documentsOf(card, cards, docs) : [];
     const broken = card ? brokenLinksOf(card, cards, docs) : [];
 
+    // The tabs, the one asked for once the documents are known, and the open
+    // one -- the card's, if the open document is no longer the card's.
+    const tabs = card ? tabsOf(card, cards, docs) : [{ key: CARD_TAB }];
+    if (wanted !== null && docs !== null) {
+      const doc = docForLink(docs, wanted) ?? docs.find((d) => d.path === wanted) ?? null;
+      wanted = null;
+      if (doc && tabs.some((tab) => tab.key === doc.path)) {
+        active = doc.path;
+        load(doc.path);
+      }
+    }
+    if (!tabs.some((tab) => tab.key === active)) active = CARD_TAB;
+    const open = tabs.find((tab) => tab.key === active);
+    const states = new Map(
+      tabs
+        .filter((tab) => tab.doc)
+        .map((tab) => {
+          const author = authorOf(tab.doc, card);
+          return [tab.key, author ? authorState(author.short, latest) : null];
+        }),
+    );
+
     const signature = JSON.stringify({
       hasSnapshot: latest !== null,
       current,
@@ -387,14 +499,20 @@ export function renderCard(root, path, onClose, options = {}) {
       broken,
       pending: [...pending],
       outcomes: [...outcomes],
+      tabs: tabs.map((tab) => tab.key),
+      states: [...states],
+      active,
+      body: open?.doc ? bodies.get(open.doc.path) ?? null : null,
+      author: open?.doc ? [open.doc.session ?? "", cardsLinkingTo(open.doc, cards, docs).map((c) => [c.path, c.title, c.id])] : null,
     });
     if (signature === painted) return;
     painted = signature;
 
     root.hidden = false;
-    const [headNode, ...paneNodes] = build(latest, card, known, orphan, stopped, backlinks, documents, broken);
+    const [headNode, ...cardNodes] = build(latest, card, known, orphan, stopped, backlinks, documents, broken);
     headHost.replaceChildren(headNode);
-    pane.replaceChildren(...paneNodes);
+    renderTabs(tabsHost, tabs, { active, stateOf: (tab) => states.get(tab.key) ?? null, onPick: pick });
+    pane.replaceChildren(...(open?.doc ? docPane(open.doc, card, cards, known) : cardNodes));
     // After the panel is in the page, never while it is being built: a node
     // outside the document has no layout, so both widths read zero and every
     // box "fits". Measured there, the mark never appeared at all — and looked
@@ -417,7 +535,12 @@ export function renderCard(root, path, onClose, options = {}) {
       const doc = docForLink(docs, docLink.dataset.doc);
       if (!doc) return;
       event.preventDefault?.();
-      onOpenDoc?.(doc.path);
+      // One of this card's documents opens on its tab; any other in the reader.
+      const cards = latest?.cards ?? [];
+      const card = cards.find((c) => c.path === current);
+      const own = card ? documentsOf(card, cards, docs).some((d) => d.path === doc.path) : false;
+      if (own) pick(doc.path);
+      else onOpenDoc?.(doc.path);
       return;
     }
     const link = event.target?.closest?.("[data-link]");
@@ -425,20 +548,7 @@ export function renderCard(root, path, onClose, options = {}) {
     const target = cardPathForLink(latest?.cards, link.dataset.link);
     if (!target) return;
     event.preventDefault?.();
-    current = target;
-    // None of this belongs to the card being opened. Answers still in flight
-    // find `current` changed and discard themselves.
-    //
-    // `writes` is deliberately NOT cleared: it holds edit identities, not
-    // display state, and its tokens are unique for the life of the panel.
-    // Clearing it here would make every in-flight answer stale for the token
-    // reason as well, which would leave the "is this still the same card?" half
-    // of the guard below covering nothing and untestable — true today and
-    // silently untrue the moment this line moved.
-    pending.clear();
-    outcomes.clear();
-    painted = null;
-    draw(latest);
+    goToCard(target);
   };
 
   // Escape closes the panel, and while the panel is open that is all it does —
@@ -551,9 +661,13 @@ export function createCardPanel(panel, options = {}) {
   };
 
   return {
-    open(path) {
+    // open(path, {doc, dock, expand}): doc opens the sheet on that document's
+    // tab (a link name or a path); dock and expand place the author's session
+    // and open it, for a stand, without storing the choice. Nothing of one
+    // opening is carried into the next.
+    open(path, how = {}) {
       close();
-      dispose = renderCard(panel, path, close, options);
+      dispose = renderCard(panel, path, close, { ...options, ...how });
     },
     close,
   };

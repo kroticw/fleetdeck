@@ -773,10 +773,21 @@ function withDocuments(snap) {
   return snap;
 }
 
-test("a card's documents are listed and each opens with one click", async () => {
+// The card's own documents open in the card, on their tab (T-091); only a
+// document the card does not link goes to the reader over the board.
+function activeTab(root) {
+  return root.querySelectorAll(".card-tab").find((b) => b.getAttribute("aria-selected") === "true")?.dataset.key;
+}
+
+test("a card's documents are listed and each opens on its tab with one click", async () => {
   const opened = [];
+  const fetched = [];
   const { root } = open(withDocuments(snapshot()), FLEET_UI, {
     listDocs: async () => DOCS,
+    fetchDoc: async (path) => {
+      fetched.push(path);
+      return "# Design\n";
+    },
     onOpenDoc: (path) => opened.push(path),
   });
   await settle();
@@ -787,7 +798,10 @@ test("a card's documents are listed and each opens with one click", async () => 
     ["reports/2026-09-12-report", "reports/2026-09-13-design"],
   );
   fireEvent(entries[1], "click");
-  assert.deepEqual(opened, ["/board/docs/reports/2026-09-13-design.md"]);
+  await settle();
+  assert.deepEqual(opened, [], "the card's own document is not handed to the reader");
+  assert.equal(activeTab(root), "/board/docs/reports/2026-09-13-design.md");
+  assert.deepEqual(fetched, ["/board/docs/reports/2026-09-13-design.md"]);
 });
 
 test("a card with no documents draws no documents block, not an empty one", async () => {
@@ -865,10 +879,11 @@ test("a document link in the body is a control naming the document", async () =>
   assert.match(root.querySelector(".card-body").innerHTML, /data-doc="2026-09-12-report"/);
 });
 
-test("a document link clicked in the body opens that document", async () => {
+test("a document link clicked in the body opens that document on its tab", async () => {
   const opened = [];
   const { root } = open(withDocuments(snapshot()), FLEET_UI, {
     listDocs: async () => DOCS,
+    fetchDoc: async () => "# Report\n",
     onOpenDoc: (path) => opened.push(path),
   });
   await settle();
@@ -878,9 +893,148 @@ test("a document link clicked in the body opens that document", async () => {
   link.dataset.doc = "2026-09-12-report";
   root.querySelector(".card-body").appendChild(link);
   fireEvent(link, "click");
+  await settle();
 
-  assert.deepEqual(opened, ["/board/docs/reports/2026-09-12-report.md"]);
+  assert.deepEqual(opened, []);
+  assert.equal(activeTab(root), "/board/docs/reports/2026-09-12-report.md");
 });
+
+test("a link to a document the card does not link goes to the reader", async () => {
+  const opened = [];
+  const other = { path: "/board/docs/elsewhere.md", title: "elsewhere.md", root: "/board/docs" };
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => [...DOCS, other],
+    onOpenDoc: (path) => opened.push(path),
+  });
+  await settle();
+
+  const link = dom.element("button");
+  link.dataset.doc = "elsewhere";
+  root.querySelector(".card-body").appendChild(link);
+  fireEvent(link, "click");
+
+  assert.deepEqual(opened, ["/board/docs/elsewhere.md"]);
+  assert.equal(activeTab(root), "card");
+});
+
+test("the tabs are the card and its documents, in the order its body links them", async () => {
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, { listDocs: async () => DOCS });
+  await settle();
+  assert.deepEqual(
+    root.querySelectorAll(".card-tab").map((b) => b.dataset.key),
+    ["card", "/board/docs/reports/2026-09-12-report.md", "/board/docs/reports/2026-09-13-design.md"],
+  );
+  assert.equal(activeTab(root), "card");
+});
+
+test("a document's tab shows the document, the cards linking it and who wrote it", async () => {
+  const signed = DOCS.map((d, i) => (i === 0 ? { ...d, session: "a41c09d2" } : d));
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => signed,
+    fetchDoc: async () => "# Report\n\nThe questions.\n",
+  });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  const pane = root.querySelector(".card-pane");
+  assert.equal(pane.querySelector(".card-body"), null, "the card's body is not under the document");
+  assert.match(pane.querySelector(".card-doc-body").innerHTML, /The questions/);
+  assert.ok(pane.querySelector(".doc-cards"), "the cards linking the document are named");
+  const author = pane.querySelector(".card-doc-author");
+  assert.ok(author.textContent.includes("a41c09d2"));
+  assert.ok(author.textContent.includes(t("card_doc_author_from_document")));
+
+  fireEvent(root.querySelectorAll(".card-tab")[2], "click");
+  await settle();
+  const fallback = root.querySelector(".card-pane").querySelector(".card-doc-author");
+  const card = snapshot().cards.find((c) => c.path === FLEET_UI);
+  if (card.session) {
+    assert.ok(fallback.textContent.includes(card.session));
+    assert.ok(fallback.textContent.includes(t("card_doc_author_from_card")));
+  } else {
+    assert.equal(fallback, null, "no session named anywhere, no author line");
+  }
+});
+
+test("a document's body is fetched once, not again on its tab or on every snapshot", async () => {
+  const fetched = [];
+  const { root, store } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    fetchDoc: async (path) => {
+      fetched.push(path);
+      return "# Report\n";
+    },
+  });
+  await settle();
+  const tabs = () => root.querySelectorAll(".card-tab");
+  fireEvent(tabs()[1], "click");
+  await settle();
+  store.push(withDocuments(snapshot()));
+  fireEvent(tabs()[0], "click");
+  fireEvent(tabs()[1], "click");
+  await settle();
+  assert.deepEqual(fetched, ["/board/docs/reports/2026-09-12-report.md"]);
+});
+
+test("a document that cannot be fetched says why on its tab, and the tabs still work", async () => {
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    fetchDoc: async () => {
+      throw new Error("document not found");
+    },
+  });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  const pane = root.querySelector(".card-pane");
+  assert.ok(pane.textContent.includes(t("card_doc_failed")));
+  assert.ok(pane.textContent.includes("document not found"));
+  fireEvent(root.querySelectorAll(".card-tab")[0], "click");
+  assert.ok(root.querySelector(".card-pane").querySelector(".card-body"));
+});
+
+test("a card can be opened straight on one of its documents", async () => {
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    fetchDoc: async () => "# Design\n",
+    doc: "reports/2026-09-13-design",
+  });
+  await settle();
+  assert.equal(activeTab(root), "/board/docs/reports/2026-09-13-design.md");
+});
+
+test("following a link to another card goes back to that card's own tab", async () => {
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    fetchDoc: async () => "# Report\n",
+  });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  const link = dom.element("button");
+  link.dataset.link = baseNameOf(CARD_KEEPING);
+  root.querySelector(".card-pane").appendChild(link);
+  fireEvent(link, "click");
+  assert.equal(activeTab(root), "card");
+});
+
+test("the one panel can open a card straight on one of its documents", async () => {
+  const panel = dom.element("div");
+  dom.document.body.appendChild(panel);
+  const store = fakeStore(withDocuments(snapshot()));
+  const cardPanel = createCardPanel(panel, { subscribe: store.subscribe, listDocs: async () => DOCS, fetchDoc: async () => "# D\n" });
+  cardPanel.open(FLEET_UI, { doc: "2026-09-12-report" });
+  await settle();
+  assert.equal(activeTab(panel), "/board/docs/reports/2026-09-12-report.md");
+  cardPanel.open(FLEET_UI);
+  await settle();
+  assert.equal(activeTab(panel), "card", "what one opening asked for is not carried into the next");
+  cardPanel.close();
+});
+
+function baseNameOf(path) {
+  return path.split("/").pop().replace(/\.md$/, "");
+}
 
 test("the documents are listed once per opened card, not once per snapshot", async () => {
   let calls = 0;

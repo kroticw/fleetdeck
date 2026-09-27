@@ -131,6 +131,13 @@ const en = {
   // each with the state of the session that wrote it (web/js/docauthor.js).
   card_tab_card: "Card",
   card_tabs_more: "{n} more",
+  // A document's tab: who wrote it, and where the panel learnt that -- the
+  // document's own frontmatter, or the card it is opened from.
+  card_doc_author: "written by {short}",
+  card_doc_author_from_document: "from the document",
+  card_doc_author_from_card: "from the card",
+  card_doc_loading: "Loading the document…",
+  card_doc_failed: "the document could not be read",
   author_state_orchestrator: "written by the orchestrator",
   author_state_unknown: "its session is not known to the panel",
   author_state_dead: "its session is gone",
@@ -453,6 +460,11 @@ const ru = {
   card_doc_missing: "не открывается: нет ни карточки, ни документа с таким именем, или документов с ним несколько",
   card_tab_card: "Карточка",
   card_tabs_more: "ещё {n}",
+  card_doc_author: "написала {short}",
+  card_doc_author_from_document: "из документа",
+  card_doc_author_from_card: "из карточки",
+  card_doc_loading: "Документ загружается…",
+  card_doc_failed: "документ не прочитан",
   author_state_orchestrator: "написал оркестратор",
   author_state_unknown: "панель не знает его сессию",
   author_state_dead: "его сессии больше нет",
