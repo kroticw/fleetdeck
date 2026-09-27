@@ -41,6 +41,12 @@ test("a stand's board is asked to open a session", () => {
   assert.deepEqual(readHost(win({ stand: true, standOpen: "newcard,session" })).open, ["newcard", "session"]);
 });
 
+test("a stand's board is asked to open a card's document with its author docked below or beside it", () => {
+  assert.deepEqual(readHost(win({ stand: true, standOpen: "carddoc-bottom" })).open, ["carddoc-bottom"]);
+  assert.deepEqual(readHost(win({ stand: true, standOpen: "carddoc-right" })).open, ["carddoc-right"]);
+  assert.equal(readHost(win({ stand: true, standOpen: "carddoc" })).open, undefined);
+});
+
 test("a page off a stand, or asked for anything else, opens nothing by itself", () => {
   assert.equal(readHost(win({ standOpen: "newcard" })).open, undefined);
   assert.equal(readHost(win({ stand: true, standOpen: "card" })).open, undefined);

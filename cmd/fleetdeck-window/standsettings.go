@@ -4,9 +4,16 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
+
+// standOpenNames is what standOpenEnv may name. "carddoc-bottom" and
+// "carddoc-right" open the stand's card on its first document tab with the
+// author's session docked below or beside it and open, the way the operator
+// answers a document's question from the card (T-091).
+var standOpenNames = []string{"newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right"}
 
 // On a stand, and only there, the window takes a few settings from its
 // environment that a person's window never has. A variable set without the
@@ -25,7 +32,7 @@ const (
 	// appearance cannot be relied on to reach a window started after it
 	// changed.
 	standAppearanceEnv = "FLEETDECK_STAND_APPEARANCE"
-	// "newcard", "fleetmenu", "session", or any of them comma-separated: the
+	// Any of standOpenNames, comma-separated ("newcard", "fleetmenu", ...): the
 	// board opens its new card form and the first session the panel lists, the
 	// orchestrator surface its fleet menu, as they load, so a stand shows them
 	// open without anyone pressing anything. A session open is what took
@@ -107,8 +114,8 @@ func standSettingsFrom(standSocket string, lookup func(string) (string, bool)) (
 	}
 	if v, set := lookup(standOpenEnv); set {
 		for _, name := range strings.Split(v, ",") {
-			if name != "newcard" && name != "fleetmenu" && name != "session" {
-				return standSettings{}, fmt.Errorf("%s=%q is not newcard, fleetmenu or session, comma-separated", standOpenEnv, v)
+			if !slices.Contains(standOpenNames, name) {
+				return standSettings{}, fmt.Errorf("%s=%q is not %s, comma-separated", standOpenEnv, v, strings.Join(standOpenNames, ", "))
 			}
 		}
 		s.open = v
