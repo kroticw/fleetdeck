@@ -298,6 +298,32 @@ def validate_doc_paths(
     ]
 
 
+def validate_doc_frontmatter(root: Path) -> list[str]:
+    """Frontmatter документа доски: session, если есть, — short id автора.
+
+    Панель открывает эту сессию рядом с документом. Поле необязательное, но
+    названное неверно отправит ответ не туда или никуда, поэтому это ошибка.
+    """
+    errors: list[str] = []
+    for docs in docs_dirs(root):
+        for path in sorted(docs.rglob("*.md")):
+            name = path.relative_to(docs).as_posix()
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                errors.append(f"{name}: документ не прочитан: {exc}")
+                continue
+            if not text.startswith("---"):
+                continue
+            fields = parse_frontmatter(text)
+            if fields is None:
+                errors.append(f"{name}: frontmatter документа не закрыт строкой ---")
+                continue
+            if "session" in fields and not SESSION_RE.match(fields["session"]):
+                errors.append(f"{name}: session документа не похож на short id: {fields['session']!r}")
+    return errors
+
+
 def read_registry(root: Path) -> set[str] | None:
     """Захваченные номера. None, если реестра ещё нет и проверять нечем."""
     registry = root / IDS_DIR
@@ -375,6 +401,10 @@ def main(argv: list[str]) -> int:
     links = doc_links(root)
     for name, text in cards:
         errors.extend(validate_doc_paths(name, text, root, links))
+    # Документы проверяются, только когда проверяется вся доска: сессия, которая
+    # проверяет свою карточку, чужой документ чинить не вправе.
+    if target.is_dir():
+        errors.extend(validate_doc_frontmatter(root))
 
     for error in errors:
         print(error)
