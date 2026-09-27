@@ -34,6 +34,7 @@ var reportSubjects = map[string]string{
 	"columnScroll": "column scroll",
 	"controls":     "controls",
 	"topband":      "top band",
+	"cardSheet":    "card sheet",
 }
 
 // reportSubject is what a page's report is of: each kind is a log line of its

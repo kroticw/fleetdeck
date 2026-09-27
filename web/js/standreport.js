@@ -264,6 +264,48 @@ export function topBandReport(win, { max = TOP_BAND_MAX } = {}) {
   return { report: "topband", width, max, height, sheetOpen: open, rows };
 }
 
+// --- the card sheet's document and its author's session -----------------------
+//
+// Where an open card sheet keeps the document it shows and the session that
+// wrote it (T-091): the document's box, the session's, the terminal's, the
+// place the session is in and the place it was asked to be in. scripts/standcheck
+// holds the last report to the sheet's gates: the session open next to the
+// document and not over it, and below whenever the sheet is too narrow for it
+// beside. A part the sheet does not have is null, as it is on a build without
+// the tabs.
+
+const rectOf = (el) => {
+  const r = el.getBoundingClientRect();
+  return { x: tenth(r.left), y: tenth(r.top), w: tenth(r.width), h: tenth(r.height) };
+};
+
+export function cardSheetReport(win) {
+  const panel = win.document.getElementById("card-panel");
+  const open = Boolean(panel) && panel.hidden === false;
+  const part = (sel) => (open ? panel.querySelector(sel) : null);
+  const stage = part(".card-stage");
+  const pane = part(".card-pane");
+  const dock = part(".card-dock");
+  const shown = dock && dock.hidden !== true ? dock : null;
+  const term = shown ? part(".card-dock-term") : null;
+  return {
+    report: "cardSheet",
+    open,
+    stage: stage ? rectOf(stage) : null,
+    pane: pane ? rectOf(pane) : null,
+    dock: shown ? rectOf(shown) : null,
+    terminal: term ? { open: shown.dataset.open === "true", ...rectOf(term) } : null,
+    place: stage?.dataset.dock ?? null,
+    chosen: stage?.dataset.chosen ?? null,
+  };
+}
+
+// watchCardSheetOnStand reports the card sheet whenever anything in the centre
+// column changes: a tab picked, the session opened, moved or resized.
+export function watchCardSheetOnStand(win, centre, report) {
+  return watch(win, centre, { childList: true, subtree: true, attributes: true }, () => cardSheetReport(win), report);
+}
+
 // watchTopBand reports the band whenever anything in the centre column changes:
 // a sheet opening is what this is here for.
 export function watchTopBandOnStand(win, centre, report) {

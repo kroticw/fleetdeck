@@ -7,7 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
-import { probeColumnScroll, watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
+import { probeColumnScroll, watchBoardScroll, watchCardSheetOnStand, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
 import { watchControls } from "./standcontrols.js";
 import { watchOverflow } from "./standoverflow.js";
@@ -271,6 +271,8 @@ if (host) {
   // And what stands in the way of the band the window is dragged by, with a
   // sheet open and without one (T-079).
   if (boardEl) watchTopBandOnStand(window, document.getElementById("center"), (report) => callHost(window, "fleetdeckStandReport", report));
+  // And where a card sheet keeps its document and the author's session (T-091).
+  if (boardEl) watchCardSheetOnStand(window, document.getElementById("center"), (report) => callHost(window, "fleetdeckStandReport", report));
   // And the sessions list's scrollbar, from the sessions surface.
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the grounds the sessions list lies on, which a screenshot of glass cannot tell from the glass.
@@ -373,6 +375,27 @@ if (center && host?.open?.includes("session")) {
     if (!first) return;
     opened = true;
     openSession(first.short);
+    stop?.();
+  });
+  if (opened) stop();
+}
+
+// A stand told to take the frame with a card's document open and the author's
+// session docked (FLEETDECK_STAND_OPEN=carddoc-bottom or carddoc-right, T-091):
+// the board opens the first card that names a session and links anything, on
+// its first link's tab, with the session open below or beside it as asked. The
+// place is handed to the sheet, not stored: a stand writes nothing a person's
+// window would read back.
+const standDock = ["bottom", "right"].find((place) => host?.open?.includes(`carddoc-${place}`));
+if (center && standDock) {
+  let opened = false;
+  let stop = null;
+  stop = subscribe((snap) => {
+    if (opened) return;
+    const card = (snap?.cards ?? []).find((c) => c.session && (c.links ?? []).length > 0);
+    if (!card) return;
+    opened = true;
+    cardPanel.open(card.path, { doc: card.links[0], dock: standDock, expand: true });
     stop?.();
   });
   if (opened) stop();
