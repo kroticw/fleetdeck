@@ -100,6 +100,13 @@ export function renderTabs(root, tabs, options = {}) {
   }
   more.addEventListener("click", () => {
     menu.hidden = !menu.hidden;
+    // The menu is fixed on the page (app.css: the row scrolls sideways and
+    // would clip it), so it is placed under the button, its right edges on it.
+    const box = more.getBoundingClientRect?.();
+    if (!menu.hidden && box) {
+      menu.style.setProperty("top", `${box.bottom}px`);
+      menu.style.setProperty("right", `${Math.max(0, (globalThis.innerWidth ?? box.right) - box.right)}px`);
+    }
   });
 
   root.replaceChildren(...buttons);

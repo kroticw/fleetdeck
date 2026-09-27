@@ -1147,12 +1147,25 @@ main {
  * style attributes as well as inline <style>, and a blocked one fails silently.
  */
 
+/* The card sheet is a frame (T-091): its head, its tabs, and a stage holding
+ * the open tab's pane and the place of the session that wrote it. Only the pane
+ * scrolls, so the tabs and the session stay in sight while a document is read.
+ * The reader is still one scrolling box. */
+#card-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#reader-panel {
+  overflow: auto;
+}
+
 #card-panel,
 #reader-panel {
   position: absolute;
   inset: 0;
   z-index: 2;
-  overflow: auto;
   padding: var(--gap-lg);
   background: var(--surface-raised);
   color: var(--text);
@@ -1296,6 +1309,7 @@ main {
 }
 
 .card-body pre,
+.card-doc-body pre,
 .reader-body pre {
   overflow: auto;
   padding: var(--gap);
@@ -1401,10 +1415,394 @@ main {
  * across the whole centre column of a wide window is not read; its tables
  * scroll inside their own box (.md-table) instead of widening the text.
  */
-.reader-body {
+.reader-body,
+.card-doc-body {
   max-width: 80ch;
   margin-top: var(--gap);
   overflow-wrap: anywhere;
+}
+
+/* --- a card's tabs, and the session that wrote the open one (T-091) -----------
+ *
+ * web/js/cardtabs.js draws the tabs, web/js/carddock.js the session's place.
+ * Where the session is -- below the document or beside it -- is chosen by the
+ * page's script from the stage's own width (DOCK_RIGHT_MIN), not by a media
+ * query: the sheet's width is not the window's. The stage says it in
+ * data-dock, and the session's share of it in --card-dock-size.
+ */
+.card-sheet-head {
+  flex: none;
+}
+
+.card-tabs {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  margin-top: var(--gap);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  border-bottom: 1px solid var(--border);
+}
+
+.card-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 26ch;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.card-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.card-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-tabs-more {
+  flex: none;
+  position: sticky;
+  right: 0;
+  margin-left: auto;
+  padding: 6px 10px;
+  border: none;
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+/* Fixed, not absolute: the tab row scrolls sideways and would clip it. Its
+ * place is set from the button's own box when it opens (cardtabs.js). */
+.card-tabs-menu {
+  position: fixed;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  min-width: 16ch;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--island-shadow);
+}
+
+.card-tabs-item {
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-tabs-item:hover {
+  background: var(--surface-hover);
+}
+
+/* The dot of a document's author, on its tab and on the session's handle. A
+ * session that is gone, or one the panel does not know, is a hollow ring:
+ * nothing is there to be in any state. */
+.card-tab-dot,
+.card-dock-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.card-tab-dot[data-state="waiting"],
+.card-dock-dot[data-state="waiting"] {
+  background: var(--attn);
+}
+
+.card-tab-dot[data-state="stalled"],
+.card-dock-dot[data-state="stalled"] {
+  background: var(--danger);
+}
+
+.card-tab-dot[data-state="working"],
+.card-dock-dot[data-state="working"] {
+  background: var(--ok);
+}
+
+.card-tab-dot[data-state="stopped"],
+.card-dock-dot[data-state="stopped"] {
+  background: var(--text-faint);
+}
+
+.card-tab-dot[data-state="orchestrator"],
+.card-dock-dot[data-state="orchestrator"] {
+  background: var(--accent);
+}
+
+.card-tab-dot[data-state="dead"],
+.card-tab-dot[data-state="unknown"],
+.card-dock-dot[data-state="dead"],
+.card-dock-dot[data-state="unknown"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-faint);
+}
+
+.card-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  margin-top: var(--gap);
+}
+
+.card-stage[data-dock="bottom"] {
+  flex-direction: column;
+}
+
+.card-stage[data-dock="right"] {
+  flex-direction: row;
+}
+
+.card-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.card-doc-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding-bottom: var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.card-doc-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+
+.card-doc-author,
+.card-doc-loading {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* The grip between the document and the session: dragged to size the session.
+ * Only there while the session is open. */
+.card-dock-grip {
+  flex: none;
+}
+
+.card-stage[data-dock="bottom"] > .card-dock-grip {
+  height: 8px;
+  cursor: row-resize;
+}
+
+.card-stage[data-dock="right"] > .card-dock-grip {
+  width: 8px;
+  cursor: col-resize;
+}
+
+.card-dock {
+  flex: 0 0 var(--card-dock-size, 55%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.card-dock[data-open="false"] {
+  flex: none;
+  margin-top: var(--gap);
+}
+
+.card-dock-handle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--surface-hover);
+  font-size: var(--fs-xs);
+}
+
+.card-dock-id {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.card-dock-state {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.card-dock[data-state="waiting"] .card-dock-state {
+  color: var(--attn);
+}
+
+.card-dock-needs {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-dock-places {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.card-dock-place,
+.card-dock-open,
+.card-dock-resume,
+.card-dock-write,
+.card-dock-orchestrator {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.card-dock-place[aria-pressed="true"],
+.card-dock-resume,
+.card-dock-write,
+.card-dock-orchestrator {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.card-dock-place:disabled,
+.card-dock-resume:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.card-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-dock-term {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  padding: var(--gap-sm);
+  background: var(--surface);
+}
+
+.card-dock-keys {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+.card-dock .s-keys-label {
+  margin-right: var(--gap-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.card-dock .s-key {
+  min-width: 34px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.card-dock-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap);
+  padding: var(--gap-lg);
+}
+
+.card-dock-note-text {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--text-muted);
+}
+
+.card-dock-orchestrator {
+  align-self: flex-start;
+  margin: var(--gap-lg);
+}
+
+.card-dock-error {
+  margin: 0;
+  padding: var(--gap-sm) var(--gap);
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+/* Folded beside the document, the session is a rail: its dot and its id, read
+ * down, and the control that opens it. */
+.card-dock[data-place="right"][data-open="false"] {
+  width: 44px;
+  margin-top: 0;
+  margin-left: var(--gap);
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-handle {
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: var(--gap) 0;
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-id {
+  writing-mode: vertical-rl;
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-state,
+.card-dock[data-place="right"][data-open="false"] .card-dock-needs,
+.card-dock[data-place="right"][data-open="false"] .card-dock-places {
+  display: none;
 }
 
 .reader-empty {
@@ -2223,6 +2621,7 @@ main {
  * they are what stop the terminal from being a solid black rectangle inside
  * an otherwise light panel — the specific defect a live run surfaced. */
 #session-panel .xterm-viewport,
+#card-panel .xterm-viewport,
 #orchestrator .xterm-viewport {
   background-color: var(--surface);
 }
