@@ -26,7 +26,7 @@ Read this before changing `web/js/liveterminal.js`, `internal/server/pty.go` or 
    | 4404 | no such session |
    | 4503 | no daemon to attach through |
 
-5. **Decided:** the orchestrator column reconnects by itself after 1, 2, 5 and then every 10 s. 4000, 4001 and 4404 are final. 4403 is retried: the token lives exactly as long as the panel's process, so the one moment a page presents a stale token is a panel restart between reading the token and opening the socket, which is the very case reconnecting is for. The session panel does not reconnect on its own; opening the session again is its reconnect.
+5. **Decided:** the orchestrator column reconnects by itself after 1, 2, 5 and then every 10 s. 4000, 4001 and 4404 are final. 4403 is retried: the token lives exactly as long as the panel's process, so the one moment a page presents a stale token is a panel restart between reading the token and opening the socket, which is the very case reconnecting is for. The session panel does not reconnect on its own; opening the session again is its reconnect. Neither does the session's place in a card sheet (`web/js/carddock.js`), which attaches only while it is open: folding it and opening it again is its reconnect.
 
 ## 2. The session's size belongs to everyone
 
