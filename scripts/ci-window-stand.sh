@@ -135,9 +135,10 @@ case $expect in
 		;;
 	content)
 		# The orchestrator pinned is standdaemon's orchestratorShort, the session
-		# whose attach shows a terminal.
+		# whose attach shows a terminal. The documents are the board's docs
+		# directory, where standdaemon writes the ones a card's tabs open.
 		mkdir -p "$stand/board"
-		printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n    orchestrator:\n      session: 0c7e1a2b\n' "$port" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
+		printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n    docs:\n      paths:\n        - "%s/docs"\n    orchestrator:\n      session: 0c7e1a2b\n' "$port" "$stand/board" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
 		url="http://127.0.0.1:$port/?fleet=stand"
 		(cd "$(dirname "$0")/.." && go build -o "$stand/standdaemon" ./scripts/standdaemon)
 		(cd "$(dirname "$0")/.." && go build -o "$stand/standcheck" ./scripts/standcheck)

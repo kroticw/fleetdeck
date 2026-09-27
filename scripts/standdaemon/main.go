@@ -11,10 +11,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -39,6 +41,34 @@ const stoppedShort = "5e55a0ff"
 // transcript's last word is that call, 17 minutes old, and the panel names it
 // in the row's badge, the widest a row gets.
 const silentShort = "5e55a001"
+
+// askShort is the session on a question the daemon reports (needs), and the
+// author of the document a stand opens in a card's tab
+// (FLEETDECK_STAND_OPEN=carddoc-*): its attach shows AskUserQuestion's
+// choices, so the frame shows what the operator answers.
+const askShort = "5e55a002"
+
+// docCardFile is the card whose document tabs a stand opens; askDoc and
+// workDoc are its two documents, signed by askShort and by a working session.
+const (
+	docCardFile = "T-103.md"
+	askDoc      = "2026-09-26-booking-review-questions"
+	workDoc     = "2026-09-26-reconciliation-notes"
+)
+
+// docs are the board's documents, under its docs directory, each signed in its
+// frontmatter by the session that wrote it (docs/en/board-convention.md).
+var docs = []struct{ Name, Session, Body string }{
+	{askDoc, askShort, "# Booking branch: questions before the release candidate\n\n" +
+		"## Questions for the operator\n\n" +
+		"1. Merge the migration first, or after the API change?\n" +
+		"2. Keep the old booking endpoint for one more release?\n\n" +
+		"## What was reviewed\n\n" +
+		"The booking branch as it stands, commit by commit: the migration, the API change that reads the new column, and the tests that pin both. " +
+		"The migration is reversible; the API change is not, once a client has read the new field.\n"},
+	{workDoc, "5e55a003", "# Reconciliation job: notes\n\n" +
+		"The job keeps its position in a table of its own, so a restart halfway resumes from the last batch it committed.\n"},
+}
 
 type session struct {
 	Short, Name, State, Tempo, Needs, Detail string
@@ -66,6 +96,9 @@ type card struct {
 	File, ID, Zone, Stage string
 	Progress              int
 	Session, Title        string
+	// Body is what follows the title: the links a card's document tabs are
+	// made of, for the one card that has them.
+	Body string
 }
 
 // cards is the board: every stage holds something, the titles are long, and
@@ -73,7 +106,8 @@ type card struct {
 var cards = append([]card{
 	{File: "T-101.md", ID: "T-101", Zone: "planned", Stage: "new", Title: "Measure how long the panel takes to answer under a loaded machine before choosing its deadline"},
 	{File: "T-102.md", ID: "T-102", Zone: "urgent", Stage: "active", Progress: 60, Session: "5e55a001", Title: "fleetdeck: Liquid Glass window with native panels over the board, the v0.10.1 fixes"},
-	{File: "T-103.md", ID: "T-103", Zone: "unplanned", Stage: "active", Progress: 20, Session: "5e55a002", Title: "cruises: full review of the booking branch before the release candidate goes out"},
+	{File: docCardFile, ID: "T-103", Zone: "unplanned", Stage: "active", Progress: 20, Session: askShort, Title: "cruises: full review of the booking branch before the release candidate goes out",
+		Body: "## Log\n\n- review written: [[" + askDoc + "]]\n- the reconciliation job's notes: [[" + workDoc + "]]\n"},
 	{File: "T-104.md", ID: "T-104", Zone: "planned", Stage: "review", Progress: 80, Session: "5e55a003", Title: "BS-27572: rewrite the payment reconciliation job so that it survives a restart halfway"},
 	{File: "T-105.md", ID: "T-105", Zone: "niceToHave", Stage: "blocked", Progress: 40, Session: stoppedShort, Title: "fleetdeck: release v0.10.0 and hand the checklist to the operator"},
 	{File: "T-106.md", ID: "T-106", Zone: "planned", Stage: "done", Progress: 100, Title: "Keep every branch after a merge: the operator's word on deleting them"},
@@ -101,7 +135,20 @@ func layout(home, board string) error {
 	for _, c := range cards {
 		body := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: %s\nprogress: %d\nsession: %q\nrepo: stand/fleet\ncreated: 2026-09-14\n---\n\n# %s\n",
 			c.ID, c.Zone, c.Stage, c.Progress, c.Session, c.Title)
+		if c.Body != "" {
+			body += "\n" + c.Body
+		}
 		if err := os.WriteFile(filepath.Join(dir, c.File), []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	reports := filepath.Join(board, "docs", "reports")
+	if err := os.MkdirAll(reports, 0o755); err != nil {
+		return err
+	}
+	for _, d := range docs {
+		text := "---\nsession: " + d.Session + "\n---\n\n" + d.Body
+		if err := os.WriteFile(filepath.Join(reports, d.Name+".md"), []byte(text), 0o644); err != nil {
 			return err
 		}
 	}
@@ -221,14 +268,38 @@ func screen() []byte {
 	return []byte(strings.Join(lines, ""))
 }
 
+// askScreen is askShort's terminal: AskUserQuestion's choices as Claude Code
+// draws them, the question the document's own "Questions" section asks.
+func askScreen() []byte {
+	lines := []string{
+		"\x1b[2J\x1b[H",
+		"\x1b[1m⏺\x1b[0m Wrote docs/reports/" + askDoc + ".md\r\n\r\n",
+		"\x1b[1m☐ Merge order\x1b[0m\r\n\r\n",
+		"Merge the migration first, or after the API change?\r\n\r\n",
+		"\x1b[36m❯ 1. First\x1b[0m\r\n",
+		"  2. After the API change\r\n",
+		"  3. Type something.\r\n\r\n",
+		"\x1b[2mEnter to select · ↑/↓ to navigate · Esc to cancel\x1b[0m\r\n",
+	}
+	return []byte(strings.Join(lines, ""))
+}
+
 func handlers(cwd string, hold <-chan struct{}) (daemontest.Handler, error) {
 	list, err := listRecords(cwd)
 	if err != nil {
 		return nil, err
 	}
+	orchestratorScreen := daemontest.Screen(screen(), hold)
+	question := daemontest.Screen(askScreen(), hold)
 	return daemontest.Ops(map[string]daemontest.Handler{
-		"list":   daemontest.List(list),
-		"attach": daemontest.Screen(screen(), hold),
+		"list": daemontest.List(list),
+		"attach": func(req map[string]any, c net.Conn, r *bufio.Reader) {
+			if short, _ := req["short"].(string); short == askShort {
+				question(req, c, r)
+				return
+			}
+			orchestratorScreen(req, c, r)
+		},
 		"resize": daemontest.Resized,
 	}), nil
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -198,5 +199,85 @@ func TestTheWindowStandStartsThisDaemonAndPinsItsOrchestrator(t *testing.T) {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("scripts/ci-window-stand.sh lacks %q", want)
 		}
+	}
+}
+
+// attachText reads what the stand's daemon draws for short's terminal.
+func attachText(t *testing.T, short string, want int) string {
+	t.Helper()
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	handle, err := handlers(t.TempDir(), hold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := daemontest.StartTest(t, handle)
+	a, err := daemon.New(d.Socket, func() (string, error) { return "", os.ErrNotExist }).Attach(context.Background(), short, 80, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	got := make([]byte, 0, want)
+	buf := make([]byte, 1024)
+	for deadline := time.Now().Add(2 * time.Second); len(got) < want && time.Now().Before(deadline); {
+		n, err := a.Read(buf)
+		got = append(got, buf[:n]...)
+		if err != nil {
+			t.Fatalf("read: %v after %q", err, got)
+		}
+	}
+	return string(got)
+}
+
+// The card a stand opens on its document tab (FLEETDECK_STAND_OPEN=carddoc-*)
+// links two documents, each signed by a different session: the one on a
+// question, whose terminal the tab docks, and a working one.
+func TestTheStandsCardLinksTwoDocumentsSignedByTheirSessions(t *testing.T) {
+	home, boardDir := t.TempDir(), t.TempDir()
+	if err := layout(home, boardDir); err != nil {
+		t.Fatal(err)
+	}
+	c, err := board.ParseCard(filepath.Join(boardDir, "cards", docCardFile))
+	if err != nil || c.ParseError != "" {
+		t.Fatalf("%s: %v, %q", docCardFile, err, c.ParseError)
+	}
+	authors := map[string]string{askDoc: askShort, workDoc: "5e55a003"}
+	for name, short := range authors {
+		if !slices.Contains(c.Links, name) {
+			t.Errorf("the card does not link %s: %v", name, c.Links)
+		}
+		path := filepath.Join(boardDir, "docs", "reports", name+".md")
+		if got := board.DocSession(path); got != short {
+			t.Errorf("%s is signed by %q, want %q", name, got, short)
+		}
+	}
+	if c.Session != askShort {
+		t.Errorf("the card's session is %q, want the one on a question", c.Session)
+	}
+}
+
+// The session a document tab docks is inside AskUserQuestion, drawn the way
+// Claude Code draws it, so the frame shows what the operator answers.
+func TestTheSessionOnAQuestionShowsItsChoices(t *testing.T) {
+	text := attachText(t, askShort, len(askScreen()))
+	for _, want := range []string{"❯ 1.", "Type something.", "Enter to select"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the question's screen lacks %q: %q", want, text)
+		}
+	}
+	if strings.Contains(attachText(t, orchestratorShort, len(screen())), "Type something.") {
+		t.Error("the orchestrator's terminal shows the question too")
+	}
+}
+
+// The stand's fleet reads documents from the board's docs directory, where
+// layout puts them.
+func TestTheWindowStandPointsItsFleetAtTheDocuments(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "ci-window-stand.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), `docs:\n      paths:\n        - "%s/docs"`) {
+		t.Error("scripts/ci-window-stand.sh gives the content fleet no docs paths")
 	}
 }
