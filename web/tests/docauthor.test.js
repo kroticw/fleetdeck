@@ -41,6 +41,8 @@ test("the orchestrator's pinned session is the orchestrator, even while it waits
 test("a session the snapshot does not list is unknown", () => {
   assert.equal(authorState("a41c09d2", snap([])), "unknown");
   assert.equal(authorState("a41c09d2", snap([], "")), "unknown", "an empty pin is not a match for anything");
+  assert.equal(authorState("", snap([], "")), "unknown", "not even for an empty id");
+  assert.equal(authorState(undefined, { sessions: [] }), "unknown", "nor for no id and no pin at all");
 });
 
 test("where a session is in its life comes before what it last said", () => {

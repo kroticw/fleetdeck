@@ -1,6 +1,7 @@
 package board
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,9 +41,25 @@ func TestDocSessionRefusesAValueThatIsNotAShortID(t *testing.T) {
 func TestDocSessionIgnoresAFrontmatterPastTheHead(t *testing.T) {
 	// Only the head is read: a document is listed on every card the panel
 	// opens, and a frontmatter that runs this far is not one.
-	body := "---\n" + strings.Repeat("x: y\n", 2000) + "session: e62e1d58\n---\n"
-	if got := DocSession(writeDoc(t, body)); got != "" {
+	// Distinct keys: a YAML map with one key repeated does not parse at all,
+	// which would make this pass whatever the head's size.
+	var b strings.Builder
+	b.WriteString("---\n")
+	for i := range 2000 {
+		fmt.Fprintf(&b, "k%d: v\n", i)
+	}
+	b.WriteString("session: e62e1d58\n---\n")
+	if b.Len() <= docHead {
+		t.Fatalf("the frontmatter is %d bytes, not past the %d-byte head", b.Len(), docHead)
+	}
+	if got := DocSession(writeDoc(t, b.String())); got != "" {
 		t.Fatalf("DocSession = %q past the head", got)
+	}
+	// The same frontmatter within the head is read: the limit, not the
+	// frontmatter's shape, is what drops it above.
+	short := "---\nk0: v\nsession: e62e1d58\n---\n"
+	if got := DocSession(writeDoc(t, short)); got != "e62e1d58" {
+		t.Fatalf("DocSession = %q within the head", got)
 	}
 }
 

@@ -1151,6 +1151,22 @@ test("with no window around the page the card's tabs, documents and session all 
   assert.deepEqual(terms.made.map((x) => x.short), ["909bf9b2"]);
 });
 
+test("another card that links the same document still opens on its own tab", async () => {
+  const s = withDocuments(snapshot());
+  const other = s.cards.find((c) => c.path === CARD_KEEPING);
+  other.links = [...(other.links ?? []), "2026-09-12-report"];
+  const { root } = open(s, FLEET_UI, { listDocs: async () => DOCS, fetchDoc: async () => "# Report\n" });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  const link = dom.element("button");
+  link.dataset.link = baseNameOf(CARD_KEEPING);
+  root.querySelector(".card-pane").appendChild(link);
+  fireEvent(link, "click");
+  assert.ok(root.querySelectorAll(".card-tab").some((b) => b.dataset.key === "/board/docs/reports/2026-09-12-report.md"), "the other card has that tab too");
+  assert.equal(activeTab(root), "card");
+});
+
 function baseNameOf(path) {
   return path.split("/").pop().replace(/\.md$/, "");
 }

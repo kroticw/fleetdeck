@@ -82,6 +82,12 @@ test("stored choices come back, sizes clamped", () => {
   assert.deepEqual(readDockPrefs(s), { place: "right", height: 80, width: 40 });
 });
 
+test("a stored place that is neither below nor beside reads as below", () => {
+  for (const junk of ["left", "", "RIGHT", "true"]) {
+    assert.equal(readDockPrefs(memoryStorage({ "fleetdeck-card-session-dock": junk })).place, "bottom", junk);
+  }
+});
+
 test("a storage that refuses is not an error: the defaults hold and a write is dropped", () => {
   assert.deepEqual(readDockPrefs(refusing), { place: "bottom", height: 55, width: 45 });
   assert.doesNotThrow(() => writeDockPref("place", "right", refusing));
