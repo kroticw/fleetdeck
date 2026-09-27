@@ -37,9 +37,12 @@ test("the open new card form under the capsules ends the band at its top", () =>
   assert.equal(freeTopHeight(at, 1512), TOP_BAND_MAX - 8);
 });
 
-test("a dimmed board, a sheet or cards at the top leave no band at all", () => {
-  const scrim = el("DIV");
-  assert.equal(freeTopHeight(() => scrim, 1440), 0);
+// Ground is what the page marks as ground; anything else ends the band where it
+// begins. The dimmed board under an open sheet is marked (web/index.html,
+// #sheet-scrim) and so is not this case -- an unmarked box across the top is.
+test("a sheet or cards at the top leave no band at all", () => {
+  const banner = el("DIV");
+  assert.equal(freeTopHeight(() => banner, 1440), 0);
   const card = el("ARTICLE");
   assert.equal(freeTopHeight((x, y) => (x < 30 && y < 10 ? card : BOARD), 1440), 0);
 });

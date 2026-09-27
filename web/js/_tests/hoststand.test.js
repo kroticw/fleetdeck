@@ -34,6 +34,13 @@ test("a stand's page is asked to open the fleet menu, alone or with the new card
   assert.deepEqual(readHost(win({ stand: true, standOpen: "newcard,fleetmenu" })).open, ["newcard", "fleetmenu"]);
 });
 
+// T-079: the band the window is dragged by went to nothing the moment a sheet
+// opened over the dimmed board, and no stand had ever opened one.
+test("a stand's board is asked to open a session", () => {
+  assert.deepEqual(readHost(win({ stand: true, standOpen: "session" })).open, ["session"]);
+  assert.deepEqual(readHost(win({ stand: true, standOpen: "newcard,session" })).open, ["newcard", "session"]);
+});
+
 test("a page off a stand, or asked for anything else, opens nothing by itself", () => {
   assert.equal(readHost(win({ standOpen: "newcard" })).open, undefined);
   assert.equal(readHost(win({ stand: true, standOpen: "card" })).open, undefined);

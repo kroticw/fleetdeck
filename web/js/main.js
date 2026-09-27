@@ -7,7 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
-import { probeColumnScroll, watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll } from "./standreport.js";
+import { probeColumnScroll, watchBoardScroll, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
 import { watchControls } from "./standcontrols.js";
 import { watchOverflow } from "./standoverflow.js";
@@ -268,6 +268,9 @@ if (host) {
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
   // And whether a scrolled column keeps its place while the panel's snapshots come in.
   if (boardEl) probeColumnScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report));
+  // And what stands in the way of the band the window is dragged by, with a
+  // sheet open and without one (T-079).
+  if (boardEl) watchTopBandOnStand(window, document.getElementById("center"), (report) => callHost(window, "fleetdeckStandReport", report));
   // And the sessions list's scrollbar, from the sessions surface.
   if (host.stand && host.surface === "sessions" && column) watchListScroll(window, column, (report) => callHost(window, "fleetdeckStandReport", report));
   // And the grounds the sessions list lies on, which a screenshot of glass cannot tell from the glass.
@@ -354,3 +357,23 @@ connect();
 // sessions; a side surface leaves the stored value to it.
 const reopen = regions.has("center") ? takeOpenSession(storage) : "";
 if (reopen) openSession(reopen);
+
+// A stand told to take the frame with a session open (FLEETDECK_STAND_OPEN, and
+// web/js/host.js): the board opens the first session the panel lists, as soon as
+// a snapshot names one and once only. Not the orchestrator's pinned session --
+// in the window that one is a panel of its own and opens no sheet -- because the
+// sheet is the point: over the dimmed board it is what took v0.12.0's drag band
+// down to nothing, and no stand had opened one (T-079).
+if (center && host?.open?.includes("session")) {
+  let opened = false;
+  let stop = null;
+  stop = subscribe((snap) => {
+    if (opened) return;
+    const first = (snap?.sessions ?? []).find((s) => s.short && s.short !== snap.orchestratorSession);
+    if (!first) return;
+    opened = true;
+    openSession(first.short);
+    stop?.();
+  });
+  if (opened) stop();
+}

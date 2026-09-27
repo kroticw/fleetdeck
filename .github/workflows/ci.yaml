@@ -363,6 +363,22 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_OPEN: newcard,fleetmenu
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7825 out/light-newcard exec content
+      # With a session open: the session opens as a sheet over the dimmed board,
+      # and the dimmed board covers the centre column from its very top. On
+      # v0.12.0 that took the band the window is dragged by down to nothing --
+      # across the whole width, the empty room beside the sheet included -- and
+      # the operator could not move the window at all while a session was open.
+      # The stand holds the band to more than nothing, from the board's own
+      # measurement of its top and from the window's own measurement of the band
+      # (scripts/standcheck): a press in the middle of it has to land on it.
+      - name: This build's window with a session open, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: session
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7833 out/dark-session exec content
       # In full screen and after it: v0.10.1's theme and limits capsules lay over
       # the sessions panel in full screen on the operator's macOS, and no stand
       # had entered it. The window goes in once its surfaces have loaded and
