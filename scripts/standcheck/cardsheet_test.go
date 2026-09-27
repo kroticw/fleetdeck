@@ -87,6 +87,18 @@ func TestASessionAskedRightGoesBelowOnANarrowSheetOnly(t *testing.T) {
 	}
 }
 
+// A sheet that reports no stage cannot say where its session is: that is a
+// failure of the placement gate, not a pass by silence.
+func TestASheetWithoutAStageFailsThePlacementGate(t *testing.T) {
+	s := goodSheet()
+	s.Stage = nil
+	for _, chosen := range []string{"right", "bottom"} {
+		if got := strings.Join(cardSheetVerdicts(s, chosen), "\n"); !strings.Contains(got, "the sheet reports no stage") {
+			t.Errorf("%s: verdicts %q", chosen, got)
+		}
+	}
+}
+
 func TestTheLastCardSheetReportInTheLogIsTheOneHeld(t *testing.T) {
 	log := strings.Join([]string{
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":null,"pane":null,"dock":null,"terminal":null,"place":null,"chosen":null}`,

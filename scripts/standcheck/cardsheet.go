@@ -87,7 +87,9 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 		problems = append(problems, fmt.Sprintf("the session covers the document: document %v, session %v", s.Pane, s.Dock))
 	}
 	if s.Stage == nil {
-		return problems
+		// Without the stage there is no telling where the session is, or should
+		// be: the placement gate fails rather than passes by saying nothing.
+		return append(problems, fmt.Sprintf("the sheet reports no stage: where the session is, %s asked, cannot be told", chosen))
 	}
 	switch {
 	case chosen == "right" && s.Stage.W < dockRightMin && s.Place != "bottom":
