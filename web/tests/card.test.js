@@ -1182,6 +1182,25 @@ test("another card that links the same document still opens on its own tab", asy
   assert.equal(activeTab(root), "card");
 });
 
+// What the author is doing moves every turn; the document being read must not
+// be drawn again for it -- a selection, an open <details>, would go with it.
+test("the author's state moves the dot on its tab and leaves the open document as it is", async () => {
+  const { root, store } = open(withAuthors(snapshot()), FLEET_UI, { listDocs: async () => SIGNED, fetchDoc: async () => "# Notes\n" });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[2], "click");
+  await settle();
+  const body = root.querySelector(".card-pane").querySelector(".card-doc-body");
+  const dot = () => root.querySelectorAll(".card-tab")[2].querySelector(".card-tab-dot").dataset.state;
+  assert.equal(dot(), "working");
+
+  const next = withAuthors(snapshot());
+  next.sessions.find((s) => s.short === "909bf9b2").needs = "answer: which way?";
+  store.push(next);
+
+  assert.equal(dot(), "waiting");
+  assert.equal(root.querySelector(".card-pane").querySelector(".card-doc-body"), body, "the document was drawn again");
+});
+
 function baseNameOf(path) {
   return path.split("/").pop().replace(/\.md$/, "");
 }

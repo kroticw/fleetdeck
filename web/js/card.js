@@ -121,6 +121,8 @@ export function renderCard(root, path, onClose, options = {}) {
   // Signature of what is currently on screen, so an unchanged snapshot redraws
   // nothing.
   let painted = null;
+  // The same for the row of tabs, which the authors' states also move.
+  let paintedTabs = null;
   // The documentation list, fetched once per opened panel and null until it
   // arrives. A card's documents are the links in it that name a document there.
   let docs = null;
@@ -523,18 +525,28 @@ export function renderCard(root, path, onClose, options = {}) {
       pending: [...pending],
       outcomes: [...outcomes],
       tabs: tabs.map((tab) => tab.key),
-      states: [...states],
       active,
       body: open?.doc ? bodies.get(open.doc.path) ?? null : null,
       author: open?.doc ? [open.doc.session ?? "", cardsLinkingTo(open.doc, cards, docs).map((c) => [c.path, c.title, c.id])] : null,
     });
-    if (signature === painted) return;
+    // The authors' states move every turn and are drawn only on the tabs: a
+    // change in them draws the row again and leaves the document being read --
+    // its selection, an open <details> -- as it is.
+    const tabsSignature = JSON.stringify({ tabs: tabs.map((tab) => tab.key), states: [...states], active });
+    const paintTabs = () => {
+      paintedTabs = tabsSignature;
+      renderTabs(tabsHost, tabs, { active, stateOf: (tab) => states.get(tab.key) ?? null, onPick: pick });
+    };
+    if (signature === painted) {
+      if (tabsSignature !== paintedTabs) paintTabs();
+      return;
+    }
     painted = signature;
 
     root.hidden = false;
     const [headNode, ...cardNodes] = build(latest, card, known, orphan, stopped, backlinks, documents, broken);
     headHost.replaceChildren(headNode);
-    renderTabs(tabsHost, tabs, { active, stateOf: (tab) => states.get(tab.key) ?? null, onPick: pick });
+    paintTabs();
     pane.replaceChildren(...(open?.doc ? docPane(open.doc, card, cards, known) : cardNodes));
     // After the panel is in the page, never while it is being built: a node
     // outside the document has no layout, so both widths read zero and every
