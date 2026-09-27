@@ -426,6 +426,14 @@ class DocFrontmatterTest(unittest.TestCase):
             self.write(root, "---\nsession: e62e1d58\n# Разбор\n")
             self.assertEqual(len(validate_doc_frontmatter(root)), 1)
 
+    def test_a_longer_rule_at_the_top_is_not_a_frontmatter(self):
+        # Только строка ровно из трёх дефисов открывает фронтматтер; линия из
+        # четырёх — просто линия.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.write(root, "----\n\n# Разбор\n")
+            self.assertEqual(validate_doc_frontmatter(root), [])
+
     def test_other_fields_are_free(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = board_with_report(tmp)

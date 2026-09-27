@@ -313,7 +313,9 @@ def validate_doc_frontmatter(root: Path) -> list[str]:
             except (OSError, UnicodeDecodeError) as exc:
                 errors.append(f"{name}: документ не прочитан: {exc}")
                 continue
-            if not text.startswith("---"):
+            # Фронтматтер открывает только строка ровно из трёх дефисов, как
+            # в parse_frontmatter; линия «----» в начале документа — просто линия.
+            if text.splitlines()[:1] != ["---"]:
                 continue
             fields = parse_frontmatter(text)
             if fields is None:
