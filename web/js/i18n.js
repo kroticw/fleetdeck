@@ -127,6 +127,17 @@ const en = {
   // A [[link]] that opens nothing, in the card's documents and as its title
   // in the body.
   card_doc_missing: "opens nothing: no card or document has this name, or two documents share it",
+  // A card's tabs (web/js/cardtabs.js): the card itself, then its documents,
+  // each with the state of the session that wrote it (web/js/docauthor.js).
+  card_tab_card: "Card",
+  card_tabs_more: "{n} more",
+  author_state_orchestrator: "written by the orchestrator",
+  author_state_unknown: "its session is not known to the panel",
+  author_state_dead: "its session is gone",
+  author_state_stopped: "its session is stopped",
+  author_state_stalled: "its session is stalled",
+  author_state_waiting: "its session is waiting for an answer",
+  author_state_working: "its session is working",
   doc_cards: "cards",
   reader_close: "close the document",
 
@@ -440,6 +451,15 @@ const ru = {
   backlinks: "ссылаются сюда",
   card_docs: "документы",
   card_doc_missing: "не открывается: нет ни карточки, ни документа с таким именем, или документов с ним несколько",
+  card_tab_card: "Карточка",
+  card_tabs_more: "ещё {n}",
+  author_state_orchestrator: "написал оркестратор",
+  author_state_unknown: "панель не знает его сессию",
+  author_state_dead: "его сессии больше нет",
+  author_state_stopped: "его сессия остановлена",
+  author_state_stalled: "его сессия встала",
+  author_state_waiting: "его сессия ждёт ответа",
+  author_state_working: "его сессия работает",
   doc_cards: "карточки",
   reader_close: "закрыть документ",
 
