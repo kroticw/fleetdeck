@@ -98,9 +98,20 @@ const noOverlay = { open() {}, close() {} };
 const cardPanel = center
   ? createCardPanel(document.getElementById("card-panel"), {
       onOpenSession: (short) => showSession(short),
+      // Only a document the card does not link: its own open on their tabs.
       onOpenDoc: (path) => {
         cardPanel.close();
         reader.open(path);
+      },
+      // A document the orchestrator wrote, or one whose session is gone, sends
+      // to the orchestrator's own terminal (web/js/carddock.js): through the
+      // window in the fleetdeck window, in the page in a browser tab.
+      toOrchestrator: () => routes.openOrchestrator(),
+      // A [[link]] in the author's terminal opens a card the way a link in any
+      // session's terminal does. Read when a card opens, not now: the links
+      // are defined further down.
+      get links() {
+        return terminalLinks;
       },
     })
   : noOverlay;
@@ -172,7 +183,9 @@ const routes = routesFor(window, host, {
   openSession,
   switchFleet: (name) => switchFleet(name, { storage }),
   fold: () => {},
-  openOrchestrator: () => {},
+  // In a browser tab the orchestrator's terminal is a column of this page:
+  // going to it is putting the keyboard in it.
+  openOrchestrator: () => document.querySelector("#orchestrator .xterm-helper-textarea")?.focus(),
 });
 
 // In the window the orchestrator's pinned session is its own panel, always on
