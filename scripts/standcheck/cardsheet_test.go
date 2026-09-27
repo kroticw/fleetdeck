@@ -30,8 +30,8 @@ func TestACardSheetWithoutItsSessionIsCaught(t *testing.T) {
 		"no session place":    func(s *cardSheet) { s.Dock = nil; s.Terminal = nil },
 		"no terminal":         func(s *cardSheet) { s.Terminal = nil },
 		"terminal folded":     func(s *cardSheet) { s.Terminal.Open = false },
-		"terminal too narrow": func(s *cardSheet) { s.Terminal.W = 199 },
-		"terminal too low":    func(s *cardSheet) { s.Terminal.H = 119 },
+		"terminal too narrow": func(s *cardSheet) { s.Terminal.W = 149 },
+		"terminal too low":    func(s *cardSheet) { s.Terminal.H = 99 },
 		"sheet without panes": func(s *cardSheet) { s.Pane, s.Dock, s.Terminal = nil, nil, nil },
 		"sheet closed":        func(s *cardSheet) { s.Open = false },
 	} {
@@ -44,11 +44,22 @@ func TestACardSheetWithoutItsSessionIsCaught(t *testing.T) {
 	}
 }
 
+// The least a docked terminal and its document may be: what a 1000 pt window's
+// sheet between two open panels leaves them (about 230 wide, less its padding).
+func TestADockedSessionAtItsLeastSizeHolds(t *testing.T) {
+	s := goodSheet()
+	s.Terminal.W, s.Terminal.H = 150, 100
+	s.Pane.W, s.Pane.H = 150, 100
+	if got := cardSheetVerdicts(s, "right"); len(got) != 0 {
+		t.Fatalf("verdicts %v", got)
+	}
+}
+
 func TestASessionOverTheDocumentIsCaught(t *testing.T) {
 	over := goodSheet()
 	over.Dock.X = 840 // 10 px into the document
 	squeezed := goodSheet()
-	squeezed.Pane.W = 199
+	squeezed.Pane.W = 149
 	for name, s := range map[string]cardSheet{"overlapping": over, "document squeezed": squeezed} {
 		if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the session covers the document") {
 			t.Errorf("%s: verdicts %q", name, got)

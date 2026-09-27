@@ -18,8 +18,8 @@ const dockRightMin = 640
 // The smallest a docked terminal and the document next to it may be and still
 // be read: a few lines of a question, a few lines of the document.
 const (
-	minDockedW = 200
-	minDockedH = 120
+	minDockedW = 150
+	minDockedH = 100
 )
 
 // terminalBox is the docked terminal's box, and whether the session is open in
