@@ -248,12 +248,20 @@ if [ "$expect" = content ]; then
 		sleep 1
 	done
 fi
-# opens_a_session: the stand was told to take the frame with a session open.
-opens_a_session() {
+# opened_sheet: the sheet the stand was told to take the frame with open --
+# session-panel for a session, card-panel for a card's document with its
+# author's session docked (T-091) -- or nothing.
+opened_sheet() {
 	case ",${FLEETDECK_STAND_OPEN:-}," in
-		*,session,*) return 0 ;;
-		*) return 1 ;;
+		*,session,*) echo session-panel ;;
+		*,carddoc-*) echo card-panel ;;
+		*) echo "" ;;
 	esac
+}
+# opens_a_session: the stand was told to take the frame with a sheet open over
+# the dimmed board, a session's or a card's with its session docked.
+opens_a_session() {
+	[ -n "$(opened_sheet)" ]
 }
 # A session opens as a sheet over the dimmed board, and the sheet is what the
 # band is measured against: the gates below run once the board has said it is
@@ -262,7 +270,7 @@ sheet_open=yes
 if [ "$expect" = content ] && opens_a_session; then
 	sheet_open=no
 	for _ in $(seq 20); do
-		if grep -q 'the board reports its top band: .*"sheetOpen":\["session-panel"\]' "$out/window.log" 2>/dev/null; then
+		if grep -q "the board reports its top band: .*\"sheetOpen\":\[\"$(opened_sheet)\"\]" "$out/window.log" 2>/dev/null; then
 			sheet_open=yes
 			break
 		fi
