@@ -250,6 +250,9 @@ export function renderCard(root, path, onClose, options = {}) {
   const pick = (key) => {
     if (key === active) return;
     active = key;
+    // A document that could not be fetched is asked for again when its tab is
+    // picked again: the reason it failed -- a panel restarting -- may be gone.
+    if (bodies.get(key)?.error !== undefined) bodies.delete(key);
     if (key !== CARD_TAB) load(key);
     painted = null;
     draw(latest);

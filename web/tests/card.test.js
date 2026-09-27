@@ -1008,6 +1008,27 @@ test("a document that cannot be fetched says why on its tab, and the tabs still 
   assert.ok(root.querySelector(".card-pane").querySelector(".card-body"));
 });
 
+test("a document that could not be fetched is asked for again when its tab is picked again", async () => {
+  let calls = 0;
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    fetchDoc: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("the panel was restarting");
+      return "# Report\n\nBack.\n";
+    },
+  });
+  await settle();
+  const tabs = () => root.querySelectorAll(".card-tab");
+  fireEvent(tabs()[1], "click");
+  await settle();
+  fireEvent(tabs()[0], "click");
+  fireEvent(tabs()[1], "click");
+  await settle();
+  assert.equal(calls, 2);
+  assert.match(root.querySelector(".card-pane").querySelector(".card-doc-body").innerHTML, /Back/);
+});
+
 test("a card can be opened straight on one of its documents", async () => {
   const { root } = open(withDocuments(snapshot()), FLEET_UI, {
     listDocs: async () => DOCS,
