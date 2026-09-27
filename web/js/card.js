@@ -28,6 +28,7 @@ import { brokenLinksOf, cardsLinkingTo, docForLink, docTitle, documentsOf, noteN
 import { docCardsRow } from "./doccards.js";
 import { CARD_TAB, renderTabs, tabsOf } from "./cardtabs.js";
 import { authorOf, authorState } from "./docauthor.js";
+import { createCardDock } from "./carddock.js";
 import { closeCrossHTML } from "./icon.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
@@ -151,6 +152,23 @@ export function renderCard(root, path, onClose, options = {}) {
   stage.dataset.dock = "bottom";
   stage.append(pane, grip, dock);
   root.replaceChildren(headHost, tabsHost, stage);
+  // The author's session next to the open tab (web/js/carddock.js). The panel's
+  // options reach it as they are: how to go to the orchestrator
+  // (toOrchestrator), a terminal's links and font key, and a stand's place and
+  // open session (dock, expand); a test's terminal, width and storage too.
+  const sessionPlace = createCardDock(dock, {
+    stage,
+    grip,
+    toOrchestrator: options.toOrchestrator,
+    links: options.links,
+    fontKey: options.fontKey,
+    place: options.dock,
+    expand: options.expand,
+    terminal: options.terminal,
+    observe: options.observe,
+    storage: options.storage,
+    resume: options.resume,
+  });
 
   const shownValue = (card, field) =>
     pending.has(field) ? pending.get(field) : String(card?.[field] ?? "");
@@ -487,6 +505,11 @@ export function renderCard(root, path, onClose, options = {}) {
         }),
     );
 
+    // The open tab's author, on every snapshot and not only on a changed one:
+    // what the session is doing -- the question it waits on, a stop -- moves
+    // without the card changing at all.
+    sessionPlace.show(card ? authorOf(open?.doc ?? null, card) : null, latest);
+
     const signature = JSON.stringify({
       hasSnapshot: latest !== null,
       current,
@@ -618,6 +641,7 @@ export function renderCard(root, path, onClose, options = {}) {
 
   return () => {
     disposed = true;
+    sessionPlace.dispose();
     unsubscribe();
     root.removeEventListener("click", onLinkClick);
     document.removeEventListener("keydown", onKey, true);

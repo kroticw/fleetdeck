@@ -1032,6 +1032,125 @@ test("the one panel can open a card straight on one of its documents", async () 
   cardPanel.close();
 });
 
+// --- the author's session next to the open tab (T-091) --------------------------
+
+function fakeTerminals() {
+  const made = [];
+  const factory = (host, short) => {
+    const term = { short, opened: 0, stopped: 0, open() { this.opened += 1; }, stop() { this.stopped += 1; }, type() {} };
+    made.push(term);
+    return term;
+  };
+  return { made, factory };
+}
+
+function withAuthors(snap, { cardSession = "a41c09d2", orchestrator = "" } = {}) {
+  const s = withDocuments(snap);
+  s.cards.find((c) => c.path === FLEET_UI).session = cardSession;
+  s.orchestratorSession = orchestrator;
+  s.sessions = [
+    ...(s.sessions ?? []).filter((x) => !["a41c09d2", "909bf9b2", "0c7e1a2b"].includes(x.short)),
+    { short: "a41c09d2", needs: "answer: which way?", lifecycle: "live" },
+    { short: "909bf9b2", needs: "", lifecycle: "live" },
+    { short: "0c7e1a2b", needs: "", lifecycle: "live" },
+  ];
+  return s;
+}
+
+const SIGNED = DOCS.map((d, i) => (i === 1 ? { ...d, session: "909bf9b2" } : d));
+
+test("a card with no session and a document that names none leaves no place for a session", async () => {
+  const s = withDocuments(snapshot());
+  s.cards.find((c) => c.path === FLEET_UI).session = "";
+  const { root } = open(s, FLEET_UI, { listDocs: async () => DOCS, fetchDoc: async () => "# R\n" });
+  await settle();
+  assert.equal(root.querySelector(".card-dock").hidden, true);
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  assert.equal(root.querySelector(".card-dock").hidden, true);
+  assert.ok(root.querySelector(".card-doc-body"), "the tabs work without anyone to answer");
+});
+
+test("a tab whose document another session wrote moves the open terminal to that session", async () => {
+  const terms = fakeTerminals();
+  const { root } = open(withAuthors(snapshot()), FLEET_UI, {
+    listDocs: async () => SIGNED,
+    fetchDoc: async () => "# R\n",
+    terminal: terms.factory,
+    expand: true,
+  });
+  await settle();
+  assert.deepEqual(terms.made.map((x) => x.short), ["a41c09d2"], "the card's tab: the card's session");
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  assert.deepEqual(terms.made.map((x) => x.short), ["a41c09d2"], "a document naming no one: still the card's session");
+  fireEvent(root.querySelectorAll(".card-tab")[2], "click");
+  await settle();
+  assert.deepEqual(terms.made.map((x) => x.short), ["a41c09d2", "909bf9b2"]);
+  assert.equal(terms.made[0].stopped, 1);
+});
+
+test("snapshots under an open terminal keep the one terminal", async () => {
+  const terms = fakeTerminals();
+  const { store } = open(withAuthors(snapshot()), FLEET_UI, {
+    listDocs: async () => SIGNED,
+    terminal: terms.factory,
+    expand: true,
+  });
+  await settle();
+  for (let i = 0; i < 5; i += 1) {
+    const next = withAuthors(snapshot());
+    next.cards.find((c) => c.path === FLEET_UI).progress = 10 * i;
+    store.push(next);
+  }
+  assert.equal(terms.made.length, 1);
+  assert.equal(terms.made[0].opened, 1);
+  assert.equal(terms.made[0].stopped, 0);
+});
+
+test("a document the orchestrator wrote sends to the orchestrator the way the panel was told to", async () => {
+  const terms = fakeTerminals();
+  let sent = 0;
+  const { root } = open(withAuthors(snapshot(), { cardSession: "0c7e1a2b", orchestrator: "0c7e1a2b" }), FLEET_UI, {
+    listDocs: async () => DOCS,
+    terminal: terms.factory,
+    expand: true,
+    toOrchestrator: () => {
+      sent += 1;
+    },
+  });
+  await settle();
+  assert.equal(terms.made.length, 0, "the orchestrator's terminal is not opened a second time");
+  fireEvent(root.querySelector(".card-dock-orchestrator"), "click");
+  assert.equal(sent, 1);
+});
+
+test("closing the sheet lets its terminal go", async () => {
+  const terms = fakeTerminals();
+  const { dispose } = open(withAuthors(snapshot()), FLEET_UI, { listDocs: async () => DOCS, terminal: terms.factory, expand: true });
+  await settle();
+  dispose();
+  assert.equal(terms.made[0].stopped, 1);
+});
+
+// T-017: the page in a plain browser tab, with no fleetdeck window around it,
+// still opens a card's tabs, its documents and the author's session.
+test("with no window around the page the card's tabs, documents and session all work", async () => {
+  assert.equal(globalThis.window?.fleetdeckHost, undefined, "no window host in this test");
+  const terms = fakeTerminals();
+  const { root } = open(withAuthors(snapshot()), FLEET_UI, {
+    listDocs: async () => SIGNED,
+    fetchDoc: async () => "# Design\n",
+    terminal: terms.factory,
+  });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[2], "click");
+  await settle();
+  assert.ok(root.querySelector(".card-doc-body"));
+  fireEvent(root.querySelector(".card-dock-open"), "click");
+  assert.deepEqual(terms.made.map((x) => x.short), ["909bf9b2"]);
+});
+
 function baseNameOf(path) {
   return path.split("/").pop().replace(/\.md$/, "");
 }
