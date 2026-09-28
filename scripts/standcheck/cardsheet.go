@@ -23,8 +23,11 @@ const (
 	// web/app.css.
 	railMaxW       = 64
 	railControlMin = 36
-	minDockedW     = 150
-	minDockedH     = 100
+	// fillSlack is how much narrower than its box the drawn terminal may be:
+	// the box's padding, xterm's scrollbar and less than one cell.
+	fillSlack  = 48
+	minDockedW = 150
+	minDockedH = 100
 )
 
 // terminalBox is the docked terminal's box, and whether the session is open in
@@ -34,6 +37,9 @@ type terminalBox struct {
 	// Attached: the bridge has attached to the session -- a box of the right
 	// size with nothing in it passed before this was held.
 	Attached bool `json:"attached"`
+	// Screen is the terminal as xterm draws it: fitted, it is as wide as the
+	// box, less fillSlack.
+	Screen *box `json:"screen"`
 	box
 }
 
@@ -119,6 +125,10 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 		problems = append(problems, railVerdicts(s)...)
 	} else if !s.Open || s.Dock == nil || t == nil || !t.Open || !t.Attached || t.W < minDockedW || t.H < minDockedH {
 		problems = append(problems, fmt.Sprintf("the session is not open next to the document: sheet open %v, session %v, terminal %v", s.Open, s.Dock, t))
+	} else if t.Screen == nil || t.Screen.W < t.W-fillSlack {
+		// Claude Code drawn across part of the place: the operator saw it once
+		// the session moved from beside the document to below it.
+		problems = append(problems, fmt.Sprintf("the terminal does not fill its place: drawn %v in %v", t.Screen, t.box))
 	}
 	if s.Pane == nil || s.Pane.W < minDockedW || s.Pane.H < minDockedH || (s.Dock != nil && overlaps(*s.Pane, *s.Dock)) {
 		problems = append(problems, fmt.Sprintf("the session covers the document: document %v, session %v", s.Pane, s.Dock))
@@ -149,7 +159,7 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 		problems = append(problems, fmt.Sprintf("a narrow sheet keeps the session on the right: the sheet is %v wide, under %d", s.Stage.W, dockRightMin))
 	case chosen == "right" && s.Stage.W >= dockRightMin && s.Place != "right":
 		problems = append(problems, fmt.Sprintf("a wide sheet puts the session below though right was chosen: the sheet is %v wide", s.Stage.W))
-	case chosen == "bottom" && s.Place != "bottom":
+	case (chosen == "bottom" || chosen == "flip") && s.Place != "bottom":
 		problems = append(problems, fmt.Sprintf("the session is not below though below was chosen: it is %q", s.Place))
 	}
 	return problems

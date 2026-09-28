@@ -398,8 +398,11 @@ if (center && host?.open?.includes("session")) {
 // the board opens the first card that names a session and links anything, on
 // its first link's tab, with the session open below or beside it as asked. The
 // place is handed to the sheet, not stored: a stand writes nothing a person's
-// window would read back. carddoc-rail is the session folded beside it.
-const standDock = ["bottom", "right", "rail"].find((place) => host?.open?.includes(`carddoc-${place}`));
+// window would read back. carddoc-rail is the session folded beside it;
+// carddoc-flip opens it beside and, once its terminal has attached, presses the
+// button that moves it below, the way the operator did when Claude Code stayed
+// drawn across part of the place (T-091's dev build).
+const standDock = ["bottom", "right", "rail", "flip"].find((place) => host?.open?.includes(`carddoc-${place}`));
 if (center && standDock) {
   let opened = false;
   let stop = null;
@@ -409,7 +412,16 @@ if (center && standDock) {
     if (!card) return;
     opened = true;
     const rail = standDock === "rail";
-    cardPanel.open(card.path, { doc: card.links[0], dock: rail ? "right" : standDock, expand: !rail });
+    const flip = standDock === "flip";
+    cardPanel.open(card.path, { doc: card.links[0], dock: rail || flip ? "right" : standDock, expand: !rail });
+    if (flip) {
+      const moving = setInterval(() => {
+        const place = document.querySelector("#card-panel .card-dock");
+        if (place?.dataset.attached !== "true" || place.dataset.place !== "right") return;
+        clearInterval(moving);
+        place.querySelector(".card-dock-place-bottom")?.click();
+      }, 200);
+    }
     stop?.();
   });
   if (opened) stop();

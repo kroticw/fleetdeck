@@ -13,8 +13,9 @@ import (
 // "carddoc-right" open the stand's card on its first document tab with the
 // author's session docked below or beside it and open, the way the operator
 // answers a document's question from the card (T-091); "carddoc-rail" with the
-// session folded beside it, a strip like the folded session list.
-var standOpenNames = []string{"newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail"}
+// session folded beside it, a strip like the folded session list; "carddoc-flip"
+// beside it and then moved below once its terminal has attached.
+var standOpenNames = []string{"newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip"}
 
 // On a stand, and only there, the window takes a few settings from its
 // environment that a person's window never has. A variable set without the

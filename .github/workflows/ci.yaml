@@ -422,6 +422,18 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_OPEN: carddoc-rail
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7845 out/dark-carddoc-rail exec content
+      # Moved from beside the document to below it once attached: the terminal
+      # is held to filling the place it moved to, with the stand's session
+      # attached by nothing else.
+      - name: This build's window with a card's session moved from beside its document to below it, both panels folded, glass, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_FOLD: both
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: carddoc-flip
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7847 out/light-carddoc-flip exec content
       # In full screen and after it: v0.10.1's theme and limits capsules lay over
       # the sessions panel in full screen on the operator's macOS, and no stand
       # had entered it. The window goes in once its surfaces have loaded and

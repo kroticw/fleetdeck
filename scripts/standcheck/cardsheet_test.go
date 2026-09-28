@@ -13,7 +13,7 @@ func goodSheet() cardSheet {
 		Stage:    &box{X: 400, Y: 120, W: 820, H: 560},
 		Pane:     &box{X: 400, Y: 120, W: 450, H: 560},
 		Dock:     &box{X: 858, Y: 120, W: 362, H: 560},
-		Terminal: &terminalBox{Open: true, Attached: true, box: box{X: 858, Y: 160, W: 362, H: 480}},
+		Terminal: &terminalBox{Open: true, Attached: true, box: box{X: 858, Y: 160, W: 362, H: 480}, Screen: &box{X: 866, Y: 168, W: 340, H: 460}},
 		Place:    "right",
 		Chosen:   "right",
 		Tab:      "/stand/board/docs/reports/q.md",
@@ -138,7 +138,7 @@ func TestASessionAskedRightGoesBelowOnANarrowSheetOnly(t *testing.T) {
 	narrow.Place = "bottom"
 	narrow.Pane = &box{X: 400, Y: 120, W: 639, H: 250}
 	narrow.Dock = &box{X: 400, Y: 378, W: 639, H: 302}
-	narrow.Terminal = &terminalBox{Open: true, Attached: true, box: box{X: 400, Y: 410, W: 639, H: 230}}
+	narrow.Terminal = &terminalBox{Open: true, Attached: true, box: box{X: 400, Y: 410, W: 639, H: 230}, Screen: &box{X: 408, Y: 418, W: 610, H: 210}}
 	narrow.Control = &box{X: 980, Y: 382, W: 50, H: 24}
 	if got := cardSheetVerdicts(narrow, "right"); len(got) != 0 {
 		t.Errorf("639 wide, bottom: %v", got)
@@ -172,7 +172,7 @@ func TestTheLastCardSheetReportInTheLogIsTheOneHeld(t *testing.T) {
 	log := strings.Join([]string{
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":null,"pane":null,"dock":null,"terminal":null,"place":null,"chosen":null}`,
 		cardSheetPrefix + `{"report":"cardSheet","open":true,"stage":{"x":400,"y":120,"w":820,"h":560},"pane":{"x":400,"y":120,"w":450,"h":560},` +
-			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"attached":true,"x":858,"y":160,"w":362,"h":480},"place":"right","chosen":"right",` +
+			`"dock":{"x":858,"y":120,"w":362,"h":560},"terminal":{"open":true,"attached":true,"x":858,"y":160,"w":362,"h":480,"screen":{"x":866,"y":168,"w":340,"h":460}},"place":"right","chosen":"right",` +
 			`"tab":"/stand/board/docs/reports/q.md","author":{"short":"5e55a002","from":"document"},"control":{"x":1150,"y":125,"w":60,"h":24},` +
 			`"body":"Booking branch: questions"}`,
 	}, "\n")
@@ -226,5 +226,47 @@ func TestAFoldedSessionThatIsNotARailIsCaught(t *testing.T) {
 		if got := cardSheetVerdicts(s, "rail"); len(got) == 0 {
 			t.Errorf("%s: no verdict", name)
 		}
+	}
+}
+
+// The terminal drawn across its place: xterm fitted to the box it is in, not
+// left at the size of a place the session was in before. The operator saw
+// Claude Code drawn across part of the place once it moved from beside the
+// document to below it (T-091's dev build).
+func TestATerminalNotFittedToItsPlaceIsCaught(t *testing.T) {
+	s := goodSheet()
+	s.Terminal.Screen = &box{X: 866, Y: 168, W: 200, H: 460}
+	if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the terminal does not fill its place") {
+		t.Fatalf("verdicts %q", got)
+	}
+	s.Terminal.Screen = nil
+	if got := strings.Join(cardSheetVerdicts(s, "right"), "\n"); !strings.Contains(got, "the terminal does not fill its place") {
+		t.Fatalf("no drawn terminal: verdicts %q", got)
+	}
+}
+
+func TestATerminalFittedToItsPlaceHolds(t *testing.T) {
+	s := goodSheet()
+	s.Terminal.Screen = &box{X: 866, Y: 168, W: s.Terminal.W - fillSlack, H: 460}
+	if got := cardSheetVerdicts(s, "right"); len(got) != 0 {
+		t.Fatalf("verdicts %v", got)
+	}
+}
+
+// FLEETDECK_STAND_OPEN=carddoc-flip opens the session beside the document and
+// moves it below once it has attached: held as a session asked below.
+func TestASessionMovedBelowIsHeldBelow(t *testing.T) {
+	s := goodSheet()
+	s.Place = "bottom"
+	s.Pane = &box{X: 400, Y: 120, W: 820, H: 240}
+	s.Dock = &box{X: 400, Y: 368, W: 820, H: 312}
+	s.Terminal = &terminalBox{Open: true, Attached: true, box: box{X: 400, Y: 400, W: 820, H: 240}, Screen: &box{X: 408, Y: 408, W: 790, H: 220}}
+	s.Control = &box{X: 1150, Y: 372, W: 60, H: 24}
+	if got := cardSheetVerdicts(s, "flip"); len(got) != 0 {
+		t.Fatalf("verdicts %v", got)
+	}
+	s.Place = "right"
+	if got := cardSheetVerdicts(s, "flip"); len(got) == 0 {
+		t.Fatal("a session left beside the document after the move: no verdict")
 	}
 }

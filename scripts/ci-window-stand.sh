@@ -288,6 +288,9 @@ fi
 sheet_ready='the board reports its card sheet: .*"attached":true'
 case ",${FLEETDECK_STAND_OPEN:-}," in
 	*,carddoc-rail,*) sheet_ready='the board reports its card sheet: .*"from":"document"' ;;
+	# Moved below once attached (carddoc-flip): the frame is of the session
+	# after the move, its terminal refitted to the place it moved to.
+	*,carddoc-flip,*) sheet_ready='the board reports its card sheet: .*"attached":true.*"place":"bottom"' ;;
 esac
 if [ "$expect" = content ] && [ "$(opened_sheet)" = card-panel ]; then
 	for _ in $(seq 20); do
