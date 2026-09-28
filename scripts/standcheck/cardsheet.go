@@ -18,8 +18,13 @@ const dockRightMin = 640
 // The smallest a docked terminal and the document next to it may be and still
 // be read: a few lines of a question, a few lines of the document.
 const (
-	minDockedW = 150
-	minDockedH = 100
+	// railMaxW is the widest a session folded beside the document may be, and
+	// railControlMin the least its round unfold button is across: 52 and 40 in
+	// web/app.css.
+	railMaxW       = 64
+	railControlMin = 36
+	minDockedW     = 150
+	minDockedH     = 100
 )
 
 // terminalBox is the docked terminal's box, and whether the session is open in
@@ -110,7 +115,9 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 		problems = append(problems, fmt.Sprintf("the sheet is not on a document with its author docked: tab %q, author %v", s.Tab, s.Author))
 	}
 	t := s.Terminal
-	if !s.Open || s.Dock == nil || t == nil || !t.Open || !t.Attached || t.W < minDockedW || t.H < minDockedH {
+	if chosen == "rail" {
+		problems = append(problems, railVerdicts(s)...)
+	} else if !s.Open || s.Dock == nil || t == nil || !t.Open || !t.Attached || t.W < minDockedW || t.H < minDockedH {
 		problems = append(problems, fmt.Sprintf("the session is not open next to the document: sheet open %v, session %v, terminal %v", s.Open, s.Dock, t))
 	}
 	if s.Pane == nil || s.Pane.W < minDockedW || s.Pane.H < minDockedH || (s.Dock != nil && overlaps(*s.Pane, *s.Dock)) {
@@ -136,12 +143,36 @@ func cardSheetVerdicts(s cardSheet, chosen string) []string {
 		return append(problems, fmt.Sprintf("the sheet reports no stage: where the session is, %s asked, cannot be told", chosen))
 	}
 	switch {
+	case chosen == "rail" && s.Place != "right":
+		problems = append(problems, fmt.Sprintf("the folded session is not beside the document: it is %q on a sheet %v wide", s.Place, s.Stage.W))
 	case chosen == "right" && s.Stage.W < dockRightMin && s.Place != "bottom":
 		problems = append(problems, fmt.Sprintf("a narrow sheet keeps the session on the right: the sheet is %v wide, under %d", s.Stage.W, dockRightMin))
 	case chosen == "right" && s.Stage.W >= dockRightMin && s.Place != "right":
 		problems = append(problems, fmt.Sprintf("a wide sheet puts the session below though right was chosen: the sheet is %v wide", s.Stage.W))
 	case chosen == "bottom" && s.Place != "bottom":
 		problems = append(problems, fmt.Sprintf("the session is not below though below was chosen: it is %q", s.Place))
+	}
+	return problems
+}
+
+// railVerdicts is what is wrong with a session folded beside the document
+// (FLEETDECK_STAND_OPEN=carddoc-rail): it holds no terminal, is a strip no
+// wider than the folded session list's, and its round unfold button is whole
+// inside it. The id and "Open" read down the strip once did not fit (the
+// operator's dev build of T-091).
+func railVerdicts(s cardSheet) []string {
+	var problems []string
+	if s.Dock == nil {
+		return []string{"the folded session is not on the sheet"}
+	}
+	if t := s.Terminal; t != nil && t.Open {
+		problems = append(problems, fmt.Sprintf("the folded session holds an open terminal: %v", t))
+	}
+	if s.Dock.W > railMaxW {
+		problems = append(problems, fmt.Sprintf("the folded session is not a strip: %v wide, over %d", s.Dock.W, railMaxW))
+	}
+	if c := s.Control; c == nil || c.W < railControlMin || c.H < railControlMin {
+		problems = append(problems, fmt.Sprintf("the folded session's unfold button is not whole: %v, at least %d across", s.Control, railControlMin))
 	}
 	return problems
 }

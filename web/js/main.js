@@ -398,8 +398,8 @@ if (center && host?.open?.includes("session")) {
 // the board opens the first card that names a session and links anything, on
 // its first link's tab, with the session open below or beside it as asked. The
 // place is handed to the sheet, not stored: a stand writes nothing a person's
-// window would read back.
-const standDock = ["bottom", "right"].find((place) => host?.open?.includes(`carddoc-${place}`));
+// window would read back. carddoc-rail is the session folded beside it.
+const standDock = ["bottom", "right", "rail"].find((place) => host?.open?.includes(`carddoc-${place}`));
 if (center && standDock) {
   let opened = false;
   let stop = null;
@@ -408,7 +408,8 @@ if (center && standDock) {
     const card = (snap?.cards ?? []).find((c) => c.session && (c.links ?? []).length > 0);
     if (!card) return;
     opened = true;
-    cardPanel.open(card.path, { doc: card.links[0], dock: standDock, expand: true });
+    const rail = standDock === "rail";
+    cardPanel.open(card.path, { doc: card.links[0], dock: rail ? "right" : standDock, expand: !rail });
     stop?.();
   });
   if (opened) stop();

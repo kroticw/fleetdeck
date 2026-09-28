@@ -411,6 +411,17 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_OPEN: carddoc-right
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7839 out/light-carddoc-right exec content
+      # Folded beside the document the session is a strip like the folded
+      # session list: its round unfold button and its mark, no terminal.
+      - name: This build's window with a card's document and its session folded beside it, both panels folded, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_FOLD: both
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: carddoc-rail
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7845 out/dark-carddoc-rail exec content
       # In full screen and after it: v0.10.1's theme and limits capsules lay over
       # the sessions panel in full screen on the operator's macOS, and no stand
       # had entered it. The window goes in once its surfaces have loaded and

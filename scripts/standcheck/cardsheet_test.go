@@ -190,3 +190,41 @@ func TestAStandThatOpenedACardSheetNeedsItsReport(t *testing.T) {
 		t.Fatalf("a stand that opened no card sheet is not held to one: %v", got)
 	}
 }
+
+// Folded beside the document (FLEETDECK_STAND_OPEN=carddoc-rail): the session
+// is a strip like the folded session list, with no terminal attached, and its
+// round unfold button whole inside it. The id and "Open" read down a strip once
+// did not fit (the operator's dev build of T-091).
+func railSheet() cardSheet {
+	s := goodSheet()
+	s.Pane = &box{X: 400, Y: 120, W: 760, H: 560}
+	s.Dock = &box{X: 1168, Y: 120, W: 52, H: 560}
+	s.Terminal = &terminalBox{Open: false, box: box{X: 1168, Y: 160, W: 0, H: 0}}
+	s.Control = &box{X: 1174, Y: 126, W: 40, H: 40}
+	return s
+}
+
+func TestASessionFoldedBesideTheDocumentHolds(t *testing.T) {
+	if got := cardSheetVerdicts(railSheet(), "rail"); len(got) != 0 {
+		t.Fatalf("verdicts %v", got)
+	}
+}
+
+func TestAFoldedSessionThatIsNotARailIsCaught(t *testing.T) {
+	for name, edit := range map[string]func(*cardSheet){
+		"terminal open": func(s *cardSheet) {
+			s.Terminal = &terminalBox{Open: true, Attached: true, box: box{X: 858, Y: 160, W: 362, H: 480}}
+		},
+		"strip too wide":       func(s *cardSheet) { s.Dock.W = 120; s.Dock.X = 1100 },
+		"below the document":   func(s *cardSheet) { s.Place = "bottom" },
+		"unfold button cut":    func(s *cardSheet) { s.Control = &box{X: 1174, Y: 126, W: 40, H: 12} },
+		"unfold button absent": func(s *cardSheet) { s.Control = nil },
+		"no session at all":    func(s *cardSheet) { s.Dock = nil },
+	} {
+		s := railSheet()
+		edit(&s)
+		if got := cardSheetVerdicts(s, "rail"); len(got) == 0 {
+			t.Errorf("%s: no verdict", name)
+		}
+	}
+}

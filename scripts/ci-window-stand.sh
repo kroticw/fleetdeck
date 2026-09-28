@@ -282,9 +282,16 @@ fi
 # says it has attached, and a moment after, for its first screen to be drawn.
 # A frame taken before showed an empty terminal (run 36341858143); the gate
 # (scripts/standcheck) holds the terminal to having attached either way.
+# Folded beside the document (carddoc-rail) there is no terminal: the frame is
+# taken once the sheet has read the document's author, whose mark the strip
+# shows.
+sheet_ready='the board reports its card sheet: .*"attached":true'
+case ",${FLEETDECK_STAND_OPEN:-}," in
+	*,carddoc-rail,*) sheet_ready='the board reports its card sheet: .*"from":"document"' ;;
+esac
 if [ "$expect" = content ] && [ "$(opened_sheet)" = card-panel ]; then
 	for _ in $(seq 20); do
-		if grep -q 'the board reports its card sheet: .*"attached":true' "$out/window.log" 2>/dev/null; then
+		if grep -q "$sheet_ready" "$out/window.log" 2>/dev/null; then
 			sleep 2
 			break
 		fi
