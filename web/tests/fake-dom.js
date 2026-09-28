@@ -339,7 +339,9 @@ class FakeNode {
   dispatchEvent(event) {
     event.target = event.target ?? this;
     for (let walk = this; walk; walk = walk.parentNode) {
-      for (const fn of walk.listeners.get(event.type) ?? []) fn(event);
+      // A copy, as a browser takes one: a listener added to this node while the
+      // event is being delivered to it does not hear this event.
+      for (const fn of [...(walk.listeners.get(event.type) ?? [])]) fn(event);
       if (event.propagationStopped) break;
     }
     return !event.defaultPrevented;

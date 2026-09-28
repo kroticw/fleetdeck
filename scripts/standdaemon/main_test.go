@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -55,8 +56,13 @@ func TestTheStandsOrchestratorHasItsBriefAndItsTerminalAKey(t *testing.T) {
 	if err := layout(home, boardDir); err != nil {
 		t.Fatal(err)
 	}
-	if got := orchestrator.ReadBriefState(orchestrator.BriefPath(orchestrator.Paths{Board: boardDir})); got != orchestrator.BriefOurs {
-		t.Fatalf("the brief on the stand's board reads as %v, want the wizard's own", got)
+	// Where the panel looks for it: the stand's fleet has a documentation
+	// directory (scripts/ci-window-stand.sh), and the brief lives in the first
+	// one (orchestrator.BriefPath). Written beside the board instead, the
+	// orchestrator panel said the working order was not on disk (T-091).
+	panel := orchestrator.Paths{Board: boardDir, Docs: []string{filepath.Join(boardDir, "docs")}}
+	if got := orchestrator.ReadBriefState(orchestrator.BriefPath(panel)); got != orchestrator.BriefOurs {
+		t.Fatalf("the brief where the stand's panel looks for it reads as %v, want the wizard's own", got)
 	}
 	t.Setenv("HOME", home)
 	if _, err := daemon.ControlKey(); err != nil {
@@ -198,5 +204,101 @@ func TestTheWindowStandStartsThisDaemonAndPinsItsOrchestrator(t *testing.T) {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("scripts/ci-window-stand.sh lacks %q", want)
 		}
+	}
+}
+
+// attachText reads what the stand's daemon draws for short's terminal.
+func attachText(t *testing.T, short string, want int) string {
+	t.Helper()
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	handle, err := handlers(t.TempDir(), hold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := daemontest.StartTest(t, handle)
+	a, err := daemon.New(d.Socket, func() (string, error) { return "", os.ErrNotExist }).Attach(context.Background(), short, 80, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	got := make([]byte, 0, want)
+	buf := make([]byte, 1024)
+	for deadline := time.Now().Add(2 * time.Second); len(got) < want && time.Now().Before(deadline); {
+		n, err := a.Read(buf)
+		got = append(got, buf[:n]...)
+		if err != nil {
+			t.Fatalf("read: %v after %q", err, got)
+		}
+	}
+	return string(got)
+}
+
+// The card a stand opens on its document tab (FLEETDECK_STAND_OPEN=carddoc-*)
+// links two documents, each signed by a different session: the one on a
+// question, whose terminal the tab docks, and a working one.
+func TestTheStandsCardLinksTwoDocumentsSignedByTheirSessions(t *testing.T) {
+	home, boardDir := t.TempDir(), t.TempDir()
+	if err := layout(home, boardDir); err != nil {
+		t.Fatal(err)
+	}
+	c, err := board.ParseCard(filepath.Join(boardDir, "cards", docCardFile))
+	if err != nil || c.ParseError != "" {
+		t.Fatalf("%s: %v, %q", docCardFile, err, c.ParseError)
+	}
+	authors := map[string]string{askDoc: askShort, workDoc: "5e55a003"}
+	for name, short := range authors {
+		if !slices.Contains(c.Links, name) {
+			t.Errorf("the card does not link %s: %v", name, c.Links)
+		}
+		path := filepath.Join(boardDir, "docs", "reports", name+".md")
+		if got := board.DocSession(path); got != short {
+			t.Errorf("%s is signed by %q, want %q", name, got, short)
+		}
+	}
+	// The card names a session of its own, not its documents': a sheet that
+	// failed to open the document, or to read who wrote it, would dock the
+	// card's session, and the stand's gates tell the two apart.
+	if c.Session == "" || c.Session == askShort || c.Session == "5e55a003" {
+		t.Errorf("the card's session is %q, want one of its own, apart from its documents' authors", c.Session)
+	}
+}
+
+// The session a document tab docks is inside AskUserQuestion, drawn the way
+// Claude Code draws it, so the frame shows what the operator answers.
+func TestTheSessionOnAQuestionShowsItsChoices(t *testing.T) {
+	text := attachText(t, askShort, len(askScreen()))
+	for _, want := range []string{"❯ 1.", "Type something.", "Enter to select"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the question's screen lacks %q: %q", want, text)
+		}
+	}
+	if strings.Contains(attachText(t, orchestratorShort, len(screen())), "Type something.") {
+		t.Error("the orchestrator's terminal shows the question too")
+	}
+}
+
+// A card sheet's frame is taken once its docked terminal has attached: the
+// session attaches after the documents are listed and the tab opens, and a
+// frame taken before showed an empty terminal (run 36341858143).
+func TestTheWindowStandWaitsForTheDockedTerminal(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "ci-window-stand.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), `the board reports its card sheet: .*"attached":true`) {
+		t.Error("scripts/ci-window-stand.sh takes a card sheet's frame without waiting for its terminal to attach")
+	}
+}
+
+// The stand's fleet reads documents from the board's docs directory, where
+// layout puts them.
+func TestTheWindowStandPointsItsFleetAtTheDocuments(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "ci-window-stand.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), `docs:\n      paths:\n        - "%s/docs"`) {
+		t.Error("scripts/ci-window-stand.sh gives the content fleet no docs paths")
 	}
 }

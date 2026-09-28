@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { boardScrollReport, topBandReport, watchBoardScroll } from "../standreport.js";
+import { boardScrollReport, cardSheetReport, topBandReport, watchBoardScroll } from "../standreport.js";
 import { TOP_BAND_MAX } from "../topband.js";
 
 // A window of the given width whose page carries the insets the fleetdeck
@@ -227,4 +227,117 @@ test("a dimmed board that is not the page's ground is reported as what took the 
   assert.equal(report.rows[0].id, "sheet-scrim");
   assert.equal(report.rows[0].y, 0);
   assert.equal(report.rows.length, TOP_BAND_MAX / 4, "every row the window looks at is reported, not the first alone");
+});
+
+// --- the card sheet's document and its author's session -----------------------
+//
+// cardSheetReport is where a card sheet keeps the open document and the author's
+// session (T-091): scripts/standcheck holds it to the sheet's gates -- the
+// session open and not over the document, and below when the sheet is narrow.
+
+function box(x, y, w, h, extra = {}) {
+  return { getBoundingClientRect: () => ({ left: x, top: y, width: w, height: h }), dataset: {}, hidden: false, ...extra };
+}
+
+function fakeCardSheetWindow({ panelHidden = false, stage = null, pane = null, dock = null, term = null, tab = null, control = null, body = null } = {}) {
+  const parts = {
+    ".card-stage": stage,
+    ".card-pane": pane,
+    ".card-dock": dock,
+    ".card-dock-term": term,
+    '.card-tab[aria-selected="true"]': tab,
+    ".card-dock-open": control,
+    ".card-doc-body": body,
+  };
+  const panel = { hidden: panelHidden, querySelector: (sel) => parts[sel] ?? null };
+  return { document: { getElementById: (id) => (id === "card-panel" ? panel : null) } };
+}
+
+test("a closed card sheet reports itself closed and nothing in it", () => {
+  const report = cardSheetReport(fakeCardSheetWindow({ panelHidden: true }));
+  assert.deepEqual(report, {
+    report: "cardSheet",
+    open: false,
+    stage: null,
+    pane: null,
+    dock: null,
+    terminal: null,
+    place: null,
+    chosen: null,
+    tab: null,
+    author: null,
+    control: null,
+    body: null,
+  });
+});
+
+test("a card sheet without tabs reports no pane and no session", () => {
+  const report = cardSheetReport(fakeCardSheetWindow());
+  assert.equal(report.open, true);
+  assert.equal(report.pane, null);
+  assert.equal(report.dock, null);
+});
+
+test("a card sheet reports its document, its session, where the session is and where it was asked to be", () => {
+  const stage = box(400, 120, 820, 560, { dataset: { dock: "right", chosen: "right" } });
+  const report = cardSheetReport(
+    fakeCardSheetWindow({
+      stage,
+      pane: box(400, 120, 450.25, 560),
+      dock: box(858, 120, 362, 560, { dataset: { open: "true" } }),
+      term: box(858, 160, 362, 480),
+    }),
+  );
+  assert.deepEqual(report.stage, { x: 400, y: 120, w: 820, h: 560 });
+  assert.deepEqual(report.pane, { x: 400, y: 120, w: 450.3, h: 560 });
+  assert.deepEqual(report.terminal, { open: true, attached: false, screen: null, x: 858, y: 160, w: 362, h: 480 });
+  assert.equal(report.place, "right");
+  assert.equal(report.chosen, "right");
+});
+
+// Which tab is open and whose session is docked, and where the sheet learnt who
+// that is: a sheet that failed to open the document, or to read its author,
+// would dock the card's own session, and only this tells the two apart.
+test("a card sheet reports the open tab and whose session is docked, from where", () => {
+  const report = cardSheetReport(
+    fakeCardSheetWindow({
+      stage: box(0, 0, 900, 500),
+      pane: box(0, 0, 500, 500),
+      dock: box(508, 0, 392, 500, { dataset: { open: "true", attached: "true", short: "5e55a002", from: "document" } }),
+      term: box(508, 40, 392, 400, { querySelector: (sel) => (sel === ".xterm-screen" ? box(516, 48, 370, 380) : null) }),
+      tab: { dataset: { key: "/stand/board/docs/reports/q.md" } },
+      control: box(850, 4, 44, 24),
+      body: { textContent: `\n  Booking branch: questions${" x".repeat(400)}` },
+    }),
+  );
+  assert.equal(report.terminal.attached, true, "whether the docked terminal has attached");
+  assert.deepEqual(report.terminal.screen, { x: 516, y: 48, w: 370, h: 380 }, "the terminal as xterm draws it, to hold it to its place");
+  assert.equal(report.tab, "/stand/board/docs/reports/q.md");
+  assert.deepEqual(report.author, { short: "5e55a002", from: "document" });
+  assert.deepEqual(report.control, { x: 850, y: 4, w: 44, h: 24 }, "the session's open/fold control, to hold it inside the place");
+  assert.ok(report.body.startsWith("Booking branch: questions"), "the start of the document's text as drawn, trimmed");
+  assert.equal(report.body.length, 300, "no more of it than the gate needs");
+});
+
+// Folded beside the document the place opens by its round button: "Open" is
+// not drawn there, and its empty box would say nothing about the one that is.
+test("a session folded beside the document reports its unfold button as its control", () => {
+  const parts = fakeCardSheetWindow({
+    stage: box(0, 0, 900, 500),
+    pane: box(0, 0, 840, 500),
+    dock: box(848, 0, 52, 500, { dataset: { open: "false", place: "right" } }),
+    control: box(0, 0, 0, 0),
+  });
+  const panel = parts.document.getElementById("card-panel");
+  const inner = panel.querySelector;
+  panel.querySelector = (sel) => (sel === ".card-dock-unfold" ? box(854, 6, 40, 40) : inner(sel));
+  assert.deepEqual(cardSheetReport(parts).control, { x: 854, y: 6, w: 40, h: 40 });
+});
+
+test("a hidden session place is no session", () => {
+  const report = cardSheetReport(
+    fakeCardSheetWindow({ stage: box(0, 0, 500, 500), pane: box(0, 0, 500, 500), dock: box(0, 0, 0, 0, { hidden: true }) }),
+  );
+  assert.equal(report.dock, null);
+  assert.equal(report.terminal, null);
 });

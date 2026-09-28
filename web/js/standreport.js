@@ -264,6 +264,73 @@ export function topBandReport(win, { max = TOP_BAND_MAX } = {}) {
   return { report: "topband", width, max, height, sheetOpen: open, rows };
 }
 
+// --- the card sheet's document and its author's session -----------------------
+//
+// Where an open card sheet keeps the document it shows and the session that
+// wrote it (T-091): the document's box, the session's, the terminal's, the
+// place the session is in and the place it was asked to be in. scripts/standcheck
+// holds the last report to the sheet's gates: the session open next to the
+// document and not over it, and below whenever the sheet is too narrow for it
+// beside. A part the sheet does not have is null, as it is on a build without
+// the tabs.
+
+const rectOf = (el) => {
+  const r = el.getBoundingClientRect();
+  return { x: tenth(r.left), y: tenth(r.top), w: tenth(r.width), h: tenth(r.height) };
+};
+
+// screenOf is the docked terminal as xterm draws it: fitted to its place, as
+// wide as it; left at an earlier place's size, narrower (T-091's dev build,
+// the session moved from beside the document to below it).
+const screenOf = (term) => {
+  const screen = term.querySelector?.(".xterm-screen");
+  return screen ? rectOf(screen) : null;
+};
+
+export function cardSheetReport(win) {
+  const panel = win.document.getElementById("card-panel");
+  const open = Boolean(panel) && panel.hidden === false;
+  const part = (sel) => (open ? panel.querySelector(sel) : null);
+  const stage = part(".card-stage");
+  const pane = part(".card-pane");
+  const dock = part(".card-dock");
+  const shown = dock && dock.hidden !== true ? dock : null;
+  const term = shown ? part(".card-dock-term") : null;
+  const tab = part('.card-tab[aria-selected="true"]');
+  // The control that opens or folds the place: folded beside the document that
+  // is its round unfold button (web/js/carddock.js), and "Open" is not drawn.
+  const railed = shown && shown.dataset.open === "false" && shown.dataset.place === "right";
+  const control = shown ? part(railed ? ".card-dock-unfold" : ".card-dock-open") : null;
+  const docBody = part(".card-doc-body");
+  return {
+    report: "cardSheet",
+    open,
+    stage: stage ? rectOf(stage) : null,
+    pane: pane ? rectOf(pane) : null,
+    dock: shown ? rectOf(shown) : null,
+    terminal: term ? { open: shown.dataset.open === "true", attached: shown.dataset.attached === "true", screen: screenOf(term), ...rectOf(term) } : null,
+    place: stage?.dataset.dock ?? null,
+    chosen: stage?.dataset.chosen ?? null,
+    // The open tab, and whose session is docked and where the sheet learnt who
+    // that is: a sheet that failed to open the document, or to read its author,
+    // docks the card's own session, and only these tell the two apart.
+    tab: tab?.dataset.key ?? null,
+    author: shown?.dataset.short ? { short: shown.dataset.short, from: shown.dataset.from ?? null } : null,
+    // The session's open/fold button, held inside the session's place: on a
+    // narrow sheet the handle had cut it off past the sheet's edge.
+    control: control ? rectOf(control) : null,
+    // The start of the open document's text as drawn: the boxes say where it
+    // is, this what is in it -- a frontmatter drawn as text passed every box.
+    body: docBody ? String(docBody.textContent ?? "").trim().slice(0, 300) : null,
+  };
+}
+
+// watchCardSheetOnStand reports the card sheet whenever anything in the centre
+// column changes: a tab picked, the session opened, moved or resized.
+export function watchCardSheetOnStand(win, centre, report) {
+  return watch(win, centre, { childList: true, subtree: true, attributes: true }, () => cardSheetReport(win), report);
+}
+
 // watchTopBand reports the band whenever anything in the centre column changes:
 // a sheet opening is what this is here for.
 export function watchTopBandOnStand(win, centre, report) {

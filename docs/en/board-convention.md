@@ -81,7 +81,17 @@ With the fenced regions blanked out, the title is the first line matching a leve
 
 A card's reports, research results and design documents are markdown files under a documentation directory: `docs` inside the board, or `docs` next to it, the way a fleetdeck workspace lays them out. A card links to one the way it links to another card, by name: `[[2026-09-13-card-artifacts]]`. A longer tail of the path, such as `[[reports/2026-09-13-card-artifacts]]`, is needed only when two documents share a file name.
 
-These links are the only record of which documents belong to a card; there is no frontmatter field for them. The panel lists a card's documents under its number and opens each one in a reader over the board. The reader, like the documentation section, names every card that links to the document it shows, so the way back is worked out from the cards and cannot disagree with them.
+These links are the only record of which documents belong to a card; there is no frontmatter field for them. The panel shows a card's documents as tabs of the card, next to the session that wrote the open one. A document opened from the documentation section, or from a card that does not link to it, opens in a reader over the board. Both name every card that links to the document they show, so the way back is worked out from the cards and cannot disagree with them.
+
+A document may name the session that wrote it, in a frontmatter of its own:
+
+```yaml
+---
+session: e62e1d58
+---
+```
+
+The value is the session's short id, in the same form as a card's `session`. The panel opens that session next to the document, so an answer to a question the document asks goes to the one who asked it. A session that rewrites someone else's document puts its own id there: answers go to whoever keeps the document now. The field is optional; a document without it falls back to the `session` of the card it was opened from, and the panel says so. Other frontmatter fields (`date`, `cards`, `prs`) are free. Checking the whole board, the validator rejects a `session` that is not a short id and a frontmatter that is not closed; checking one card, it leaves documents alone.
 
 A document written as a path — `docs/reports/x.md`, in backticks or not — cannot be opened from the card, so the validator rejects it and names the link to write instead. `scripts/link_docs.py` rewrites the paths in cards written before this rule; without `--write` it only prints what it would change.
 

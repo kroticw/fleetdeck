@@ -629,6 +629,60 @@ test("every glass token has a light and both dark definitions", () => {
 // The board is dimmed while a card, a document or a session is open over it.
 // The stylesheet decides that from the overlays' own hidden attribute, so no
 // module has to keep a second piece of state in step with three panels.
+// T-091: the card sheet is a frame -- head, tabs, and a stage holding the open
+// tab's pane and the author's session -- and only the pane scrolls: the session
+// and the tabs stay in sight while the document is read.
+test("the card sheet is a column whose pane scrolls and nothing else", () => {
+  assert.match(ruleBody("#card-panel"), /display:\s*flex/);
+  assert.match(ruleBody("#card-panel"), /flex-direction:\s*column/);
+  assert.match(ruleBody("#card-panel"), /overflow:\s*hidden/);
+  assert.match(ruleBody(".card-stage"), /min-height:\s*0/);
+  assert.match(ruleBody(".card-pane"), /overflow:\s*auto/);
+  assert.match(ruleBody(".card-pane"), /min-height:\s*0/);
+  assert.match(ruleBody(".card-tabs"), /overflow-x:\s*auto/);
+});
+
+test("the session sits below the document or beside it, as the stage says, at the size it carries", () => {
+  assert.match(ruleBody('.card-stage[data-dock="bottom"]'), /flex-direction:\s*column/);
+  assert.match(ruleBody('.card-stage[data-dock="right"]'), /flex-direction:\s*row/);
+  assert.match(ruleBody(".card-dock"), /var\(--card-dock-size/);
+  assert.match(ruleBody('.card-dock[data-open="false"]'), /flex:\s*none/, "a folded session takes only its handle");
+});
+
+// On a narrow sheet the handle's controls wrap to a line of their own rather
+// than going out past the sheet's edge (the stand's 1000 pt frames, T-091).
+test("the session's handle wraps rather than cutting off its controls", () => {
+  assert.match(ruleBody(".card-dock-handle"), /flex-wrap:\s*wrap/);
+});
+
+test("the dots say each author's state in the palette's own colours", () => {
+  const colours = {
+    waiting: "--attn",
+    stalled: "--danger",
+    working: "--ok",
+    stopped: "--text-faint",
+    orchestrator: "--accent",
+  };
+  for (const [state, token] of Object.entries(colours)) {
+    for (const dot of [".card-tab-dot", ".card-dock-dot"]) {
+      const body = ruleBody(`${dot}[data-state="${state}"]`);
+      assert.match(body, new RegExp(`var\\(${token}\\)`), `${dot} ${state}`);
+      assert.doesNotMatch(body, /#[0-9a-f]{3,6}\b/i, `${dot} ${state} names a colour of its own`);
+    }
+  }
+  for (const state of ["dead", "unknown"]) {
+    assert.match(ruleBody(`.card-tab-dot[data-state="${state}"]`), /background:\s*transparent/, `${state} is a hollow dot`);
+  }
+});
+
+test("nothing the card sheet adds is the window's ground, and the width decides the place in the page's script, not a media query", () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const cls of ["card-stage", "card-pane", "card-dock", "card-tabs"]) {
+    assert.doesNotMatch(stripped, new RegExp(`\\.${cls}[^{]*\\{[^}]*data-window-ground`), cls);
+  }
+  assert.doesNotMatch(stripped, /@media[^{]*width[^{]*\{[^@]*card-(stage|dock|tabs)/, "the place is chosen in web/js/carddock.js");
+});
+
 test("the board is dimmed under an open sheet and only then", () => {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
   assert.match(ruleBody("#sheet-scrim"), /display:\s*none/, "the scrim shows with nothing open");
