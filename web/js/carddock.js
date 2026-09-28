@@ -188,7 +188,14 @@ export function createCardDock(host, options) {
   const unfold = button("card-dock-unfold", "«");
   unfold.setAttribute("aria-label", t("dock_open"));
   const mark = button("card-dock-mark");
-  handle.append(unfold, mark, dot, who, named, doing, needs, fontButtons.node, places, openClose);
+  // Who and what on one line that clips, the controls on another when the two
+  // do not fit side by side: a handle that wrapped item by item took four rows
+  // on a narrow sheet and left the terminal 55 px (run 36379262459).
+  const about = el("div", "card-dock-about");
+  about.append(dot, who, named, doing, needs);
+  const controls = el("div", "card-dock-controls");
+  controls.append(fontButtons.node, places, openClose);
+  handle.append(unfold, mark, about, controls);
 
   const body = el("div", "card-dock-body");
   const errorLine = el("p", "card-dock-error");

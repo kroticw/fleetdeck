@@ -1651,7 +1651,31 @@ main {
   font-size: var(--fs-xs);
 }
 
+/* Who and what: one line whatever its width, the name and the question
+ * clipped. With the controls beside it where both fit, above them where they
+ * do not -- two rows at most, so a narrow sheet keeps its terminal (a handle
+ * that wrapped item by item took four rows and left it 55 px, run
+ * 36379262459). */
+.card-dock-about {
+  flex: 1 1 16rem;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.card-dock-controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  margin-left: auto;
+}
+
 .card-dock-id {
+  flex: none;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
@@ -1880,13 +1904,8 @@ main {
   color: var(--text-muted);
 }
 
-.card-dock[data-place="right"][data-open="false"] .card-dock-dot,
-.card-dock[data-place="right"][data-open="false"] .card-dock-id,
-.card-dock[data-place="right"][data-open="false"] .card-dock-name,
-.card-dock[data-place="right"][data-open="false"] .card-dock-state,
-.card-dock[data-place="right"][data-open="false"] .card-dock-needs,
-.card-dock[data-place="right"][data-open="false"] .card-dock-places,
-.card-dock[data-place="right"][data-open="false"] .card-dock-open {
+.card-dock[data-place="right"][data-open="false"] .card-dock-about,
+.card-dock[data-place="right"][data-open="false"] .card-dock-controls {
   display: none;
 }
 
