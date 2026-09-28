@@ -135,9 +135,10 @@ case $expect in
 		;;
 	content)
 		# The orchestrator pinned is standdaemon's orchestratorShort, the session
-		# whose attach shows a terminal.
+		# whose attach shows a terminal. The documents are the board's docs
+		# directory, where standdaemon writes the ones a card's tabs open.
 		mkdir -p "$stand/board"
-		printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n    orchestrator:\n      session: 0c7e1a2b\n' "$port" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
+		printf 'server:\n  port: %s\nfleets:\n  - name: stand\n    board:\n      path: "%s"\n    docs:\n      paths:\n        - "%s/docs"\n    orchestrator:\n      session: 0c7e1a2b\n' "$port" "$stand/board" "$stand/board" >"$stand/home/.config/fleetdeck/config.yaml"
 		url="http://127.0.0.1:$port/?fleet=stand"
 		(cd "$(dirname "$0")/.." && go build -o "$stand/standdaemon" ./scripts/standdaemon)
 		(cd "$(dirname "$0")/.." && go build -o "$stand/standcheck" ./scripts/standcheck)
@@ -247,12 +248,20 @@ if [ "$expect" = content ]; then
 		sleep 1
 	done
 fi
-# opens_a_session: the stand was told to take the frame with a session open.
-opens_a_session() {
+# opened_sheet: the sheet the stand was told to take the frame with open --
+# session-panel for a session, card-panel for a card's document with its
+# author's session docked (T-091) -- or nothing.
+opened_sheet() {
 	case ",${FLEETDECK_STAND_OPEN:-}," in
-		*,session,*) return 0 ;;
-		*) return 1 ;;
+		*,session,*) echo session-panel ;;
+		*,carddoc-*) echo card-panel ;;
+		*) echo "" ;;
 	esac
+}
+# opens_a_session: the stand was told to take the frame with a sheet open over
+# the dimmed board, a session's or a card's with its session docked.
+opens_a_session() {
+	[ -n "$(opened_sheet)" ]
 }
 # A session opens as a sheet over the dimmed board, and the sheet is what the
 # band is measured against: the gates below run once the board has said it is
@@ -261,8 +270,32 @@ sheet_open=yes
 if [ "$expect" = content ] && opens_a_session; then
 	sheet_open=no
 	for _ in $(seq 20); do
-		if grep -q 'the board reports its top band: .*"sheetOpen":\["session-panel"\]' "$out/window.log" 2>/dev/null; then
+		if grep -q "the board reports its top band: .*\"sheetOpen\":\[\"$(opened_sheet)\"\]" "$out/window.log" 2>/dev/null; then
 			sheet_open=yes
+			break
+		fi
+		sleep 1
+	done
+fi
+# A card sheet's docked terminal attaches after the documents are listed and
+# the tab opens, later than the sheet itself: the frame is taken once the board
+# says it has attached, and a moment after, for its first screen to be drawn.
+# A frame taken before showed an empty terminal (run 36341858143); the gate
+# (scripts/standcheck) holds the terminal to having attached either way.
+# Folded beside the document (carddoc-rail) there is no terminal: the frame is
+# taken once the sheet has read the document's author, whose mark the strip
+# shows.
+sheet_ready='the board reports its card sheet: .*"attached":true'
+case ",${FLEETDECK_STAND_OPEN:-}," in
+	*,carddoc-rail,*) sheet_ready='the board reports its card sheet: .*"from":"document"' ;;
+	# Moved below once attached (carddoc-flip): the frame is of the session
+	# after the move, its terminal refitted to the place it moved to.
+	*,carddoc-flip,*) sheet_ready='the board reports its card sheet: .*"attached":true.*"place":"bottom"' ;;
+esac
+if [ "$expect" = content ] && [ "$(opened_sheet)" = card-panel ]; then
+	for _ in $(seq 20); do
+		if grep -q "$sheet_ready" "$out/window.log" 2>/dev/null; then
+			sleep 2
 			break
 		fi
 		sleep 1

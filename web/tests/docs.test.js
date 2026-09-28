@@ -126,6 +126,23 @@ test("opening a document renders its markdown", async () => {
   assert.match(body.innerHTML, /<li>one<\/li>/);
 });
 
+test("a document's frontmatter is not drawn as its text", async () => {
+  stubFetch([
+    ["/api/docs/content", ok({ path: "/docs/index.md", body: "---\nsession: e62e1d58\n---\n\n# Handbook\n" })],
+    ["/api/docs", ok(DOCS)],
+  ]);
+
+  renderDocs(root);
+  await settle();
+  fireEvent(root.querySelector("[data-path]"), "click");
+  await settle();
+
+  const body = root.querySelector(".docs-body");
+  assert.doesNotMatch(body.innerHTML, /session:/);
+  assert.doesNotMatch(body.innerHTML, /<hr/);
+  assert.match(body.innerHTML, /<h2>Handbook<\/h2>/);
+});
+
 // The section has no cards to resolve links against, so every wiki link in a
 // document is a link that does not work — shown as one, never as a control that
 // silently does nothing when clicked.

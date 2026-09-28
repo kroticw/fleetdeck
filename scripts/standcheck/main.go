@@ -264,6 +264,7 @@ func main() {
 		fmt.Println("frame: not measured: " + n)
 	}
 	problems := append(check(string(raw), *trips), controlsCheck(string(raw), openList(*open))...)
+	problems = append(problems, cardSheetCheck(string(raw), openList(*open))...)
 	for _, p := range problems {
 		fmt.Println("frame: " + p)
 	}

@@ -32,6 +32,22 @@ export function noteName(path) {
 // docTitle is how a document is named on screen: its path under its root,
 // without ".md". The file name alone is not enough when two directories hold
 // one of the same name, and the full path is the operator's disk, not a name.
+// A document's frontmatter: a first line of exactly three dashes, up to the
+// next such line -- the same block internal/board reads a document's author
+// from (DocSession) and the board's validator checks.
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
+
+// documentBody is a document's text without its frontmatter, which names who
+// wrote the document (docs/en/board-convention.md) and is not text for the
+// operator to read. Every place a document's body is drawn -- its tab in a
+// card, the reader, the documentation section -- takes it from here. A
+// frontmatter that is never closed is left in: the document then shows what
+// is wrong with it rather than losing its first lines.
+export function documentBody(text) {
+  if (typeof text !== "string") return "";
+  return text.replace(FRONTMATTER, "");
+}
+
 export function docTitle(doc) {
   return String(doc?.title ?? "").replace(/\.md$/i, "");
 }

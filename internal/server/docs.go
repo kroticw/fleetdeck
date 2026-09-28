@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kroticw/fleetdeck/internal/board"
 )
 
 // markdownExt is the only extension this section serves. The documentation
@@ -32,6 +34,10 @@ type Doc struct {
 	Path  string `json:"path"`
 	Title string `json:"title"`
 	Root  string `json:"root"`
+	// Session is the short id of the session that wrote the document, from the
+	// document's own frontmatter; empty, and left out, when it names none. The
+	// panel opens that session next to the document.
+	Session string `json:"session,omitempty"`
 }
 
 // handleDocsList walks every configured root and returns the markdown under them.
@@ -88,7 +94,7 @@ func (d Deps) handleDocsList(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 			seen[resolved] = true
-			out = append(out, Doc{Path: resolved, Title: rel, Root: realRoot})
+			out = append(out, Doc{Path: resolved, Title: rel, Root: realRoot, Session: board.DocSession(resolved)})
 			return nil
 		}); err != nil {
 			unreadable = append(unreadable, root)

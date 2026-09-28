@@ -53,6 +53,26 @@ func TestDocsListsMarkdownOnly(t *testing.T) {
 	}
 }
 
+func TestDocsListNamesTheSessionThatWroteADocument(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "signed.md"), "---\nsession: e62e1d58\n---\n# a")
+	writeFile(t, filepath.Join(dir, "plain.md"), "# b")
+	writeFile(t, filepath.Join(dir, "wrong.md"), "---\nsession: nobody\n---\n# c")
+
+	rec := getDocs(docsDeps(t, dir), "/api/docs")
+	var docs []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &docs); err != nil {
+		t.Fatalf("decode %s: %v", rec.Body.String(), err)
+	}
+	got := map[string]any{}
+	for _, d := range docs {
+		got[filepath.Base(d["path"].(string))] = d["session"]
+	}
+	if got["signed.md"] != "e62e1d58" || got["plain.md"] != nil || got["wrong.md"] != nil {
+		t.Fatalf("sessions by document: %v", got)
+	}
+}
+
 func TestDocsRefusesPathsOutsideRoots(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.md"), "# a")

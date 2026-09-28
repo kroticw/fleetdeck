@@ -104,6 +104,19 @@ test("the document says it is opening, then shows its body", async () => {
   assert.match(root.querySelector(".reader-body").innerHTML, /<h2>Report<\/h2>/);
 });
 
+test("a document's frontmatter is not drawn as its text, and a document without one keeps its first line", async () => {
+  const signed = open(REPORT.path, { fetchDoc: async () => "---\nsession: e62e1d58\n---\n\n# Report\n\nBody.\n" });
+  await settle();
+  const html = signed.root.querySelector(".reader-body").innerHTML;
+  assert.doesNotMatch(html, /session:/);
+  assert.doesNotMatch(html, /<hr/);
+  assert.match(html, /<h2>Report<\/h2>/);
+
+  const plain = open(REPORT.path, { fetchDoc: async () => "First words.\n\nBody.\n" });
+  await settle();
+  assert.match(plain.root.querySelector(".reader-body").innerHTML, /First words\./);
+});
+
 test("the cards the document belongs to are listed by number and open with one click", async () => {
   const { root, opened } = open();
   await settle();

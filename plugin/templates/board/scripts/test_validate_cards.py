@@ -11,6 +11,7 @@ from validate_cards import (
     parse_frontmatter,
     validate_card,
     validate_collection,
+    validate_doc_frontmatter,
     validate_doc_paths,
     vault_names,
 )
@@ -384,6 +385,90 @@ class DocPathTest(unittest.TestCase):
                 code = main(["validate_cards.py", str(root / "cards")])
             self.assertEqual(code, 1)
             self.assertIn("[[2026-09-12-report]]", out.getvalue())
+
+
+class DocFrontmatterTest(unittest.TestCase):
+    """Документ может назвать сессию-автора во frontmatter; панель откроет её рядом."""
+
+    def write(self, root: Path, text: str, name: str = "2026-09-12-report.md") -> None:
+        (root / "docs" / "reports" / name).write_text(text, encoding="utf-8")
+
+    def test_document_without_frontmatter_is_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.assertEqual(validate_doc_frontmatter(root), [])
+
+    def test_session_in_the_short_id_format_is_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.write(root, "---\ndate: 2026-09-12\nsession: e62e1d58\ncards: [T-090]\n---\n# Разбор\n")
+            self.assertEqual(validate_doc_frontmatter(root), [])
+
+    def test_session_not_like_a_short_id_is_error_naming_the_document(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.write(root, "---\nsession: оркестр\n---\n# Разбор\n")
+            errors = validate_doc_frontmatter(root)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("reports/2026-09-12-report.md", errors[0])
+            self.assertIn("оркестр", errors[0])
+
+    def test_empty_session_is_error(self):
+        # Пустое поле панель не отличит от отсутствующего, а автор думал, что назвал себя.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.write(root, "---\nsession:\n---\n# Разбор\n")
+            self.assertEqual(len(validate_doc_frontmatter(root)), 1)
+
+    def test_unclosed_frontmatter_is_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.write(root, "---\nsession: e62e1d58\n# Разбор\n")
+            self.assertEqual(len(validate_doc_frontmatter(root)), 1)
+
+    def test_a_longer_rule_at_the_top_is_not_a_frontmatter(self):
+        # Только строка ровно из трёх дефисов открывает фронтматтер; линия из
+        # четырёх — просто линия.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.write(root, "----\n\n# Разбор\n")
+            self.assertEqual(validate_doc_frontmatter(root), [])
+
+    def test_other_fields_are_free(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            self.write(root, "---\nprs: [143, 146]\nrepo: opensource/fleetdeck\n---\n# Разбор\n")
+            self.assertEqual(validate_doc_frontmatter(root), [])
+
+    def test_documents_next_to_the_board_are_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "board"
+            (root / "cards").mkdir(parents=True)
+            (root / ".git").mkdir()
+            (Path(tmp) / "docs").mkdir()
+            (Path(tmp) / "docs" / "design.md").write_text("---\nsession: x\n---\n", encoding="utf-8")
+            self.assertEqual(len(validate_doc_frontmatter(root)), 1)
+
+    def test_main_on_the_cards_directory_reports_the_document(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            (root / "cards" / "T-001-card.md").write_text(card(id="T-001"), encoding="utf-8")
+            self.write(root, "---\nsession: nope\n---\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main(["validate_cards.py", str(root / "cards")])
+            self.assertEqual(code, 1)
+            self.assertIn("session документа", out.getvalue())
+
+    def test_main_on_one_card_does_not_check_documents(self):
+        # Сессия проверяет свою карточку; чужой документ ей чинить нельзя.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board_with_report(tmp)
+            path = root / "cards" / "T-001-card.md"
+            path.write_text(card(id="T-001"), encoding="utf-8")
+            self.write(root, "---\nsession: nope\n---\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["validate_cards.py", str(path)]), 0)
 
 
 if __name__ == "__main__":

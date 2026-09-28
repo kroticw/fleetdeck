@@ -25,7 +25,7 @@
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { subscribe as storeSubscribe } from "./store.js";
-import { cardsLinkingTo } from "./docnames.js";
+import { cardsLinkingTo, documentBody } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
 import { t } from "./i18n.js";
 import { inFleet } from "./api.js";
@@ -182,7 +182,7 @@ export function renderDocs(root, options = {}) {
     try {
       const body = await fetchDoc(path);
       if (token !== mine) return;
-      paintBody({ html: renderMarkdown(body, NO_CARDS) });
+      paintBody({ html: renderMarkdown(documentBody(body), NO_CARDS) });
     } catch (err) {
       if (token !== mine) return;
       paintBody({ text: `${t("doc_open_failed")}: ${err.message}` });

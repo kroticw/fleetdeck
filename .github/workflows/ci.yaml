@@ -379,6 +379,61 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_OPEN: session
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7833 out/dark-session exec content
+      # A card open on its document's tab, with the session that wrote the
+      # document docked and open next to it (T-091): the operator answers the
+      # document's question there. scripts/standcheck holds the sheet to its gates
+      # from the board's own report: the session open and not over the document,
+      # below it on a sheet too narrow for it beside -- the 1000 pt window's sheet
+      # is -- and beside it on a wide one, both panels folded; and the drag band is held as it is
+      # with a session open.
+      - name: This build's window with a card's document and its session below, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: carddoc-bottom
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7835 out/dark-carddoc-bottom exec content
+      - name: This build's window with a card's document and its session asked beside it on a narrow sheet, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: carddoc-right
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7837 out/dark-carddoc-right-narrow exec content
+      - name: This build's window with a card's document and its session beside it, both panels folded, glass, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_FOLD: both
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: carddoc-right
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7839 out/light-carddoc-right exec content
+      # Folded beside the document the session is a strip like the folded
+      # session list: its round unfold button and its mark, no terminal.
+      - name: This build's window with a card's document and its session folded beside it, both panels folded, glass, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_FOLD: both
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: carddoc-rail
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7845 out/dark-carddoc-rail exec content
+      # Moved from beside the document to below it once attached: the terminal
+      # is held to filling the place it moved to, with the stand's session
+      # attached by nothing else.
+      - name: This build's window with a card's session moved from beside its document to below it, both panels folded, glass, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_FOLD: both
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: carddoc-flip
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7847 out/light-carddoc-flip exec content
       # In full screen and after it: v0.10.1's theme and limits capsules lay over
       # the sessions panel in full screen on the operator's macOS, and no stand
       # had entered it. The window goes in once its surfaces have loaded and
@@ -573,6 +628,30 @@ jobs:
           defaults write com.apple.universalaccess reduceTransparency -bool true
           echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
           scripts/ci-window-stand.sh new/fleetdeck.app 7821 out/fold-sessions-opaque-dark exec content
+      # A card's document with its session docked, with no glass (T-091).
+      - name: This build's window with a card's document and its session below, opaque, light
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_OPEN: carddoc-bottom
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7841 out/opaque-light-carddoc-bottom exec content
+      - name: This build's window with a card's document and its session beside it, both panels folded, opaque, dark
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_FOLD: both
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_OPEN: carddoc-right
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          echo "=== reduceTransparency: $(defaults read com.apple.universalaccess reduceTransparency 2>/dev/null || echo unset)"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7843 out/opaque-dark-carddoc-right exec content
       - name: The system light again
         if: always()
         run: osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
