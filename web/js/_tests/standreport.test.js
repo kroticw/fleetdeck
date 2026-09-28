@@ -318,6 +318,21 @@ test("a card sheet reports the open tab and whose session is docked, from where"
   assert.equal(report.body.length, 300, "no more of it than the gate needs");
 });
 
+// Folded beside the document the place opens by its round button: "Open" is
+// not drawn there, and its empty box would say nothing about the one that is.
+test("a session folded beside the document reports its unfold button as its control", () => {
+  const parts = fakeCardSheetWindow({
+    stage: box(0, 0, 900, 500),
+    pane: box(0, 0, 840, 500),
+    dock: box(848, 0, 52, 500, { dataset: { open: "false", place: "right" } }),
+    control: box(0, 0, 0, 0),
+  });
+  const panel = parts.document.getElementById("card-panel");
+  const inner = panel.querySelector;
+  panel.querySelector = (sel) => (sel === ".card-dock-unfold" ? box(854, 6, 40, 40) : inner(sel));
+  assert.deepEqual(cardSheetReport(parts).control, { x: 854, y: 6, w: 40, h: 40 });
+});
+
 test("a hidden session place is no session", () => {
   const report = cardSheetReport(
     fakeCardSheetWindow({ stage: box(0, 0, 500, 500), pane: box(0, 0, 500, 500), dock: box(0, 0, 0, 0, { hidden: true }) }),

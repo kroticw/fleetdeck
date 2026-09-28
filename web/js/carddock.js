@@ -12,6 +12,8 @@
 import { authorState } from "./docauthor.js";
 import { t } from "./i18n.js";
 import { resumeSession } from "./api.js";
+import { buildFontControls } from "./fontcontrols.js";
+import { sessionMark } from "./initials.js";
 import { createLiveTerminal } from "./liveterminal.js";
 import { KEYS } from "./session.js";
 import { FONT_KEYS } from "./terminalfont.js";
@@ -161,6 +163,9 @@ export function createCardDock(host, options) {
   const dot = el("span", "card-dock-dot");
   dot.setAttribute("aria-hidden", "true");
   const who = el("span", "card-dock-id");
+  // The name the session list shows, the operator's label first: the id alone
+  // does not say which session this is.
+  const named = el("span", "card-dock-name");
   const doing = el("span", "card-dock-state");
   const needs = el("span", "card-dock-needs");
   const places = el("div", "card-dock-places");
@@ -173,7 +178,17 @@ export function createCardDock(host, options) {
   toRight.dataset.place = "right";
   places.append(toBottom, toRight);
   const openClose = button("card-dock-open");
-  handle.append(dot, who, doing, needs, places, openClose);
+  // The type's size, as in the session panel and the orchestrator column
+  // (web/js/fontcontrols.js), there only while a terminal is.
+  const fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "card-dock-font" });
+  // Folded beside the document the place is drawn like the folded session
+  // list: the round button that unfolds it and the session's two-letter mark
+  // (web/js/initials.js), which opens it too. The page's CSS shows them only
+  // there.
+  const unfold = button("card-dock-unfold", "«");
+  unfold.setAttribute("aria-label", t("dock_open"));
+  const mark = button("card-dock-mark");
+  handle.append(unfold, mark, dot, who, named, doing, needs, fontButtons.node, places, openClose);
 
   const body = el("div", "card-dock-body");
   const errorLine = el("p", "card-dock-error");
@@ -207,6 +222,7 @@ export function createCardDock(host, options) {
     attached = "";
     streamError = "";
     host.dataset.attached = "false";
+    fontButtons.paint(null);
   };
 
   const attach = (short) => {
@@ -228,6 +244,7 @@ export function createCardDock(host, options) {
         ready: () => {
           host.dataset.attached = "true";
         },
+        fontSize: (size) => fontButtons.paint(size),
       },
     });
     attached = short;
@@ -259,6 +276,12 @@ export function createCardDock(host, options) {
     who.textContent = author.short;
     doing.textContent = t(`dock_state_${state}`);
     const session = (latest?.sessions ?? []).find((s) => s.short === author.short);
+    const name = session?.label || session?.name || "";
+    named.textContent = name;
+    named.hidden = !name;
+    mark.textContent = sessionMark(session ?? { short: author.short });
+    mark.dataset.state = state;
+    mark.title = `${name || author.short} — ${doing.textContent}`;
     needs.textContent = state === "waiting" && session?.needs ? `— ${session.needs}` : "";
     toBottom.setAttribute("aria-pressed", String(where === "bottom"));
     toRight.setAttribute("aria-pressed", String(where === "right"));
@@ -270,6 +293,7 @@ export function createCardDock(host, options) {
     openClose.setAttribute("aria-expanded", String(open));
 
     const withTerminal = WITH_TERMINAL.has(state);
+    fontButtons.node.hidden = !(open && withTerminal);
     body.hidden = !open;
     term.hidden = !withTerminal;
     keyRow.hidden = !withTerminal;
@@ -297,6 +321,12 @@ export function createCardDock(host, options) {
     open = !open;
     paint();
   });
+  for (const b of [unfold, mark]) {
+    b.addEventListener("click", () => {
+      open = true;
+      paint();
+    });
+  }
   for (const b of [toBottom, toRight]) {
     b.addEventListener("click", () => {
       if (b.disabled) return;

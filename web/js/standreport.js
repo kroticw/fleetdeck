@@ -289,7 +289,10 @@ export function cardSheetReport(win) {
   const shown = dock && dock.hidden !== true ? dock : null;
   const term = shown ? part(".card-dock-term") : null;
   const tab = part('.card-tab[aria-selected="true"]');
-  const control = shown ? part(".card-dock-open") : null;
+  // The control that opens or folds the place: folded beside the document that
+  // is its round unfold button (web/js/carddock.js), and "Open" is not drawn.
+  const railed = shown && shown.dataset.open === "false" && shown.dataset.place === "right";
+  const control = shown ? part(railed ? ".card-dock-unfold" : ".card-dock-open") : null;
   const docBody = part(".card-doc-body");
   return {
     report: "cardSheet",

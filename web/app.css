@@ -1655,6 +1655,18 @@ main {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
+/* The session's name, beside its id. Any length, so it clips rather than
+ * pushing the controls onto another row. */
+.card-dock-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .card-dock-state {
   font-weight: 600;
   white-space: nowrap;
@@ -1681,6 +1693,7 @@ main {
 }
 
 .card-dock-place,
+.card-dock-font,
 .card-dock-open,
 .card-dock-resume,
 .card-dock-write,
@@ -1705,6 +1718,7 @@ main {
 }
 
 .card-dock-place:disabled,
+.card-dock-font:disabled,
 .card-dock-resume:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -1782,10 +1796,18 @@ main {
   overflow-wrap: anywhere;
 }
 
-/* Folded beside the document, the session is a rail: its dot and its id, read
- * down, and the control that opens it. */
+/* Folded beside the document, the session is drawn like the folded session
+ * list (.col-size-unfold, .sfold-mark): the round button that unfolds it and
+ * the session's two-letter mark, coloured by the same states. The id and the
+ * word "Open" read down a strip this narrow did not fit (found on the dev
+ * build). Elsewhere neither is shown. */
+.card-dock-unfold,
+.card-dock-mark {
+  display: none;
+}
+
 .card-dock[data-place="right"][data-open="false"] {
-  width: 44px;
+  width: 52px;
   margin-top: 0;
   margin-left: var(--gap);
 }
@@ -1793,16 +1815,78 @@ main {
 .card-dock[data-place="right"][data-open="false"] .card-dock-handle {
   flex: 1 1 auto;
   flex-direction: column;
-  padding: var(--gap) 0;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: var(--gap-sm) 0;
+  background: none;
 }
 
-.card-dock[data-place="right"][data-open="false"] .card-dock-id {
-  writing-mode: vertical-rl;
+.card-dock[data-place="right"][data-open="false"] .card-dock-unfold {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
 }
 
+.card-dock[data-place="right"][data-open="false"] .card-dock-unfold:hover {
+  background-color: var(--glass-control-hover);
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-mark:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-strong);
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-mark[data-state="waiting"] {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-mark[data-state="stalled"] {
+  background: var(--surface);
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.card-dock[data-place="right"][data-open="false"] .card-dock-dot,
+.card-dock[data-place="right"][data-open="false"] .card-dock-id,
+.card-dock[data-place="right"][data-open="false"] .card-dock-name,
 .card-dock[data-place="right"][data-open="false"] .card-dock-state,
 .card-dock[data-place="right"][data-open="false"] .card-dock-needs,
-.card-dock[data-place="right"][data-open="false"] .card-dock-places {
+.card-dock[data-place="right"][data-open="false"] .card-dock-places,
+.card-dock[data-place="right"][data-open="false"] .card-dock-open {
   display: none;
 }
 

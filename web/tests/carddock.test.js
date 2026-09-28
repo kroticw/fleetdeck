@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import { installDOM, fireEvent, fireDocumentEvent, settle } from "./fake-dom.js";
 import { t } from "../js/i18n.js";
+import { sessionMark } from "../js/initials.js";
 import {
   DOCK_KEYS,
   DOCK_RIGHT_MIN,
@@ -141,8 +142,8 @@ function snap(overrides = {}) {
   return {
     orchestratorSession: ORCH,
     sessions: [
-      { short: ASK, needs: "answer: fold by double click, by a button, or both?", lifecycle: "live" },
-      { short: WORK, needs: "", lifecycle: "live" },
+      { short: ASK, name: "cruises: booking review", needs: "answer: fold by double click, by a button, or both?", lifecycle: "live" },
+      { short: WORK, name: "reconciliation notes", label: "the operator's label", needs: "", lifecycle: "live" },
       { short: ORCH, needs: "", lifecycle: "live" },
       { short: "5e55a0ff", lifecycle: "stopped" },
       { short: "deadbeef", lifecycle: "dead" },
@@ -162,6 +163,7 @@ function terminals() {
       opened: 0,
       stopped: 0,
       typed: [],
+      steps: [],
       open() {
         this.opened += 1;
       },
@@ -170,6 +172,9 @@ function terminals() {
       },
       type(bytes) {
         this.typed.push(bytes);
+      },
+      stepFont(step) {
+        this.steps.push(step);
       },
     };
     made.push(term);
@@ -436,4 +441,56 @@ test("letting the place go stops its terminal and its watch on the width", () =>
   m.dock.dispose();
   assert.equal(m.terms.made[0].stopped, 1);
   assert.equal(m.unobserved, 1);
+});
+
+// The operator's report after the dev build (T-091): the type is sized here as
+// in every other place a session's terminal is shown (web/js/fontcontrols.js).
+test("the open place sizes its terminal's type with the session panel's buttons", () => {
+  const m = mount({ extra: { expand: true } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  const bigger = m.host.querySelector(".term-font-bigger");
+  assert.ok(bigger, "the buttons are on the place");
+  assert.equal(bigger.disabled, true, "no size to claim before the terminal has one");
+  m.terms.made[0].opts.report.fontSize(12);
+  assert.equal(m.host.querySelector(".term-font-reset").textContent, "12 px");
+  fireEvent(bigger, "click");
+  fireEvent(m.host.querySelector(".term-font-smaller"), "click");
+  assert.deepEqual(m.terms.made[0].steps, [1, -1]);
+  fireEvent(openButton(m.host), "click");
+  assert.equal(m.host.querySelector(".term-font-bigger").disabled, true, "folded, there is no terminal to size");
+  assert.equal(m.host.querySelector(".term-font").hidden, true);
+});
+
+// The id alone does not say which session it is: the name the session list
+// shows goes beside it, the operator's label first.
+test("the handle names the session beside its id, the way the session list does", () => {
+  const m = mount();
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  assert.equal(m.host.querySelector(".card-dock-name").textContent, "cruises: booking review");
+  assert.equal(m.host.querySelector(".card-dock-id").textContent, ASK);
+  m.dock.show({ short: WORK, from: "card" }, snap());
+  assert.equal(m.host.querySelector(".card-dock-name").textContent, "the operator's label");
+  m.dock.show({ short: "5e55a0ff", from: "card" }, snap());
+  assert.equal(m.host.querySelector(".card-dock-name").textContent, "", "an unnamed session is its id alone");
+  assert.equal(m.host.querySelector(".card-dock-name").hidden, true);
+});
+
+// Folded beside the document, the place is drawn like the folded session list:
+// the round button that unfolds it and the session's two-letter mark, which
+// opens it too. The mark carries the state for the page's colours and the whole
+// name under the pointer.
+test("folded beside the document, the place is a mark and an unfold button, both of which open it", () => {
+  const m = mount({ width: 900, extra: { place: "right" } });
+  m.dock.show({ short: ASK, from: "document" }, snap());
+  const mark = m.host.querySelector(".card-dock-mark");
+  assert.equal(mark.textContent, sessionMark(snap().sessions[0]));
+  assert.equal(mark.dataset.state, "waiting");
+  assert.ok(mark.title.includes("cruises: booking review"));
+  fireEvent(mark, "click");
+  assert.equal(m.host.dataset.open, "true");
+  assert.equal(m.terms.made.length, 1);
+  fireEvent(openButton(m.host), "click");
+  fireEvent(m.host.querySelector(".card-dock-unfold"), "click");
+  assert.equal(m.host.dataset.open, "true");
+  assert.equal(m.terms.made.length, 2);
 });
