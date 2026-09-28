@@ -25,7 +25,7 @@ export function readHost(win) {
   return { surface: host.surface, glass: host.glass, stand: true, ...open };
 }
 
-const STAND_OPENS = new Set(["newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right"]);
+const STAND_OPENS = new Set(["newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip"]);
 
 export function callHost(win, name, payload) {
   const fn = win?.[name];

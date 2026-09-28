@@ -44,6 +44,10 @@ test("a stand's board is asked to open a session", () => {
 test("a stand's board is asked to open a card's document with its author docked below or beside it", () => {
   assert.deepEqual(readHost(win({ stand: true, standOpen: "carddoc-bottom" })).open, ["carddoc-bottom"]);
   assert.deepEqual(readHost(win({ stand: true, standOpen: "carddoc-right" })).open, ["carddoc-right"]);
+  // Folded beside the document, and moved below once attached: the window let
+  // both through and the page opened nothing (run 36379262459).
+  assert.deepEqual(readHost(win({ stand: true, standOpen: "carddoc-rail" })).open, ["carddoc-rail"]);
+  assert.deepEqual(readHost(win({ stand: true, standOpen: "carddoc-flip" })).open, ["carddoc-flip"]);
   assert.equal(readHost(win({ stand: true, standOpen: "carddoc" })).open, undefined);
 });
 

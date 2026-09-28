@@ -3,10 +3,36 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+// The page keeps its own list of what a stand may open (web/js/host.js
+// STAND_OPENS) and opens nothing for a name it lacks: carddoc-rail and
+// carddoc-flip went into this list alone, and their frames showed no sheet
+// (run 36379262459).
+func TestThePageOpensWhatTheWindowLetsAStandOpen(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "web", "js", "host.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(src), "const STAND_OPENS = new Set([")
+	list, _, closed := strings.Cut(rest, "])")
+	if !ok || !closed {
+		t.Fatal("web/js/host.js has no STAND_OPENS list")
+	}
+	var page []string
+	for _, item := range strings.Split(list, ",") {
+		page = append(page, strings.Trim(strings.TrimSpace(item), `"`))
+	}
+	if !slices.Equal(page, standOpenNames) {
+		t.Fatalf("the page opens %q, the window lets a stand open %q", page, standOpenNames)
+	}
+}
 
 var standValues = map[string]string{
 	standPanelStartTimeoutEnv: "10s",
