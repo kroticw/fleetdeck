@@ -117,8 +117,8 @@ func snapshotFixture() state.Snapshot {
 			},
 		},
 		Limits: &usage.Limits{
-			FiveHour:  usage.Window{Utilization: 0.42, ResetsAt: at.Add(3 * time.Hour)},
-			SevenDay:  usage.Window{Utilization: 0.11, ResetsAt: at.Add(96 * time.Hour)},
+			FiveHour:  &usage.Window{Utilization: 0.42, ResetsAt: at.Add(3 * time.Hour)},
+			SevenDay:  &usage.Window{Utilization: 0.11, ResetsAt: at.Add(96 * time.Hour)},
 			FetchedAt: at,
 		},
 		OrphanCards: []string{"/board/card-keeping.md"},

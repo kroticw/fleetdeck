@@ -32,9 +32,15 @@ type Window struct {
 	ResetsAt    time.Time `json:"resetsAt"`
 }
 
+// Limits is the account's rate-limit windows as last read. A window is nil
+// when its source did not report it: Claude Code drops a window once it has
+// reset, and the endpoint does the same. Absent is not zero -- a zero window
+// would draw as "nothing spent" -- and an absent window is never filled in
+// from an earlier reading, because a window goes missing precisely when it is
+// over. The page draws an absent window as a dash.
 type Limits struct {
-	FiveHour  Window    `json:"fiveHour"`
-	SevenDay  Window    `json:"sevenDay"`
+	FiveHour  *Window   `json:"fiveHour,omitempty"`
+	SevenDay  *Window   `json:"sevenDay,omitempty"`
 	FetchedAt time.Time `json:"fetchedAt"`
 	// SpendLimit is only ever present behind a Claude apps gateway that sets
 	// a spend limit -- see localfile.go, the only source that can populate
@@ -120,22 +126,24 @@ func (f *Fetcher) Limits(ctx context.Context) (Limits, error) {
 			return f.staleCache(), fmt.Errorf("usage endpoint refused: %s", payload.Error.Type)
 		}
 	}
-	if payload.FiveHour == nil || payload.SevenDay == nil {
+	if payload.FiveHour == nil && payload.SevenDay == nil {
 		return f.staleCache(), fmt.Errorf("usage reply carries no windows")
 	}
 
-	fiveHourResets, err := time.Parse(time.RFC3339, payload.FiveHour.ResetsAt)
-	if err != nil {
-		return f.staleCache(), fmt.Errorf("parse five_hour resets_at: %w", err)
+	out := Limits{FetchedAt: time.Now()}
+	if w := payload.FiveHour; w != nil {
+		resets, err := time.Parse(time.RFC3339, w.ResetsAt)
+		if err != nil {
+			return f.staleCache(), fmt.Errorf("parse five_hour resets_at: %w", err)
+		}
+		out.FiveHour = &Window{Utilization: w.Utilization, ResetsAt: resets}
 	}
-	sevenDayResets, err := time.Parse(time.RFC3339, payload.SevenDay.ResetsAt)
-	if err != nil {
-		return f.staleCache(), fmt.Errorf("parse seven_day resets_at: %w", err)
-	}
-	out := Limits{
-		FiveHour:  Window{Utilization: payload.FiveHour.Utilization, ResetsAt: fiveHourResets},
-		SevenDay:  Window{Utilization: payload.SevenDay.Utilization, ResetsAt: sevenDayResets},
-		FetchedAt: time.Now(),
+	if w := payload.SevenDay; w != nil {
+		resets, err := time.Parse(time.RFC3339, w.ResetsAt)
+		if err != nil {
+			return f.staleCache(), fmt.Errorf("parse seven_day resets_at: %w", err)
+		}
+		out.SevenDay = &Window{Utilization: w.Utilization, ResetsAt: resets}
 	}
 	f.mu.Lock()
 	f.cached, f.at = out, time.Now()

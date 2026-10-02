@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -14,8 +15,8 @@ import (
 
 func sampleLocalLimits() Limits {
 	return Limits{
-		FiveHour:  Window{Utilization: 13, ResetsAt: time.Date(2026, 9, 11, 6, 0, 0, 0, time.UTC)},
-		SevenDay:  Window{Utilization: 40, ResetsAt: time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)},
+		FiveHour:  &Window{Utilization: 13, ResetsAt: time.Date(2026, 9, 11, 6, 0, 0, 0, time.UTC)},
+		SevenDay:  &Window{Utilization: 40, ResetsAt: time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)},
 		FetchedAt: time.Date(2026, 9, 11, 0, 10, 0, 0, time.UTC),
 	}
 }
@@ -31,8 +32,27 @@ func TestWriteLocalThenReadLocalRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadLocal: %v", err)
 	}
-	if got != want {
-		t.Fatalf("round trip mismatch: got %+v, want %+v", got, want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip mismatch: got %+v / %+v, want %+v / %+v", got, *got.FiveHour, want, *want.FiveHour)
+	}
+}
+
+// A window that was not written reads back absent, not as a zero window: the
+// page draws absent as a dash and zero as "nothing spent".
+func TestAnAbsentWindowRoundTripsAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rate_limits.json")
+	want := sampleLocalLimits()
+	want.FiveHour = nil
+
+	if err := WriteLocal(path, want); err != nil {
+		t.Fatalf("WriteLocal: %v", err)
+	}
+	got, err := ReadLocal(path)
+	if err != nil {
+		t.Fatalf("ReadLocal: %v", err)
+	}
+	if got.FiveHour != nil || got.SevenDay == nil || got.SevenDay.Utilization != 40 {
+		t.Fatalf("got five_hour %+v, seven_day %+v", got.FiveHour, got.SevenDay)
 	}
 }
 

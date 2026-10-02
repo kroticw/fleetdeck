@@ -691,8 +691,8 @@ func TestLocalRateLimitsFileWinsOverTheNetwork(t *testing.T) {
 	t.Cleanup(func() { localRateLimitsPath = original })
 
 	local := usage.Limits{
-		FiveHour:  usage.Window{Utilization: 13, ResetsAt: time.Now().Add(5 * time.Hour)},
-		SevenDay:  usage.Window{Utilization: 40, ResetsAt: time.Now().Add(7 * 24 * time.Hour)},
+		FiveHour:  &usage.Window{Utilization: 13, ResetsAt: time.Now().Add(5 * time.Hour)},
+		SevenDay:  &usage.Window{Utilization: 40, ResetsAt: time.Now().Add(7 * 24 * time.Hour)},
 		FetchedAt: time.Now(),
 	}
 	if err := usage.WriteLocal(path, local); err != nil {

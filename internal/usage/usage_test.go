@@ -28,11 +28,51 @@ func TestLimitsParsesBothWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got.FiveHour == nil || got.SevenDay == nil {
+		t.Fatalf("both windows arrived and both must be kept: %+v", got)
+	}
 	if got.FiveHour.Utilization != 17.4 || got.SevenDay.Utilization != 48.2 {
 		t.Fatalf("utilization wrong: %+v", got)
 	}
 	if got.FiveHour.ResetsAt.IsZero() || got.SevenDay.ResetsAt.IsZero() {
 		t.Fatal("reset timestamps must be parsed")
+	}
+}
+
+// A reply with one window is an answer, not a failure: the endpoint leaves a
+// window out the same way the statusline does, and refusing the whole reply
+// for it froze both gauges on the last value that had both. The window that
+// is not there stays absent, never a zero that would read as nothing spent.
+func TestLimitsKeepsAWindowThatArrivedAlone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"five_hour":null,"seven_day":{"utilization":48.2,"resets_at":"2026-09-13T00:00:00.000Z"}}`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	got, err := f.Limits(context.Background())
+	if err != nil {
+		t.Fatalf("one window is a usable reply, got %v", err)
+	}
+	if got.FiveHour != nil {
+		t.Fatalf("five_hour did not arrive and must stay absent: %+v", got.FiveHour)
+	}
+	if got.SevenDay == nil || got.SevenDay.Utilization != 48.2 {
+		t.Fatalf("seven_day arrived and must be kept: %+v", got.SevenDay)
+	}
+}
+
+// A reply with neither window still carries nothing to draw, and is reported
+// as such rather than passed on as an empty success.
+func TestLimitsWithNoWindowIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"five_hour":null,"seven_day":null}`))
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(func(context.Context) (string, error) { return "tok", nil }, srv.URL, time.Minute)
+	if _, err := f.Limits(context.Background()); err == nil {
+		t.Fatal("a reply with no window must be an error")
 	}
 }
 

@@ -17,11 +17,16 @@ const sampleInput = `{"session_id":"abc-123","model":{"display_name":"Opus 5"},"
 
 const sampleInputWithRateLimits = `{"session_id":"abc-123","model":{"display_name":"Opus 5"},"cost":{"total_cost_usd":1.234},"context_window":{"used_percentage":41.7},"rate_limits":{"five_hour":{"used_percentage":13,"resets_at":1789068600},"seven_day":{"used_percentage":40,"resets_at":1789232400}}}`
 
-// sampleInputWithPartialRateLimits carries only one of the two windows
-// writeRateLimitsTo requires -- the shape a schema drift (a field renamed,
-// moved, or dropped) would produce, as opposed to sampleInput's total
-// absence of rate_limits, which is the ordinary non-subscriber case.
+// sampleInputWithPartialRateLimits carries one window without the other: what
+// Claude Code sends once a window has reset, since it drops a window whose
+// resets_at has passed.
 const sampleInputWithPartialRateLimits = `{"session_id":"abc-123","model":{"display_name":"Opus 5"},"cost":{"total_cost_usd":1.234},"context_window":{"used_percentage":41.7},"rate_limits":{"five_hour":{"used_percentage":13,"resets_at":1789068600}}}`
+
+// sampleInputWithSpendLimitOnly carries rate_limits with no window in it at
+// all -- the shape a schema drift (a field renamed, moved, or dropped) would
+// produce, as opposed to sampleInput's total absence of rate_limits, which is
+// the ordinary non-subscriber case.
+const sampleInputWithSpendLimitOnly = `{"session_id":"abc-123","model":{"display_name":"Opus 5"},"cost":{"total_cost_usd":1.234},"context_window":{"used_percentage":41.7},"rate_limits":{"spend_limit":{"used_percentage":5,"resets_at":1789232400}}}`
 
 func TestRenderShowsModelCostAndContext(t *testing.T) {
 	in, err := parse([]byte(sampleInput))
@@ -180,7 +185,7 @@ func TestWriteRateLimitsRoundTripsThroughReadLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.FiveHour.Utilization != 13 || got.SevenDay.Utilization != 40 {
+	if got.FiveHour == nil || got.SevenDay == nil || got.FiveHour.Utilization != 13 || got.SevenDay.Utilization != 40 {
 		t.Fatalf("round trip lost the values: %+v", got)
 	}
 	if got.FetchedAt.IsZero() {
@@ -212,18 +217,56 @@ func TestWriteRateLimitsSkipsWhenEitherWindowIsMissing(t *testing.T) {
 	}
 }
 
-// TestWriteRateLimitsTracesAPartialWindow is the fix the orchestrator
-// required: a payload that carries only one of the two required windows is
-// exactly what a schema drift (a field renamed, moved, or dropped) would
-// look like, and silently doing nothing here is the same shape of failure
-// this whole task exists to stop -- a value that quietly stops updating
-// with nothing on record to say why. The file must still not be written
-// (the pair invariant holds), but the incomplete arrival must leave a
-// trace a person can find.
-func TestWriteRateLimitsTracesAPartialWindow(t *testing.T) {
+// TestWriteRateLimitsWritesAWindowThatArrivedAlone is the fix for gauges that
+// froze: Claude Code drops a window from its payload once that window has
+// reset, so requiring both windows meant the file stopped being written at all
+// for as long as one of them was gone. What arrived is written. The window that
+// did not arrive is absent rather than zero, because a zero draws as "nothing
+// spent", and it is not carried over from the previous file either, because a
+// window is missing precisely when it is over.
+func TestWriteRateLimitsWritesAWindowThatArrivedAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rate_limits.json")
 	tracePath := filepath.Join(t.TempDir(), "rate_limits_trace.log")
-	in, err := parse([]byte(sampleInputWithPartialRateLimits))
+
+	full, err := parse([]byte(sampleInputWithRateLimits))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRateLimitsTo(path, tracePath, full); err != nil {
+		t.Fatal(err)
+	}
+	partial, err := parse([]byte(sampleInputWithPartialRateLimits))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRateLimitsTo(path, tracePath, partial); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := usage.ReadLocal(path)
+	if err != nil {
+		t.Fatalf("a payload with one window must still be written, got err=%v", err)
+	}
+	if got.FiveHour == nil || got.FiveHour.Utilization != 13 {
+		t.Fatalf("five_hour arrived and must be written: %+v", got.FiveHour)
+	}
+	if got.SevenDay != nil {
+		t.Fatalf("seven_day did not arrive and must be absent, not carried over or zero: %+v", got.SevenDay)
+	}
+	if _, err := os.Stat(tracePath); !os.IsNotExist(err) {
+		t.Fatalf("one window alone is ordinary, not something to trace: stat err=%v", err)
+	}
+}
+
+// TestWriteRateLimitsTracesRateLimitsWithNoWindow covers the one arrival that
+// still writes nothing: rate_limits present with no window in it. It says
+// nothing about the account's windows, so it must not blank the gauges, and it
+// is exactly what a schema drift would look like, so it must leave a trace a
+// person can find rather than a value that quietly stops updating.
+func TestWriteRateLimitsTracesRateLimitsWithNoWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rate_limits.json")
+	tracePath := filepath.Join(t.TempDir(), "rate_limits_trace.log")
+	in, err := parse([]byte(sampleInputWithSpendLimitOnly))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,14 +274,14 @@ func TestWriteRateLimitsTracesAPartialWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := usage.ReadLocal(path); !errors.Is(err, usage.ErrNoLocalFile) {
-		t.Fatalf("an incomplete pair must still not produce a rate_limits.json, got err=%v", err)
+		t.Fatalf("no window to draw must not produce a rate_limits.json, got err=%v", err)
 	}
 	body, err := os.ReadFile(tracePath)
 	if err != nil {
 		t.Fatalf("expected a trace file to exist, got: %v", err)
 	}
-	if !strings.Contains(string(body), "five_hour=true") || !strings.Contains(string(body), "seven_day=false") {
-		t.Fatalf("trace does not name which windows arrived: %q", body)
+	if !strings.Contains(string(body), "five_hour=false") || !strings.Contains(string(body), "spend_limit=true") {
+		t.Fatalf("trace does not name which fields arrived: %q", body)
 	}
 }
 

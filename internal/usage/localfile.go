@@ -24,11 +24,13 @@ func LocalFilePath() string {
 	return filepath.Join(home, ".config", "fleetdeck", "rate_limits.json")
 }
 
-// TracePath is where cmd/fleetdeck-status records the one case WriteLocal
-// silently declines: Claude Code's statusline payload carried some rate_limits
-// data, but not the five_hour+seven_day pair WriteLocal requires (see
-// writeRateLimitsTo's own comment for why an incomplete pair must never be
-// written). Nothing reads this file back -- it exists so that the day the
+// TracePath is where cmd/fleetdeck-status records the cases in which it
+// captures nothing while something did arrive: no path was configured to
+// write to, or Claude Code's statusline payload carried rate_limits with no
+// window in it at all (see writeRateLimitsTo). One window without the other
+// is not among them -- it is written as it came, and Claude Code sending it
+// that way is ordinary, since it drops a window once that window has reset.
+// Nothing reads this file back -- it exists so that the day the
 // stdin schema drifts and the gauges quietly stop moving, whoever comes
 // asking why finds a dated line naming exactly what arrived instead of
 // nothing at all. Kept beside rate_limits.json for the same reason that file

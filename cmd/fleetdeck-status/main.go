@@ -163,18 +163,28 @@ func writeRateLimits(in statusInput, path string) error {
 // writeRateLimitsTo is writeRateLimits with both paths pulled out, purely so
 // a test can point them at its own temp files instead of the real machine's.
 //
-// Both windows must be present to write the file at all: the rest of this
-// codebase already assumes five_hour and seven_day arrive together
-// (usage.Fetcher's own network path enforces the same rule), and writing
-// one without the other would put a value nothing downstream expects into a
-// file every session's collect cycle reads. Neither an empty path nor an
-// incomplete pair is silently discarded, though, for the same underlying
-// reason: a value that stops updating for either cause must leave something
-// a person can find, not read identically to "no session has ticked its
-// statusline in a while". A payload with none of the three rate_limits
-// fields at all is the ordinary, unremarkable case (not a subscriber, or
-// Claude Code has not attached rate_limits yet) and is never traced,
-// whichever of the two causes above also applies.
+// What arrived is what is written. Claude Code drops a window from its
+// payload once that window has reset, so one window without the other is an
+// ordinary payload: the window that did not arrive is left out of the file
+// (usage.Limits keeps it nil), not written as a zero that would draw as
+// "nothing spent", and not carried over from the previous file either,
+// because a window is missing precisely when it is over. Requiring both, as
+// this used to, left the file unwritten for as long as one was gone, and the
+// gauges froze on the last reading that had both.
+//
+// Nothing to draw at all -- rate_limits with no window in it -- is the one
+// payload that writes nothing: it says nothing about the account's windows,
+// and overwriting a file the panel reads with an emptiness would blank the
+// gauges on the strength of a payload that never claimed that.
+//
+// Neither an empty path nor rate_limits with no window is silently
+// discarded, though, for the same underlying reason: a value that stops
+// updating for either cause must leave something a person can find, not
+// read identically to "no session has ticked its statusline in a while". A
+// payload with none of the three rate_limits fields at all is the ordinary,
+// unremarkable case (not a subscriber, or Claude Code has not attached
+// rate_limits yet) and is never traced, whichever of the two causes above
+// also applies.
 //
 // The trace itself goes through usage.AppendTraceOnce, not a plain append,
 // on every branch below -- including the success path, where the current
@@ -193,36 +203,34 @@ func writeRateLimitsTo(path, tracePath string, in statusInput) error {
 		_ = usage.AppendTraceOnce(tracePath, issue)
 		return nil
 	}
-	if in.RateLimits.FiveHour == nil || in.RateLimits.SevenDay == nil {
+	if in.RateLimits.FiveHour == nil && in.RateLimits.SevenDay == nil {
 		issue := ""
 		if haveAny {
 			issue = fmt.Sprintf(
-				"rate_limits present but incomplete for the local file's required pair: five_hour=%t seven_day=%t spend_limit=%t",
+				"rate_limits present but carried no window the panel can draw: five_hour=%t seven_day=%t spend_limit=%t",
 				in.RateLimits.FiveHour != nil, in.RateLimits.SevenDay != nil, in.RateLimits.SpendLimit != nil,
 			)
 		}
 		_ = usage.AppendTraceOnce(tracePath, issue)
 		return nil
 	}
-	_ = usage.AppendTraceOnce(tracePath, "") // a full pair with a real path resolves any open streak
+	_ = usage.AppendTraceOnce(tracePath, "") // a real path and a window to write resolves any open streak
 	l := usage.Limits{
-		FiveHour: usage.Window{
-			Utilization: in.RateLimits.FiveHour.UsedPercentage,
-			ResetsAt:    time.Unix(in.RateLimits.FiveHour.ResetsAt, 0),
-		},
-		SevenDay: usage.Window{
-			Utilization: in.RateLimits.SevenDay.UsedPercentage,
-			ResetsAt:    time.Unix(in.RateLimits.SevenDay.ResetsAt, 0),
-		},
-		FetchedAt: time.Now(),
-	}
-	if in.RateLimits.SpendLimit != nil {
-		l.SpendLimit = &usage.Window{
-			Utilization: in.RateLimits.SpendLimit.UsedPercentage,
-			ResetsAt:    time.Unix(in.RateLimits.SpendLimit.ResetsAt, 0),
-		}
+		FiveHour:   capturedWindow(in.RateLimits.FiveHour),
+		SevenDay:   capturedWindow(in.RateLimits.SevenDay),
+		SpendLimit: capturedWindow(in.RateLimits.SpendLimit),
+		FetchedAt:  time.Now(),
 	}
 	return usage.WriteLocal(path, l)
+}
+
+// capturedWindow is one rate-limit window from stdin as the panel stores it,
+// or nil for a window that did not arrive.
+func capturedWindow(w *rateWindow) *usage.Window {
+	if w == nil {
+		return nil
+	}
+	return &usage.Window{Utilization: w.UsedPercentage, ResetsAt: time.Unix(w.ResetsAt, 0)}
 }
 
 // statusLineOutput decides exactly what this command prints, in isolation
