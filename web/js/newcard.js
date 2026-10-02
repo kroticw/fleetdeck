@@ -43,14 +43,21 @@ export function createNewCard(host, { create = createCard } = {}) {
   title.setAttribute("placeholder", t("new_card_title"));
   title.setAttribute("aria-label", t("new_card_title"));
 
+  // The zone is the card's urgency, not its stage. Labelled in words and
+  // wrapped in its label rather than named by aria-label alone: the operator
+  // read the bare identifiers as stages and looked for the board's columns
+  // among them. Each option shows the dictionary's word and sends the
+  // schema's identifier, which is what the card's zone field must hold.
+  const zoneLabel = el("label", "newcard-zone-label");
+  zoneLabel.appendChild(el("span", "newcard-zone-caption", t("new_card_zone")));
   const zone = el("select", "newcard-zone");
-  zone.setAttribute("aria-label", t("new_card_zone"));
   for (const name of ZONES) {
-    const option = el("option", "", name);
+    const option = el("option", "", t(`zone_${name}`));
     option.value = name;
     zone.appendChild(option);
   }
   zone.value = DEFAULT_ZONE;
+  zoneLabel.appendChild(zone);
 
   const createButton = el("button", "newcard-create", t("new_card_create"));
   createButton.setAttribute("type", "button");
@@ -58,7 +65,7 @@ export function createNewCard(host, { create = createCard } = {}) {
   cancelButton.setAttribute("type", "button");
   const error = el("div", "newcard-error");
 
-  form.append(title, zone, createButton, cancelButton, error);
+  form.append(title, zoneLabel, createButton, cancelButton, error);
 
   // What stays said after the form has closed: a card that reached the board
   // and not its history.

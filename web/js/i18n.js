@@ -179,7 +179,14 @@ const en = {
   tab_docs: "Docs",
   new_card: "+ card",
   new_card_title: "Card title",
-  new_card_zone: "Zone",
+  new_card_zone: "Urgency",
+  // The zone's four values, worded rather than named by the schema's
+  // identifiers: the identifiers were read as stages the board had no
+  // column for.
+  zone_urgent: "Urgent",
+  zone_unplanned: "Unplanned",
+  zone_planned: "Planned",
+  zone_niceToHave: "Nice to have",
   new_card_create: "Create",
   new_card_cancel: "Cancel",
   new_card_title_required: "A card needs a title",
@@ -518,7 +525,11 @@ const ru = {
   tab_docs: "Доки",
   new_card: "+ карточка",
   new_card_title: "Заголовок карточки",
-  new_card_zone: "Зона",
+  new_card_zone: "Срочность",
+  zone_urgent: "Срочная",
+  zone_unplanned: "Внеплановая",
+  zone_planned: "Плановая",
+  zone_niceToHave: "Необязательная",
   new_card_create: "Создать",
   new_card_cancel: "Отмена",
   new_card_title_required: "У карточки должен быть заголовок",
