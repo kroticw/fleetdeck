@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +37,19 @@ func wsDeps() Deps {
 		Snapshot: func() state.Snapshot {
 			return state.Snapshot{Cards: []board.Card{{Path: "/b/c.md", Stage: "active"}}}
 		},
+	}
+}
+
+// rebuiltSnapshots is a panel whose collect cycle runs between every push: each
+// call answers with a fresh moment, the way a live panel's snapshot does.
+func rebuiltSnapshots() func() state.Snapshot {
+	var cycles atomic.Int64
+	base := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	return func() state.Snapshot {
+		return state.Snapshot{
+			At:    base.Add(time.Duration(cycles.Add(1)) * time.Second),
+			Cards: []board.Card{{Path: "/b/c.md", Stage: "active"}},
+		}
 	}
 }
 
@@ -77,9 +91,14 @@ func TestWebSocketPushesASnapshotOnConnect(t *testing.T) {
 	}
 }
 
+// The cadence is what the page relies on to stay current, so a socket must keep
+// pushing for as long as the panel keeps producing snapshots. Each collect cycle
+// stamps a new moment, which is what makes each of these three a push rather
+// than the copy the socket already holds (see Deps.push).
 func TestWebSocketKeepsPushingOnItsCadence(t *testing.T) {
 	d := wsDeps()
 	d.interval = 20 * time.Millisecond
+	d.Snapshot = rebuiltSnapshots()
 	url, _ := wsServer(t, d)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

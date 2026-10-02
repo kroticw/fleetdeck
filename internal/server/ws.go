@@ -70,8 +70,10 @@ func (d Deps) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	ticker := time.NewTicker(d.pushInterval())
 	defer ticker.Stop()
+	var sent snapshotMoment
 	for {
-		if !d.push(ctx, conn, r) {
+		var ok bool
+		if sent, ok = d.push(ctx, conn, r, sent); !ok {
 			return
 		}
 		select {
@@ -108,22 +110,45 @@ func readOnly(ctx context.Context, cancel context.CancelFunc, conn *websocket.Co
 	_ = conn.Close(websocket.StatusPolicyViolation, "this socket is read-only: write through the HTTP API")
 }
 
+// snapshotMoment is the moment of the snapshot last written to a socket, and
+// whether anything has been written to it at all. The two are separate because
+// a panel that has not finished its first collect cycle reports a zero moment,
+// and that first view still has to reach the page.
+type snapshotMoment struct {
+	at   time.Time
+	sent bool
+}
+
 // push sends one snapshot of the fleet the socket was opened for and reports
-// whether the connection is still usable. A failed write ends the loop: the
-// connection is gone, or the browser stopped reading, and either way there is
-// nobody left to push to. The fleets are the ones the panel started with, so
-// one checked at the upgrade stays configured for as long as the socket lives;
-// should that ever stop holding, the socket is closed rather than pushed
-// another fleet's view.
-func (d Deps) push(ctx context.Context, conn *websocket.Conn, r *http.Request) bool {
+// the moment of what the socket now holds, plus whether the connection is still
+// usable. A failed write ends the loop: the connection is gone, or the browser
+// stopped reading, and either way there is nobody left to push to. The fleets
+// are the ones the panel started with, so one checked at the upgrade stays
+// configured for as long as the socket lives; should that ever stop holding,
+// the socket is closed rather than pushed another fleet's view.
+//
+// A snapshot the socket already carries is not sent again. The panel rebuilds
+// its snapshot on the daemon poll interval and this loop ticks faster, so
+// without this check every tick in between re-encodes and re-sends a view the
+// page already has — and the page rebuilds its board from it. state.Snapshot.At
+// is stamped once per collect cycle, which makes it the cycle's identity: equal
+// moments are the same cycle's view, and nothing in the view can have changed
+// without a new cycle producing it.
+func (d Deps) push(ctx context.Context, conn *websocket.Conn, r *http.Request, sent snapshotMoment) (snapshotMoment, bool) {
 	view, err := d.fleetView(r)
 	if err != nil {
 		_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
-		return false
+		return sent, false
+	}
+	if sent.sent && view.At.Equal(sent.at) {
+		return sent, true
 	}
 	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
-	return wsjson.Write(ctx, conn, view) == nil
+	if wsjson.Write(ctx, conn, view) != nil {
+		return sent, false
+	}
+	return snapshotMoment{at: view.At, sent: true}, true
 }
 
 func (d Deps) pushInterval() time.Duration {
