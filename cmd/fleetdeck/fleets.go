@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/fleet"
@@ -64,9 +65,9 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 		// Left nil without a board, as deps leaves the first fleet's: the route
 		// then says this fleet has no board instead of writing somewhere else.
 		if f.BoardPath != "" {
-			board := f.BoardPath
-			fd.CreateCard = func(title, zone, repo string) (string, error) {
-				return createCard(board, title, zone, repo, time.Now())
+			boardDir := f.BoardPath
+			fd.CreateCard = func(card board.NewCard) (string, error) {
+				return createCard(boardDir, card, time.Now())
 			}
 			// Left nil where the panel starts no sessions (a stand given no
 			// claude): the snapshot then tells the page not to offer a start.

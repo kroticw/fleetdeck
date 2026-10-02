@@ -36,7 +36,7 @@ func goodOrchestratorControls(glass string) controlsReport {
 func goodBoardControls(glass string) controlsReport {
 	return controlsReport{Surface: "board", Report: "controls", Glass: glass, Controls: []control{
 		goodPanel("newCard", glass), goodCapsule("newCardTitle", glass), goodCapsule("newCardZone", glass),
-		goodCapsule("newCardCreate", glass), goodCapsule("newCardCancel", glass),
+		goodCapsule("newCardCreate", glass), goodCapsule("newCardClose", glass),
 	}}
 }
 

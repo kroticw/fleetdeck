@@ -586,16 +586,31 @@ test("a sheet and the documents keep clear of the sessions panel", () => {
   assert.match(ruleBody(':root[data-surface="board"] .docs'), /--host-inset-content-right/);
 });
 
-// On the board the tab row is out of flow with nothing left in it, so it has no
-// width. v0.10.0's form took its width and its right edge from that row: a
-// column of bare controls at the orchestrator panel's edge. It opens from the
-// row's left edge, which is the board's left inset, as wide as the room between
-// the panels allows.
-test("on the board the new card form opens between the panels at a width of its own", () => {
+// The new card form is a window over the board: centred, about 60% of the
+// room each way, and never wider or taller than the room less a margin, so a
+// narrow window still shows all of it. A fixed box with all four edges and a
+// size is centred by margin: auto.
+test("the new card form opens centred at about 60% of the room", () => {
+  // The rule of its own, not the one that sizes its buttons beside other containers.
+  const form = css.match(/\n\.newcard\s*\{([^}]*)\}/)[1];
+  assert.match(form, /position:\s*fixed/);
+  assert.match(form, /inset:\s*0/);
+  assert.match(form, /margin:\s*auto/);
+  assert.match(form, /width:\s*min\(max\(\d+rem,\s*60vw\),\s*calc\(100vw - 2 \* var\(--gap-lg\)\)\)/);
+  assert.match(form, /height:\s*min\(max\(\d+rem,\s*60vh\),\s*calc\(100vh - 2 \* var\(--gap-lg\)\)\)/);
+});
+
+// On the board the room is between the panels and under the capsules, not the
+// whole web view: the panels are other surfaces drawn over it.
+test("on the board the new card form is centred in the room between the panels", () => {
   const form = ruleBody(':root[data-surface="board"] .newcard');
-  assert.match(form, /left:\s*0/);
-  assert.match(form, /right:\s*auto/);
-  assert.match(form, /width:\s*min\(28rem,\s*calc\(100vw - var\(--host-inset-left[^)]*\) - var\(--host-inset-content-right/);
+  assert.match(form, /top:\s*var\(--host-inset-top/);
+  assert.match(form, /left:\s*var\(--host-inset-left/);
+  assert.match(form, /right:\s*var\(--host-inset-content-right/);
+  assert.match(form, /bottom:\s*0/);
+  assert.match(form, /--newcard-room-w:\s*calc\(100vw - var\(--host-inset-left[^)]*\) - var\(--host-inset-content-right/);
+  assert.match(form, /width:\s*min\(max\(\d+rem,\s*calc\(var\(--newcard-room-w\) \* 0\.6\)\),\s*calc\(var\(--newcard-room-w\) - 2 \* var\(--gap-lg\)\)\)/);
+  assert.match(form, /height:\s*min\(max\(\d+rem,\s*calc\(var\(--newcard-room-h\) \* 0\.6\)\),\s*calc\(var\(--newcard-room-h\) - 2 \* var\(--gap-lg\)\)\)/);
   // Not --host-inset-right: that is 0, the board running on under the sessions
   // glass, and a form that kept clear of it would open under the sessions panel.
   assert.doesNotMatch(form, /--host-inset-right\b/);

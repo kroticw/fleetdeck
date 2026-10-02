@@ -51,7 +51,7 @@ const OPAQUE_BOARD = ':root[data-surface="board"][data-glass="opaque"]';
 // .btn capsules in every surface and in a browser tab alike:
 // web/tests/buttons-css.test.js holds them.
 const ISLAND_CONTROLS = [{ class: ".o-pick-select", control: ".o-pick-select" }];
-const FORM_CONTROLS = [".newcard-title", ".newcard-zone", ".newcard-create", ".newcard-cancel"].map((c) => ({ class: c, control: c }));
+const FORM_CONTROLS = [".newcard-title", ".newcard-zone"].map((c) => ({ class: c, control: c }));
 const CONTROLS = [
   ...ISLAND_CONTROLS.map((c) => ({ surface: ORCHESTRATOR, opaque: OPAQUE_ORCHESTRATOR, ...c })),
   ...FORM_CONTROLS.map((c) => ({ surface: BOARD, opaque: OPAQUE_BOARD, ...c })),
@@ -157,15 +157,10 @@ test("with no glass every capsule is solid, and nothing floating is blurred", ()
 // Review of #185: Create stays pressed while the card is written
 // (web/js/newcard.js), and a disabled capsule lit under the pointer looked
 // pressable.
-test("a disabled capsule is dimmed and not lit under the pointer", () => {
+test("a disabled capsule is not lit under the pointer", () => {
   for (const { selector } of rules()) {
     if (!selector.includes("data-surface") || !/:hover/.test(selector)) continue;
     if (CONTROLS.some((c) => mentions(selector, c.class))) assert.match(selector, /:hover:not\(:disabled\)$/, selector);
-  }
-  for (const button of [".newcard-create", ".newcard-cancel"]) {
-    const body = ruleBody(`${BOARD} ${button}:disabled`);
-    assert.match(body, /opacity:\s*0\.\d+/, button);
-    assert.match(body, /cursor:\s*default/, button);
   }
 });
 

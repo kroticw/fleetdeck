@@ -74,6 +74,14 @@ export function inFleet(path) {
   return withFleet(path, fleetFromSearch(globalThis.location?.search ?? ""));
 }
 
+// attachmentURL is where a card's link to one of its attachments is served:
+// the card writes it as ../attachments/T-NNN/<name>, relative to itself. Any
+// other target is not an attachment, and gets null.
+export function attachmentURL(src) {
+  const rest = String(src).match(/^\.\.\/attachments\/(.+)$/)?.[1];
+  return rest ? inFleet(`/api/attachments?path=${encodeURIComponent(rest)}`) : null;
+}
+
 export async function setCardField(path, field, value, expect) {
   const body = { path: String(path), field: String(field), value: String(value) };
   // Sent only when the caller named one: the key is a pointer on the far side,
@@ -101,17 +109,21 @@ export async function setCardField(path, field, value, expect) {
   throw await refusal(response);
 }
 
-// createCard starts a card on the board from a title, a zone and the repository
-// its worker starts in — the fields the route takes, and nothing else. An empty
-// repo is a card without one. It answers {path, committed, reason}: 201
+// createCard starts a card on the board from a title, a zone, the repository
+// its worker starts in and a description of the task — the fields the route
+// takes, and nothing else. An empty repo is a card without one, an empty
+// description a card with only its title. It answers {path, committed, reason}: 201
 // both when the card was committed and when it reached the board without its
 // commit, because the card exists either way and creating it again would make a
 // second one. A thrown error means no card was made.
-export async function createCard(title, zone, repo = "") {
+export async function createCard(title, zone, repo = "", description = "", attachments = []) {
+  const card = { title: String(title), zone: String(zone), repo: String(repo), description: String(description) };
+  // Only when there are any: {name, data} with data in base64.
+  if (attachments.length > 0) card.attachments = attachments;
   const response = await fetch(inFleet("/api/cards"), {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ title: String(title), zone: String(zone), repo: String(repo) }),
+    body: JSON.stringify(card),
   });
   if (response.status !== 201) {
     throw await refusal(response);
@@ -123,6 +135,23 @@ export async function createCard(title, zone, repo = "") {
     committed: body?.committed === true,
     reason: String(body?.reason ?? ""),
   };
+}
+
+// pickDirectory asks the panel for the Finder's folder dialog, prompt as its
+// title, and answers the folder as a card's repo holds it, "" when the dialog
+// was cancelled. The page cannot ask this of the browser: a page is never told
+// where a folder it was given lives. It waits for as long as the dialog is up.
+export async function pickDirectory(prompt) {
+  const response = await fetch("/api/pick-directory", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ prompt: String(prompt) }),
+  });
+  if (response.status !== 200) {
+    throw await refusal(response);
+  }
+  const body = await readJSON(response);
+  return String(body?.repo ?? "");
 }
 
 // startWork starts a session for one card and hands the card to it: the

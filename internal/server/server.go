@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 	"github.com/kroticw/fleetdeck/internal/state"
@@ -103,7 +104,7 @@ type Deps struct {
 	// resolves to somewhere inside the board.
 	SetCardField func(path, field, value string, expect *string) error
 
-	// CreateCard starts a card on the board from a title, a zone and a repo, and records
+	// CreateCard starts a card on the board from what the form sent, and records
 	// it in the board's git history if the caller wired it to do so. It returns
 	// the new card's path. internal/board decides what a valid title and zone
 	// are; this server maps its refusals onto status codes. An error wrapping
@@ -112,7 +113,12 @@ type Deps struct {
 	//
 	// Nothing from the request names a file: the caller creates the card in its
 	// own board, under a name made from the title.
-	CreateCard func(title, zone, repo string) (string, error)
+	CreateCard func(card board.NewCard) (string, error)
+
+	// PickDirectory shows the operator a folder dialog with prompt and answers
+	// the chosen folder as a card's repo, "" when the dialog was cancelled.
+	// ChooseFolder on macOS; nil elsewhere, where the route answers 503.
+	PickDirectory func(ctx context.Context, prompt string) (string, error)
 
 	// CreateFleet makes a fleet from the start page: the folder with its board
 	// and documentation, and the line in the configuration naming them. It
@@ -270,6 +276,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/resume", d.handleResume)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
+	mux.HandleFunc("POST /api/pick-directory", d.handlePickDirectory)
+	mux.HandleFunc("GET /api/attachments", d.handleAttachment)
 	mux.HandleFunc("POST /api/fleets", d.handleCreateFleet)
 	mux.HandleFunc("GET /api/docs", d.handleDocsList)
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)

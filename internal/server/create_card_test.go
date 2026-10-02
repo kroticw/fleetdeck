@@ -12,8 +12,8 @@ import (
 
 func createDeps() (Deps, *[]string) {
 	d, calls := testDeps()
-	d.CreateCard = func(title, zone, repo string) (string, error) {
-		*calls = append(*calls, "create:"+title+":"+zone+":"+repo)
+	d.CreateCard = func(c board.NewCard) (string, error) {
+		*calls = append(*calls, "create:"+c.Title+":"+c.Zone+":"+c.Repo+":"+c.Description)
 		return "/b/cards/2026-09-11-a-task.md", nil
 	}
 	return d, calls
@@ -25,7 +25,7 @@ func TestCreateCardStartsACardFromATitleAndAZone(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned:" {
+	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned::" {
 		t.Fatalf("unexpected calls: %v", *calls)
 	}
 	body := rec.Body.String()
@@ -42,13 +42,43 @@ func TestCreateCardPassesTheRepoAlong(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned:src/fleetdeck" {
+	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned:src/fleetdeck:" {
 		t.Fatalf("unexpected calls: %v", *calls)
 	}
 }
 
-// Title, zone and repo, nothing more: a request that tries to set anything
-// else is refused, not partly obeyed.
+func TestCreateCardPassesTheDescriptionAlong(t *testing.T) {
+	d, calls := createDeps()
+	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned","description":"what to do\nand why"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned::what to do\nand why" {
+		t.Fatalf("unexpected calls: %q", *calls)
+	}
+}
+
+// Files ride in the body as base64, which is how encoding/json carries bytes,
+// and the body may be far larger than a typed prompt.
+func TestCreateCardPassesTheAttachmentsAlong(t *testing.T) {
+	d, _ := testDeps()
+	var got board.NewCard
+	d.CreateCard = func(c board.NewCard) (string, error) {
+		got = c
+		return "/b/cards/x.md", nil
+	}
+	big := strings.Repeat("A", 4<<20)
+	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned","attachments":[{"name":"a.png","data":"cG5n"},{"name":"big.bin","data":"`+big+`"}]}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(got.Attachments) != 2 || got.Attachments[0].Name != "a.png" || string(got.Attachments[0].Data) != "png" {
+		t.Fatalf("attachments = %+v", got.Attachments)
+	}
+}
+
+// Title, zone, repo and description, nothing more: a request that tries to
+// set anything else is refused, not partly obeyed.
 func TestCreateCardRefusesAnyFieldButTitleZoneAndRepo(t *testing.T) {
 	for _, extra := range []string{`"session":"abc123"`, `"stage":"active"`, `"progress":40`} {
 		d, calls := createDeps()
@@ -64,7 +94,7 @@ func TestCreateCardRefusesAnyFieldButTitleZoneAndRepo(t *testing.T) {
 
 func TestCreateCardReportsAnInvalidCardAsBadRequest(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string, string) (string, error) {
+	d.CreateCard = func(board.NewCard) (string, error) {
 		return "", fmt.Errorf("%w: unknown zone %q", board.ErrInvalidCard, "someday")
 	}
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"someday"}`)
@@ -80,7 +110,7 @@ func TestCreateCardReportsAnInvalidCardAsBadRequest(t *testing.T) {
 // not the request.
 func TestCreateCardReportsABoardWithNoCardsDirectoryAsUnavailable(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string, string) (string, error) {
+	d.CreateCard = func(board.NewCard) (string, error) {
 		return "", fmt.Errorf("%w: /b/cards", board.ErrNoCardsDir)
 	}
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned"}`)
@@ -91,7 +121,7 @@ func TestCreateCardReportsABoardWithNoCardsDirectoryAsUnavailable(t *testing.T) 
 
 func TestCreateCardReportsAWriteFailureAsServerError(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string, string) (string, error) { return "", errors.New("disk full") }
+	d.CreateCard = func(board.NewCard) (string, error) { return "", errors.New("disk full") }
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("want 500, got %d", rec.Code)
@@ -103,7 +133,7 @@ func TestCreateCardReportsAWriteFailureAsServerError(t *testing.T) {
 // second card.
 func TestCreateCardReportsAnUncommittedCardAsCreated(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string, string) (string, error) {
+	d.CreateCard = func(board.NewCard) (string, error) {
 		return "/b/cards/x.md", fmt.Errorf("%w: git commit timed out", ErrCardWrittenNotCommitted)
 	}
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned"}`)

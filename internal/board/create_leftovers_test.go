@@ -26,7 +26,7 @@ func TestCreatingACardClearsWhatAKilledWriteLeftBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := CreateCard(dir, "Next", "planned", "", createDay); err != nil {
+	if _, err := CreateCard(dir, NewCard{Title: "Next", Zone: "planned"}, createDay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(stale); err == nil {
@@ -60,7 +60,7 @@ func TestCreatingACardClearsNothingButWhatAKilledWriteLeftBehind(t *testing.T) {
 		}
 	}
 
-	if _, err := CreateCard(dir, "Next", "planned", "", createDay); err != nil {
+	if _, err := CreateCard(dir, NewCard{Title: "Next", Zone: "planned"}, createDay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(stale); err == nil {

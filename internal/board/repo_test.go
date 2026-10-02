@@ -63,14 +63,14 @@ func TestCreateCardWritesTheRepo(t *testing.T) {
 	if err := os.MkdirAll(CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	p, err := CreateCard(dir, "Задача", "planned", "~/src/fleetdeck", time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC))
+	p, err := CreateCard(dir, NewCard{Title: "Задача", Zone: "planned", Repo: "~/src/fleetdeck"}, time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c, _ := ParseCard(p); c.Repo != "src/fleetdeck" {
 		t.Fatalf("repo = %q, want src/fleetdeck", c.Repo)
 	}
-	if _, err := CreateCard(dir, "Задача", "planned", "/etc", time.Now()); err == nil {
+	if _, err := CreateCard(dir, NewCard{Title: "Задача", Zone: "planned", Repo: "/etc"}, time.Now()); err == nil {
 		t.Fatal("a card was created with a repo outside home")
 	}
 }
@@ -82,7 +82,7 @@ func TestCreateCardWithoutARepoWritesNoLine(t *testing.T) {
 	if err := os.MkdirAll(CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	p, err := CreateCard(dir, "Задача", "planned", "", time.Now())
+	p, err := CreateCard(dir, NewCard{Title: "Задача", Zone: "planned"}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

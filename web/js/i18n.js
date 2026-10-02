@@ -189,6 +189,12 @@ const en = {
   new_card_title: "Card title",
   new_card_zone: "Urgency",
   new_card_repo: "Repository from ~, e.g. src/fleetdeck",
+  new_card_desc: "What to do and why (optional)",
+  new_card_pick: "Choose…",
+  new_card_pick_prompt: "Choose the card's repository",
+  new_card_pick_trust: "If no agent has run in this folder yet, start one there first and accept the trust prompt: Claude Code does not start a worker in a folder it does not trust",
+  new_card_attach: "Attach…",
+  new_card_detach: "Remove",
   // The zone's four values, worded rather than named by the schema's
   // identifiers: the identifiers were read as stages the board had no
   // column for.
@@ -561,6 +567,12 @@ const ru = {
   new_card_title: "Заголовок карточки",
   new_card_zone: "Срочность",
   new_card_repo: "Репозиторий от ~, например src/fleetdeck",
+  new_card_desc: "Что сделать и зачем (необязательно)",
+  new_card_pick: "Выбрать…",
+  new_card_pick_prompt: "Выберите репозиторий карточки",
+  new_card_pick_trust: "Если в этом каталоге ещё не запускали агента, сначала запусти его там и прими запрос о доверии: в недоверенном каталоге Claude Code исполнителя не запустит",
+  new_card_attach: "Прикрепить…",
+  new_card_detach: "Убрать",
   zone_urgent: "Срочная",
   zone_unplanned: "Внеплановая",
   zone_planned: "Плановая",

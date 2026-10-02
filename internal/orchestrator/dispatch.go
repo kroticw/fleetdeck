@@ -111,14 +111,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 		res.Steps = append(res.Steps, Step{Name: name, Note: note})
 	}
 
-	// The session is named for the card, which is what ties the two together on
-	// the panel's own session list where no card is shown.
 	lang := Lang(w.Lang)
-	name := card.ID
-	if name == "" {
-		name = words[lang].workerName
-	}
-	short, err := d.Start(ctx, cwd, name)
+	short, err := d.Start(ctx, cwd, sessionName(lang, card.ID, card.Title))
 	if err != nil {
 		return refuse("session", err)
 	}
@@ -191,4 +185,23 @@ func (d *Dispatcher) wait(v, fallback time.Duration) time.Duration {
 // multi-line reply can be left sitting in the prompt unsent.
 func Task(lang, cardPath string) string {
 	return fmt.Sprintf(words[Lang(lang)].task, "`"+cardPath+"`")
+}
+
+// maxSessionNameRunes bounds a session's name: a row of `claude agents` and of
+// the panel's session list, not a place for the whole title.
+const maxSessionNameRunes = 60
+
+// sessionName is the name a card's session is started under: the card's number
+// and title, because the session list shows no card and the name is what says
+// what the session is busy with. A card with no number gets the worker's name,
+// in lang.
+func sessionName(lang, id, title string) string {
+	if id == "" {
+		return words[Lang(lang)].workerName
+	}
+	name := strings.TrimSpace(id + " " + title)
+	if r := []rune(name); len(r) > maxSessionNameRunes {
+		name = strings.TrimSpace(string(r[:maxSessionNameRunes-1])) + "…"
+	}
+	return name
 }

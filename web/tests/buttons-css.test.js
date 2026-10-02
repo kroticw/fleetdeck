@@ -46,6 +46,7 @@ const MIGRATED = [
   "o-name-edit", "label-edit-btn",
   "card-dock-place", "card-dock-font", "card-dock-open", "card-dock-resume", "card-dock-write", "card-dock-orchestrator",
   "s-key", "s-font-btn", "sresume-btn", "build-reload", "update-button", "theme-toggle", "fleet-menu-button",
+  "newcard-create", "newcard-close", "newcard-pick", "newcard-attach",
 ];
 
 // What makes a button's look: none of it may come from anywhere but .btn.

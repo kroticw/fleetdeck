@@ -19,7 +19,7 @@
 // about their edit appear and vanish before reading it.
 
 import { subscribe as storeSubscribe } from "./store.js";
-import { setCardField } from "./api.js";
+import { attachmentURL, setCardField } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { t, reasonText } from "./i18n.js";
@@ -477,7 +477,7 @@ export function renderCard(root, path, onClose, options = {}) {
       { has: (name) => docForLink(docs, name) !== null },
       // Said only once the documents are known: until then a link to one
       // opens nothing for a reason that is not the one this names.
-      docs === null ? {} : { missingTitle: t("card_doc_missing") },
+      { attachment: attachmentURL, ...(docs === null ? {} : { missingTitle: t("card_doc_missing") }) },
     );
     nodes.push(body);
 

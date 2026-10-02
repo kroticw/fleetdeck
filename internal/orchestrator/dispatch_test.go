@@ -124,7 +124,7 @@ func TestDispatchStartsTheSessionWritesTheIDThenSendsTheTask(t *testing.T) {
 		t.Fatalf("session = %q", res.Session)
 	}
 	want := []string{
-		"start:" + filepath.Join(d.Home, "work", "proj") + ":T-042",
+		"start:" + filepath.Join(d.Home, "work", "proj") + ":T-042 Дотащить доску до перетаскивания",
 		"set:T-042-card.md:session=abc12345:was=",
 		"set:T-042-card.md:stage=active:was=new",
 		"first:abc12345:" + Task("en", card),
@@ -299,7 +299,7 @@ func TestDispatchReadsATildeRepoAsFromHome(t *testing.T) {
 	if _, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"}); err != nil {
 		t.Fatal(err)
 	}
-	if want := "start:" + filepath.Join(d.Home, "work", "proj") + ":T-042"; f.steps[0] != want {
+	if want := "start:" + filepath.Join(d.Home, "work", "proj") + ":T-042 Дотащить доску до перетаскивания"; f.steps[0] != want {
 		t.Fatalf("started as %q, want %q", f.steps[0], want)
 	}
 }
@@ -372,4 +372,21 @@ func TestASecondDispatchWhileOneRunsIsRefused(t *testing.T) {
 	}
 	close(release)
 	<-done
+}
+
+// The session list shows no card, so the name has to say what the session is
+// busy with: the card's number, then its title, cut to what a row can show.
+func TestSessionNameIsTheCardsNumberAndTitle(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("ё", 100)
+	for _, tc := range []struct{ id, title, want string }{
+		{"T-068", "Форма карточки", "T-068 Форма карточки"},
+		{"T-068", "", "T-068"},
+		{"", "Без номера", words["en"].workerName},
+		{"T-068", long, "T-068 " + strings.Repeat("ё", maxSessionNameRunes-len("T-068 ")-1) + "…"},
+	} {
+		if got := sessionName("en", tc.id, tc.title); got != tc.want {
+			t.Errorf("sessionName(%q, %q) = %q, want %q", tc.id, tc.title, got, tc.want)
+		}
+	}
 }

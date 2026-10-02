@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, resumeSession, fetchSessionCards, fetchTerminalToken, createCard, setOrchestratorSession, startWork } from "../js/api.js";
+import { setCardField, resumeSession, fetchSessionCards, fetchTerminalToken, createCard, pickDirectory, attachmentURL, setOrchestratorSession, startWork } from "../js/api.js";
 import { langCode } from "../js/i18n.js";
 
 let calls = [];
@@ -275,16 +275,16 @@ test("a token that cannot be had throws words, never an empty token", async () =
   await assert.rejects(fetchTerminalToken(), /token/);
 });
 
-test("a new card is a POST of its title, zone and repo, and nothing else", async () => {
+test("a new card is a POST of its title, zone, repo and description, and nothing else", async () => {
   stubFetch(answer({ status: 201, body: { path: "/b/cards/2026-09-11-a-task.md", committed: true } }));
 
-  const result = await createCard("A task", "planned", "src/fleetdeck");
+  const result = await createCard("A task", "planned", "src/fleetdeck", "what and why");
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "/api/cards");
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers["Content-Type"], "application/json");
-  assert.deepEqual(JSON.parse(calls[0].init.body), { title: "A task", zone: "planned", repo: "src/fleetdeck" });
+  assert.deepEqual(JSON.parse(calls[0].init.body), { title: "A task", zone: "planned", repo: "src/fleetdeck", description: "what and why" });
   assert.deepEqual(result, { path: "/b/cards/2026-09-11-a-task.md", committed: true, reason: "" });
 });
 
@@ -293,6 +293,36 @@ test("a new card that reached the board but not its history says so", async () =
   const result = await createCard("A task", "planned");
   assert.equal(result.committed, false);
   assert.equal(result.reason, "the commit timed out");
+});
+
+test("a new card's attachments go in its body, and only when there are any", async () => {
+  stubFetch(answer({ status: 201, body: { path: "/b/cards/x.md", committed: true } }));
+  await createCard("A task", "planned", "", "", [{ name: "a.png", data: "cG5n" }]);
+  assert.deepEqual(JSON.parse(calls[0].init.body).attachments, [{ name: "a.png", data: "cG5n" }]);
+});
+
+test("a card's link to its attachment is served from the board, anything else is not an attachment", () => {
+  assert.equal(attachmentURL("../attachments/T-001/отчёт.pdf"), `/api/attachments?path=${encodeURIComponent("T-001/отчёт.pdf")}`);
+  assert.equal(attachmentURL("https://example.com/x.png"), null);
+  assert.equal(attachmentURL("../cards/T-001.md"), null);
+});
+
+// The Finder's folder, asked of the panel: a page is never told where a folder
+// lives. It is no fleet's, so it carries none.
+test("picking a folder is a POST of the dialog's prompt that answers the repo", async () => {
+  stubFetch(answer({ status: 200, body: { repo: "src/fleetdeck" } }));
+  assert.equal(await pickDirectory("Choose"), "src/fleetdeck");
+  assert.equal(calls[0].url, "/api/pick-directory");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { prompt: "Choose" });
+});
+
+test("a cancelled folder dialog is an empty repo, and a refusal throws the server's words", async () => {
+  stubFetch(answer({ status: 200, body: { repo: "" } }));
+  assert.equal(await pickDirectory("Choose"), "");
+  stubFetch(answer({ status: 503, body: { error: "this panel is not wired to a folder dialog: it is macOS only" } }));
+  await assert.rejects(pickDirectory("Choose"), /macOS only/);
 });
 
 test("a refused new card throws the server's words", async () => {

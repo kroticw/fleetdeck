@@ -27,7 +27,7 @@ func TestACardIsCreatedOnAFileSystemWithoutHardLinks(t *testing.T) {
 			noHardLinks(t, refusal)
 			dir := emptyBoard(t)
 
-			path, err := CreateCard(dir, "Whole", "planned", "", createDay)
+			path, err := CreateCard(dir, NewCard{Title: "Whole", Zone: "planned"}, createDay)
 			if err != nil {
 				t.Fatalf("create a card where a hard link is refused with %q: %v", refusal, err)
 			}

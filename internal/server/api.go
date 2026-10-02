@@ -20,6 +20,9 @@ const (
 	// human types in one go while still being small enough that a runaway client
 	// cannot make the panel buffer anything interesting.
 	maxBodyBytes = 1 << 20
+	// maxCardBytes bounds a new card with its attachments, base64 in JSON:
+	// a few screenshots and documents, not a file store.
+	maxCardBytes = 32 << 20
 )
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -53,8 +56,8 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 // decodeBodyLimit is decodeBody with the ceiling named by the caller. It exists
-// because maxBodyBytes is sized for a typed prompt, and one route carries an
-// image instead — see image.go. The limit is a parameter rather than a second
+// because maxBodyBytes is sized for a typed prompt, and a new card carries its
+// attachments instead (maxCardBytes). The limit is a parameter rather than a second
 // copy of this function so the three rules above cannot drift apart between
 // them, and it is applied here rather than by the caller because
 // http.MaxBytesReader replaces the body: a wrapper applied outside would be
@@ -247,7 +250,8 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCreateCard starts a card from a title, a zone and, optionally, the
-// repository its worker is started in. The body carries those fields and
+// repository its worker is started in and a description of the task. The body
+// carries those fields and
 // nothing else: a card is started here and written by whoever takes the task
 // on, so anything more is refused rather than half obeyed.
 func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
@@ -260,14 +264,16 @@ func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Title string `json:"title"`
-		Zone  string `json:"zone"`
-		Repo  string `json:"repo"`
+		Title       string             `json:"title"`
+		Zone        string             `json:"zone"`
+		Repo        string             `json:"repo"`
+		Description string             `json:"description"`
+		Attachments []board.Attachment `json:"attachments"`
 	}
-	if !decodeBody(w, r, &body) {
+	if !decodeBodyLimit(w, r, &body, maxCardBytes) {
 		return
 	}
-	path, err := d.CreateCard(body.Title, body.Zone, body.Repo)
+	path, err := d.CreateCard(board.NewCard{Title: body.Title, Zone: body.Zone, Repo: body.Repo, Description: body.Description, Attachments: body.Attachments})
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusCreated, map[string]any{"path": path, "committed": true})

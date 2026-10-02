@@ -2372,10 +2372,9 @@ main {
   border-bottom-color: var(--accent);
 }
 
-/* Starting a card (web/js/newcard.js). The row is the anchor for the form, and
-   the form opens over the column rather than as a row of its own: nothing moves
-   when it opens or closes. z-index 1 keeps it under the card and session
-   panels (z-index 2), which cover this row when they are up. */
+/* Starting a card (web/js/newcard.js). The row holds the form, which opens as a
+   window over the board rather than as a row of its own: nothing moves when it
+   opens or closes. */
 #tabs {
   position: relative;
   align-items: center;
@@ -2409,16 +2408,19 @@ main {
   opacity: 0.4;
 }
 
+/* A window over the board, centred by margin: auto between four zero edges,
+   about 60% of the room each way and never more than the room less a margin. */
 .newcard {
-  position: absolute;
-  top: 100%;
-  left: var(--gap-lg);
-  z-index: 1;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  margin: auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--gap);
-  width: min(28rem, calc(100% - 2 * var(--gap-lg)));
-  padding: var(--gap);
+  width: min(max(24rem, 60vw), calc(100vw - 2 * var(--gap-lg)));
+  height: min(max(20rem, 60vh), calc(100vh - 2 * var(--gap-lg)));
+  padding: var(--gap-lg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-raised);
@@ -2426,14 +2428,98 @@ main {
 }
 
 .newcard-title,
-.newcard-repo {
-  flex: 1 1 100%;
+.newcard-repo,
+.newcard-desc {
   font: inherit;
   padding: 4px 6px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
+}
+
+.newcard-desc {
+  flex: 1 1 auto;
+  min-height: 4rem;
+  resize: none;
+}
+
+.newcard-repo-row,
+.newcard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.newcard-repo {
+  flex: 1 1 12rem;
+}
+
+.newcard-head,
+.newcard-files-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.newcard-title {
+  flex: 1 1 auto;
+}
+
+/* The form's cross is a .btn-icon a step larger than the scale's largest: the
+   icon's glyph is drawn at --fs-md, so the step is taken there. */
+.newcard-close {
+  flex: none;
+  --btn-height: 40px;
+  --fs-md: 26px;
+}
+
+.newcard-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.newcard-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+}
+
+.newcard-file-remove {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.newcard-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* A picture a card was started with: as wide as the card allows, and short
+   enough that the text after it is still in reach. */
+.md-img {
+  display: block;
+  max-width: 100%;
+  max-height: 24rem;
+  margin: var(--gap-sm) 0;
+  border-radius: var(--radius-sm);
+}
+
+.newcard-actions {
+  justify-content: flex-end;
 }
 
 .newcard-zone-label {
@@ -2444,19 +2530,13 @@ main {
   font-size: var(--fs-sm);
 }
 
-.newcard-zone,
-.newcard-create,
-.newcard-cancel {
+.newcard-zone {
   font: inherit;
   font-size: var(--fs-sm);
 }
 
-.newcard-create {
-  margin-left: auto;
-}
-
 .newcard-error {
-  flex: 1 1 100%;
+  flex: 1 1 auto;
   color: var(--danger);
   font-size: var(--fs-xs);
 }
@@ -4296,15 +4376,18 @@ body.is-resizing {
   display: none;
 }
 
-/* With its tabs and button hidden the row has no width, so the form does not
-   take one from it: it opens from the row's left edge, the board's left inset,
-   as wide as the room between the panels allows. */
+/* The board's web view runs under both panels and the capsules, so the room the
+   form is centred in is what they leave: the same four edges, and 60% of it. */
 :root[data-surface="board"] .newcard {
-  top: 0;
-  left: 0;
-  right: auto;
-  width: min(28rem, calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px) - 2 * var(--gap-lg)));
-  padding: 10px;
+  --newcard-room-w: calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px));
+  --newcard-room-h: calc(100vh - var(--host-inset-top, 64px));
+  top: var(--host-inset-top, 64px);
+  left: var(--host-inset-left, 394px);
+  right: var(--host-inset-content-right, 356px);
+  bottom: 0;
+  width: min(max(20rem, calc(var(--newcard-room-w) * 0.6)), calc(var(--newcard-room-w) - 2 * var(--gap-lg)));
+  height: min(max(18rem, calc(var(--newcard-room-h) * 0.6)), calc(var(--newcard-room-h) - 2 * var(--gap-lg)));
+  padding: 14px;
   border: none;
   border-radius: var(--radius-xl);
   background-color: var(--surface-on-glass);
@@ -4505,9 +4588,7 @@ body.is-resizing {
 
 :root[data-surface="board"] .newcard-title,
 :root[data-surface="board"] .newcard-repo,
-:root[data-surface="board"] .newcard-zone,
-:root[data-surface="board"] .newcard-create,
-:root[data-surface="board"] .newcard-cancel {
+:root[data-surface="board"] .newcard-zone {
   min-height: 30px;
   padding: 4px 14px;
   border: none;
@@ -4517,29 +4598,37 @@ body.is-resizing {
   box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
 }
 
-/* A disabled capsule is not lit under the pointer: Create while the card is
-   being written looks as unpressable as it is. */
+/* A disabled capsule is not lit under the pointer. */
 :root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"] .newcard-repo:hover:not(:disabled),
-:root[data-surface="board"] .newcard-zone:hover:not(:disabled),
-:root[data-surface="board"] .newcard-create:hover:not(:disabled),
-:root[data-surface="board"] .newcard-cancel:hover:not(:disabled) {
+:root[data-surface="board"] .newcard-zone:hover:not(:disabled) {
   background-color: var(--glass-control-hover);
-}
-
-:root[data-surface="board"] .newcard-create:disabled,
-:root[data-surface="board"] .newcard-cancel:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 /* The title's placeholder is what an empty form shows: read like the muted text
    beside it, not WebKit's pale default on a frosted panel. */
 :root[data-surface="board"] .newcard-title::placeholder,
-:root[data-surface="board"] .newcard-repo::placeholder {
+:root[data-surface="board"] .newcard-repo::placeholder,
+:root[data-surface="board"] .newcard-desc::placeholder {
   color: var(--text-muted);
   opacity: 1;
+}
+
+/* The description is the capsules' glass in a box: several lines do not fit a
+   pill's round ends. */
+:root[data-surface="board"] .newcard-desc {
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+:root[data-surface="board"][data-glass="opaque"] .newcard-desc {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
 /* The closed select is drawn by the page, its chevron in the text's colour; the
@@ -4586,9 +4675,7 @@ body.is-resizing {
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo,
-:root[data-surface="board"][data-glass="opaque"] .newcard-zone,
-:root[data-surface="board"][data-glass="opaque"] .newcard-create,
-:root[data-surface="board"][data-glass="opaque"] .newcard-cancel {
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone {
   background-color: var(--surface-raised);
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
@@ -4596,9 +4683,7 @@ body.is-resizing {
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo:hover:not(:disabled),
-:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
-:root[data-surface="board"][data-glass="opaque"] .newcard-create:hover:not(:disabled),
-:root[data-surface="board"][data-glass="opaque"] .newcard-cancel:hover:not(:disabled) {
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled) {
   background-color: var(--surface-hover);
 }
 

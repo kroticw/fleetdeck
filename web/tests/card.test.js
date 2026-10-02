@@ -126,6 +126,16 @@ test("a card that is no longer on the board says so", () => {
   assert.equal(root.querySelector(".card-empty").textContent, t("card_gone"));
 });
 
+// A card started with a screenshot shows it: the panel serves the board's
+// attachments, and the card links them relative to itself.
+test("a card's attached picture is shown in its body", () => {
+  const snap = snapshot();
+  snap.cards[0].body += "\n## Вложения\n\n- ![shot.png](../attachments/T-001/shot.png)\n";
+  const { root } = open(snap);
+  const html = root.querySelector(".card-body").innerHTML;
+  assert.ok(html.includes('<img class="md-img" src="/api/attachments?path=T-001%2Fshot.png"'), html);
+});
+
 test("the title is shown as text, never as markup", () => {
   const { root } = open(snapshot());
   assert.equal(root.querySelector("h3").textContent, 'Fleet UI <panel> "v2"');

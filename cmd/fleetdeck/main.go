@@ -17,8 +17,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -207,16 +209,28 @@ func setCardField(path, field, value string, expect *string) error {
 // rule for the second: once the file exists, a commit that did not happen is
 // wrapped in server.ErrCardWrittenNotCommitted and returned with the path, so the
 // operator is not invited to create the card a second time.
-func createCard(boardDir, title, zone, repo string, now time.Time) (string, error) {
-	path, err := board.CreateCard(boardDir, title, zone, repo, now)
+func createCard(boardDir string, card board.NewCard, now time.Time) (string, error) {
+	path, err := board.CreateCard(boardDir, card, now)
 	if err != nil {
 		return "", err
 	}
 	msg := "chore(board): add card " + filepath.Base(path)
-	if err := board.Commit(filepath.Dir(path), filepath.Base(path), msg); err != nil {
+	if err := board.CommitCard(boardDir, path, msg); err != nil {
 		return path, fmt.Errorf("%w: %w", server.ErrCardWrittenNotCommitted, err)
 	}
 	return path, nil
+}
+
+// pickDirectory is server.Deps.PickDirectory: the Finder's folder dialog on
+// macOS, and nil anywhere else, where there is no osascript to show one.
+func pickDirectory() func(ctx context.Context, prompt string) (string, error) {
+	home, err := os.UserHomeDir()
+	if runtime.GOOS != "darwin" || err != nil {
+		return nil
+	}
+	return server.ChooseFolder(home, func(ctx context.Context, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, "/usr/bin/osascript", args...).CombinedOutput()
+	})
 }
 
 // setOrchestratorSession is server.Deps.SetOrchestratorSession: pin, or
@@ -947,10 +961,10 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
-	var create func(title, zone, repo string) (string, error)
+	var create func(board.NewCard) (string, error)
 	if cfg.BoardPath != "" {
-		create = func(title, zone, repo string) (string, error) {
-			return createCard(cfg.BoardPath, title, zone, repo, time.Now())
+		create = func(card board.NewCard) (string, error) {
+			return createCard(cfg.BoardPath, card, time.Now())
 		}
 	}
 	return server.Deps{
@@ -989,8 +1003,9 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// is all it takes to replace it. rand.Text carries at least 128 random bits.
 		TerminalToken: rand.Text(),
 
-		SetCardField: setCardField,
-		CreateCard:   create,
+		SetCardField:  setCardField,
+		CreateCard:    create,
+		PickDirectory: pickDirectory(),
 		// Without this the server has nothing to confine a card write to and answers
 		// every one of them 503 — deliberately, since the path arrives from the
 		// browser and internal/board will rewrite a frontmatter line in any file

@@ -57,7 +57,7 @@ var opened = map[string]struct {
 	surface string
 	names   []string
 }{
-	"newcard":   {"board", []string{"newCard", "newCardTitle", "newCardZone", "newCardCreate", "newCardCancel"}},
+	"newcard":   {"board", []string{"newCard", "newCardTitle", "newCardZone", "newCardCreate", "newCardClose"}},
 	"fleetmenu": {"orchestrator", []string{"fleetList"}},
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 )
 
@@ -26,7 +27,7 @@ var ErrOrchestratorTaken = errors.New("the session is another fleet's orchestrat
 type FleetDeps struct {
 	BoardDir               string
 	DocsRoots              []string
-	CreateCard             func(title, zone, repo string) (string, error)
+	CreateCard             func(card board.NewCard) (string, error)
 	SetOrchestratorSession func(id string) error
 	OrchestratorPreview    func(lang string) (orchestrator.Preview, error)
 	Appoint                func(ctx context.Context, req orchestrator.Request) (orchestrator.Result, error)

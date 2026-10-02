@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/fleet"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 )
@@ -41,13 +42,13 @@ func twoFleetWrites(t *testing.T) (Deps, *[]string, [4]string) {
 	t.Helper()
 	d, calls := testDeps()
 	aBoard, aDocs, bBoard, bDocs := fleetBoards(t)
-	per := func(name, board, docs string) FleetDeps {
+	per := func(name, boardDir, docs string) FleetDeps {
 		return FleetDeps{
-			BoardDir:  board,
+			BoardDir:  boardDir,
 			DocsRoots: []string{docs},
-			CreateCard: func(title, _, _ string) (string, error) {
-				*calls = append(*calls, "create:"+name+":"+title)
-				return filepath.Join(board, "cards", "new.md"), nil
+			CreateCard: func(c board.NewCard) (string, error) {
+				*calls = append(*calls, "create:"+name+":"+c.Title)
+				return filepath.Join(boardDir, "cards", "new.md"), nil
 			},
 			SetOrchestratorSession: func(id string) error {
 				*calls = append(*calls, "pin:"+name+":"+id)
@@ -57,7 +58,7 @@ func twoFleetWrites(t *testing.T) (Deps, *[]string, [4]string) {
 				return nil
 			},
 			OrchestratorPreview: func(string) (orchestrator.Preview, error) {
-				return orchestrator.Preview{Path: filepath.Join(docs, "orchestrator.md"), Workspace: filepath.Dir(board)}, nil
+				return orchestrator.Preview{Path: filepath.Join(docs, "orchestrator.md"), Workspace: filepath.Dir(boardDir)}, nil
 			},
 			Appoint: func(_ context.Context, req orchestrator.Request) (orchestrator.Result, error) {
 				*calls = append(*calls, "appoint:"+name+":"+req.Session)
