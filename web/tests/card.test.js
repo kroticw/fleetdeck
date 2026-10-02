@@ -296,6 +296,50 @@ test("a refusal is shown and the control goes back to what the file holds", asyn
   assert.equal(root.querySelector("select[data-field=stage]").value, "active");
 });
 
+// A refusal by one of the board's rules is said in the page's language, by
+// its code: the words the server sends are the board's own, in English, and
+// they name the rule without the way out. One code covers every started
+// stage, so the sentence is the same whichever of them was asked for.
+test("a rule refusal is said by its code, in the page's language", async () => {
+  for (const stage of ["review", "done", "blocked"]) {
+    const { root, dispose } = open(snapshot());
+    stubFetch(
+      answer(400, {
+        error: `cannot set stage to ${stage} while session is empty: the board requires a session at stage ${stage}`,
+        code: "session_required",
+      }),
+    );
+
+    const select = root.querySelector("select[data-field=stage]");
+    select.value = stage;
+    fireEvent(select, "change");
+    await settle();
+
+    const error = root.querySelector(".card-error");
+    assert.ok(error, `a refused ${stage} was silent`);
+    assert.equal(error.textContent, `stage: ${t("card_write_refused")}: ${t("card_refused_session_required")}`);
+    assert.doesNotMatch(error.textContent, /session is empty/, "the server's English came through");
+    assert.equal(root.querySelector("select[data-field=stage]").value, "active");
+    dispose();
+  }
+});
+
+// A code this build has no sentence for — a newer panel, or a rule nobody
+// foresaw — still shows the server's words rather than nothing.
+test("a rule refusal with an unknown code falls back to the server's words", async () => {
+  const { root } = open(snapshot());
+  stubFetch(answer(400, { error: "the board refused this for a reason of its own", code: "nobody_knows" }));
+
+  const select = root.querySelector("select[data-field=stage]");
+  select.value = "review";
+  fireEvent(select, "change");
+  await settle();
+
+  const error = root.querySelector(".card-error");
+  assert.ok(error, "a refused write was silent");
+  assert.equal(error.textContent, `stage: ${t("card_write_refused")}: the board refused this for a reason of its own`);
+});
+
 test("a repeated edit clears the previous notice", async () => {
   const { root } = open(snapshot());
   stubFetch(answer(200, { written: true, committed: false, reason: "gpg-agent asked for a PIN" }));

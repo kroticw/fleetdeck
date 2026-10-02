@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -211,6 +212,52 @@ func TestSetFieldRefusesStartedStageWithoutSession(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "ns.md", cardNoSession)
 	if err := SetField(p, "stage", "active"); err == nil {
 		t.Fatal("a started stage must be refused while session is empty")
+	}
+}
+
+// A cross-field refusal reaches the operator through the page, which can only
+// translate it by a code: the wording changes, the code does not. Every
+// started stage is refused by the one rule, so all four carry the one code.
+func TestCrossFieldRefusalsCarryACode(t *testing.T) {
+	cases := map[string]struct {
+		card  string
+		field string
+		value string
+		code  string
+	}{
+		"active without session":   {cardNoSession, "stage", "active", "session_required"},
+		"review without session":   {cardNoSession, "stage", "review", "session_required"},
+		"done without session":     {cardNoSession, "stage", "done", "session_required"},
+		"blocked without session":  {cardNoSession, "stage", "blocked", "session_required"},
+		"done before progress 100": {sample, "stage", "done", "done_needs_progress_100"},
+		"progress off 100 at done": {cardDone, "progress", "80", "done_holds_progress_100"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := writeCard(t, t.TempDir(), "c.md", tc.card)
+			err := SetField(p, tc.field, tc.value)
+			var rule *RuleRefusal
+			if !errors.As(err, &rule) {
+				t.Fatalf("want a RuleRefusal, got %v", err)
+			}
+			if rule.Code != tc.code {
+				t.Fatalf("want code %q, got %q", tc.code, rule.Code)
+			}
+			if rule.Error() == "" {
+				t.Fatal("a refusal must still say why in words: the page falls back to them for a code it cannot translate")
+			}
+		})
+	}
+}
+
+// The code becomes part of a dictionary key in web/js/i18n.js
+// (card_refused_<code>).
+func TestRuleRefusalCodesCanBeDictionaryKeys(t *testing.T) {
+	ok := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	for _, code := range ruleCodes {
+		if !ok.MatchString(code) {
+			t.Errorf("rule code %q is no key: lower-case words joined by underscores", code)
+		}
 	}
 }
 
