@@ -1,6 +1,11 @@
 // Package board reads and writes the fleet board: markdown cards with YAML
-// frontmatter. The panel owns two fields, stage and progress. Everything else
-// belongs to the agents.
+// frontmatter. The panel owns three fields — stage, progress and session.
+// Everything else belongs to the agents.
+//
+// session is the panel's only because of the order a card is handed to an
+// agent in: the session is started without a prompt, its short id is written
+// here, and the task is sent after that. An agent told to work a card before
+// the id is on it writes its own copy of the field and the two diverge.
 package board
 
 import (
@@ -20,6 +25,13 @@ var (
 	ErrNoCardsDir = errors.New("board directory has no cards subdirectory")
 	// ErrUnknownField means a write targeted a field the panel does not own.
 	ErrUnknownField = errors.New("field is not writable")
+	// ErrNoSuchField means the card's frontmatter carries no line for the field
+	// being written. The request was well formed; the card cannot take it.
+	ErrNoSuchField = errors.New("has no line for the field")
+	// ErrStale means the card no longer holds the value the write was made
+	// against. Nothing was written, and the caller is looking at a card that
+	// has moved on.
+	ErrStale = errors.New("the card has moved on since this write was made")
 	// ErrNothingToCommit means Commit found nothing staged for the given file.
 	ErrNothingToCommit = errors.New("nothing to commit")
 

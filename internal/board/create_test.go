@@ -13,6 +13,26 @@ import (
 
 var createDay = time.Date(2026, 9, 11, 18, 30, 0, 0, time.UTC)
 
+// The card the panel makes has to be able to take a session short id without a
+// line being added to it: that write is the first step of handing the card to
+// an agent, and scripts/new_card.py has written the empty field since before
+// the panel could make a card at all.
+func TestACreatedCardTakesASessionWithoutGrowingALine(t *testing.T) {
+	dir := emptyBoard(t)
+	path, err := CreateCard(dir, "Fix the header clamp", "urgent", createDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	if err := SetField(path, "session", "abc12345", nil); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if strings.Count(string(before), "\n") != strings.Count(string(after), "\n") {
+		t.Fatalf("the session line was added rather than filled in:\n%s", after)
+	}
+}
+
 func emptyBoard(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -35,7 +55,7 @@ func TestCreateCardWritesTheTitleAndZoneAndNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "---\nid: T-001\nzone: urgent\nstage: new\nprogress: 0\ncreated: 2026-09-11\n---\n\n# Fix the header clamp\n"
+	want := "---\nid: T-001\nzone: urgent\nstage: new\nprogress: 0\nsession: \"\"\ncreated: 2026-09-11\n---\n\n# Fix the header clamp\n"
 	if string(raw) != want {
 		t.Fatalf("card content:\n%q\nwant\n%q", raw, want)
 	}

@@ -94,10 +94,14 @@ type Deps struct {
 	// wrapping board.ErrNothingToCommit means the card already held the value, and
 	// is answered as an ordinary success. Everything else is a failed write.
 	//
+	// expect, when not nil, is the value the caller believes the field holds;
+	// an error wrapping board.ErrStale means the card holds something else and
+	// nothing was written, which is answered as a conflict.
+	//
 	// path arrives from the browser and is confined to BoardDir before this
 	// function is called, so what it receives is always an absolute path that
 	// resolves to somewhere inside the board.
-	SetCardField func(path, field, value string) error
+	SetCardField func(path, field, value string, expect *string) error
 
 	// CreateCard starts a card on the board from a title and a zone, and records
 	// it in the board's git history if the caller wired it to do so. It returns
@@ -201,6 +205,13 @@ type Deps struct {
 	// only; the terminal lives until it is closed. Nil leaves the route answering 503.
 	Attach func(ctx context.Context, session string, cols, rows int) (Terminal, error)
 
+	// StartWork starts a session for one card and hands the card to it, in the
+	// order internal/orchestrator.Dispatcher documents. Nil is a panel, or a
+	// fleet, that cannot start a worker session: the route says so, and the
+	// snapshot tells the page (state.Snapshot.CanStartWork) so it does not
+	// offer a start that would fail.
+	StartWork func(ctx context.Context, w orchestrator.Work) (orchestrator.Result, error)
+
 	// SessionListed reports whether the daemon lists session as alive right now —
 	// present in its list and not dying. The terminal bridge asks it when a stream
 	// ends with no reason attached, because that alone does not say the session
@@ -255,6 +266,7 @@ func New(d Deps) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
+	mux.HandleFunc("POST /api/sessions", d.handleDispatch)
 	mux.HandleFunc("POST /api/sessions/{id}/resume", d.handleResume)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)

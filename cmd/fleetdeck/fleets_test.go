@@ -208,6 +208,27 @@ func TestVetPinLeavesItsArgumentAlone(t *testing.T) {
 	}
 }
 
+// A card is handed to a session only by a panel that starts sessions: a stand
+// given no claude must not offer the start, since it would fail, and a panel
+// that looks claude up offers it for every fleet with a board.
+func TestAFleetOffersAStartOnlyWhereThePanelStartsSessions(t *testing.T) {
+	cfgPath, _, c, _ := twoFleetPanel(t, "")
+	stand, err := newFleets(runOpts{configPath: cfgPath, standSocket: "/tmp/no.sock"}, deadDaemon(t), c)("B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stand.StartWork != nil {
+		t.Fatal("a stand given no claude offered to start a worker")
+	}
+	panel, err := newFleets(runOpts{configPath: cfgPath}, deadDaemon(t), c)("B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.StartWork == nil {
+		t.Fatal("a panel that starts sessions did not offer to start a worker for a fleet with a board")
+	}
+}
+
 func TestAFleetsWizardRefusesAnotherFleetsOrchestrator(t *testing.T) {
 	cfgPath, _, c, roots := twoFleetPanel(t, `{"short":"a0000001"},{"short":"b0000001"}`)
 	resolve := newFleets(runOpts{configPath: cfgPath}, fakeDaemon(t, `{"short":"a0000001"},{"short":"b0000001"}`), c)

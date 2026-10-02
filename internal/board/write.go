@@ -1,6 +1,8 @@
 package board
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +17,11 @@ var (
 	validStages   = map[string]bool{"new": true, "active": true, "review": true, "done": true, "blocked": true}
 	validProgress = map[int]bool{0: true, 10: true, 20: true, 40: true, 60: true, 80: true, 100: true}
 	startedStages = map[string]bool{"active": true, "review": true, "done": true, "blocked": true}
+	// shortID is the board validator's own rule for a session field
+	// (scripts/validate_cards.py). Emptying the field is not offered: it is
+	// what ties a card to the agent writing it, and every stage but new
+	// requires it.
+	shortID = regexp.MustCompile(`^[0-9a-fA-F]{6,12}$`)
 )
 
 // SetField rewrites exactly one frontmatter line and leaves every other byte
@@ -24,7 +31,14 @@ var (
 // between this re-read and the rename below is still lost, because the
 // agents that append to a card do not coordinate with this process at all.
 // Narrowing the window is all a re-read can do.
-func SetField(path, field, value string) error {
+//
+// expect, when it is not nil, is the value the caller believes the field
+// holds; the write is refused with ErrStale when the card holds something
+// else. It closes the other half of the same race, the half a re-read on its
+// own makes worse rather than better: a hand dragging a card works from a
+// snapshot up to a second old, and without the check the panel writes the
+// stage it saw over the stage the card's own agent has since moved to.
+func SetField(path, field, value string, expect *string) error {
 	var normalized string
 	switch field {
 	case "stage":
@@ -42,6 +56,11 @@ func SetField(path, field, value string) error {
 		// plain decimal literal YAML expects, and yaml.v3 resolves a
 		// leading-zero scalar as octal on the next read.
 		normalized = strconv.Itoa(n)
+	case "session":
+		if !shortID.MatchString(value) {
+			return fmt.Errorf("session must be a short id of 6 to 12 hex digits, got %q", value)
+		}
+		normalized = value
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownField, field)
 	}
@@ -58,11 +77,16 @@ func SetField(path, field, value string) error {
 	if err := yaml.Unmarshal(m[1], &fm); err != nil {
 		return fmt.Errorf("card %s has malformed frontmatter, refusing write: %w", path, err)
 	}
+	if expect != nil {
+		if held := fieldValue(field, fm); held != normalize(field, *expect) {
+			return fmt.Errorf("%w: %s is %q, not the %q this write was made against", ErrStale, field, held, *expect)
+		}
+	}
 	if err := checkCrossFieldRules(field, normalized, fm); err != nil {
 		return err
 	}
 
-	out, err := substituteField(raw, field, normalized)
+	out, err := writeFrontmatterField(raw, field, normalized)
 	if err != nil {
 		return fmt.Errorf("card %s %w", path, err)
 	}
@@ -72,6 +96,79 @@ func SetField(path, field, value string) error {
 		return fmt.Errorf("stat card before write: %w", err)
 	}
 	return atomicWrite(path, out, info.Mode())
+}
+
+// fieldValue is what the card holds for one of the three fields the panel
+// writes, as a string, so a precondition can be compared whatever the field.
+func fieldValue(field string, fm frontmatter) string {
+	switch field {
+	case "stage":
+		return fm.Stage
+	case "progress":
+		return strconv.Itoa(fm.Progress)
+	default:
+		return fm.Session
+	}
+}
+
+// normalize is the caller's expected value in the form fieldValue reports:
+// progress arrives from a snapshot as a number and from a select as a string,
+// and "080" and "80" are the same progress. A value that is no progress at all
+// is left as it came and simply fails to match.
+func normalize(field, value string) string {
+	if field != "progress" {
+		return value
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return value
+	}
+	return strconv.Itoa(n)
+}
+
+// writeFrontmatterField puts value in the card's frontmatter: over the field's
+// own line when there is one, and on a new line when there is not.
+//
+// Only session is ever added. A card with no stage or progress line is a card
+// the board's validator already refuses, and inventing the field here would
+// hide that; a card with no session line is one the panel itself wrote before
+// the field was in its template, and it is on the board and legal.
+func writeFrontmatterField(raw []byte, field, value string) ([]byte, error) {
+	out, err := substituteField(raw, field, value)
+	if err == nil || field != "session" || !errors.Is(err, ErrNoSuchField) {
+		return out, err
+	}
+	return insertField(raw, field, value)
+}
+
+// insertField adds "field: value" to the frontmatter, after progress when that
+// line is there — the order scripts/new_card.py writes — and at the end of the
+// block otherwise.
+func insertField(raw []byte, field, value string) ([]byte, error) {
+	m := frontmatterRe.FindSubmatch(raw)
+	if m == nil {
+		return nil, fmt.Errorf("has no frontmatter block")
+	}
+	head := raw[:len(m[0])]
+	line := []byte(field + ": " + value + "\n")
+	at := -1
+	if loc := regexp.MustCompile(`(?m)^progress:.*\n`).FindIndex(head); loc != nil {
+		at = loc[1]
+	}
+	if at < 0 {
+		// The closing "---" of the block, which frontmatterRe's own match ends
+		// with: the new line goes before the line that closes it.
+		closing := bytes.LastIndex(head, []byte("---"))
+		if closing < 0 {
+			return nil, fmt.Errorf("has no frontmatter block")
+		}
+		at = closing
+	}
+	out := make([]byte, 0, len(raw)+len(line))
+	out = append(out, raw[:at]...)
+	out = append(out, line...)
+	out = append(out, raw[at:]...)
+	return out, nil
 }
 
 // substituteField replaces the value of the first line matching "field:..."
@@ -88,7 +185,7 @@ func substituteField(raw []byte, field, value string) ([]byte, error) {
 	line := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(field) + `:.*$`)
 	loc := line.FindIndex(head)
 	if loc == nil {
-		return nil, fmt.Errorf("has no %s field", field)
+		return nil, fmt.Errorf("%w %s", ErrNoSuchField, field)
 	}
 	replacement := field + ": " + value
 	out := make([]byte, 0, len(raw)+len(replacement))

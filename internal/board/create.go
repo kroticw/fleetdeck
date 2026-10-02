@@ -99,7 +99,10 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 
 		id := fmt.Sprintf(idFormat, number)
 		path := filepath.Join(cardsDir, id+"-"+tail+".md")
-		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\ncreated: %s\n---\n\n# %s\n", id, zone, date, title)
+		// session is written empty rather than left out, as scripts/new_card.py
+		// writes it: the panel fills it in when a card is handed to an agent,
+		// and SetField replaces a line rather than adding one.
+		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\nsession: \"\"\ncreated: %s\n---\n\n# %s\n", id, zone, date, title)
 		placed, err := placeCard(cardsDir, path, content)
 		if err != nil {
 			return "", err

@@ -30,6 +30,10 @@ type FleetDeps struct {
 	SetOrchestratorSession func(id string) error
 	OrchestratorPreview    func(lang string) (orchestrator.Preview, error)
 	Appoint                func(ctx context.Context, req orchestrator.Request) (orchestrator.Result, error)
+	// StartWork means what the Deps field of the same name means, for this
+	// fleet: one dispatcher per fleet holds the lock that keeps two hands from
+	// starting two sessions for one card.
+	StartWork func(ctx context.Context, w orchestrator.Work) (orchestrator.Result, error)
 }
 
 // forFleet is d with the capabilities of the fleet the request names in its
@@ -54,5 +58,6 @@ func (d Deps) forFleet(w http.ResponseWriter, r *http.Request) (Deps, bool) {
 	d.SetOrchestratorSession = f.SetOrchestratorSession
 	d.OrchestratorPreview = f.OrchestratorPreview
 	d.Appoint = f.Appoint
+	d.StartWork = f.StartWork
 	return d, true
 }

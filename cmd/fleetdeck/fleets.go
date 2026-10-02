@@ -34,6 +34,18 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 		}
 		return wizards[f.Name]
 	}
+	// One per fleet for the reason the wizard is: a dispatcher holds the
+	// one-at-a-time lock that keeps two hands from starting two sessions for
+	// one card.
+	dispatchers := map[string]*orchestrator.Dispatcher{}
+	dispatcherOf := func(f fleet.Fleet) *orchestrator.Dispatcher {
+		mu.Lock()
+		defer mu.Unlock()
+		if dispatchers[f.Name] == nil {
+			dispatchers[f.Name] = fleetDispatcher(o, fleetConfig(collector.Config(), f), dc)
+		}
+		return dispatchers[f.Name]
+	}
 	return func(name string) (server.FleetDeps, error) {
 		f, err := fleet.Select(collector.Config().FleetList(), name)
 		if err != nil {
@@ -55,6 +67,11 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			board := f.BoardPath
 			fd.CreateCard = func(title, zone string) (string, error) {
 				return createCard(board, title, zone, time.Now())
+			}
+			// Left nil where the panel starts no sessions (a stand given no
+			// claude): the snapshot then tells the page not to offer a start.
+			if d := dispatcherOf(f); d.Start != nil {
+				fd.StartWork = d.Dispatch
 			}
 		}
 		return fd, nil

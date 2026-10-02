@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -28,6 +29,20 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 		Pin: func(short string) error {
 			return setOrchestratorSession(o.configPath, collector, short)
 		},
+	}
+}
+
+// fleetDispatcher hands one fleet's cards to sessions of their own: started the
+// way an orchestrator is (sessionStarter), in the directory the orchestrator
+// runs in, the board's parent, and written into the card with the same commit
+// the panel makes for a field set by hand.
+func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client) *orchestrator.Dispatcher {
+	return &orchestrator.Dispatcher{
+		Start:     sessionStarter(o, cfg.Agent.Command),
+		List:      dc.ListSessions,
+		Send:      dc.SendText,
+		SetField:  setCardField,
+		Workspace: filepath.Dir(cfg.BoardPath),
 	}
 }
 

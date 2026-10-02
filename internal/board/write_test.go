@@ -58,14 +58,67 @@ created: 2026-09-09
 body
 `
 
+// The precondition exists for the drag: a card is moved by a hand working
+// from a snapshot up to a second old, and the agent that owns the card may
+// have written the field in between.
+func TestSetFieldRefusesWhenTheCardNoLongerHoldsTheExpectedValue(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", sample) // stage review
+	was := "new"
+	before, _ := os.ReadFile(p)
+	err := SetField(p, "stage", "blocked", &was)
+	if !errors.Is(err, ErrStale) {
+		t.Fatalf("want ErrStale, got %v", err)
+	}
+	after, _ := os.ReadFile(p)
+	if !bytes.Equal(before, after) {
+		t.Fatal("a refused write changed the card")
+	}
+}
+
+func TestSetFieldWritesWhenTheExpectedValueIsTheOneOnDisk(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", sample) // stage review
+	was := "review"
+	if err := SetField(p, "stage", "blocked", &was); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := ParseCard(p)
+	if c.Stage != "blocked" {
+		t.Fatalf("stage reads back as %q", c.Stage)
+	}
+}
+
+// progress arrives as a number from a snapshot and as a string here, and the
+// two have to compare equal: "080" and 80 are the same progress.
+func TestSetFieldComparesTheExpectedProgressAsANumber(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", sample) // progress 80
+	was := "080"
+	if err := SetField(p, "progress", "100", &was); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An empty session is a value like any other, so the precondition has to be
+// able to name it — which is why it is a pointer and not an empty string.
+func TestSetFieldTakesAnEmptySessionAsTheExpectedValue(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", cardNoSession)
+	was := ""
+	if err := SetField(p, "session", "abc12345", &was); err != nil {
+		t.Fatal(err)
+	}
+	again := ""
+	if err := SetField(p, "session", "deadbeef", &again); !errors.Is(err, ErrStale) {
+		t.Fatalf("the card holds a session now, want ErrStale, got %v", err)
+	}
+}
+
 func TestSetFieldChangesOnlyTheTargetLine(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "c.md", sample)
 	// sample starts at progress 80; stage done requires progress 100 first.
-	if err := SetField(p, "progress", "100"); err != nil {
+	if err := SetField(p, "progress", "100", nil); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(p)
-	if err := SetField(p, "stage", "done"); err != nil {
+	if err := SetField(p, "stage", "done", nil); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(p)
@@ -88,18 +141,22 @@ func TestSetFieldChangesOnlyTheTargetLine(t *testing.T) {
 }
 
 func TestSetFieldRefusesFieldsThePanelDoesNotOwn(t *testing.T) {
-	p := writeCard(t, t.TempDir(), "c.md", sample)
-	if err := SetField(p, "session", "deadbeef"); !errors.Is(err, ErrUnknownField) {
-		t.Fatalf("only stage and progress are writable, got %v", err)
+	for _, field := range []string{"id", "zone", "repo", "created", "title"} {
+		t.Run(field, func(t *testing.T) {
+			p := writeCard(t, t.TempDir(), "c.md", sample)
+			if err := SetField(p, field, "whatever", nil); !errors.Is(err, ErrUnknownField) {
+				t.Fatalf("%s is not the panel's to write, got %v", field, err)
+			}
+		})
 	}
 }
 
 func TestSetFieldRejectsInvalidValues(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "c.md", sample)
-	if err := SetField(p, "stage", "almost"); err == nil {
+	if err := SetField(p, "stage", "almost", nil); err == nil {
 		t.Fatal("an unknown stage must be refused")
 	}
-	if err := SetField(p, "progress", "55"); err == nil {
+	if err := SetField(p, "progress", "55", nil); err == nil {
 		t.Fatal("progress outside the allowed ladder must be refused")
 	}
 }
@@ -123,7 +180,7 @@ func TestSetFieldKeepsBodyContentItDidNotWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := SetField(p, "progress", "100"); err != nil {
+	if err := SetField(p, "progress", "100", nil); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(p)
@@ -141,7 +198,7 @@ func TestSetFieldKeepsBodyContentItDidNotWrite(t *testing.T) {
 // octal on the next read.
 func TestSetFieldWritesNormalizedProgressNotRawString(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "c.md", sample)
-	if err := SetField(p, "progress", "0100"); err != nil {
+	if err := SetField(p, "progress", "0100", nil); err != nil {
 		t.Fatal(err)
 	}
 	c, err := ParseCard(p)
@@ -159,7 +216,7 @@ func TestSetFieldRefusesCardWithDuplicateFrontmatterKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetField(p, "progress", "100"); err == nil {
+	if err := SetField(p, "progress", "100", nil); err == nil {
 		t.Fatal("a card whose frontmatter does not unmarshal must be refused")
 	}
 	after, err := os.ReadFile(p)
@@ -173,14 +230,14 @@ func TestSetFieldRefusesCardWithDuplicateFrontmatterKey(t *testing.T) {
 
 func TestSetFieldRefusesCardWithoutFrontmatter(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "n.md", "# no frontmatter\n")
-	if err := SetField(p, "stage", "new"); err == nil {
+	if err := SetField(p, "stage", "new", nil); err == nil {
 		t.Fatal("a card without a frontmatter block must be refused")
 	}
 }
 
 func TestSetFieldRefusesCardMissingTargetField(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "m.md", cardMissingProgress)
-	if err := SetField(p, "progress", "20"); err == nil {
+	if err := SetField(p, "progress", "20", nil); err == nil {
 		t.Fatal("a card without a progress field must be refused")
 	}
 }
@@ -197,20 +254,20 @@ func TestSubstituteFieldRefusesLineCountChange(t *testing.T) {
 
 func TestSetFieldEnforcesDoneRequiresProgress100(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "c.md", sample) // progress 80, stage review, session set
-	if err := SetField(p, "stage", "done"); err == nil {
+	if err := SetField(p, "stage", "done", nil); err == nil {
 		t.Fatal("stage done must be refused while progress is not 100")
 	}
-	if err := SetField(p, "progress", "100"); err != nil {
+	if err := SetField(p, "progress", "100", nil); err != nil {
 		t.Fatalf("progress 100 must be allowed while stage is review: %v", err)
 	}
-	if err := SetField(p, "stage", "done"); err != nil {
+	if err := SetField(p, "stage", "done", nil); err != nil {
 		t.Fatalf("stage done must be allowed once progress is 100: %v", err)
 	}
 }
 
 func TestSetFieldRefusesStartedStageWithoutSession(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "ns.md", cardNoSession)
-	if err := SetField(p, "stage", "active"); err == nil {
+	if err := SetField(p, "stage", "active", nil); err == nil {
 		t.Fatal("a started stage must be refused while session is empty")
 	}
 }
@@ -235,7 +292,7 @@ func TestCrossFieldRefusalsCarryACode(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			p := writeCard(t, t.TempDir(), "c.md", tc.card)
-			err := SetField(p, tc.field, tc.value)
+			err := SetField(p, tc.field, tc.value, nil)
 			var rule *RuleRefusal
 			if !errors.As(err, &rule) {
 				t.Fatalf("want a RuleRefusal, got %v", err)
@@ -263,7 +320,7 @@ func TestRuleRefusalCodesCanBeDictionaryKeys(t *testing.T) {
 
 func TestSetFieldRefusesProgressChangeAwayFrom100WhileDone(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "d.md", cardDone)
-	if err := SetField(p, "progress", "80"); err == nil {
+	if err := SetField(p, "progress", "80", nil); err == nil {
 		t.Fatal("progress must be refused away from 100 while stage is done")
 	}
 }
@@ -278,7 +335,7 @@ func TestSetFieldPreservesFileMode(t *testing.T) {
 	if err := os.Chmod(p, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetField(p, "progress", "100"); err != nil {
+	if err := SetField(p, "progress", "100", nil); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(p)
@@ -287,5 +344,83 @@ func TestSetFieldPreservesFileMode(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o644 {
 		t.Fatalf("file mode must be preserved across an atomic write, got %o", info.Mode().Perm())
+	}
+}
+
+// A card the panel itself created carries no session line at all
+// (CreateCard's template wrote five fields), so writing a short id into one
+// has to add the line rather than substitute it.
+const cardWithoutSessionLine = `---
+id: T-009
+zone: planned
+stage: new
+progress: 0
+created: 2026-09-09
+---
+
+body
+`
+
+func TestSetFieldWritesASessionShortID(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", cardNoSession)
+	if err := SetField(p, "session", "abc12345", nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	if !strings.Contains(string(raw), "session: abc12345") {
+		t.Fatalf("session was not written:\n%s", raw)
+	}
+}
+
+func TestSetFieldRefusesASessionThatIsNoShortID(t *testing.T) {
+	for _, value := range []string{"", "zz", "нехекс", "abcdef0123456", "abc 123"} {
+		t.Run(value, func(t *testing.T) {
+			p := writeCard(t, t.TempDir(), "c.md", cardNoSession)
+			before, _ := os.ReadFile(p)
+			if err := SetField(p, "session", value, nil); err == nil {
+				t.Fatalf("session %q was accepted", value)
+			}
+			after, _ := os.ReadFile(p)
+			if !bytes.Equal(before, after) {
+				t.Fatal("a refused write changed the card")
+			}
+		})
+	}
+}
+
+// The line is added in the frontmatter and nowhere else: a card body may
+// contain a line of its own that looks like a field.
+func TestSetFieldAddsASessionLineToACardThatHasNone(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", cardWithoutSessionLine)
+	if err := SetField(p, "session", "abc12345", nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	lines := strings.Split(string(raw), "\n")
+	if got, want := len(lines), len(strings.Split(cardWithoutSessionLine, "\n"))+1; got != want {
+		t.Fatalf("line count %d, want %d:\n%s", got, want, raw)
+	}
+	c, err := ParseCard(p)
+	if err != nil {
+		t.Fatalf("the card no longer parses: %v", err)
+	}
+	if c.Session != "abc12345" {
+		t.Fatalf("session reads back as %q", c.Session)
+	}
+}
+
+// The order the panel writes in: the short id first, the stage second. The
+// board refuses a started stage while session is empty, so the two writes
+// cannot be swapped and the first one has to be enough on its own.
+func TestASessionWrittenFirstLetsTheStageBeSetToActive(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", cardWithoutSessionLine)
+	if err := SetField(p, "stage", "active", nil); err == nil {
+		t.Fatal("stage active was accepted on a card with no session")
+	}
+	if err := SetField(p, "session", "abc12345", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetField(p, "stage", "active", nil); err != nil {
+		t.Fatalf("stage active after a session was written: %v", err)
 	}
 }

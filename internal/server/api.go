@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/kroticw/fleetdeck/internal/board"
@@ -111,8 +110,26 @@ func (d Deps) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 // tab's address, not in the server: two tabs on two fleets are served side by
 // side, and switching one of them changes nothing for the other. The only
 // error is a fleet no configuration has, which the caller answers with 404.
+//
+// CanStartWork is stamped here rather than in the collect cycle: whether this
+// panel can start a worker for the fleet is a fact about what it is wired
+// with, asked of the fleet by the same name forFleet asks every write route.
 func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
-	return state.ForFleet(d.Snapshot(), r.URL.Query().Get(fleetParam))
+	name := r.URL.Query().Get(fleetParam)
+	view, err := state.ForFleet(d.Snapshot(), name)
+	if err != nil {
+		return view, err
+	}
+	start := d.StartWork
+	if d.Fleet != nil {
+		f, err := d.Fleet(name)
+		if err != nil {
+			return view, nil // a fleet the snapshot accepted and the configuration does not: nothing to start
+		}
+		start = f.StartWork
+	}
+	view.CanStartWork = start != nil
+	return view, nil
 }
 
 // handleResume brings a stopped session back.
@@ -167,6 +184,10 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		Path  string `json:"path"`
 		Field string `json:"field"`
 		Value string `json:"value"`
+		// Expect is a pointer because an empty session is a value a caller may
+		// legitimately expect, and because a request that names no expectation
+		// has to go on meaning "write it whatever the card holds".
+		Expect *string `json:"expect"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -187,9 +208,13 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, "a readable board directory")
 		return
 	}
-	switch err := d.SetCardField(path, body.Field, body.Value); {
+	switch err := d.SetCardField(path, body.Field, body.Value, body.Expect); {
 	case err == nil:
 		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, board.ErrStale):
+		// Nothing was written and nothing about the request was wrong: the card
+		// moved on between the snapshot the caller acted on and this write.
+		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, board.ErrNothingToCommit):
 		// The card already held this value, so the write changed no bytes and
 		// there was no history to record. Nothing happened and nothing is
@@ -298,28 +323,28 @@ func cardWriteStatus(err error) int {
 // unwritableCard lists board.SetField's own wording for the failures that are
 // the card's fault rather than the request's.
 //
-// Matching on message text is a seam, and it is here because internal/board
-// draws no sentinel around this family: a reworded message there turns a 422
-// silently back into a 400, which no test in this package would notice. A
-// sentinel in internal/board would close it properly.
+// Matching on message text is a seam: a reworded message in internal/board
+// turns a 422 silently back into a 400, which no test in this package would
+// notice. The family's one common case — a card with no line for the field —
+// has a sentinel of its own (board.ErrNoSuchField) and is matched by it; these
+// three are what is left without one.
 var unwritableCard = []string{
 	"has no frontmatter to write into",
 	"has malformed frontmatter",
 	"line count would change",
 }
 
-// hasNoFieldLine matches board's "card <path> has no <field> field", a card whose
-// frontmatter simply does not carry the line the write would replace.
-var hasNoFieldLine = regexp.MustCompile(`has no [a-z]+ field`)
-
 func isUnwritableCard(err error) bool {
+	if errors.Is(err, board.ErrNoSuchField) {
+		return true
+	}
 	msg := err.Error()
 	for _, phrase := range unwritableCard {
 		if strings.Contains(msg, phrase) {
 			return true
 		}
 	}
-	return hasNoFieldLine.MatchString(msg)
+	return false
 }
 
 func isFilesystemError(err error) bool {

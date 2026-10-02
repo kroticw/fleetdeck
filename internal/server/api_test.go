@@ -25,7 +25,7 @@ func testDeps() (Deps, *[]string) {
 		Snapshot: func() state.Snapshot {
 			return state.Snapshot{Cards: []board.Card{{Path: "/b/c.md", Stage: "active"}}}
 		},
-		SetCardField: func(path, field, value string) error {
+		SetCardField: func(path, field, value string, _ *string) error {
 			calls = append(calls, "card:"+path+":"+field+":"+value)
 			return nil
 		},
@@ -112,7 +112,7 @@ func TestPatchCardWritesTheField(t *testing.T) {
 
 func TestPatchCardRefusesFieldsThePanelDoesNotOwn(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(string, string, string) error {
+	d.SetCardField = func(string, string, string, *string) error {
 		return fmt.Errorf("%w: session", board.ErrUnknownField)
 	}
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"session","value":"x"}`)
@@ -123,7 +123,7 @@ func TestPatchCardRefusesFieldsThePanelDoesNotOwn(t *testing.T) {
 
 func TestPatchCardReportsAMissingCardAsNotFound(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(path, _, _ string) error {
+	d.SetCardField = func(path, _, _ string, _ *string) error {
 		return fmt.Errorf("re-read card before write: %w", &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist})
 	}
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"gone.md","field":"stage","value":"done"}`)
@@ -134,7 +134,7 @@ func TestPatchCardReportsAMissingCardAsNotFound(t *testing.T) {
 
 func TestPatchCardReportsAWriteFailureAsServerError(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(path, _, _ string) error {
+	d.SetCardField = func(path, _, _ string, _ *string) error {
 		return fmt.Errorf("rename temp file over card: %w", &os.LinkError{Op: "rename", Old: path, New: path, Err: fs.ErrPermission})
 	}
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"done"}`)
@@ -148,7 +148,7 @@ func TestPatchCardReportsAWriteFailureAsServerError(t *testing.T) {
 // not the server's, so it must not be reported as a 500.
 func TestPatchCardReportsARefusedValueAsBadRequest(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(string, string, string) error { return errors.New(`unknown stage "shipping"`) }
+	d.SetCardField = func(string, string, string, *string) error { return errors.New(`unknown stage "shipping"`) }
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"shipping"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a refused value must be 400, got %d: %s", rec.Code, rec.Body.String())
@@ -201,9 +201,10 @@ func TestPatchCardReportsACardThatCannotAcceptTheWriteAsUnprocessable(t *testing
 		"frontmatter will not parse": {"---\nstage: [unclosed\n---\n", "progress", "40", http.StatusUnprocessableEntity},
 		"no line for the field":      {"---\nstage: new\n---\n", "progress", "40", http.StatusUnprocessableEntity},
 		// Still the caller's mistake: a value the board will never accept.
-		"value off the ladder": {"---\nstage: new\nprogress: 0\n---\n", "progress", "37", http.StatusBadRequest},
+		"value off the ladder":        {"---\nstage: new\nprogress: 0\n---\n", "progress", "37", http.StatusBadRequest},
+		"session that is no short id": {"---\nstage: new\nprogress: 0\n---\n", "session", "abc", http.StatusBadRequest},
 		// And so is a field the panel does not own.
-		"field the panel does not own": {"---\nstage: new\nprogress: 0\n---\n", "session", "abc", http.StatusBadRequest},
+		"field the panel does not own": {"---\nstage: new\nprogress: 0\n---\n", "zone", "urgent", http.StatusBadRequest},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -220,12 +221,52 @@ func TestPatchCardReportsACardThatCannotAcceptTheWriteAsUnprocessable(t *testing
 	}
 }
 
+// A card dragged from one column to another is dragged by a hand working from
+// a snapshot up to a second old. The precondition is what keeps that hand from
+// writing the stage it saw over the stage the card's own agent has since moved
+// to, and the refusal has to read as a conflict rather than as a bad request:
+// nothing about the request was wrong.
+func TestPatchCardRefusesAWriteMadeAgainstACardThatHasMovedOn(t *testing.T) {
+	d, _, card := cardDeps(t)
+	if err := os.WriteFile(card, []byte("---\nstage: review\nprogress: 80\nsession: abc12345\n---\n"), 0o600); err != nil {
+		t.Fatalf("write card: %v", err)
+	}
+	d.SetCardField = board.SetField
+
+	stale := `{"path":"c.md","field":"stage","value":"blocked","expect":"new"}`
+	if rec := do(d, http.MethodPatch, "/api/cards", stale); rec.Code != http.StatusConflict {
+		t.Fatalf("a stale write must be 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if raw, _ := os.ReadFile(card); !strings.Contains(string(raw), "stage: review") {
+		t.Fatalf("a refused write changed the card:\n%s", raw)
+	}
+
+	fresh := `{"path":"c.md","field":"stage","value":"blocked","expect":"review"}`
+	if rec := do(d, http.MethodPatch, "/api/cards", fresh); rec.Code != http.StatusNoContent {
+		t.Fatalf("a write made against the card on disk must go through, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Every write the panel made before the precondition existed carries no expect
+// key, and has to go on meaning "write it whatever the card holds".
+func TestPatchCardWithoutAnExpectWritesUnconditionally(t *testing.T) {
+	d, _, card := cardDeps(t)
+	if err := os.WriteFile(card, []byte("---\nstage: review\nprogress: 80\nsession: abc12345\n---\n"), 0o600); err != nil {
+		t.Fatalf("write card: %v", err)
+	}
+	d.SetCardField = board.SetField
+	body := `{"path":"c.md","field":"stage","value":"blocked"}`
+	if rec := do(d, http.MethodPatch, "/api/cards", body); rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // The one refusal in this family that no card content can be built to provoke
 // from outside: board refuses a substitution that would change the file's line
 // count. It is still the card's fault, not the request's.
 func TestPatchCardReportsALineCountRefusalAsUnprocessable(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(string, string, string) error {
+	d.SetCardField = func(string, string, string, *string) error {
 		return errors.New("card c.md refusing to write: line count would change")
 	}
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
@@ -359,7 +400,7 @@ func TestANilDependencyIsUnavailableNotAPanic(t *testing.T) {
 // progress field moves it somewhere nobody asked for.
 func TestPatchCardReportsAnUncommittedWriteAsSuccess(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(string, string, string) error {
+	d.SetCardField = func(string, string, string, *string) error {
 		return fmt.Errorf("%w: git commit timed out after 30s, likely a signing passphrase prompt", ErrFieldWrittenNotCommitted)
 	}
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
@@ -379,7 +420,7 @@ func TestPatchCardReportsAnUncommittedWriteAsSuccess(t *testing.T) {
 // missing and there is nothing to tell the operator about.
 func TestPatchCardReportsNothingToCommitAsAnOrdinarySuccess(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(string, string, string) error {
+	d.SetCardField = func(string, string, string, *string) error {
 		return fmt.Errorf("nothing to commit for c.md: %w", board.ErrNothingToCommit)
 	}
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)
@@ -392,7 +433,7 @@ func TestPatchCardReportsNothingToCommitAsAnOrdinarySuccess(t *testing.T) {
 // not a write missing from git history, whichever way the caller wrapped it.
 func TestPatchCardTreatsNothingToCommitAsSuccessEvenWhenWrappedAsUncommitted(t *testing.T) {
 	d, _, _ := cardDeps(t)
-	d.SetCardField = func(string, string, string) error {
+	d.SetCardField = func(string, string, string, *string) error {
 		return fmt.Errorf("%w: %w", ErrFieldWrittenNotCommitted, board.ErrNothingToCommit)
 	}
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"progress","value":"40"}`)

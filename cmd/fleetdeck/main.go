@@ -186,8 +186,8 @@ func watchBoard(ctx context.Context, boardDir string, onChange func()) {
 //     says the commit is missing. Reported as a plain failure this is the one that
 //     does damage: the operator redoes an edit that already took effect, and a
 //     progress field applied twice moves somewhere nobody asked for.
-func setCardField(path, field, value string) error {
-	if err := board.SetField(path, field, value); err != nil {
+func setCardField(path, field, value string, expect *string) error {
+	if err := board.SetField(path, field, value, expect); err != nil {
 		return err
 	}
 	msg := fmt.Sprintf("chore(board): set %s to %s", field, value)
@@ -539,7 +539,7 @@ func serve(parent context.Context, o runOpts) error {
 	if err != nil {
 		return err
 	}
-	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession
+	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession, d.StartWork = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession, first.StartWork
 
 	var wg sync.WaitGroup
 	wg.Add(1)

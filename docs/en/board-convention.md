@@ -63,9 +63,9 @@ Two rules connect `stage`, `progress`, and `session` to each other, and both are
 
 The board splits ownership by who is writing:
 
-- The panel writes exactly two fields: `stage` and `progress`. Its write path accepts no other field name — asking it to write `zone`, `session`, `repo`, or `created` is refused as an unwritable field, reported as `field is not writable: <field>`.
+- The panel writes three fields: `stage`, `progress` and `session`. Its write path accepts no other field name — asking it to write `zone`, `repo`, or `created` is refused as an unwritable field, reported as `field is not writable: <field>`. `session` is accepted only as a short id of 6 to 12 hexadecimal characters; emptying it is not offered. A write may also name the value it expects the field to hold, and is then refused with `the card has moved on since this write was made` when the card holds something else: a hand dragging a card acts on a snapshot up to a second old.
 - The body of the card — its heading, its context section, and its log — belongs to the agents working on the task. The panel never edits the body.
-- The `session` field is filled in by the orchestrator when it starts a session for a card, not by the panel and not by the agent working the task.
+- The `session` field is filled in by whoever starts a session for the card, before the session is told about the card: the orchestrator, or the panel when a card is dropped into the board's active column. The panel starts the session with no prompt, writes its short id into the card, sets the stage to `active`, and only then sends it one line naming the card; an agent told to work a card before its id is on it writes its own copy of the field.
 - `repo`, `created`, and `zone` are not written by the panel, and are not documented as belonging to the agent either. In practice they are set once, by whoever creates the card from the template, and left alone.
 
 ## How the title and links are extracted
@@ -120,9 +120,9 @@ The Go code the panel uses to read cards (`internal/board`) and the Python valid
 | `stage: done` requires `progress: 100`, and vice versa | not checked | enforced | enforced |
 | A started stage requires a non-empty `session` | not checked | enforced | enforced |
 
-A card the panel starts (`CreateCard`, behind the **+ card** button) is the one thing the Go code writes whole, and it is written to pass the validator script: exactly `zone` — one of the four allowed values, checked — `stage: new`, `progress: 0` and `created`, and a title. A test runs the validator script itself on such a card in each of the four zones.
+A card the panel starts (`CreateCard`, behind the **+ card** button) is the one thing the Go code writes whole, and it is written to pass the validator script: exactly `zone` — one of the four allowed values, checked — `stage: new`, `progress: 0`, an empty `session` and `created`, and a title. A test runs the validator script itself on such a card in each of the four zones.
 
-The Go reader is a lenient reader and a surgical writer of two fields; it was not built to be a schema gate. The validator script is the strict gate, and it has to be run on purpose — by a person or by an agent — since nothing in the Go code calls it. A card that the panel reads without complaint can still fail the validator script, and a card that fails the validator script can still be read and have its `stage` or `progress` field updated by the panel without any warning that something else about it is malformed.
+The Go reader is a lenient reader and a surgical writer of three fields; it was not built to be a schema gate. The validator script is the strict gate, and it has to be run on purpose — by a person or by an agent — since nothing in the Go code calls it. A card that the panel reads without complaint can still fail the validator script, and a card that fails the validator script can still be read and have its `stage` or `progress` field updated by the panel without any warning that something else about it is malformed.
 
 ## The card-write race
 
