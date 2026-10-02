@@ -145,6 +145,9 @@ type Collector struct {
 	usage       *usage.Fetcher
 	projectsDir string
 
+	// boards carries its own lock; a collect cycle is its only caller.
+	boards *board.Cache
+
 	// cacheMu guards the two caches a collect cycle fills, and reportMu guards
 	// reports alone. They are two mutexes rather than one because they are
 	// contended by different callers: reports arrive on HTTP handler goroutines
@@ -170,6 +173,7 @@ func NewCollector(cfg config.Config, dc *daemon.Client, uf *usage.Fetcher, proje
 		daemon:       dc,
 		usage:        uf,
 		projectsDir:  projectsDir,
+		boards:       board.NewCache(),
 		contextCache: map[string]cachedUsage{},
 		pathCache:    map[string]locatedPath{},
 		reports:      map[string]reported{},
@@ -616,7 +620,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	for _, f := range cfg.FleetList() {
 		fb := state.FleetBoard{Fleet: f}
 		if f.BoardPath != "" {
-			scanned, err := board.Scan(f.BoardPath)
+			scanned, err := c.boards.Scan(f.BoardPath)
 			if err != nil {
 				fb.BoardError = err.Error()
 			} else {

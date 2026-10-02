@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // CardsDir returns the directory Scan and Watch actually read cards from:
@@ -45,13 +46,20 @@ func Scan(dir string) ([]Card, error) {
 	cardsDir := CardsDir(dir)
 	cards, err := readCardsIn(cardsDir)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("%w: %s", ErrNoCardsDir, cardsDir)
-		}
-		return nil, fmt.Errorf("read board cards dir: %w", err)
+		return nil, scanErr(cardsDir, err)
 	}
 	sort.Slice(cards, func(i, j int) bool { return cards[i].Path < cards[j].Path })
 	return cards, nil
+}
+
+// scanErr is how a failed read of a cards directory reaches a caller of Scan —
+// shared with Cache.Scan so the two cannot disagree about what a board path
+// naming no board looks like.
+func scanErr(cardsDir string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: %s", ErrNoCardsDir, cardsDir)
+	}
+	return fmt.Errorf("read board cards dir: %w", err)
 }
 
 // readCardsIn parses every .md file directly inside dir. The error is the
@@ -59,21 +67,56 @@ func Scan(dir string) ([]Card, error) {
 // directory means: a board that is not one for Scan, a board with no archive
 // yet for SessionCards.
 func readCardsIn(dir string) ([]Card, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := readCardEntries(dir)
 	if err != nil {
 		return nil, err
 	}
 	var cards []Card
 	for _, e := range entries {
+		cards = append(cards, parseCardAt(e.path))
+	}
+	return cards, nil
+}
+
+// cardEntry is one card file as the directory describes it, before it is read:
+// the pair Cache judges freshness by.
+type cardEntry struct {
+	path  string
+	size  int64
+	mtime time.Time
+}
+
+// readCardEntries lists the card files directly inside dir. The error is the
+// directory read's own, unwrapped, for the same reason readCardsIn's is.
+func readCardEntries(dir string) ([]cardEntry, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]cardEntry, 0, len(entries))
+	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
 		p := filepath.Join(dir, e.Name())
-		c, err := ParseCard(p)
+		fi, err := e.Info()
 		if err != nil {
-			c = Card{Path: p, ParseError: err.Error()}
+			// The file went away between the listing and the question. It is
+			// not a card any more; the next scan will not list it either.
+			continue
 		}
-		cards = append(cards, c)
+		out = append(out, cardEntry{path: p, size: fi.Size(), mtime: fi.ModTime()})
 	}
-	return cards, nil
+	return out, nil
+}
+
+// parseCardAt is ParseCard with a failure carried in the card itself, which is
+// how an unparsable card reaches the board: as a card with a ParseError, never
+// as a missing row.
+func parseCardAt(path string) Card {
+	c, err := ParseCard(path)
+	if err != nil {
+		return Card{Path: path, ParseError: err.Error()}
+	}
+	return c
 }
