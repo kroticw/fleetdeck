@@ -14,8 +14,8 @@ let sent;
 let answer;
 let card;
 
-async function fakeCreate(title, zone) {
-  sent.push({ title, zone });
+async function fakeCreate(title, zone, repo) {
+  sent.push({ title, zone, repo });
   if (answer instanceof Error) throw answer;
   return answer;
 }
@@ -83,7 +83,7 @@ test("new card: choosing an option by its label sends the zone's identifier", as
   form.querySelector("input.newcard-title").value = "Later";
   fireEvent(form.querySelector("button.newcard-create"), "click");
   await settle();
-  assert.deepEqual(sent, [{ title: "Later", zone: "niceToHave" }]);
+  assert.deepEqual(sent, [{ title: "Later", zone: "niceToHave", repo: "" }]);
 });
 
 test("new card: create sends the trimmed title and the chosen zone, then closes", async () => {
@@ -93,10 +93,35 @@ test("new card: create sends the trimmed title and the chosen zone, then closes"
   fireEvent(form.querySelector("button.newcard-create"), "click");
   await settle();
 
-  assert.deepEqual(sent, [{ title: "Fix the header", zone: "urgent" }]);
+  assert.deepEqual(sent, [{ title: "Fix the header", zone: "urgent", repo: "" }]);
   assert.equal(form.hidden, true);
   assert.equal(form.querySelector("input.newcard-title").value, "", "the next card starts from an empty title");
   assert.equal(host.querySelector("span.newcard-note").hidden, true, "a committed card has nothing missing to report");
+});
+
+// A worker starts in the checkout its card names, so the form asks for it.
+// It stays filled after a card is made: the next card is usually for the same
+// repository.
+test("new card: the repo is sent trimmed and kept for the next card", async () => {
+  const form = open();
+  const repo = form.querySelector("input.newcard-repo");
+  assert.ok(repo, "the form has a repo field");
+  form.querySelector("input.newcard-title").value = "With a repo";
+  repo.value = "  src/fleetdeck ";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.deepEqual(sent, [{ title: "With a repo", zone: "unplanned", repo: "src/fleetdeck" }]);
+  assert.equal(open().querySelector("input.newcard-repo").value, "src/fleetdeck");
+});
+
+test("new card: Enter in the repo creates the card too", async () => {
+  const form = open();
+  form.querySelector("input.newcard-title").value = "By keyboard";
+  const repo = form.querySelector("input.newcard-repo");
+  repo.value = "src/x";
+  fireEvent(repo, "keydown", { key: "Enter" });
+  await settle();
+  assert.equal(sent.length, 1);
 });
 
 test("new card: Enter in the title creates the card", async () => {

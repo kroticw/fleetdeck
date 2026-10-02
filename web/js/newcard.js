@@ -1,9 +1,11 @@
 // Starting a card from the panel.
 //
-// A title and a zone, and nothing else (the orchestrator's decision,
-// 2026-09-11): the card is written further by the agent or the person who takes
-// the task on, and the panel only has to be able to start one. Without this, a
-// person with no editor open on the board had no way to put a first card on it.
+// A title, a zone and the repository, and nothing else: the card is written
+// further by the agent or the person who takes the task on, and the panel only
+// has to be able to start one. Without this, a person with no editor open on
+// the board had no way to put a first card on it. The repository is asked here
+// because a worker is started in it and a card without one is not handed over
+// (T-061).
 //
 // The button that opens this is drawn in the board's new column (board.js) and
 // the form is not: the board is redrawn whole from every snapshot, and a form
@@ -62,13 +64,19 @@ export function createNewCard(host, { create = createCard } = {}) {
   zone.value = DEFAULT_ZONE;
   zoneLabel.appendChild(zone);
 
+  // Kept after a card is made: the next one is usually for the same checkout.
+  const repo = el("input", "newcard-repo");
+  repo.setAttribute("type", "text");
+  repo.setAttribute("placeholder", t("new_card_repo"));
+  repo.setAttribute("aria-label", t("new_card_repo"));
+
   const createButton = el("button", "newcard-create", t("new_card_create"));
   createButton.setAttribute("type", "button");
   const cancelButton = el("button", "newcard-cancel", t("new_card_cancel"));
   cancelButton.setAttribute("type", "button");
   const error = el("div", "newcard-error");
 
-  form.append(title, zoneLabel, createButton, cancelButton, error);
+  form.append(title, zoneLabel, repo, createButton, cancelButton, error);
 
   // What stays said after the form has closed: a card that reached the board
   // and not its history.
@@ -109,8 +117,10 @@ export function createNewCard(host, { create = createCard } = {}) {
     createButton.disabled = true;
     error.textContent = "";
     try {
-      const result = await create(text, zone.value);
+      const where = repo.value.trim();
+      const result = await create(text, zone.value, where);
       title.value = "";
+      repo.value = where;
       close();
       if (!result.committed) {
         note.textContent = `${t("new_card_not_committed")}: ${result.reason}`;
@@ -132,12 +142,14 @@ export function createNewCard(host, { create = createCard } = {}) {
     note.hidden = true;
   });
   cancelButton.addEventListener("click", close);
-  title.addEventListener("keydown", (ev) => {
+  const submitOnEnter = (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault?.();
       submit();
     }
-  });
+  };
+  title.addEventListener("keydown", submitOnEnter);
+  repo.addEventListener("keydown", submitOnEnter);
   // Escape from anywhere in the form, not only its title: the zone and the
   // buttons take focus too.
   form.addEventListener("keydown", (ev) => {

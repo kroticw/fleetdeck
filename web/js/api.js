@@ -101,16 +101,17 @@ export async function setCardField(path, field, value, expect) {
   throw await refusal(response);
 }
 
-// createCard starts a card on the board from a title and a zone — the two fields
-// the route takes, and nothing else. It answers {path, committed, reason}: 201
+// createCard starts a card on the board from a title, a zone and the repository
+// its worker starts in — the fields the route takes, and nothing else. An empty
+// repo is a card without one. It answers {path, committed, reason}: 201
 // both when the card was committed and when it reached the board without its
 // commit, because the card exists either way and creating it again would make a
 // second one. A thrown error means no card was made.
-export async function createCard(title, zone) {
+export async function createCard(title, zone, repo = "") {
   const response = await fetch(inFleet("/api/cards"), {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ title: String(title), zone: String(zone) }),
+    body: JSON.stringify({ title: String(title), zone: String(zone), repo: String(repo) }),
   });
   if (response.status !== 201) {
     throw await refusal(response);

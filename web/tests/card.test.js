@@ -145,6 +145,36 @@ test("both fields show what the card holds", () => {
   assert.equal(root.querySelector("select[data-field=progress]").value, "40");
 });
 
+// The repo is where the card's worker is started (T-061), so it is shown and
+// can be changed from the card, as stage and progress are.
+test("the repo is shown and a change is written into the card", async () => {
+  const { root } = open(snapshot());
+  const calls = stubFetch(answer(204));
+  const repo = root.querySelector("input[data-field=repo]");
+  assert.ok(repo, "the card has a repo field");
+  assert.equal(repo.value, "fleetdeck");
+
+  repo.value = " src/fleetdeck ";
+  fireEvent(repo, "change");
+  await settle();
+
+  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "repo", value: "src/fleetdeck" });
+  assert.equal(root.querySelector("input[data-field=repo]").value, "src/fleetdeck");
+});
+
+test("an unchanged or emptied repo writes nothing", async () => {
+  const { root } = open(snapshot());
+  const calls = stubFetch(answer(204));
+  const repo = root.querySelector("input[data-field=repo]");
+  repo.value = "fleetdeck";
+  fireEvent(repo, "change");
+  repo.value = "  ";
+  fireEvent(repo, "change");
+  await settle();
+  assert.equal(calls.length, 0);
+  assert.equal(root.querySelector("input[data-field=repo]").value, "fleetdeck");
+});
+
 test("a card that does not parse offers no controls", () => {
   const { root } = open(snapshot(), BROKEN);
   assert.equal(root.querySelectorAll("select").length, 0);

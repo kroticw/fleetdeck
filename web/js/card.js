@@ -237,6 +237,31 @@ export function renderCard(root, path, onClose, options = {}) {
     return wrap;
   };
 
+  // The repo is free text, written when the operator leaves the field or
+  // presses Enter (the input's change). An empty or unchanged value writes
+  // nothing: clearing it is not offered, the board has no "no repo" value.
+  const repoControl = (value) => {
+    const wrap = el("label", "card-field");
+    wrap.append(el("span", "card-field-name", "repo"));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "card-repo";
+    input.dataset.field = "repo";
+    input.value = value;
+    input.placeholder = t("new_card_repo");
+    input.addEventListener("change", () => {
+      const next = input.value.trim();
+      if (next === "" || next === value) {
+        input.value = value;
+        return;
+      }
+      input.value = next;
+      onFieldChange(input);
+    });
+    wrap.append(input);
+    return wrap;
+  };
+
   const head = (title) => {
     const box = el("div", "card-head");
     box.append(el("h3", "card-title", title));
@@ -345,6 +370,7 @@ export function renderCard(root, path, onClose, options = {}) {
       const fields = el("div", "card-fields");
       fields.append(fieldControl("stage", STAGES, shownValue(card, "stage")));
       fields.append(fieldControl("progress", PROGRESS, shownValue(card, "progress")));
+      fields.append(repoControl(shownValue(card, "repo")));
       nodes.push(fields);
     }
 
@@ -564,7 +590,7 @@ export function renderCard(root, path, onClose, options = {}) {
       // rebuild. Putting the focus back is the difference between a panel that
       // can be driven from the keyboard and one that drops out from under it on
       // every edit.
-      root.querySelector(`select[data-field="${focusField}"]`)?.focus?.();
+      root.querySelector(`[data-field="${focusField}"]`)?.focus?.();
     }
   };
 

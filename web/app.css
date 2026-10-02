@@ -1294,7 +1294,8 @@ main {
   color: var(--text-muted);
 }
 
-.card-field select {
+.card-field select,
+.card-field input {
   font: inherit;
   color: var(--text);
   background: var(--surface);
@@ -2424,7 +2425,8 @@ main {
   box-shadow: 0 4px 16px var(--shadow);
 }
 
-.newcard-title {
+.newcard-title,
+.newcard-repo {
   flex: 1 1 100%;
   font: inherit;
   padding: 4px 6px;
@@ -4502,6 +4504,7 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] .newcard-title,
+:root[data-surface="board"] .newcard-repo,
 :root[data-surface="board"] .newcard-zone,
 :root[data-surface="board"] .newcard-create,
 :root[data-surface="board"] .newcard-cancel {
@@ -4518,6 +4521,7 @@ body.is-resizing {
    being written looks as unpressable as it is. */
 :root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"] .newcard-title:hover:not(:disabled),
+:root[data-surface="board"] .newcard-repo:hover:not(:disabled),
 :root[data-surface="board"] .newcard-zone:hover:not(:disabled),
 :root[data-surface="board"] .newcard-create:hover:not(:disabled),
 :root[data-surface="board"] .newcard-cancel:hover:not(:disabled) {
@@ -4532,7 +4536,8 @@ body.is-resizing {
 
 /* The title's placeholder is what an empty form shows: read like the muted text
    beside it, not WebKit's pale default on a frosted panel. */
-:root[data-surface="board"] .newcard-title::placeholder {
+:root[data-surface="board"] .newcard-title::placeholder,
+:root[data-surface="board"] .newcard-repo::placeholder {
   color: var(--text-muted);
   opacity: 1;
 }
@@ -4580,6 +4585,7 @@ body.is-resizing {
    nothing blurred. */
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
+:root[data-surface="board"][data-glass="opaque"] .newcard-repo,
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone,
 :root[data-surface="board"][data-glass="opaque"] .newcard-create,
 :root[data-surface="board"][data-glass="opaque"] .newcard-cancel {
@@ -4589,6 +4595,7 @@ body.is-resizing {
 
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-repo:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-create:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-cancel:hover:not(:disabled) {

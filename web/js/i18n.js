@@ -188,6 +188,7 @@ const en = {
   new_card: "+ card",
   new_card_title: "Card title",
   new_card_zone: "Urgency",
+  new_card_repo: "Repository from ~, e.g. src/fleetdeck",
   // The zone's four values, worded rather than named by the schema's
   // identifiers: the identifiers were read as stages the board had no
   // column for.
@@ -559,6 +560,7 @@ const ru = {
   new_card: "+ карточка",
   new_card_title: "Заголовок карточки",
   new_card_zone: "Срочность",
+  new_card_repo: "Репозиторий от ~, например src/fleetdeck",
   zone_urgent: "Срочная",
   zone_unplanned: "Внеплановая",
   zone_planned: "Плановая",

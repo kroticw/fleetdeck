@@ -275,16 +275,16 @@ test("a token that cannot be had throws words, never an empty token", async () =
   await assert.rejects(fetchTerminalToken(), /token/);
 });
 
-test("a new card is a POST of its title and zone, and nothing else", async () => {
+test("a new card is a POST of its title, zone and repo, and nothing else", async () => {
   stubFetch(answer({ status: 201, body: { path: "/b/cards/2026-09-11-a-task.md", committed: true } }));
 
-  const result = await createCard("A task", "planned");
+  const result = await createCard("A task", "planned", "src/fleetdeck");
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "/api/cards");
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers["Content-Type"], "application/json");
-  assert.deepEqual(JSON.parse(calls[0].init.body), { title: "A task", zone: "planned" });
+  assert.deepEqual(JSON.parse(calls[0].init.body), { title: "A task", zone: "planned", repo: "src/fleetdeck" });
   assert.deepEqual(result, { path: "/b/cards/2026-09-11-a-task.md", committed: true, reason: "" });
 });
 
