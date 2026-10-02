@@ -217,6 +217,14 @@ const en = {
   move_cancel: "Leave it",
   move_close: "Close",
   move_refused_title: "The card did not move",
+  // Accepting a card, which puts its session out. The question is asked on the
+  // drag and not in the open card's select: a drag is where a slip of the mouse
+  // lands somewhere nobody meant.
+  move_done_title: "Accepting this card puts its session out",
+  move_done_ask:
+    "What the session said goes into the board's archive, its pin is dropped, and then it is stopped — it keeps its history and can be brought back. Session",
+  move_done_go: "Accept and tidy away",
+  move_after_title: "The card moved, and not everything around it did",
   // The close button of every dialog (web/js/dialog.js), for a screen reader:
   // on screen it is a ×.
   dialog_close: "Close",
@@ -588,6 +596,11 @@ const ru = {
   move_cancel: "Оставить",
   move_close: "Закрыть",
   move_refused_title: "Карточка не переехала",
+  move_done_title: "Приёмка карточки погасит её сессию",
+  move_done_ask:
+    "Сказанное сессией уйдёт в архив доски, пин снимется, а потом сессия погаснет — история сохранится, сессию можно поднять снова. Сессия",
+  move_done_go: "Принять и убрать",
+  move_after_title: "Карточка переехала, но вокруг неё вышло не всё",
   dialog_close: "Закрыть",
   start_session_title: "Запустить сессию под карточку",
   start_session_ask: "Сессия поднимется без промпта, её short id будет записан в карточку, и только после этого уйдёт задача.",

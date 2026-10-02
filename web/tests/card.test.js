@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { installDOM, fireEvent, fireDocumentEvent, settle } from "./fake-dom.js";
-import { t } from "../js/i18n.js";
+import { t, langCode } from "../js/i18n.js";
 
 const FIXTURE = readFileSync(new URL("./testdata/snapshot.json", import.meta.url), "utf8");
 const FLEET_UI = "/board/fleet-ui.md";
@@ -168,7 +168,7 @@ test("the repo is shown and a change is written into the card", async () => {
   fireEvent(repo, "change");
   await settle();
 
-  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "repo", value: "src/fleetdeck" });
+  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "repo", value: "src/fleetdeck", lang: langCode });
   assert.equal(root.querySelector("input[data-field=repo]").value, "src/fleetdeck");
 });
 
@@ -268,7 +268,7 @@ test("204 is a silent success and the control keeps the new value", async () => 
   fireEvent(stage, "change");
   await settle();
 
-  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "stage", value: "review" });
+  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "stage", value: "review", lang: langCode });
   assert.equal(root.querySelector(".card-error"), null);
   assert.equal(root.querySelector(".card-notice"), null);
   assert.equal(root.querySelector("select[data-field=stage]").value, "review");
@@ -292,6 +292,37 @@ test("written but not committed keeps the value, names the reason, offers no ret
   assert.equal(notice.querySelectorAll("button").length, 0);
   assert.equal(root.querySelector(".card-error"), null);
   assert.equal(root.querySelector("select[data-field=stage]").value, "review");
+});
+
+// A stage set here does more than write the field: the agent keeping the card
+// is told, and an accepted card has its session tidied away. A step that failed
+// is the only place the operator can learn that the session is still running.
+test("a step that failed around the write is shown beside the field it belongs to", async () => {
+  const { root } = open(snapshot());
+  stubFetch(
+    answer(200, {
+      written: true,
+      committed: true,
+      steps: [
+        { name: "words", note: "read 40 characters of what abc12345 said" },
+        { name: "session", error: "abc12345 is still running: claude is not installed" },
+      ],
+    }),
+  );
+
+  const stage = root.querySelector("select[data-field=stage]");
+  stage.value = "done";
+  fireEvent(stage, "change");
+  await settle();
+
+  const notices = [...root.querySelectorAll(".card-notice")].map((n) => n.textContent).join("\n");
+  assert.ok(notices.includes("claude is not installed"), notices);
+  assert.ok(notices.includes("stage"), "an unlabelled line does not say which edit it is about: " + notices);
+  assert.ok(!notices.includes("read 40 characters"), "a step that worked is not news: " + notices);
+  // The field is written; the control must not go back, and nothing here may
+  // read as a refusal.
+  assert.equal(root.querySelector(".card-error"), null);
+  assert.equal(root.querySelector("select[data-field=stage]").value, "done");
 });
 
 test("the not-committed notice survives the next snapshot", async () => {

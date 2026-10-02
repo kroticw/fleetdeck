@@ -218,6 +218,24 @@ type Deps struct {
 	// offer a start that would fail.
 	StartWork func(ctx context.Context, w orchestrator.Work) (orchestrator.Result, error)
 
+	// SendToSession delivers one line into a session that is already running,
+	// as a message of its own. It is how the agent keeping a card learns that
+	// the operator moved its stage by hand (stagebyhand.go): the panel and the
+	// agent write the same file, and the agent goes on writing the stage it
+	// wrote unless something tells it otherwise.
+	//
+	// It is the ordinary send and not the first-message one: the session it
+	// reaches has been working for a while, so there is no boot to wait out.
+	// Nil is a panel, or a fleet, with no way to reach its sessions; the card
+	// still moves and the answer says the agent was not told.
+	SendToSession func(ctx context.Context, session, text string) error
+
+	// CleanupSession tidies away the session behind a card the operator has
+	// accepted, in the order internal/orchestrator.Cleaner documents. Nil
+	// leaves a card moved into done with its session running, as it was before
+	// the panel did any of this.
+	CleanupSession func(ctx context.Context, a orchestrator.Accepted) (orchestrator.Result, error)
+
 	// SessionListed reports whether the daemon lists session as alive right now —
 	// present in its list and not dying. The terminal bridge asks it when a stream
 	// ends with no reason attached, because that alone does not say the session

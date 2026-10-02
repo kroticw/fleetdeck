@@ -67,6 +67,31 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
   startDialog.body.append(startText);
   startDialog.foot.append(startCancel, startGo);
 
+  // Accepting a card is the one move with a consequence outside the board: the
+  // session behind it is put out. It is asked about instead of the held
+  // question above — this one says everything that one does and more — and it
+  // is asked only where the accident is possible, which is the drag. The same
+  // stage chosen in the open card's select is two deliberate clicks on a named
+  // value, and a question there would be a question on every card the operator
+  // closes by hand.
+  const doneText = el("div", "bmove-done-text");
+  const doneGo = button("bmove-go bmove-done-go", t("move_done_go"));
+  const doneCancel = button("bmove-cancel bmove-done-cancel", t("move_cancel"));
+  const doneDialog = createDialog({ title: t("move_done_title"), onClose: () => settle(false) });
+  doneDialog.body.append(doneText);
+  doneDialog.foot.append(doneCancel, doneGo);
+
+  // What happened around a move that did happen. The card is in its new column
+  // either way, and a cleanup that stopped halfway leaves a session running
+  // that the operator has every reason to believe is out — the board draws
+  // nothing about sessions, so this window is the only place it can be said.
+  const afterText = el("div", "bmove-after-text");
+  const afterDialog = createDialog({ title: t("move_after_title") });
+  afterDialog.body.append(afterText);
+  const afterClose = button("bmove-cancel bmove-after-close", t("move_close"));
+  afterDialog.foot.append(afterClose);
+  afterClose.addEventListener("click", () => afterDialog.close());
+
   // A refusal is its own window rather than a line inside the one that asked:
   // the question is over, and what is left is the board's own sentence saying
   // which rule refused — the detail the operator acts on.
@@ -79,6 +104,7 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
 
   heldCancel.addEventListener("click", () => heldDialog.close());
   startCancel.addEventListener("click", () => startDialog.close());
+  doneCancel.addEventListener("click", () => doneDialog.close());
   heldGo.addEventListener("click", () => {
     settle(true);
     heldDialog.close();
@@ -87,8 +113,12 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
     settle(true);
     startDialog.close();
   });
+  doneGo.addEventListener("click", () => {
+    settle(true);
+    doneDialog.close();
+  });
 
-  host.append(heldDialog.element, startDialog.element, refusedDialog.element);
+  host.append(heldDialog.element, startDialog.element, doneDialog.element, afterDialog.element, refusedDialog.element);
 
   const ask = (dialog) =>
     new Promise((resolve) => {
@@ -134,16 +164,30 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
       }
     }
 
-    if (live) {
+    if (to === "done" && live) {
+      doneText.textContent = `${t("move_done_ask")} ${session}`;
+      if (!(await ask(doneDialog))) return null;
+    } else if (live) {
       heldText.textContent = `${t("move_held_ask")} ${session}`;
       if (!(await ask(heldDialog))) return null;
     }
 
     try {
-      await patch(path, "stage", to, from);
+      report(await patch(path, "stage", to, from));
       return to;
     } catch (err) {
       return refuse(err);
     }
   };
+
+  // report shows what went wrong around a move that happened. Only the steps
+  // that failed: a list of everything that worked is a window the operator
+  // learns to dismiss without reading, and then the one line that mattered goes
+  // with it.
+  function report(result) {
+    const failed = (result?.steps ?? []).filter((step) => step.error);
+    if (failed.length === 0) return;
+    afterText.textContent = failed.map((step) => `${step.name}: ${step.error}`).join("\n");
+    afterDialog.open();
+  }
 }

@@ -191,6 +191,9 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		// legitimately expect, and because a request that names no expectation
 		// has to go on meaning "write it whatever the card holds".
 		Expect *string `json:"expect"`
+		// Lang is the page's language: a stage set by hand is announced to the
+		// session keeping the card in it (stagebyhand.go).
+		Lang string `json:"lang"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -211,9 +214,13 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, "a readable board directory")
 		return
 	}
+	// Read before the write, not after: what the operator moved the card away
+	// from, and who is keeping it, are both gone from the file the moment the
+	// write lands (stagebyhand.go).
+	before := cardBefore(path)
 	switch err := d.SetCardField(path, body.Field, body.Value, body.Expect); {
 	case err == nil:
-		w.WriteHeader(http.StatusNoContent)
+		d.answerCardWrite(w, d.stageByHand(r, before, body.Field, body.Value, body.Lang), true, "")
 	case errors.Is(err, board.ErrStale):
 		// Nothing was written and nothing about the request was wrong: the card
 		// moved on between the snapshot the caller acted on and this write.
@@ -232,11 +239,7 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		// on a progress field would apply it twice. So the outcome goes out as a
 		// success carrying the part that did not happen and why, for the panel to
 		// show as it likes.
-		writeJSON(w, http.StatusOK, map[string]any{
-			"written":   true,
-			"committed": false,
-			"reason":    err.Error(),
-		})
+		d.answerCardWrite(w, d.stageByHand(r, before, body.Field, body.Value, body.Lang), false, err.Error())
 	default:
 		var rule *board.RuleRefusal
 		if errors.As(err, &rule) {

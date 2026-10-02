@@ -193,6 +193,11 @@ export function renderCard(root, path, onClose, options = {}) {
     try {
       const result = await setCardField(card, field, value);
       if (!result.committed) outcome = { kind: "notice", reason: result.reason };
+      // What the server did around the write: the agent told its card moved,
+      // the session behind an accepted card tidied away. Only the steps that
+      // failed — the rest is the panel narrating itself.
+      const failed = (result.steps ?? []).filter((step) => step.error);
+      if (failed.length > 0) outcome = { ...outcome, steps: failed };
     } catch (err) {
       // By the code when the board sent one and this build has words for it:
       // the board's own sentence names the rule in English and not the way
@@ -465,9 +470,17 @@ export function renderCard(root, path, onClose, options = {}) {
     for (const field of ["stage", "progress"]) {
       const outcome = outcomes.get(field);
       if (!outcome) continue;
-      const what = outcome.kind === "error" ? t("card_write_refused") : t("card_not_committed");
-      const text = outcome.reason ? `${field}: ${what}: ${outcome.reason}` : `${field}: ${what}`;
-      nodes.push(el("p", outcome.kind === "error" ? "card-error" : "card-notice", text));
+      if (outcome.kind) {
+        const what = outcome.kind === "error" ? t("card_write_refused") : t("card_not_committed");
+        const text = outcome.reason ? `${field}: ${what}: ${outcome.reason}` : `${field}: ${what}`;
+        nodes.push(el("p", outcome.kind === "error" ? "card-error" : "card-notice", text));
+      }
+      // A notice and never an error: the field is written, and repeating the
+      // edit would not retry the step that failed — it would only write the
+      // field again.
+      for (const step of outcome.steps ?? []) {
+        nodes.push(el("p", "card-notice", `${field}: ${step.name}: ${step.error}`));
+      }
     }
 
     const body = el("div", "card-body");

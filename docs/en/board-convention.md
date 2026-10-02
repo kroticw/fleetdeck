@@ -68,6 +68,16 @@ The board splits ownership by who is writing:
 - The `session` field is filled in by whoever starts a session for the card, before the session is told about the card: the orchestrator, or the panel when a card is dropped into the board's active column. The panel starts the session with no prompt, writes its short id into the card, sets the stage to `active`, and only then sends it one line naming the card; an agent told to work a card before its id is on it writes its own copy of the field.
 - `created` and `zone` are not written by the panel after a card is started, and are not documented as belonging to the agent either. In practice they are set once, by whoever creates the card, and left alone. `repo` is set the same way, and the panel also writes it when asked from the open card.
 
+## What happens around a stage write
+
+A card's stage is written by two hands: the agent keeping it, and the operator, by dragging the card between columns or with the `stage` field in the open card. The agent edits the file itself, while the operator goes through the panel, and that is how the two are told apart: everything that reaches the panel's write route is the operator, and an agent is never sent an echo of its own write, because its write never went there.
+
+After a stage written by hand succeeds, the panel sends the session named in the `session` field one line in the page's language: which stage it was, which it is now, and that the write was not the session's. It is a message, not a refusal: both writes succeed, and without it the agent keeps the stage the operator has just cancelled in mind and sooner or later writes it back. A session the panel could not reach does not undo the move: the panel answers with a success and says, in a line of its own, that the agent was not told.
+
+Moving a card to `done` is the acceptance, and with it the panel tidies the session away, in exactly this order: it drops the pin, reads the session's last words off its transcript, appends a line to `archive/AGENTS-ARCHIVE.md` with them and the transcript's path, and only then stops the session — gracefully, so it can be brought back with its history. The order is enforced by code: if the words could not be read or the archive line was not written, the session keeps running and the panel names the step it stopped at. Stopping before the words are taken is the one way to lose what a session knew for good, and it is closed. The panel also says when there was nothing to stop: a session that is no longer listed is named in the report, not skipped silently.
+
+Before an acceptance by drag the panel asks, naming the session, so that a slip of the mouse does not stop a session. The open card asks nothing: choosing `done` from a list of values takes two deliberate actions, and a question on every move would make the board awkward to use.
+
 ## How the title and links are extracted
 
 A card's title and its `[[links]]` to other notes are read out of the body, not out of the frontmatter, and the extraction has two deliberate blind spots:

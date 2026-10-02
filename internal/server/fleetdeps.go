@@ -35,6 +35,12 @@ type FleetDeps struct {
 	// fleet: one dispatcher per fleet holds the lock that keeps two hands from
 	// starting two sessions for one card.
 	StartWork func(ctx context.Context, w orchestrator.Work) (orchestrator.Result, error)
+
+	// SendToSession and CleanupSession mean what the Deps fields of the same
+	// name mean, for this fleet: reaching a session, and putting one out, is
+	// the business of the fleet the card belongs to.
+	SendToSession  func(ctx context.Context, session, text string) error
+	CleanupSession func(ctx context.Context, a orchestrator.Accepted) (orchestrator.Result, error)
 }
 
 // forFleet is d with the capabilities of the fleet the request names in its
@@ -60,5 +66,7 @@ func (d Deps) forFleet(w http.ResponseWriter, r *http.Request) (Deps, bool) {
 	d.OrchestratorPreview = f.OrchestratorPreview
 	d.Appoint = f.Appoint
 	d.StartWork = f.StartWork
+	d.SendToSession = f.SendToSession
+	d.CleanupSession = f.CleanupSession
 	return d, true
 }

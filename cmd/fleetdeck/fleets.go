@@ -61,6 +61,10 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			},
 			OrchestratorPreview: wizard.Preview,
 			Appoint:             wizard.Appoint,
+			// The ordinary send, not the first-message one: what goes through
+			// here is addressed to a session that has been working for a while
+			// (server.Deps.SendToSession).
+			SendToSession: dc.SendText,
 		}
 		// Left nil without a board, as deps leaves the first fleet's: the route
 		// then says this fleet has no board instead of writing somewhere else.
@@ -73,6 +77,13 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			// claude): the snapshot then tells the page not to offer a start.
 			if d := dispatcherOf(f); d.Start != nil {
 				fd.StartWork = d.Dispatch
+			}
+			// Made per request rather than kept: a cleaner holds nothing
+			// between cleanups. Wired with the board and not beside it, since
+			// the cleanup's third step writes the board's archive.
+			cfg := collector.Config()
+			if c := fleetCleaner(o, cfg.Agent.Command, boardDir, dc, projectsDir(claudeDirOf(cfg))); c != nil {
+				fd.CleanupSession = c.Cleanup
 			}
 		}
 		return fd, nil

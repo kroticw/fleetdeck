@@ -39,7 +39,9 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-test("a card write with no expectation is a PATCH of three strings, declared as JSON", async () => {
+// The page's language goes with every write: a stage set by hand is announced
+// to the session keeping the card in it.
+test("a card write with no expectation is a PATCH of its strings and the page's language, declared as JSON", async () => {
   stubFetch(answer({ status: 204 }));
 
   // progress arrives from a snapshot as a number; the route takes a string.
@@ -54,6 +56,7 @@ test("a card write with no expectation is a PATCH of three strings, declared as 
     path: "/board/fleet-ui.md",
     field: "progress",
     value: "60",
+    lang: langCode,
   });
 });
 
@@ -67,6 +70,7 @@ test("a card write made against a stage the board drew carries it as the expecta
     field: "stage",
     value: "review",
     expect: "active",
+    lang: langCode,
   });
 });
 
@@ -117,6 +121,39 @@ test("200 is a success with a caveat: written, not committed, with a reason", as
 
   assert.equal(result.committed, false);
   assert.equal(result.reason, "git commit timed out after 5s");
+});
+
+// A stage the operator set does more than write the card: the agent keeping it
+// is told, and an accepted card has its session tidied away. What that came to
+// rides on the same answer, and the page has nowhere else to read it from.
+test("the steps taken around a write come back with it", async () => {
+  stubFetch(
+    answer({
+      status: 200,
+      body: {
+        written: true,
+        committed: true,
+        steps: [
+          { name: "message", error: "abc12345 was not told its card moved: the daemon is not running" },
+          { name: "archive", note: "recorded in the board's archive" },
+        ],
+      },
+    }),
+  );
+
+  const result = await setCardField("/board/fleet-ui.md", "stage", "done");
+
+  assert.equal(result.committed, true);
+  assert.equal(result.steps.length, 2);
+  assert.match(result.steps[0].error, /not told its card moved/);
+});
+
+// An older panel, or a write with nothing around it, answers without the key;
+// a caller reading .steps.length must not have to check for it first.
+test("an answer with no steps in it reads as no steps", async () => {
+  stubFetch(answer({ status: 200, body: { written: true, committed: false, reason: "no commit" } }));
+  const result = await setCardField("/board/fleet-ui.md", "stage", "review");
+  assert.deepEqual(result.steps, []);
 });
 
 test("a 200 whose body cannot be read is not reported as committed", async () => {

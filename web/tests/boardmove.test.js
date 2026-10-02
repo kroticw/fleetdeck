@@ -110,8 +110,9 @@ test("board move: a card its session is keeping is not moved until the operator 
   assert.deepEqual(patched, [{ path: "/b/c.md", field: "stage", value: "review", expect: "active" }]);
 });
 
+// Not into done: accepting a card asks its own question, below.
 test("board move: leaving an agent's card alone writes nothing", async () => {
-  const pending = move({ path: "/b/c.md", from: "active", to: "done", session: "abc12345", live: true });
+  const pending = move({ path: "/b/c.md", from: "active", to: "blocked", session: "abc12345", live: true });
   await settle();
   press("bmove-held-cancel");
   assert.equal(await pending, null);
@@ -176,4 +177,68 @@ test("board move: a card that already names a session is moved into active, not 
   assert.equal(drawn, "active");
   assert.deepEqual(started, []);
   assert.equal(patched.length, 1);
+});
+
+// Accepting a card puts its session out. That is one question a slip of the
+// mouse must not answer, and it is asked instead of the ordinary "its session
+// is keeping this card" one: two windows in a row for one drop is worse than
+// either, and this question already says everything that one does.
+test("board move: accepting a card asks first, and names what it does to the session", async () => {
+  const pending = move({ path: "/b/c.md", from: "review", to: "done", session: "abc12345", live: true });
+  await settle();
+  assert.deepEqual(patched, [], "nothing may be written before the answer");
+  assert.equal(host.querySelector("div.bmove-held-text").textContent, "", "one question, not two");
+  const asked = host.querySelector("div.bmove-done-text");
+  assert.ok(asked, "the operator was asked nothing");
+  assert.match(asked.textContent, /abc12345/, "the operator must be told which session goes out");
+  press("bmove-done-go");
+  assert.equal(await pending, "done");
+  assert.deepEqual(patched, [{ path: "/b/c.md", field: "stage", value: "done", expect: "review" }]);
+});
+
+test("board move: declining to accept a card writes nothing", async () => {
+  const pending = move({ path: "/b/c.md", from: "review", to: "done", session: "abc12345", live: true });
+  await settle();
+  press("bmove-done-cancel");
+  assert.equal(await pending, null);
+  assert.deepEqual(patched, []);
+});
+
+// Nothing is put out that was not running, so there is nothing to warn about —
+// and a question on every move is what makes a board tiring to use.
+test("board move: accepting a card whose session is not running asks nothing", async () => {
+  const drawn = await move({ path: "/b/c.md", from: "review", to: "done", session: "abc12345", live: false });
+  assert.equal(drawn, "done");
+  assert.equal(patched.length, 1);
+});
+
+test("board move: a card with no session is accepted without a question", async () => {
+  const drawn = await move({ path: "/b/c.md", from: "review", to: "done", session: "", live: false });
+  assert.equal(drawn, "done");
+  assert.equal(patched.length, 1);
+});
+
+// The card moved, so it is drawn as moved — but a cleanup that stopped halfway
+// leaves a session running that the operator believes is out, and the board
+// itself shows nothing about sessions.
+test("board move: a step that failed around the move is shown, and the card still moves", async () => {
+  patchAnswer = {
+    committed: true,
+    steps: [
+      { name: "words", note: "read 40 characters" },
+      { name: "session", error: "there was nothing to put out: this fleet does not list abc12345 as running" },
+    ],
+  };
+  const drawn = await move({ path: "/b/c.md", from: "review", to: "done", session: "abc12345", live: false });
+  assert.equal(drawn, "done", "the card is in done whatever the cleanup came to");
+  const report = host.querySelector("div.bmove-after-text");
+  assert.notEqual(report.textContent, "", "the operator was shown nothing");
+  assert.match(report.textContent, /nothing to put out/);
+  assert.doesNotMatch(report.textContent, /read 40 characters/, "a step that worked is not news");
+});
+
+test("board move: a move where everything worked shows no report", async () => {
+  patchAnswer = { committed: true, steps: [{ name: "session", note: "abc12345 is out" }] };
+  await move({ path: "/b/c.md", from: "review", to: "done", session: "", live: false });
+  assert.equal(host.querySelector("div.bmove-after-text")?.textContent ?? "", "");
 });

@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -103,6 +106,52 @@ func sessionStarter(o runOpts, command []string, extra ...string) func(ctx conte
 			return "", err
 		}
 		return orchestrator.StartWith(slices.Concat([]string{bin}, extra))(ctx, cwd, name)
+	}
+}
+
+// stopWait bounds one stop. It is a command that asks the daemon and returns;
+// a stop that has not answered in ten seconds is not going to.
+const stopWait = 10 * time.Second
+
+// sessionStopper is how this panel stops a session, or nil when it must not:
+// `stop <short>` run by the same claude sessionStarter starts sessions with,
+// found the same way. The session leaves the list of running ones and stays
+// resumable, with its history.
+//
+// A stand given no claude of its own stops nothing, for the reason it starts
+// nothing: the claude on PATH reaches the operator's real daemon, and a
+// stand's done card would put out a session of the operator's own.
+func sessionStopper(o runOpts, command []string) func(ctx context.Context, short string) error {
+	// Nil is a claude looked up at each stop, as sessionStarter looks one up
+	// at each start.
+	var fixed []string
+	switch {
+	case o.standSocket != "":
+		if o.standClaude == "" {
+			return nil
+		}
+		fixed = []string{o.standClaude}
+	case len(command) > 0:
+		fixed = command
+	}
+	return func(ctx context.Context, short string) error {
+		argv := fixed
+		if argv == nil {
+			home, _ := os.UserHomeDir()
+			bin, err := orchestrator.FindClaude(home, exec.LookPath, claudePlaces)
+			if err != nil {
+				return err
+			}
+			argv = []string{bin}
+		}
+		ctx, cancel := context.WithTimeout(ctx, stopWait)
+		defer cancel()
+		args := slices.Concat(argv[1:], []string{"stop", short})
+		out, err := exec.CommandContext(ctx, argv[0], args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("stop session %s: %w: %s", short, err, strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
 }
 

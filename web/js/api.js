@@ -88,6 +88,9 @@ export async function setCardField(path, field, value, expect) {
   // and an absent one is "write it whatever the card holds" — which is what
   // every edit but a drag means.
   if (expect !== undefined && expect !== null) body.expect = String(expect);
+  // The page's language: a stage set by hand is announced to the session
+  // keeping the card in it.
+  body.lang = langCode;
   const response = await fetch(inFleet("/api/cards"), {
     method: "PATCH",
     headers: JSON_HEADERS,
@@ -101,10 +104,20 @@ export async function setCardField(path, field, value, expect) {
   if (response.status === 200) {
     const body = await readJSON(response);
     // A 200 whose body could not be read is treated as not committed. That is
-    // the conservative reading: the server only ever answers 200 to say a commit
-    // did not happen, and claiming a commit we cannot see is the one mistake
-    // here that leaves the operator believing the board's history is complete.
-    return { committed: body?.committed === true, reason: String(body?.reason ?? "") };
+    // the conservative reading: the server only ever answers 200 to say
+    // something did not go plainly, and claiming a commit we cannot see is the
+    // one mistake here that leaves the operator believing the board's history
+    // is complete.
+    //
+    // steps are what the server did around the write — the agent told its card
+    // moved, the session behind an accepted card tidied away. Always an array,
+    // so a caller never has to tell an answer without the key from one with an
+    // empty list; both mean nothing happened worth reporting.
+    return {
+      committed: body?.committed === true,
+      reason: String(body?.reason ?? ""),
+      steps: Array.isArray(body?.steps) ? body.steps : [],
+    };
   }
   throw await refusal(response);
 }
