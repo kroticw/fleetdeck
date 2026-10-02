@@ -131,3 +131,55 @@ func TestMakingAFleetIsRefusedFromAForeignOrigin(t *testing.T) {
 		t.Fatalf("want 403, got %d", rec.Code)
 	}
 }
+
+// Deleting a fleet answers the directories it left in place, so the start page
+// can say what is still on the disk.
+func TestDeletingAFleetNamesWhatItKept(t *testing.T) {
+	var got string
+	d, _ := testDeps()
+	d.DeleteFleet = func(name string) ([]string, error) { got = name; return []string{"/src/project/docs"}, nil }
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/fleets/vpn", nil))
+	if rec.Code != http.StatusOK || got != "vpn" {
+		t.Fatalf("status %d, fleet %q, body %s", rec.Code, got, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"kept":["/src/project/docs"]`) {
+		t.Fatalf("the answer must name what was kept: %s", rec.Body.String())
+	}
+}
+
+func TestADeletionRefusedIsAConflictInItsOwnWords(t *testing.T) {
+	d, _ := testDeps()
+	d.DeleteFleet = func(string) ([]string, error) { return nil, errors.New("fleet \"main\" is the first fleet") }
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/fleets/main", nil))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "first fleet") {
+		t.Fatalf("status %d, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A page on another site must not delete a fleet: DELETE carries no body, so
+// the Origin rule is what stands in the way.
+func TestDeletingAFleetIsRefusedFromAForeignOrigin(t *testing.T) {
+	d, _ := testDeps()
+	d.DeleteFleet = func(string) ([]string, error) {
+		t.Fatal("a foreign origin reached the deletion")
+		return nil, nil
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/fleets/vpn", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	New(d).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", rec.Code)
+	}
+}
+
+func TestAPanelThatCannotDeleteFleetsSaysSo(t *testing.T) {
+	d, _ := testDeps()
+	rec := httptest.NewRecorder()
+	New(d).ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/fleets/vpn", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503, got %d", rec.Code)
+	}
+}

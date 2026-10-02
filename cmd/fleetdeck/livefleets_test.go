@@ -112,3 +112,41 @@ func TestARunningPanelTakesAFleetOnce(t *testing.T) {
 		t.Fatal("a second fleet named vpn on another board was taken")
 	}
 }
+
+// A fleet taken out of the running panel stops being watched, and only it.
+func TestRemovingAFleetStopsItsWatchAlone(t *testing.T) {
+	ended := make(chan string, 2)
+	live := &liveFleets{
+		ctx:       context.Background(),
+		collector: NewCollector(config.Config{BoardPath: "/fleets/first/board"}, nil, nil, ""),
+		watch: func(ctx context.Context, dir string, _ func()) {
+			<-ctx.Done()
+			ended <- dir
+		},
+		refresh: func(context.Context) {},
+	}
+	for _, f := range []fleet.Fleet{{Name: "vpn", BoardPath: "/fleets/vpn/board"}, {Name: "ops", BoardPath: "/fleets/ops/board"}} {
+		if err := live.add(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !live.remove("vpn") {
+		t.Fatal("vpn was not removed")
+	}
+	select {
+	case dir := <-ended:
+		if dir != "/fleets/vpn/board" {
+			t.Fatalf("the watch that ended is %s", dir)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the removed fleet is still watched")
+	}
+	select {
+	case dir := <-ended:
+		t.Fatalf("another fleet's watch ended too: %s", dir)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if live.remove("vpn") {
+		t.Error("a fleet removed twice was removed again")
+	}
+}

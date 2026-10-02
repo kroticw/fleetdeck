@@ -202,6 +202,21 @@ func (c *Collector) SetFleetOrchestrator(name, id string) bool {
 // fleet made twice is served once. A fleet the fleets already here would
 // refuse — its name or its board taken by another — is an error, and nothing
 // changes. The caller persists the fleet first (config.AddFleet).
+// RemoveFleet stops reporting the listed fleet named name. The first fleet is
+// the configuration's own keys and is never removed here. False when no listed
+// fleet has that name.
+func (c *Collector) RemoveFleet(name string) bool {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	for i := range c.cfg.Fleets {
+		if c.cfg.Fleets[i].Name == name {
+			c.cfg.Fleets = slices.Delete(slices.Clone(c.cfg.Fleets), i, i+1)
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Collector) AddFleet(f fleet.Fleet) (bool, error) {
 	c.cfgMu.Lock()
 	defer c.cfgMu.Unlock()

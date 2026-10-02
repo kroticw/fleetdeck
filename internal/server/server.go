@@ -136,6 +136,14 @@ type Deps struct {
 	// it makes is served after a restart, never at once: see handleCreateFleet.
 	CreateFleet func(name, path string) (steps []SetupStep, ok bool, err error)
 
+	// DeleteFleet deletes a listed fleet from the start page: its own sessions
+	// stopped, its entry gone from the configuration and the running panel, its
+	// workspace removed. It answers the directories it left in place —
+	// documentation configured outside the workspace. An error is a refusal,
+	// and a refusal changed nothing; nil is a panel that does not delete
+	// fleets.
+	DeleteFleet func(name string) (kept []string, err error)
+
 	// BoardDir is the only directory card writes may touch. Every path a card
 	// write arrives with is resolved and checked against it, and anything that
 	// lands elsewhere is refused before board.SetField — which will rewrite a
@@ -310,6 +318,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/pick-directory", d.handlePickDirectory)
 	mux.HandleFunc("GET /api/attachments", d.handleAttachment)
 	mux.HandleFunc("POST /api/fleets", d.handleCreateFleet)
+	mux.HandleFunc("DELETE /api/fleets/{name}", d.handleDeleteFleet)
 	mux.HandleFunc("GET /api/docs", d.handleDocsList)
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)
 	mux.HandleFunc("POST /api/status", d.handleStatus)

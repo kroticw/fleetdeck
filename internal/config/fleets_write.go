@@ -57,6 +57,84 @@ func AddFleet(path string, fl fleet.Fleet) error {
 	return writeCheckedConfig(path, out, fmt.Sprintf("adding fleet %q", fl.Name))
 }
 
+// RemoveFleet drops the listed fleet named name from the file and returns it as
+// it was. Only that entry's lines go; every other byte stays. The first fleet
+// is the file's top-level keys rather than an entry in the list, and is not
+// removable here.
+func RemoveFleet(path, name string) (fleet.Fleet, error) {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+
+	cfg, err := Load(path)
+	if err != nil {
+		return fleet.Fleet{}, err
+	}
+	for _, fl := range cfg.Fleets {
+		if fl.Name != name {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return fleet.Fleet{}, fmt.Errorf("re-read config before write: %w", err)
+		}
+		out, err := removeFleetEntry(raw, name)
+		if err != nil {
+			return fleet.Fleet{}, fmt.Errorf("config %s: removing fleet %q: %w", path, name, err)
+		}
+		if err := writeCheckedConfig(path, out, fmt.Sprintf("removing fleet %q", name)); err != nil {
+			return fleet.Fleet{}, err
+		}
+		return fl, nil
+	}
+	return fleet.Fleet{}, fmt.Errorf("fleet %q is not a listed fleet: the first fleet cannot be removed, and no other has this name", name)
+}
+
+// removeFleetEntry is raw without the lines of the fleets entry named name:
+// from its own first line to the next entry's, or to the end of the list.
+func removeFleetEntry(raw []byte, name string) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) == 0 {
+		return nil, fmt.Errorf("no fleets list")
+	}
+	root := doc.Content[0]
+	var entries *yaml.Node
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "fleets" {
+			entries = root.Content[i+1]
+			break
+		}
+	}
+	if entries == nil || entries.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("no fleets list")
+	}
+	lines, join := splitLines(raw)
+	_, blockEnd := fleetsBlock(lines)
+	for i, entry := range entries.Content {
+		if entry.Kind != yaml.MappingNode || mappingValue(entry, "name") != name {
+			continue
+		}
+		start, end := entry.Line-1, blockEnd
+		if i+1 < len(entries.Content) {
+			end = entries.Content[i+1].Line - 1
+		}
+		return join(append(lines[:start:start], lines[end:]...)), nil
+	}
+	return nil, fmt.Errorf("no entry named %q", name)
+}
+
+// mappingValue is the scalar value of key in a mapping node, "" when absent.
+func mappingValue(m *yaml.Node, key string) string {
+	for j := 0; j+1 < len(m.Content); j += 2 {
+		if m.Content[j].Value == key {
+			return m.Content[j+1].Value
+		}
+	}
+	return ""
+}
+
 // SetFleetOrchestrator pins short as the orchestrator of the listed fleet
 // named name; an empty short unpins it. The top-level fleet is not in the
 // list and is pinned through SetField's orchestrator.session instead. The
