@@ -49,6 +49,11 @@ type controlsReport struct {
 // capsule lying on its surface.
 var floatingPanels = map[string]bool{"newCard": true, "fleetList": true}
 
+// accents are the buttons that write (.btn-primary): an accent fill, solid in
+// every material, so the action stands apart from the capsules of glass around
+// it. They are still held to being solid with no glass.
+var accents = map[string]bool{"newCardCreate": true}
+
 // islandHead is what the orchestrator island's head always shows unfolded.
 var islandHead = []string{"editPencil", "picker", "fleetButton"}
 
@@ -165,7 +170,7 @@ func controlProblems(surface, glass string, c control) []string {
 	case c.Disabled:
 	case solid && c.FillAlpha < 1:
 		say("is see-through (fill %v) with no glass: it has to be solid", c.FillAlpha)
-	case !solid && c.FillAlpha >= 1:
+	case !solid && c.FillAlpha >= 1 && !accents[c.Name]:
 		say("is solid on %s: a capsule of glass has to be see-through", glass)
 	}
 	if floatingPanels[c.Name] {
