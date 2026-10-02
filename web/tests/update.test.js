@@ -22,7 +22,8 @@ import {
   reasonKey,
   settle,
   STAND_UPDATE,
-  updateControlReport,
+  panelPlace,
+  updatePanelReport,
   updateHTML,
 } from "../js/update.js";
 import { t } from "../js/i18n.js";
@@ -392,28 +393,76 @@ test("every state a stand can open has a report to be held in, and only those", 
   assert.equal(onProgress(initialState(), STAND_UPDATE["check-available"], 0).phase, "available");
 });
 
-// The control as the DOM would hand it over: querySelector by class.
-function controlOf(html) {
+// The panel as the DOM would hand it over: its box, and the elements in it by
+// class, the status with how much of its text fits.
+const rect = (top, left, width, height) => ({ top, left, width, height, right: left + width, bottom: top + height });
+function panelOf(html, { box = rect(150, 8, 297, 60), hidden = false, status = {} } = {}) {
+  const fits = { scrollWidth: 270, clientWidth: 270, scrollHeight: 32, clientHeight: 32, rect: rect(160, 16, 270, 32), ...status };
   return {
+    hidden,
+    getBoundingClientRect: () => box,
     querySelector(selector) {
       const name = selector.slice(1);
       const m = html.match(new RegExp(`class="[^"]*\\b${name}\\b[^"]*"[^>]*>([^<]*)<`));
-      return m ? { textContent: m[1] } : null;
+      if (!m) return null;
+      return { textContent: m[1], ...fits, getBoundingClientRect: () => fits.rect };
     },
   };
 }
+const panelHTML = (open) => updateHTML(onProgress(initialState(), STAND_UPDATE[open], 0), 0);
+const term = { getBoundingClientRect: () => rect(140, 0, 313, 500) };
+const page = { innerWidth: 313, document: { documentElement: { scrollWidth: 313 } } };
 
-test("the update control reports its words, its button and whether it is a problem", () => {
-  const failed = updateControlReport(controlOf(updateHTML(onProgress(initialState(), STAND_UPDATE["check-failed"], 0), 0)));
+test("the update panel reports its words, its button and whether it is a problem", () => {
+  const failed = updatePanelReport(page, panelOf(panelHTML("check-failed")), term);
   assert.equal(failed.report, "update");
   assert.match(failed.text, /no such host/);
   assert.equal(failed.button, false);
   assert.equal(failed.problem, true);
+  assert.equal(failed.shown, true);
 
-  const found = updateControlReport(controlOf(updateHTML(onProgress(initialState(), STAND_UPDATE["check-available"], 0), 0)));
+  const found = updatePanelReport(page, panelOf(panelHTML("check-available")), term);
   assert.equal(found.button, true);
   assert.match(found.text, /v1\.1\.0/);
   assert.equal(found.problem, false);
+});
 
-  assert.deepEqual(updateControlReport(null), { report: "update", text: "", button: false, problem: false });
+// What a screenshot cannot settle to the point: where the panel is against
+// the terminal it lies over and the page it is in, and whether its words fit
+// their box.
+test("the update panel reports where it lies and whether its words fit", () => {
+  const r = updatePanelReport(page, panelOf(panelHTML("check-latest")), term);
+  assert.deepEqual(r.box, { top: 150, left: 8, right: 305, bottom: 210 });
+  assert.equal(r.termTop, 140);
+  assert.equal(r.pageWidth, 313);
+  assert.equal(r.clipped, false);
+
+  const wider = updatePanelReport(page, panelOf(panelHTML("check-failed"), { status: { scrollWidth: 400 } }), term);
+  assert.equal(wider.clipped, true, "words wider than their box were not seen");
+  const taller = updatePanelReport(page, panelOf(panelHTML("check-failed"), { status: { scrollHeight: 50 } }), term);
+  assert.equal(taller.clipped, true, "words taller than their box were not seen");
+  const outside = updatePanelReport(page, panelOf(panelHTML("check-failed"), { status: { rect: rect(160, 16, 300, 32) } }), term);
+  assert.equal(outside.clipped, true, "words running past the panel's edge were not seen");
+});
+
+test("a hidden panel, or none, reports nothing shown", () => {
+  assert.equal(updatePanelReport(page, panelOf(panelHTML("check-latest"), { hidden: true }), term).shown, false);
+  const none = updatePanelReport(page, null, null);
+  assert.equal(none.shown, false);
+  assert.equal(none.text, "");
+});
+
+// The panel lies over the top of the orchestrator's terminal, column-wide,
+// and never over the brand row, the window's buttons or the island's head
+// above the terminal.
+test("the panel is placed over the top of the terminal, inset from the column's sides", () => {
+  assert.deepEqual(panelPlace(rect(40, 0, 313, 660), rect(140, 0, 313, 500)), { top: 148, left: 8, width: 297 });
+  assert.deepEqual(panelPlace(rect(40, 100, 500, 660), rect(140, 100, 500, 500)), { top: 148, left: 108, width: 484 });
+});
+
+test("a folded column, or one with no terminal yet, has no room for the panel", () => {
+  assert.equal(panelPlace(rect(40, 0, 48, 660), rect(140, 0, 48, 500)), null);
+  assert.equal(panelPlace(rect(40, 0, 313, 660), null), null);
+  assert.equal(panelPlace(rect(40, 0, 313, 660), rect(140, 0, 313, 0)), null);
+  assert.equal(panelPlace(null, rect(140, 0, 313, 500)), null);
 });

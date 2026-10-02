@@ -125,16 +125,57 @@ export const STAND_UPDATE = {
   "check-available": { step: "available", detail: "v1.1.0" },
 };
 
-// updateControlReport is what a stand's orchestrator surface says of its
-// update control in the window's log: its words, whether the Update button is
-// there, and whether the words are marked as a problem.
-export function updateControlReport(control) {
-  const status = control?.querySelector(".update-status");
+// The update control is a panel of its own over the top of the orchestrator's
+// terminal, not a part of the brand row (decided by the operator, 2026-10-02).
+// The brand row of a 313 pt column is full with the brand and the fleet
+// button: a found version and its button were cut to "Updat" there, and the
+// surface scrolled sideways. PANEL_INSET is how far it stands in from the
+// column's sides and the terminal's top.
+export const PANEL_INSET = 8;
+// Narrower than this the column is folded to its strip, and the panel stays
+// hidden: there is no room for words in it.
+const PANEL_MIN_WIDTH = 120;
+
+// panelPlace is where the panel goes, in the page's coordinates, given the
+// orchestrator column's box and its terminal's: over the top of the terminal,
+// as wide as the column less an inset each side. null where there is no
+// terminal to lie over or no room. The panel never reaches above the
+// terminal's top, so the brand row, the window's buttons and the island's head
+// stay uncovered.
+export function panelPlace(column, term) {
+  if (!column || !term || term.height <= 0) return null;
+  const width = column.width - 2 * PANEL_INSET;
+  if (width < PANEL_MIN_WIDTH) return null;
+  return { top: term.top + PANEL_INSET, left: column.left + PANEL_INSET, width };
+}
+
+// updatePanelReport is what a stand's orchestrator surface says of its update
+// panel in the window's log: its words, whether the Update button is there,
+// whether the words are marked as a problem, whether it is shown, where it lies
+// against the terminal and the page, and whether its words fit their box.
+export function updatePanelReport(win, panel, term) {
+  const status = panel?.querySelector(".update-status");
+  const box = panel?.getBoundingClientRect();
+  const words = status?.getBoundingClientRect();
+  const slack = 0.5;
+  const clipped =
+    !!status &&
+    (status.scrollWidth > status.clientWidth + slack ||
+      status.scrollHeight > status.clientHeight + slack ||
+      words.left < box.left - slack ||
+      words.right > box.right + slack ||
+      words.top < box.top - slack ||
+      words.bottom > box.bottom + slack);
   return {
     report: "update",
     text: status?.textContent ?? "",
-    button: !!control?.querySelector(".update-button"),
-    problem: !!control?.querySelector(".update-problem"),
+    button: !!panel?.querySelector(".update-button"),
+    problem: !!panel?.querySelector(".update-problem"),
+    shown: !!panel && !panel.hidden,
+    box: box ? { top: box.top, left: box.left, right: box.right, bottom: box.bottom } : null,
+    termTop: term ? term.getBoundingClientRect().top : null,
+    pageWidth: win.innerWidth,
+    clipped,
   };
 }
 
