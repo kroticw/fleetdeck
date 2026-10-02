@@ -265,6 +265,7 @@ func main() {
 	}
 	problems := append(check(string(raw), *trips), controlsCheck(string(raw), openList(*open))...)
 	problems = append(problems, cardSheetCheck(string(raw), openList(*open))...)
+	problems = append(problems, updateControlCheck(string(raw), openList(*open))...)
 	for _, p := range problems {
 		fmt.Println("frame: " + p)
 	}

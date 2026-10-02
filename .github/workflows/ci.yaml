@@ -374,6 +374,50 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_OPEN: fleetmenu
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7849 out/dark-fleetmenu exec content
+      # Check for Updates… in the app menu: the update control beside the brand
+      # held in each of its states -- checking, nothing newer, no answer, a
+      # version found. scripts/standcheck holds each frame to the words, the
+      # button and the problem mark the state has.
+      - name: This build's window in its frame, glass, dark, checking for updates
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: check-checking
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7853 out/dark-check-checking exec content
+      - name: This build's window in its frame, glass, dark, with nothing newer found
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: check-latest
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7855 out/dark-check-latest exec content
+      - name: This build's window in its frame, glass, dark, with a check that got no answer
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: check-failed
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7857 out/dark-check-failed exec content
+      - name: This build's window in its frame, glass, light, with a check that got no answer
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: check-failed
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7859 out/light-check-failed exec content
+      - name: This build's window in its frame, glass, dark, with a newer version found
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: check-available
+        run: scripts/ci-window-stand.sh new/fleetdeck.app 7861 out/dark-check-available exec content
       # With a session open: the session opens as a sheet over the dimmed board,
       # and the dimmed board covers the centre column from its very top. On
       # v0.12.0 that took the band the window is dragged by down to nothing --

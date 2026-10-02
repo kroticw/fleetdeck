@@ -11,6 +11,7 @@ import { createNewCard } from "./newcard.js";
 import { createBoardMove } from "./boardmove.js";
 import { probeColumnScroll, watchBoardScroll, watchCardSheetOnStand, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
+import { STAND_UPDATE, updateControlReport } from "./update.js";
 import { watchControls } from "./standcontrols.js";
 import { watchOverflow } from "./standoverflow.js";
 import { renderDocs } from "./docs.js";
@@ -234,7 +235,9 @@ const headerParts = regions.has("header")
 if (headerParts.length > 0) {
   // A stand's frame with the fleet menu open (web/js/host.js, open).
   const openMenu = host?.open?.includes("fleetmenu") ?? false;
-  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu });
+  // And one with the update control held in a state of Check for Updates….
+  const standUpdate = STAND_UPDATE[host?.open?.find((name) => Object.hasOwn(STAND_UPDATE, name))] ?? null;
+  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu, standUpdate });
 } else {
   initTheme();
 }
@@ -341,6 +344,20 @@ if (host) {
   // orchestrator island's head and the board's new card form (web/js/standcontrols.js).
   if (host.stand && (host.surface === "orchestrator" || host.surface === "board")) {
     watchControls(window, host.surface, (report) => callHost(window, "fleetdeckStandReport", report));
+  }
+  // And what the update control beside the brand shows, when the stand held it
+  // in a state of Check for Updates… (web/js/update.js, STAND_UPDATE).
+  if (standHeader && host.open?.some((name) => Object.hasOwn(STAND_UPDATE, name))) {
+    let last = "";
+    const reportUpdate = () => {
+      const report = updateControlReport(standHeader.querySelector(".update-control"));
+      const text = JSON.stringify(report);
+      if (text === last) return;
+      last = text;
+      callHost(window, "fleetdeckStandReport", report);
+    };
+    new MutationObserver(reportUpdate).observe(standHeader, { childList: true, subtree: true, characterData: true });
+    reportUpdate();
   }
   // The window's panel folds with the column: a fold the column makes itself
   // (its own button) is passed on, and one the window sends is not passed back.

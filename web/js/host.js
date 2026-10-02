@@ -18,14 +18,15 @@ export function readHost(win) {
   if (host.stand !== true) return { surface: host.surface, glass: host.glass };
   // open: what a stand's frame is taken with open, without a press
   // (FLEETDECK_STAND_OPEN): the new card form, the fleet menu, a session, a
-  // card on its document tab with the author docked below or beside it, or any
-  // of them. Anything else asked opens nothing.
+  // card on its document tab with the author docked below or beside it, the
+  // update control in a state of Check for Updates… (check-*), or any of them.
+  // Anything else asked opens nothing.
   const asked = typeof host.standOpen === "string" ? host.standOpen.split(",") : [];
   const open = asked.length > 0 && asked.every((name) => STAND_OPENS.has(name)) ? { open: asked } : {};
   return { surface: host.surface, glass: host.glass, stand: true, ...open };
 }
 
-const STAND_OPENS = new Set(["newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip"]);
+const STAND_OPENS = new Set(["newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip", "check-checking", "check-latest", "check-failed", "check-available"]);
 
 export function callHost(win, name, payload) {
   const fn = win?.[name];
