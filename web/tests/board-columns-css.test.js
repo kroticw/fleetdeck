@@ -72,6 +72,23 @@ test("a column's heading stays in place while its cards scroll under it", () => 
   assert.match(head, /background:\s*var\(--bg\)/);
 });
 
+// The button that starts a card is as wide as the column it sits in, whatever
+// width the column has: a square in the head was missed by eye and by pointer.
+// Its look is the button system's (.btn); the rule here only places it.
+test("the add button takes the column's width and has none of its own", () => {
+  const add = ruleBody(".kcol-add");
+  assert.match(add, /width:\s*100%/);
+  assert.doesNotMatch(add, /width:\s*\d+px/);
+  assert.doesNotMatch(add, /margin-left/);
+  for (const body of ruleBodies(`${BOARD} .kcol-add`)) assert.doesNotMatch(body, /width:\s*\d+px/);
+  // An empty new column is as wide as its button's label, on one line: at the
+  // empty column's 64px floor the label wrapped.
+  assert.match(add, /white-space:\s*nowrap/);
+  const floor = ruleBody(".kcol-empty:has(.kcol-add)");
+  assert.match(floor, /flex-basis:\s*auto/);
+  assert.match(floor, /min-width:\s*0/);
+});
+
 // The form opens from the tab row, which is #board's sibling, not inside it: a
 // board that clips what is past its height does not cut the form.
 test("the new card form opens outside the box that clips the columns", () => {

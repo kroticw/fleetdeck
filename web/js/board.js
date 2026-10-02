@@ -82,7 +82,7 @@ function cardHTML(c, orphanPaths, stoppedPaths) {
     </article>`;
 }
 
-// ADD_STAGE is the one column whose head carries the "new card" button, and it
+// ADD_STAGE is the one column that carries the "new card" button, and it
 // is one rather than every column because a card cannot be started anywhere
 // else: internal/board.CreateCard writes stage new, and the board refuses every
 // other stage while the card's session field is empty. A button over the review
@@ -96,13 +96,16 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
   // .kcol-empty (app.css) is what actually shrinks it; this only says which
   // columns qualify.
   const empty = cards.length === 0;
+  // A row of its own under the head, as wide as the column: a square beside
+  // the count was missed by eye and by pointer.
   const add =
     stage === ADD_STAGE
-      ? `<button type="button" class="btn btn-icon btn-sm kcol-add" title="${escapeHTML(t("new_card"))}" aria-label="${escapeHTML(t("new_card"))}">+</button>`
+      ? `<button type="button" class="btn btn-sm kcol-add" aria-label="${escapeHTML(t("new_card"))}">${escapeHTML(t("new_card"))}</button>`
       : "";
   return `
     <div class="kcol${empty ? " kcol-empty" : ""}" data-stage="${escapeHTML(stage)}">
-      <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span>${add}</h5>
+      <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span></h5>
+      ${add}
       ${cards.map((c) => cardHTML(c, orphanPaths, stoppedPaths)).join("")}
     </div>`;
 }

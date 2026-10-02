@@ -79,7 +79,12 @@ afterEach(() => {
 
 test("board: the new column carries the add button and no other column does", () => {
   const { columnHTML } = boardModule;
-  assert.match(columnHTML("new", "new", [], new Set()), /class="[^"]*\bkcol-add\b[^"]*"/);
+  const html = columnHTML("new", "new", [], new Set());
+  assert.match(html, /class="[^"]*\bkcol-add\b[^"]*"/);
+  // A row of its own under the heading, not a square inside it: the head keeps
+  // the stage and its count and nothing else, and the button says what it does.
+  assert.match(html, /<\/h5>\s*<button type="button" class="[^"]*\bkcol-add\b[^"]*"[^>]*>[^<]+<\/button>/);
+  assert.doesNotMatch(html.slice(0, html.indexOf("</h5>")), /kcol-add/);
   for (const stage of ["active", "review", "blocked", "done", "other"]) {
     assert.ok(!/kcol-add/.test(columnHTML(stage, stage, [], new Set())), `${stage} must not offer to start a card`);
   }

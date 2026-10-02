@@ -2118,9 +2118,6 @@ main {
   color: var(--text-muted);
 }
 
-/* margin-left rather than the head's space-between, which only holds while the
-   head has two children: the new column's has three, and the count would sit
-   against the stage's name with the button taking all the room between. */
 .kcount {
   margin-left: auto;
   font-size: var(--fs-2xs);
@@ -2345,12 +2342,22 @@ main {
   align-items: center;
 }
 
-/* The button that opens the form sits in the head of the new column
-   (web/js/board.js) and the form opens under the tab row, over that column:
-   new is the first column, so the form's left edge is the board's. */
+/* The button that opens the form is a row of the new column under its head
+   (web/js/board.js), and the form opens under the tab row, over that column:
+   new is the first column, so the form's left edge is the board's. Its width
+   is the column's, whatever the column's is: a fixed one would stop following
+   a resized column. */
 .kcol-add {
-  margin-left: var(--gap-sm);
+  width: 100%;
+  white-space: nowrap;
   color: var(--text-muted);
+}
+
+/* The empty new column's floor is its button, not the head: at 64px the
+   button's label wrapped onto two lines. */
+.kcol-empty:has(.kcol-add) {
+  flex-basis: auto;
+  min-width: 0;
 }
 
 .kcol-add:hover {
