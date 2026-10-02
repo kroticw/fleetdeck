@@ -242,3 +242,16 @@ test("board move: a move where everything worked shows no report", async () => {
   await move({ path: "/b/c.md", from: "review", to: "done", session: "", live: false });
   assert.equal(host.querySelector("div.bmove-after-text")?.textContent ?? "", "");
 });
+
+// Every window the board asks in is drawn by the button system, the accepting
+// one included: a button without .btn falls back to the browser's own and
+// stands out of every other window on the page.
+test("board move: every button in its windows is a .btn, and each go is the accent", () => {
+  const buttons = [...host.querySelectorAll("button")];
+  assert.ok(buttons.length > 0);
+  const plain = buttons.filter((b) => !String(b.className).split(" ").includes("btn")).map((b) => b.className);
+  assert.deepEqual(plain, []);
+  for (const go of ["bmove-held-go", "bmove-start-go", "bmove-done-go"]) {
+    assert.ok(String(host.querySelector(`button.${go}`).className).split(" ").includes("btn-primary"), go);
+  }
+});

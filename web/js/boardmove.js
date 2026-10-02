@@ -75,8 +75,8 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
   // value, and a question there would be a question on every card the operator
   // closes by hand.
   const doneText = el("div", "bmove-done-text");
-  const doneGo = button("bmove-go bmove-done-go", t("move_done_go"));
-  const doneCancel = button("bmove-cancel bmove-done-cancel", t("move_cancel"));
+  const doneGo = button("btn btn-primary bmove-go bmove-done-go", t("move_done_go"));
+  const doneCancel = button("btn bmove-cancel bmove-done-cancel", t("move_cancel"));
   const doneDialog = createDialog({ title: t("move_done_title"), onClose: () => settle(false) });
   doneDialog.body.append(doneText);
   doneDialog.foot.append(doneCancel, doneGo);
@@ -88,7 +88,7 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
   const afterText = el("div", "bmove-after-text");
   const afterDialog = createDialog({ title: t("move_after_title") });
   afterDialog.body.append(afterText);
-  const afterClose = button("bmove-cancel bmove-after-close", t("move_close"));
+  const afterClose = button("btn bmove-cancel bmove-after-close", t("move_close"));
   afterDialog.foot.append(afterClose);
   afterClose.addEventListener("click", () => afterDialog.close());
 
