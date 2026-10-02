@@ -12,6 +12,7 @@ let host;
 let createNewCard;
 let sent;
 let answer;
+let card;
 
 async function fakeCreate(title, zone) {
   sent.push({ title, zone });
@@ -20,7 +21,7 @@ async function fakeCreate(title, zone) {
 }
 
 function open() {
-  fireEvent(host.querySelector("button.newcard-open"), "click");
+  card.open();
   return host.querySelector("div.newcard");
 }
 
@@ -31,7 +32,7 @@ beforeEach(async () => {
   sent = [];
   answer = { path: "/b/cards/x.md", committed: true, reason: "" };
   ({ createNewCard } = await import("../js/newcard.js"));
-  createNewCard(host, { create: fakeCreate });
+  card = createNewCard(host, { create: fakeCreate });
 });
 
 afterEach(() => {

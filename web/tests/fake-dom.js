@@ -21,6 +21,23 @@ function attributeName(name) {
     : null;
 }
 
+// nodeList is what a real querySelectorAll answers: indexable, iterable, with
+// length and forEach — and with none of the array methods. It is a wrapper
+// rather than the plain array it used to be because the difference is not
+// cosmetic: web/js/dialog.js called .filter on the result and threw on every
+// open() in a real browser, while this DOM answered an array and every test
+// passed. A double quieter than the thing it stands in for is worse than none.
+function nodeList(found) {
+  const list = {
+    length: found.length,
+    item: (i) => found[i] ?? null,
+    forEach: (fn, thisArg) => found.forEach(fn, thisArg),
+    [Symbol.iterator]: () => found[Symbol.iterator](),
+  };
+  for (let i = 0; i < found.length; i += 1) list[i] = found[i];
+  return list;
+}
+
 function matchesSelector(node, selector) {
   // A comma is a list of selectors, and a node matches if it matches any of
   // them — the panel asks for its scrolling boxes as ".md-table, pre", one
@@ -311,6 +328,18 @@ class FakeNode {
     // logged rather than inferred.
     this.ownerDocument?.searches?.push({ selector, connected: this.isConnected });
     const found = [];
+    // ":scope > x" is the one combinator this understands, and it is here
+    // because the board asks by it: a column is a direct child of #board, and
+    // a plain ".kcol" would also find a column nested in one — which on a
+    // board being redrawn is the difference between putting a column's scroll
+    // back and putting it somewhere else.
+    const direct = selector.trim().match(/^:scope\s*>\s*(.+)$/);
+    if (direct) {
+      for (const child of this.children) {
+        if (matchesSelector(child, direct[1])) found.push(child);
+      }
+      return nodeList(found);
+    }
     const visit = (node) => {
       for (const child of node.children) {
         if (matchesSelector(child, selector)) found.push(child);
@@ -318,7 +347,7 @@ class FakeNode {
       }
     };
     visit(this);
-    return found;
+    return nodeList(found);
   }
 
   querySelector(selector) {

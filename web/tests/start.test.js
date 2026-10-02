@@ -56,7 +56,7 @@ function start(extra = {}) {
 }
 
 function texts(selector) {
-  return root.querySelectorAll(selector).map((node) => node.textContent);
+  return [...root.querySelectorAll(selector)].map((node) => node.textContent);
 }
 
 beforeEach(() => {

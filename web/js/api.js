@@ -15,6 +15,7 @@
 // header.
 
 import { withFleet, fleetFromSearch } from "./fleet.js";
+import { langCode } from "./i18n.js";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -73,13 +74,18 @@ export function inFleet(path) {
   return withFleet(path, fleetFromSearch(globalThis.location?.search ?? ""));
 }
 
-export async function setCardField(path, field, value) {
+export async function setCardField(path, field, value, expect) {
+  const body = { path: String(path), field: String(field), value: String(value) };
+  // Sent only when the caller named one: the key is a pointer on the far side,
+  // and an absent one is "write it whatever the card holds" — which is what
+  // every edit but a drag means.
+  if (expect !== undefined && expect !== null) body.expect = String(expect);
   const response = await fetch(inFleet("/api/cards"), {
     method: "PATCH",
     headers: JSON_HEADERS,
-    // The route takes three strings; progress arrives here as a number from a
+    // The route takes strings; progress arrives here as a number from a
     // snapshot and as a string from a select, and the server rejects a number.
-    body: JSON.stringify({ path: String(path), field: String(field), value: String(value) }),
+    body: JSON.stringify(body),
   });
   if (response.status === 204) {
     return { committed: true };
@@ -116,6 +122,31 @@ export async function createCard(title, zone) {
     committed: body?.committed === true,
     reason: String(body?.reason ?? ""),
   };
+}
+
+// startWork starts a session for one card and hands the card to it: the
+// session comes up with no prompt, its short id is written into the card, and
+// the task is sent after that. The order is the server's to keep (see
+// internal/orchestrator.Dispatcher), and it is the reason this is one call
+// rather than the page starting a session and then writing the card.
+//
+// Like resumeSession it can take the better part of a minute — a session is
+// started and waited for — and the caller must show that it is waiting. It
+// resolves with the steps the dispatch took; it throws with the server's own
+// words, and a throw can still leave a session running, which is why those
+// words have to reach the operator rather than a retry.
+export async function startWork(card) {
+  const response = await fetch(inFleet("/api/sessions"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    // The page's language: the session is sent its card in it, as the
+    // orchestrator is sent its working order in the wizard's.
+    body: JSON.stringify({ card: String(card), lang: langCode }),
+  });
+  if (!response.ok) {
+    throw await refusal(response);
+  }
+  return (await readJSON(response)) ?? {};
 }
 
 async function post(url, body) {

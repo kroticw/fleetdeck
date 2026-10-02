@@ -193,6 +193,28 @@ const en = {
   new_card_cancel: "Cancel",
   new_card_title_required: "A card needs a title",
   new_card_not_committed: "Card created, but not recorded in the board's git history",
+
+  // Dragging a card between the board's columns. move_held is the question
+  // asked before a card an agent is keeping is moved by hand: the card is the
+  // operator's to move, but the agent goes on writing the file it thinks it
+  // keeps, so the move is said out loud rather than done quietly.
+  move_held_title: "This card is being kept by its session",
+  move_held_ask: "After it was started the card is the agent's to write, and it goes on writing the one it thinks it keeps. Move it anyway? Session",
+  move_held_go: "Move it",
+  move_cancel: "Leave it",
+  move_close: "Close",
+  move_refused_title: "The card did not move",
+  // The close button of every dialog (web/js/dialog.js), for a screen reader:
+  // on screen it is a ×.
+  dialog_close: "Close",
+  // A card with no session dropped into active. The board takes no started
+  // stage while the session field is empty, so what is offered is the session
+  // rather than a refusal.
+  start_session_title: "Start a session for this card",
+  start_session_ask: "The session comes up with no prompt, its short id is written into the card, and the task is sent after that.",
+  start_session_go: "Start it",
+  start_session_none: "This panel starts no sessions, so it cannot start one for this card: hand the card to a session from the orchestrator.",
+  start_session_failed: "The session was not handed the card",
   setup_title: "Set up fleetdeck",
   setup_intro: "Choose the folder fleetdeck keeps its board and documentation in. It creates two folders inside it:",
   setup_board: "board — an empty board: a git repository with the board's README, archive and card validator (the validator needs python3)",
@@ -536,6 +558,19 @@ const ru = {
   new_card_cancel: "Отмена",
   new_card_title_required: "У карточки должен быть заголовок",
   new_card_not_committed: "Карточка создана, но не записана в историю git доски",
+
+  move_held_title: "Карточку ведёт её сессия",
+  move_held_ask: "После запуска карточку пишет агент, и он продолжит писать ту, которую считает своей. Всё равно переставить? Сессия",
+  move_held_go: "Переставить",
+  move_cancel: "Оставить",
+  move_close: "Закрыть",
+  move_refused_title: "Карточка не переехала",
+  dialog_close: "Закрыть",
+  start_session_title: "Запустить сессию под карточку",
+  start_session_ask: "Сессия поднимется без промпта, её short id будет записан в карточку, и только после этого уйдёт задача.",
+  start_session_go: "Запустить",
+  start_session_none: "Эта панель не запускает сессии, поэтому не может поднять сессию под карточку: передайте карточку сессии через оркестратора.",
+  start_session_failed: "Сессия карточку не получила",
   setup_title: "Настройка fleetdeck",
   setup_intro: "Выберите папку, в которой fleetdeck будет держать доску и документацию. В ней появятся две папки:",
   setup_board: "board — пустая доска: git-репозиторий с README доски, архивом и валидатором карточек (валидатору нужен python3)",

@@ -41,6 +41,7 @@ const MIGRATED = [
   "setup-choose", "setup-create",
   "wizard-create", "wizard-appoint", "wizard-open", "wizard-skip",
   "start-new", "start-choose",
+  "bmove-go", "bmove-cancel", "dialog-close", "kcol-add",
   "card-close", "reader-close", "s-close",
   "o-name-edit", "label-edit-btn",
   "card-dock-place", "card-dock-font", "card-dock-open", "card-dock-resume", "card-dock-write", "card-dock-orchestrator",
@@ -100,7 +101,7 @@ test("an icon button is round: as wide as it is tall", () => {
 });
 
 test("the size is the container's: dialogs, forms and pages large, a class for the rest", () => {
-  for (const container of [".newcard", ".setup", ".start", ".btn-lg"]) {
+  for (const container of [".dialog", ".newcard", ".setup", ".start", ".btn-lg"]) {
     assert.match(ruleBody(container), /--btn-height:\s*var\(--btn-h-lg\)/, container);
   }
   assert.match(ruleBody(".btn-md"), /--btn-height:\s*var\(--btn-h\)/);

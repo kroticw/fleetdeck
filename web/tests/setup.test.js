@@ -126,7 +126,7 @@ test("setup: create sends the path and shows every step, a refused one with its 
   await create();
   const post = requests.find((r) => r.method === "POST");
   assert.deepEqual(post.body, { path: "/srv/fleet" });
-  const items = root.querySelectorAll("li.setup-step");
+  const items = [...root.querySelectorAll("li.setup-step")];
   assert.equal(items.length, 4);
   assert.match(items[2].textContent, /statusline/);
   assert.match(items[2].textContent, /no fleetdeck-status found/);
@@ -150,7 +150,7 @@ test("setup: once made, the page waits for the panel to answer, then goes on to 
   assert.equal(root.querySelector("input.setup-path"), null, "the folder step is gone");
   assert.equal(reloaded, 0, "the panel is opened from the orchestrator step, not before it");
   // What setup did stays readable: the next step carries it.
-  const carried = root.querySelector("div.wizard-made").querySelectorAll("li.setup-step");
+  const carried = [...root.querySelector("div.wizard-made").querySelectorAll("li.setup-step")];
   assert.equal(carried.length, 4);
   assert.match(carried[2].textContent, /no fleetdeck-status found/);
 });

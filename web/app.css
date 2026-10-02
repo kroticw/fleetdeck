@@ -112,6 +112,10 @@
   --island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%);
   --sheet-shadow: 0 2px 6px rgb(20 22 26 / 10%), 0 18px 48px rgb(20 22 26 / 24%);
   --sheet-scrim: rgb(20 22 26 / 22%);
+  /* A dialog holds the work until it is answered, and its scrim says so: the
+     darker of the two in every theme, with no blur beside it (the .dialog
+     block says why it must not have one). */
+  --dialog-scrim: rgb(20 22 26 / 52%);
   --radius-lg: 12px;
   --radius-xl: 18px;
 }
@@ -163,6 +167,7 @@ html {
     --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
     --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
     --sheet-scrim: rgb(0 0 0 / 48%);
+    --dialog-scrim: rgb(0 0 0 / 68%);
   }
 }
 
@@ -197,6 +202,7 @@ html {
   --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
   --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
   --sheet-scrim: rgb(0 0 0 / 48%);
+  --dialog-scrim: rgb(0 0 0 / 68%);
 }
 
 :root[data-theme="light"] {
@@ -317,6 +323,7 @@ body {
   --btn-font: var(--fs-xs);
 }
 
+.dialog,
 .newcard,
 .setup,
 .start,
@@ -2111,7 +2118,11 @@ main {
   color: var(--text-muted);
 }
 
+/* margin-left rather than the head's space-between, which only holds while the
+   head has two children: the new column's has three, and the count would sit
+   against the stage's name with the button taking all the room between. */
 .kcount {
+  margin-left: auto;
   font-size: var(--fs-2xs);
   color: var(--text-faint);
 }
@@ -2334,28 +2345,28 @@ main {
   align-items: center;
 }
 
-.newcard-open {
-  margin-left: auto;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+/* The button that opens the form sits in the head of the new column
+   (web/js/board.js) and the form opens under the tab row, over that column:
+   new is the first column, so the form's left edge is the board's. */
+.kcol-add {
+  margin-left: var(--gap-sm);
   color: var(--text-muted);
-  font: inherit;
-  font-size: var(--fs-xs);
-  padding: 2px 8px;
-  margin-bottom: var(--gap-sm);
 }
 
-.newcard-open:hover {
+.kcol-add:hover {
   color: var(--text);
-  border-color: var(--border-strong);
+}
+
+/* The card under the pointer while it is being dragged. The browser draws the
+   image that follows the cursor; this is the place it came from. */
+.kcard-dragging {
+  opacity: 0.4;
 }
 
 .newcard {
   position: absolute;
   top: 100%;
-  right: var(--gap-lg);
+  left: var(--gap-lg);
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
@@ -2402,7 +2413,7 @@ main {
 .newcard-note {
   position: absolute;
   top: 100%;
-  right: var(--gap-lg);
+  left: var(--gap-lg);
   z-index: 1;
   color: var(--attn);
   font-size: var(--fs-xs);
@@ -4226,8 +4237,7 @@ body.is-resizing {
   box-shadow: var(--island-shadow);
 }
 
-:root[data-surface="board"] #tabs .tab,
-:root[data-surface="board"] #tabs .newcard-open {
+:root[data-surface="board"] #tabs .tab {
   display: none;
 }
 
@@ -4594,4 +4604,107 @@ body.is-resizing {
 :root[data-surface="orchestrator"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled),
 :root[data-surface="sessions"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled) {
   background-color: var(--surface-hover);
+}
+
+/* The dialog (web/js/dialog.js), the page's one modal, which the board's moves
+ * ask their questions in (web/js/boardmove.js).
+ *
+ * The window floats over the content, which is the one case where a blur inside
+ * this page is legal — a control lying on an island carries none, or it blurs
+ * the window's own glass a second time (web/tests/glass-controls-css.test.js
+ * states the rule and what it was measured on). The scrim is NOT that case: it
+ * is fixed over the whole web view, and in the fleetdeck window most of what it
+ * covers is not page content at all but the window's own glass, which is the
+ * very material the rule keeps blurs off. So the scrim dims and does no more.
+ *
+ * Written without a data-surface, so a browser tab is covered too.
+ *
+ * No [hidden] rule of its own: the sheet already forces display:none on
+ * anything hidden. */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--gap-lg);
+  background: var(--dialog-scrim);
+}
+
+.dialog {
+  width: min(400px, 100%);
+  max-height: calc(100vh - 4 * var(--gap-lg));
+  overflow: auto;
+  padding: var(--gap-lg);
+  border: none;
+  border-radius: var(--radius-lg);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--sheet-shadow);
+  color: var(--text);
+}
+
+/* Wide is the form's width, narrow the question's. */
+.dialog[data-size="wide"] {
+  width: min(560px, 100%);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: var(--fs-md);
+}
+
+.dialog-close {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.dialog-close:hover {
+  color: var(--text);
+}
+
+.dialog-body {
+  display: grid;
+  gap: var(--gap);
+  margin-top: var(--gap);
+  line-height: 1.5;
+}
+
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap);
+  margin-top: var(--gap-lg);
+}
+
+.dialog-foot:empty {
+  display: none;
+}
+
+/* Moving a card between the board's columns (web/js/boardmove.js). The dialog
+   above gives the window; these are the things said inside one. */
+.bmove-held-text,
+.bmove-start-text {
+  color: var(--text);
+}
+
+.bmove-error {
+  color: var(--danger);
+}
+
+/* Reduce transparency: solid, and nothing blurred. The scrim is not named here
+   because it has no blur to take away. */
+:root[data-glass="opaque"] .dialog {
+  background-color: var(--surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--sheet-shadow), inset 0 0 0 1px var(--border-strong);
 }

@@ -5,7 +5,8 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, resumeSession, fetchSessionCards, fetchTerminalToken, createCard, setOrchestratorSession } from "../js/api.js";
+import { setCardField, resumeSession, fetchSessionCards, fetchTerminalToken, createCard, setOrchestratorSession, startWork } from "../js/api.js";
+import { langCode } from "../js/i18n.js";
 
 let calls = [];
 let realFetch;
@@ -38,7 +39,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-test("a card write is a PATCH of three strings, declared as JSON", async () => {
+test("a card write with no expectation is a PATCH of three strings, declared as JSON", async () => {
   stubFetch(answer({ status: 204 }));
 
   // progress arrives from a snapshot as a number; the route takes a string.
@@ -54,6 +55,47 @@ test("a card write is a PATCH of three strings, declared as JSON", async () => {
     field: "progress",
     value: "60",
   });
+});
+
+// The drag is the one write made against a picture of the card rather than
+// against the card: the board is drawn from a snapshot up to a second old.
+test("a card write made against a stage the board drew carries it as the expectation", async () => {
+  stubFetch(answer({ status: 204 }));
+  await setCardField("/board/fleet-ui.md", "stage", "review", "active");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    path: "/board/fleet-ui.md",
+    field: "stage",
+    value: "review",
+    expect: "active",
+  });
+});
+
+// An empty session is a value a caller may legitimately expect, so it has to
+// be told apart from naming no expectation at all.
+test("an empty expectation is sent, and only an absent one is left out", async () => {
+  stubFetch(answer({ status: 204 }));
+  await setCardField("/board/c.md", "session", "abc12345", "");
+  assert.equal(JSON.parse(calls[0].init.body).expect, "");
+  stubFetch(answer({ status: 204 }));
+  await setCardField("/board/c.md", "session", "abc12345");
+  assert.ok(!("expect" in JSON.parse(calls[1].init.body)));
+});
+
+test("starting a session for a card names the card and the page's language", async () => {
+  stubFetch(answer({ status: 200, body: { ok: true, session: "abc12345", steps: [] } }));
+  const result = await startWork("/board/c.md");
+  assert.equal(calls[0].url, "/api/sessions");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { card: "/board/c.md", lang: langCode });
+  assert.equal(result.session, "abc12345");
+});
+
+// A refusal can still leave a session running, so the server's own words have
+// to reach the operator rather than a retry.
+test("a refused dispatch throws with the server's own words", async () => {
+  stubFetch(answer({ status: 409, body: { error: "the card already names a session: deadbeef" } }));
+  await assert.rejects(() => startWork("/board/c.md", "claude"), /already names a session/);
 });
 
 test("204 is a plain success: written and committed", async () => {

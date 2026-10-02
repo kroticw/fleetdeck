@@ -230,7 +230,7 @@ test("every card the session worked on is listed, in order, closed and archived 
   assert.notEqual(row, null, "the panel has no history row");
   assert.equal(row.querySelector(".s-cards-label")?.textContent, t("session_cards"));
 
-  const items = row.querySelectorAll(".s-card");
+  const items = [...row.querySelectorAll(".s-card")];
   assert.equal(items.length, HISTORY.length, "a card is missing from the history");
   HISTORY.forEach((card, i) => {
     assert.equal(items[i].dataset.path, card.path, `card ${i} is out of order`);

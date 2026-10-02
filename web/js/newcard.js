@@ -5,11 +5,16 @@
 // the task on, and the panel only has to be able to start one. Without this, a
 // person with no editor open on the board had no way to put a first card on it.
 //
-// The control sits in the centre column's tab row, not in #board: the board is
-// redrawn whole from every snapshot, and a form inside it would lose what was
-// being typed. The form opens over the column (position: absolute, app.css), so
-// opening it moves nothing — see docs/engineering/live-terminal.md section 6 on
-// why a row that appears and goes away is not free in this page.
+// The button that opens this is drawn in the board's new column (board.js) and
+// the form is not: the board is redrawn whole from every snapshot, and a form
+// inside #board would lose what was being typed. It lives in the centre
+// column's tab row instead and opens over the column (position: absolute,
+// app.css), so opening it moves nothing — see docs/engineering/live-terminal.md
+// section 6 on why a row that appears and goes away is not free in this page.
+//
+// The button is in the new column and in no other because a card cannot be
+// started anywhere else: every stage but new needs a session on the card
+// first (internal/board/write.go).
 
 import { createCard } from "./api.js";
 import { t } from "./i18n.js";
@@ -26,13 +31,11 @@ function el(tag, className, text) {
 }
 
 /**
- * createNewCard appends the "new card" button, its form and its note to host.
- * `create` is the write, api.createCard unless a test replaces it.
+ * createNewCard appends the "new card" form and its note to host, and hands
+ * back the two ways it is opened. `create` is the write, api.createCard unless
+ * a test replaces it.
  */
 export function createNewCard(host, { create = createCard } = {}) {
-  const openButton = el("button", "newcard-open", t("new_card"));
-  openButton.setAttribute("type", "button");
-
   const form = el("div", "newcard");
   form.hidden = true;
   form.setAttribute("role", "dialog");
@@ -65,16 +68,23 @@ export function createNewCard(host, { create = createCard } = {}) {
   const note = el("span", "newcard-note");
   note.hidden = true;
 
-  host.append(openButton, form, note);
+  host.append(form, note);
 
   let busy = false;
+  // What had the focus when the form opened, to give it back when it closes:
+  // the button that opened it is drawn inside the board and replaced by the
+  // next snapshot, so it cannot be focused again by name.
+  let opener = null;
 
   const close = () => {
     form.hidden = true;
     error.textContent = "";
+    opener?.focus?.();
+    opener = null;
   };
 
   const open = () => {
+    opener = document.activeElement ?? null;
     form.hidden = false;
     error.textContent = "";
     note.hidden = true;
@@ -110,7 +120,6 @@ export function createNewCard(host, { create = createCard } = {}) {
 
   const toggle = () => (form.hidden ? open() : close());
 
-  openButton.addEventListener("click", toggle);
   createButton.addEventListener("click", submit);
   note.addEventListener("click", () => {
     note.hidden = true;
@@ -131,11 +140,9 @@ export function createNewCard(host, { create = createCard } = {}) {
     ev.preventDefault?.();
     ev.stopPropagation?.();
     close();
-    openButton.focus();
   });
 
-  // open and toggle, for the fleetdeck window: its new card capsule stands in
-  // for the button, which the board hides there, and a second press closes the
-  // form as the button's does.
+  // open for the board's button, and toggle for the fleetdeck window's new
+  // card capsule, where a second press closes the form the first opened.
   return { open, toggle };
 }

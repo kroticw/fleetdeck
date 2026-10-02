@@ -81,7 +81,7 @@ test("the list is built from the server's documents", async () => {
   renderDocs(root);
   await settle();
 
-  const links = root.querySelectorAll("[data-path]");
+  const links = [...root.querySelectorAll("[data-path]")];
   assert.equal(links.length, 2);
   assert.deepEqual(
     links.map((node) => node.textContent),
@@ -305,7 +305,7 @@ test("an open document names the cards that link it, and a card opens with one c
   fireEvent(root.querySelector("[data-path]"), "click");
   await settle();
 
-  const cards = root.querySelectorAll(".doc-card");
+  const cards = [...root.querySelectorAll(".doc-card")];
   assert.equal(cards.length, 1);
   assert.match(cards[0].textContent, /T-007/);
   fireEvent(cards[0], "click");

@@ -7,6 +7,7 @@ import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
+import { createBoardMove } from "./boardmove.js";
 import { probeColumnScroll, watchBoardScroll, watchCardSheetOnStand, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
 import { watchControls } from "./standcontrols.js";
@@ -216,7 +217,17 @@ if (headerParts.length > 0) {
 // One web view checks the build: in the window, the board. Its reload is the
 // window's, which reloads all three, and its reload ceiling stays in one place.
 if (regions.has("build")) renderBuildBanner(document.getElementById("build-banner"), subscribe);
-if (regions.has("center")) renderBoard(document.getElementById("board"), cardPanel.open);
+// Both are built further down, after createSections has replaced the tab row's
+// children — it would throw away anything put there before it — so the board
+// reaches them through a closure rather than by value.
+let newCard = null;
+let boardMove = null;
+if (regions.has("center")) {
+  renderBoard(document.getElementById("board"), cardPanel.open, {
+    onAddCard: () => newCard?.open(),
+    onMove: (move) => boardMove?.(move) ?? null,
+  });
+}
 if (regions.has("orchestrator")) {
   renderOrchestrator(document.getElementById("orchestrator"), { links: { resolve: terminalLinks.resolve, open: routes.openCard } });
 }
@@ -235,7 +246,6 @@ if (regions.has("orchestrator")) {
 // documentation directories configured would otherwise ask for them — and take
 // the server's 404 — before the operator had opened that section at all.
 let sections = null;
-let newCard = null;
 if (regions.has("center")) {
   sections = createSections(document.getElementById("tabs"), [
     { id: "board", label: t("tab_board"), root: document.getElementById("board") },
@@ -248,7 +258,10 @@ if (regions.has("center")) {
   ]);
 
   // After the tabs, not before: createSections replaces the row's children.
+  // The form and the move dialogs both hang off the tab row rather than off
+  // #board, which every snapshot replaces whole.
   newCard = createNewCard(document.getElementById("tabs"));
+  boardMove = createBoardMove(document.getElementById("tabs"));
   // A stand's frame with the form open (web/js/host.js, open).
   if (host?.open?.includes("newcard")) newCard.open();
 }

@@ -48,11 +48,11 @@ func TestDispatchIsConfinedToTheBoard(t *testing.T) {
 
 func TestDispatchMapsItsRefusalsOntoStatusCodes(t *testing.T) {
 	cases := map[error]int{
-		orchestrator.ErrBadRequest:             http.StatusBadRequest,
-		orchestrator.ErrBusy:                   http.StatusConflict,
-		orchestrator.ErrCardTaken:              http.StatusConflict,
-		orchestrator.ErrNoCard:                 http.StatusNotFound,
-		orchestrator.ErrCannotStart:            http.StatusServiceUnavailable,
+		orchestrator.ErrBadRequest:         http.StatusBadRequest,
+		orchestrator.ErrBusy:               http.StatusConflict,
+		orchestrator.ErrCardTaken:          http.StatusConflict,
+		orchestrator.ErrNoCard:             http.StatusNotFound,
+		orchestrator.ErrCannotStart:        http.StatusServiceUnavailable,
 		errors.New("the daemon went away"): http.StatusInternalServerError,
 	}
 	for err, want := range cases {
@@ -78,13 +78,14 @@ func TestDispatchOnAPanelThatStartsNoWorkerSaysSo(t *testing.T) {
 	}
 }
 
-
 // The page offers a start only where one can succeed, and reads that off the
 // snapshot: a panel wired to start no worker (a stand with no claude) says so
 // by the field's absence rather than by a start that fails with 503.
 func TestTheSnapshotSaysWhetherAWorkerCanBeStarted(t *testing.T) {
 	d, _ := testDeps()
-	d.StartWork = func(context.Context, orchestrator.Work) (orchestrator.Result, error) { return orchestrator.Result{}, nil }
+	d.StartWork = func(context.Context, orchestrator.Work) (orchestrator.Result, error) {
+		return orchestrator.Result{}, nil
+	}
 	if rec := do(d, http.MethodGet, "/api/snapshot", ""); !strings.Contains(rec.Body.String(), `"canStartWork":true`) {
 		t.Fatalf("a panel that can start a worker must say so: %s", rec.Body.String())
 	}
@@ -99,7 +100,9 @@ func TestTheSnapshotSaysWhetherAWorkerCanBeStarted(t *testing.T) {
 func TestTheSnapshotAsksTheFleetWhetherAWorkerCanBeStarted(t *testing.T) {
 	d, _ := testDeps()
 	d.Fleet = func(string) (FleetDeps, error) {
-		return FleetDeps{StartWork: func(context.Context, orchestrator.Work) (orchestrator.Result, error) { return orchestrator.Result{}, nil }}, nil
+		return FleetDeps{StartWork: func(context.Context, orchestrator.Work) (orchestrator.Result, error) {
+			return orchestrator.Result{}, nil
+		}}, nil
 	}
 	if rec := do(d, http.MethodGet, "/api/snapshot", ""); !strings.Contains(rec.Body.String(), `"canStartWork":true`) {
 		t.Fatalf("the fleet can start a worker and the snapshot must say so: %s", rec.Body.String())

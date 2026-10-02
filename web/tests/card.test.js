@@ -835,7 +835,7 @@ function withDocuments(snap) {
 // The card's own documents open in the card, on their tab (T-091); only a
 // document the card does not link goes to the reader over the board.
 function activeTab(root) {
-  return root.querySelectorAll(".card-tab").find((b) => b.getAttribute("aria-selected") === "true")?.dataset.key;
+  return [...root.querySelectorAll(".card-tab")].find((b) => b.getAttribute("aria-selected") === "true")?.dataset.key;
 }
 
 test("a card's documents are listed and each opens on its tab with one click", async () => {
@@ -851,7 +851,7 @@ test("a card's documents are listed and each opens on its tab with one click", a
   });
   await settle();
 
-  const entries = root.querySelectorAll(".card-doc");
+  const entries = [...root.querySelectorAll(".card-doc")];
   assert.deepEqual(
     entries.map((entry) => entry.textContent),
     ["reports/2026-09-12-report", "reports/2026-09-13-design"],
@@ -980,7 +980,7 @@ test("the tabs are the card and its documents, in the order its body links them"
   const { root } = open(withDocuments(snapshot()), FLEET_UI, { listDocs: async () => DOCS });
   await settle();
   assert.deepEqual(
-    root.querySelectorAll(".card-tab").map((b) => b.dataset.key),
+    [...root.querySelectorAll(".card-tab")].map((b) => b.dataset.key),
     ["card", "/board/docs/reports/2026-09-12-report.md", "/board/docs/reports/2026-09-13-design.md"],
   );
   assert.equal(activeTab(root), "card");
@@ -1047,7 +1047,7 @@ test("a document's body is fetched once, not again on its tab or on every snapsh
     },
   });
   await settle();
-  const tabs = () => root.querySelectorAll(".card-tab");
+  const tabs = () => [...root.querySelectorAll(".card-tab")];
   fireEvent(tabs()[1], "click");
   await settle();
   store.push(withDocuments(snapshot()));
@@ -1085,7 +1085,7 @@ test("a document that could not be fetched is asked for again when its tab is pi
     },
   });
   await settle();
-  const tabs = () => root.querySelectorAll(".card-tab");
+  const tabs = () => [...root.querySelectorAll(".card-tab")];
   fireEvent(tabs()[1], "click");
   await settle();
   fireEvent(tabs()[0], "click");
@@ -1265,7 +1265,7 @@ test("another card that links the same document still opens on its own tab", asy
   link.dataset.link = baseNameOf(CARD_KEEPING);
   root.querySelector(".card-pane").appendChild(link);
   fireEvent(link, "click");
-  assert.ok(root.querySelectorAll(".card-tab").some((b) => b.dataset.key === "/board/docs/reports/2026-09-12-report.md"), "the other card has that tab too");
+  assert.ok([...root.querySelectorAll(".card-tab")].some((b) => b.dataset.key === "/board/docs/reports/2026-09-12-report.md"), "the other card has that tab too");
   assert.equal(activeTab(root), "card");
 });
 

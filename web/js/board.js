@@ -70,13 +70,24 @@ function cardHTML(c, orphanPaths, stoppedPaths) {
   }
 
   const mark = dead ? " kcard-orphan" : stopped ? " kcard-stopped" : "";
+  // data-stage is what a drop writes against: the stage this card was drawn
+  // in, so the write can be refused if the card has moved since (the expect
+  // of PATCH /api/cards). data-session says whether an agent is holding it,
+  // which the drop asks about before writing over that agent's work.
   return `
-    <article class="kcard ${zoneClass(c.zone)}${mark}" data-path="${path}">
+    <article class="kcard ${zoneClass(c.zone)}${mark}" data-path="${path}" data-stage="${escapeHTML(c.stage ?? "")}"${c.session ? ` data-session="${escapeHTML(c.session)}"` : ""} draggable="true">
       <div class="ktitle">${title}</div>
       <div class="kmeta">${cardNumberHTML(c.id)}${sessionHTML}</div>
       <div class="kprog"><i data-progress="${clampProgress(c.progress)}"></i></div>
     </article>`;
 }
+
+// ADD_STAGE is the one column whose head carries the "new card" button, and it
+// is one rather than every column because a card cannot be started anywhere
+// else: internal/board.CreateCard writes stage new, and the board refuses every
+// other stage while the card's session field is empty. A button over the review
+// column would promise a card that lands in new anyway.
+const ADD_STAGE = "new";
 
 export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new Set()) {
   // An empty column is a real drop target, not dead space -- it must never
@@ -85,9 +96,13 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
   // .kcol-empty (app.css) is what actually shrinks it; this only says which
   // columns qualify.
   const empty = cards.length === 0;
+  const add =
+    stage === ADD_STAGE
+      ? `<button type="button" class="btn btn-icon btn-sm kcol-add" title="${escapeHTML(t("new_card"))}" aria-label="${escapeHTML(t("new_card"))}">+</button>`
+      : "";
   return `
     <div class="kcol${empty ? " kcol-empty" : ""}" data-stage="${escapeHTML(stage)}">
-      <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span></h5>
+      <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span>${add}</h5>
       ${cards.map((c) => cardHTML(c, orphanPaths, stoppedPaths)).join("")}
     </div>`;
 }
@@ -103,6 +118,15 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
 // snap?.boardError rather than snap.boardError so this still falls through
 // to the normal empty-columns render when snap itself is null.
 export function render(root, snap) {
+  // A card being dragged is held by the browser as the element the gesture
+  // started on. Replacing #board's children mid-gesture therefore ends the
+  // drag, and the card is left in the column it came from with no sign of
+  // why. The frame is dropped instead; the store keeps the newest snapshot,
+  // and renderBoard draws again the moment the gesture is over. The flag is
+  // on the element rather than in a variable so that every way in here obeys
+  // it, not only the subscription.
+  if (root.dataset?.dragging) return;
+
   if (snap?.boardError) {
     root.innerHTML = `<div class="kerror">${escapeHTML(snap.boardError)}</div>`;
     return;
@@ -145,18 +169,134 @@ export function render(root, snap) {
   markScrollable(root);
 }
 
+// pendingView is the snapshot as the board should draw it while a move it has
+// asked for has not come back yet.
+//
+// A card dropped into another column is written by a PATCH, and the board only
+// learns the result from the next snapshot — up to a second later. Drawn from
+// the snapshot alone the card would jump back to the column it came from and
+// then forward again, which reads as the drop having failed. So the asked-for
+// stage is drawn instead, until the snapshot agrees.
+//
+// pending is pruned here rather than by a timer: an entry the snapshot has
+// caught up with, and one whose card is no longer on the board at all, are
+// both over.
+export function pendingView(snap, pending) {
+  if (!snap || pending.size === 0) return snap;
+  const seen = new Set();
+  const cards = (snap.cards ?? []).map((c) => {
+    seen.add(c.path);
+    const want = pending.get(c.path);
+    if (want === undefined) return c;
+    if (c.stage === want) {
+      pending.delete(c.path);
+      return c;
+    }
+    return { ...c, stage: want };
+  });
+  for (const path of [...pending.keys()]) {
+    if (!seen.has(path)) pending.delete(path);
+  }
+  return { ...snap, cards };
+}
+
 // The board scrolls itself rather than holding boxes that scroll, so it marks
 // itself. The mechanism and the reasoning behind it live in scrollable.js,
 // which is also where the panel's other scrolling boxes get it from.
-export function renderBoard(root, onOpenCard) {
+//
+// onAddCard opens the new card form over the new column, and onMove is a card
+// dropped into another column: `{path, from, to}`, answered with the stage the
+// board should draw until the next snapshot, or nothing when the move did not
+// happen. A board wired without them opens cards and nothing else.
+export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
+  // The snapshot the board would be drawn from if it were being drawn right
+  // now, and the moves it has asked for and not seen come back.
+  let latest = null;
+  const pending = new Map();
+  // The card being dragged, while one is. render reads the same state off
+  // root.dataset and skips the frame; this holds what the drop needs to know.
+  let dragging = null;
+  const hold = (card) => {
+    dragging = card;
+    if (card) root.dataset.dragging = "1";
+    else delete root.dataset.dragging;
+  };
+
+  const draw = () => render(root, pendingView(latest, pending));
+
   // One delegated listener rather than one per card: root.innerHTML is
   // replaced whole on every snapshot, so per-card listeners would need to be
   // re-attached every time anyway, and delegation reads the path straight
   // back from the browser's own attribute decoding — no re-escaping needed.
   root.addEventListener("click", (ev) => {
+    if (ev.target.closest(".kcol-add")) {
+      onAddCard?.();
+      return;
+    }
     const card = ev.target.closest(".kcard");
     if (!card || !root.contains(card)) return;
     onOpenCard(card.dataset.path);
+  });
+
+  root.addEventListener("dragstart", (ev) => {
+    const card = ev.target.closest(".kcard");
+    if (!card || !onMove) return;
+    hold({
+      path: card.dataset.path,
+      from: card.dataset.stage,
+      session: card.dataset.session ?? "",
+      // Alive means the card is being kept by an agent right now, which is
+      // what the drop asks about before writing over that agent's work. It is
+      // read off the marks the card was drawn with rather than off the
+      // snapshot: a card whose session is dead or stopped names a session and
+      // is nobody's to lose, and those two are exactly what the marks say.
+      live: Boolean(card.dataset.session) && !card.classList.contains("kcard-orphan") && !card.classList.contains("kcard-stopped"),
+    });
+    // text/plain rather than a type of our own: a drop outside the board then
+    // carries the card's path as text rather than nothing at all, and the
+    // browser has a label to draw the drag with.
+    ev.dataTransfer?.setData?.("text/plain", card.dataset.path);
+    if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
+    card.classList?.add?.("kcard-dragging");
+  });
+
+  // A drop target is a column that does not preventDefault on dragover: the
+  // browser refuses the drop otherwise, and it refuses it silently.
+  root.addEventListener("dragover", (ev) => {
+    if (!dragging || !ev.target.closest(".kcol")) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  });
+
+  root.addEventListener("drop", (ev) => {
+    const column = ev.target.closest(".kcol");
+    const move = dragging;
+    hold(null);
+    if (!move || !column) return;
+    ev.preventDefault();
+    const to = column.dataset.stage;
+    if (to && to !== move.from) {
+      Promise.resolve(onMove({ ...move, to }))
+        .then((drawn) => {
+          if (drawn) pending.set(move.path, drawn);
+        })
+        // A move that threw rather than answering leaves the card where it
+        // was, and the board still has to be drawn: without this the gesture
+        // ends with the board frozen on the frame the drag started from, which
+        // reads as the panel having stopped.
+        .catch((err) => console.error("the card was not moved", err))
+        .then(draw);
+      return;
+    }
+    draw();
+  });
+
+  // dragend fires whatever ended the gesture — a drop, Escape, a release over
+  // nothing — so the board is drawn again from here rather than from drop
+  // alone, which a cancelled drag never reaches.
+  root.addEventListener("dragend", () => {
+    hold(null);
+    draw();
   });
 
   // Resize and scroll both change the answer with no new snapshot behind them:
@@ -164,5 +304,8 @@ export function renderBoard(root, onOpenCard) {
   // column is the one thing the mark exists to stop claiming.
   watchSelf(root);
 
-  subscribe((snap) => render(root, snap));
+  subscribe((snap) => {
+    latest = snap;
+    draw();
+  });
 }

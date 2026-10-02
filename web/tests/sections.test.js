@@ -47,7 +47,7 @@ test("one tab per section, labelled", () => {
   sections();
 
   assert.deepEqual(
-    tabs.querySelectorAll("[data-section]").map((node) => node.textContent),
+    [...tabs.querySelectorAll("[data-section]")].map((node) => node.textContent),
     ["Board", "Docs"],
   );
 });
