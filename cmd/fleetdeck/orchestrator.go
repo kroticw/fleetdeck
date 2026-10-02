@@ -5,7 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"slices"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -33,18 +33,39 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 	}
 }
 
-// fleetDispatcher hands one fleet's cards to sessions of their own: started the
-// way an orchestrator is (sessionStarter), in the directory the orchestrator
-// runs in, the board's parent, and written into the card with the same commit
-// the panel makes for a field set by hand.
-func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client) *orchestrator.Dispatcher {
+// fleetDispatcher hands one fleet's cards to sessions of their own: started as
+// workers (workerStarter), in the checkout each card's repo field names under
+// the home directory, and written into the card with the same commit the panel
+// makes for a field set by hand. workers is the configuration's workers section
+// as it is when a worker starts.
+func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client, workers func() config.Workers) *orchestrator.Dispatcher {
+	home, _ := os.UserHomeDir()
 	return &orchestrator.Dispatcher{
-		Start:     sessionStarter(o, cfg.Agent.Command),
+		Start:     workerStarter(o, cfg.Agent.Command, workers),
 		List:      dc.ListSessions,
 		Send:      dc.SendText,
 		SendFirst: dc.SendFirst,
 		SetField:  setCardField,
-		Workspace: filepath.Dir(cfg.BoardPath),
+		Home:      home,
+	}
+}
+
+// workerLaunch is the workers section as the flags a worker is started with;
+// what it leaves unset is orchestrator.Launch's default.
+func workerLaunch(w config.Workers) orchestrator.Launch {
+	return orchestrator.Launch{Model: w.Model, PermissionMode: w.PermissionMode, Sandbox: w.Sandbox}
+}
+
+// workerStarter is sessionStarter for a worker session: the same claude, with
+// the workers section's flags added (orchestrator.Launch), read from workers
+// each time a worker starts so that an edited configuration applies to the
+// next worker. Nil where sessionStarter is nil.
+func workerStarter(o runOpts, command []string, workers func() config.Workers) func(ctx context.Context, cwd, name string) (string, error) {
+	if sessionStarter(o, command) == nil {
+		return nil
+	}
+	return func(ctx context.Context, cwd, name string) (string, error) {
+		return sessionStarter(o, command, workerLaunch(workers()).Args()...)(ctx, cwd, name)
 	}
 }
 
@@ -62,15 +83,18 @@ func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client) *orchestra
 // would start sessions in the wrong fleet. With no command configured, a panel looks
 // claude up each time it starts one, so a claude installed while the panel runs is
 // found without a restart.
-func sessionStarter(o runOpts, command []string) func(ctx context.Context, cwd, name string) (string, error) {
+//
+// extra are flags for the session itself, after the command and before the
+// `--bg --name` StartWith adds: a worker's launch flags (workerStarter).
+func sessionStarter(o runOpts, command []string, extra ...string) func(ctx context.Context, cwd, name string) (string, error) {
 	if o.standSocket != "" {
 		if o.standClaude == "" {
 			return nil
 		}
-		return orchestrator.StartWith([]string{o.standClaude})
+		return orchestrator.StartWith(slices.Concat([]string{o.standClaude}, extra))
 	}
 	if len(command) > 0 {
-		return orchestrator.StartWith(command)
+		return orchestrator.StartWith(slices.Concat(command, extra))
 	}
 	return func(ctx context.Context, cwd, name string) (string, error) {
 		home, _ := os.UserHomeDir()
@@ -78,7 +102,7 @@ func sessionStarter(o runOpts, command []string) func(ctx context.Context, cwd, 
 		if err != nil {
 			return "", err
 		}
-		return orchestrator.StartWith([]string{bin})(ctx, cwd, name)
+		return orchestrator.StartWith(slices.Concat([]string{bin}, extra))(ctx, cwd, name)
 	}
 }
 

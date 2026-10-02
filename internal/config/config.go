@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -126,6 +127,8 @@ type Config struct {
 	// Agent is the Claude Code installation this panel drives; the zero value is
 	// the default installation. See AgentConfig.
 	Agent AgentConfig
+	// Workers is how the panel starts the worker sessions it hands cards to.
+	Workers Workers
 
 	// Name names the fleet the top-level board, docs and orchestrator keys
 	// describe. Empty means the folder above its board (fleet.DefaultName).
@@ -297,9 +300,23 @@ type file struct {
 	// Name and Fleets came after every key above and are omitted when unused,
 	// so a file that does not use them is written exactly as before they
 	// existed (pinned by TestSaveOutputOfASingleFleetConfigIsPinned).
-	Name   string      `yaml:"name,omitempty"`
-	Fleets []fleetFile `yaml:"fleets,omitempty"`
+	Name    string      `yaml:"name,omitempty"`
+	Fleets  []fleetFile `yaml:"fleets,omitempty"`
+	Workers Workers     `yaml:"workers,omitempty"`
 }
+
+// Workers is how the panel starts a worker session for a card, for every
+// fleet alike: the model, the permission mode and whether Bash runs in the
+// sandbox. An empty value is the launcher's default (orchestrator.Launch),
+// kept out of the file so that today's default is not frozen into it.
+type Workers struct {
+	Model          string `yaml:"model,omitempty"`
+	PermissionMode string `yaml:"permission_mode,omitempty"`
+	Sandbox        bool   `yaml:"sandbox,omitempty"`
+}
+
+// PermissionModes are the values claude's --permission-mode accepts (2.1.283).
+var PermissionModes = []string{"acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"}
 
 // Default returns the configuration used when no file exists.
 func Default() Config {
@@ -346,6 +363,7 @@ func configToFile(c Config) file {
 	f.Agent.Command = c.Agent.Command
 	f.Agent.ConfigDir = c.Agent.ConfigDir
 	f.Name = c.Name
+	f.Workers = c.Workers
 	for _, fl := range c.Fleets {
 		var ff fleetFile
 		ff.Name = fl.Name
@@ -380,8 +398,9 @@ func fileToConfig(f file) Config {
 			Command:   f.Agent.Command,
 			ConfigDir: f.Agent.ConfigDir,
 		},
-		Name:   f.Name,
-		Fleets: fleetsFromFile(f.Fleets),
+		Name:    f.Name,
+		Fleets:  fleetsFromFile(f.Fleets),
+		Workers: f.Workers,
 	}
 }
 
@@ -540,6 +559,9 @@ func describeYAMLError(err error) error {
 // has one defined meaning (see NotifyConfig.SilenceAfter) rather than two competing
 // ones, so there is nothing for validate to refuse.
 func validate(c Config) error {
+	if m := c.Workers.PermissionMode; m != "" && !slices.Contains(PermissionModes, m) {
+		return fmt.Errorf("workers.permission_mode %q is not one of %s", m, strings.Join(PermissionModes, ", "))
+	}
 	if c.ServerPort < 1 || c.ServerPort > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.ServerPort)
 	}

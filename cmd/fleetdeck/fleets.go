@@ -42,7 +42,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 		mu.Lock()
 		defer mu.Unlock()
 		if dispatchers[f.Name] == nil {
-			dispatchers[f.Name] = fleetDispatcher(o, fleetConfig(collector.Config(), f), dc)
+			dispatchers[f.Name] = fleetDispatcher(o, fleetConfig(collector.Config(), f), dc, func() config.Workers { return collector.Config().Workers })
 		}
 		return dispatchers[f.Name]
 	}
@@ -65,8 +65,8 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 		// then says this fleet has no board instead of writing somewhere else.
 		if f.BoardPath != "" {
 			board := f.BoardPath
-			fd.CreateCard = func(title, zone string) (string, error) {
-				return createCard(board, title, zone, time.Now())
+			fd.CreateCard = func(title, zone, repo string) (string, error) {
+				return createCard(board, title, zone, repo, time.Now())
 			}
 			// Left nil where the panel starts no sessions (a stand given no
 			// claude): the snapshot then tells the page not to offer a start.

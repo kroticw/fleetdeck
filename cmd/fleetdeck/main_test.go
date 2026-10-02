@@ -373,7 +373,7 @@ func TestACreatedCardIsCommitted(t *testing.T) {
 	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path, err := createCard(dir, "A task", "planned", time.Now())
+	path, err := createCard(dir, "A task", "planned", "", time.Now())
 	if err != nil {
 		t.Fatalf("a card created in a real repository must be committed: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestACreatedCardThatCannotBeCommittedIsStillCreated(t *testing.T) {
 	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path, err := createCard(dir, "A task", "planned", time.Now())
+	path, err := createCard(dir, "A task", "planned", "", time.Now())
 	if !errors.Is(err, server.ErrCardWrittenNotCommitted) {
 		t.Fatalf("want ErrCardWrittenNotCommitted, got %v", err)
 	}
@@ -411,7 +411,7 @@ func TestARefusedCardIsNotCreated(t *testing.T) {
 	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := createCard(dir, "A task", "someday", time.Now())
+	_, err := createCard(dir, "A task", "someday", "", time.Now())
 	if !errors.Is(err, board.ErrInvalidCard) {
 		t.Fatalf("want board.ErrInvalidCard, got %v", err)
 	}

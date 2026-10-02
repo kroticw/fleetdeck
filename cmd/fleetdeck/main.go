@@ -207,8 +207,8 @@ func setCardField(path, field, value string, expect *string) error {
 // rule for the second: once the file exists, a commit that did not happen is
 // wrapped in server.ErrCardWrittenNotCommitted and returned with the path, so the
 // operator is not invited to create the card a second time.
-func createCard(boardDir, title, zone string, now time.Time) (string, error) {
-	path, err := board.CreateCard(boardDir, title, zone, now)
+func createCard(boardDir, title, zone, repo string, now time.Time) (string, error) {
+	path, err := board.CreateCard(boardDir, title, zone, repo, now)
 	if err != nil {
 		return "", err
 	}
@@ -947,10 +947,10 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
-	var create func(title, zone string) (string, error)
+	var create func(title, zone, repo string) (string, error)
 	if cfg.BoardPath != "" {
-		create = func(title, zone string) (string, error) {
-			return createCard(cfg.BoardPath, title, zone, time.Now())
+		create = func(title, zone, repo string) (string, error) {
+			return createCard(cfg.BoardPath, title, zone, repo, time.Now())
 		}
 	}
 	return server.Deps{

@@ -45,7 +45,7 @@ func twoFleetWrites(t *testing.T) (Deps, *[]string, [4]string) {
 		return FleetDeps{
 			BoardDir:  board,
 			DocsRoots: []string{docs},
-			CreateCard: func(title, _ string) (string, error) {
+			CreateCard: func(title, _, _ string) (string, error) {
 				*calls = append(*calls, "create:"+name+":"+title)
 				return filepath.Join(board, "cards", "new.md"), nil
 			},

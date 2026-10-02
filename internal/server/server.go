@@ -103,7 +103,7 @@ type Deps struct {
 	// resolves to somewhere inside the board.
 	SetCardField func(path, field, value string, expect *string) error
 
-	// CreateCard starts a card on the board from a title and a zone, and records
+	// CreateCard starts a card on the board from a title, a zone and a repo, and records
 	// it in the board's git history if the caller wired it to do so. It returns
 	// the new card's path. internal/board decides what a valid title and zone
 	// are; this server maps its refusals onto status codes. An error wrapping
@@ -112,7 +112,7 @@ type Deps struct {
 	//
 	// Nothing from the request names a file: the caller creates the card in its
 	// own board, under a name made from the title.
-	CreateCard func(title, zone string) (string, error)
+	CreateCard func(title, zone, repo string) (string, error)
 
 	// CreateFleet makes a fleet from the start page: the folder with its board
 	// and documentation, and the line in the configuration naming them. It

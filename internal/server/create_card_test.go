@@ -12,8 +12,8 @@ import (
 
 func createDeps() (Deps, *[]string) {
 	d, calls := testDeps()
-	d.CreateCard = func(title, zone string) (string, error) {
-		*calls = append(*calls, "create:"+title+":"+zone)
+	d.CreateCard = func(title, zone, repo string) (string, error) {
+		*calls = append(*calls, "create:"+title+":"+zone+":"+repo)
 		return "/b/cards/2026-09-11-a-task.md", nil
 	}
 	return d, calls
@@ -25,7 +25,7 @@ func TestCreateCardStartsACardFromATitleAndAZone(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned" {
+	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned:" {
 		t.Fatalf("unexpected calls: %v", *calls)
 	}
 	body := rec.Body.String()
@@ -34,10 +34,23 @@ func TestCreateCardStartsACardFromATitleAndAZone(t *testing.T) {
 	}
 }
 
-// Title and zone, nothing more (the orchestrator's decision, 2026-09-11): a
-// request that tries to set anything else is refused, not partly obeyed.
-func TestCreateCardRefusesAnyFieldButTitleAndZone(t *testing.T) {
-	for _, extra := range []string{`"session":"abc123"`, `"stage":"active"`, `"progress":40`, `"repo":"x"`} {
+// The repository goes in beside title and zone: a worker is started in it, so
+// a card is handed over only once it names one (T-061).
+func TestCreateCardPassesTheRepoAlong(t *testing.T) {
+	d, calls := createDeps()
+	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned","repo":"src/fleetdeck"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(*calls) != 1 || (*calls)[0] != "create:A task:planned:src/fleetdeck" {
+		t.Fatalf("unexpected calls: %v", *calls)
+	}
+}
+
+// Title, zone and repo, nothing more: a request that tries to set anything
+// else is refused, not partly obeyed.
+func TestCreateCardRefusesAnyFieldButTitleZoneAndRepo(t *testing.T) {
+	for _, extra := range []string{`"session":"abc123"`, `"stage":"active"`, `"progress":40`} {
 		d, calls := createDeps()
 		rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned",`+extra+`}`)
 		if rec.Code != http.StatusBadRequest {
@@ -51,7 +64,7 @@ func TestCreateCardRefusesAnyFieldButTitleAndZone(t *testing.T) {
 
 func TestCreateCardReportsAnInvalidCardAsBadRequest(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string) (string, error) {
+	d.CreateCard = func(string, string, string) (string, error) {
 		return "", fmt.Errorf("%w: unknown zone %q", board.ErrInvalidCard, "someday")
 	}
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"someday"}`)
@@ -67,7 +80,7 @@ func TestCreateCardReportsAnInvalidCardAsBadRequest(t *testing.T) {
 // not the request.
 func TestCreateCardReportsABoardWithNoCardsDirectoryAsUnavailable(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string) (string, error) {
+	d.CreateCard = func(string, string, string) (string, error) {
 		return "", fmt.Errorf("%w: /b/cards", board.ErrNoCardsDir)
 	}
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned"}`)
@@ -78,7 +91,7 @@ func TestCreateCardReportsABoardWithNoCardsDirectoryAsUnavailable(t *testing.T) 
 
 func TestCreateCardReportsAWriteFailureAsServerError(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string) (string, error) { return "", errors.New("disk full") }
+	d.CreateCard = func(string, string, string) (string, error) { return "", errors.New("disk full") }
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("want 500, got %d", rec.Code)
@@ -90,7 +103,7 @@ func TestCreateCardReportsAWriteFailureAsServerError(t *testing.T) {
 // second card.
 func TestCreateCardReportsAnUncommittedCardAsCreated(t *testing.T) {
 	d, _ := createDeps()
-	d.CreateCard = func(string, string) (string, error) {
+	d.CreateCard = func(string, string, string) (string, error) {
 		return "/b/cards/x.md", fmt.Errorf("%w: git commit timed out", ErrCardWrittenNotCommitted)
 	}
 	rec := do(d, http.MethodPost, "/api/cards", `{"title":"A task","zone":"planned"}`)

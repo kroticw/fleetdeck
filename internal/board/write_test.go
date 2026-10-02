@@ -141,7 +141,7 @@ func TestSetFieldChangesOnlyTheTargetLine(t *testing.T) {
 }
 
 func TestSetFieldRefusesFieldsThePanelDoesNotOwn(t *testing.T) {
-	for _, field := range []string{"id", "zone", "repo", "created", "title"} {
+	for _, field := range []string{"id", "zone", "created", "title"} {
 		t.Run(field, func(t *testing.T) {
 			p := writeCard(t, t.TempDir(), "c.md", sample)
 			if err := SetField(p, field, "whatever", nil); !errors.Is(err, ErrUnknownField) {

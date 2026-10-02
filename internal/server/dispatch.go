@@ -66,6 +66,10 @@ func (d Deps) handleDispatch(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, orchestrator.ErrNoCard):
 		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, orchestrator.ErrNoRepo):
+		// The request is fine and the card is not: it names no checkout a
+		// worker could start in, which is fixed on the card.
+		fail(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, orchestrator.ErrCannotStart):
 		fail(w, http.StatusServiceUnavailable, err.Error())
 	case err != nil:

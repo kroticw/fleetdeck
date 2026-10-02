@@ -55,7 +55,8 @@ var translit = map[rune]string{
 }
 
 // CreateCard starts a card on the board at boardDir: a title and a zone, in
-// stage new at progress 0, created on the given day. Nothing else — the rest of
+// stage new at progress 0, created on the given day, and the repository the
+// work belongs to when one is given (NormalizeRepo). Nothing else — the rest of
 // a card is written by the agent or the person who takes the task on, and the
 // panel only has to be able to start one.
 //
@@ -69,8 +70,16 @@ var translit = map[rune]string{
 // The file is cards/T-NNN-<date>-<slug>.md, the slug made from the title. It is
 // created exclusively, and no existing card is ever overwritten. It returns the
 // path of the new card.
-func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
+func CreateCard(boardDir, title, zone, repo string, day time.Time) (string, error) {
 	title = strings.TrimSpace(title)
+	repoLine := ""
+	if strings.TrimSpace(repo) != "" {
+		r, err := NormalizeRepo(repo)
+		if err != nil {
+			return "", fmt.Errorf("%w: %w", ErrInvalidCard, err)
+		}
+		repoLine = "repo: " + r + "\n"
+	}
 	switch {
 	case !validZones[zone]:
 		return "", fmt.Errorf("%w: unknown zone %q", ErrInvalidCard, zone)
@@ -102,7 +111,7 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 		// session is written empty rather than left out, as scripts/new_card.py
 		// writes it: the panel fills it in when a card is handed to an agent,
 		// and SetField replaces a line rather than adding one.
-		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\nsession: \"\"\ncreated: %s\n---\n\n# %s\n", id, zone, date, title)
+		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\nsession: \"\"\n%screated: %s\n---\n\n# %s\n", id, zone, repoLine, date, title)
 		placed, err := placeCard(cardsDir, path, content)
 		if err != nil {
 			return "", err

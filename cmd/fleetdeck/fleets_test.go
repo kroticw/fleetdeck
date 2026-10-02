@@ -158,7 +158,7 @@ func TestEachFleetHasItsOwnBoardDocsAndWizard(t *testing.T) {
 	if b.BoardDir != workspace.BoardDir(roots[1]) || len(b.DocsRoots) != 1 || b.DocsRoots[0] != workspace.DocsDir(roots[1]) {
 		t.Fatalf("B's board %q docs %q", b.BoardDir, b.DocsRoots)
 	}
-	path, err := b.CreateCard("a task of B", "planned")
+	path, err := b.CreateCard("a task of B", "planned", "")
 	if err != nil {
 		t.Fatalf("CreateCard on B: %v", err)
 	}

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +20,9 @@ var (
 	ErrCardTaken = errors.New("the card already names a session")
 	// ErrNoCard is a dispatch for a card that cannot be read. Nothing was done.
 	ErrNoCard = errors.New("the card cannot be read")
+	// ErrNoRepo is a card that names no repository a worker could start in.
+	// Nothing was done.
+	ErrNoRepo = errors.New("the card names no repository to work in")
 )
 
 // Work is one card handed to a session of its own: the card's path, and the
@@ -53,12 +59,10 @@ type Dispatcher struct {
 	// SetField writes one frontmatter field, refusing when the card no longer
 	// holds the value the write was made against (board.SetField).
 	SetField func(path, field, value string, expect *string) error
-	// Workspace is where a worker session is started — the same directory the
-	// fleet's orchestrator runs in, which is the board's own parent. A card
-	// names the repository its work belongs to and this panel does not resolve
-	// that name to a checkout: where the work happens is the card's business
-	// and the agent's.
-	Workspace string
+	// Home is the directory a card's repo field is read from: a worker starts
+	// in Home/<repo>, the checkout its card names, and a card naming none that
+	// exists is refused rather than started somewhere else (Workdir).
+	Home string
 
 	// Poll, StartWait and SendWait mean what the Appointer's do. Zero is the
 	// default.
@@ -89,6 +93,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	if card.Session != "" {
 		return Result{}, fmt.Errorf("%w: %s", ErrCardTaken, card.Session)
 	}
+	cwd, err := Workdir(d.Home, card.Repo)
+	if err != nil {
+		return Result{}, err
+	}
 	if !d.busy.TryLock() {
 		return Result{}, ErrBusy
 	}
@@ -110,7 +118,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	if name == "" {
 		name = words[lang].workerName
 	}
-	short, err := d.Start(ctx, d.Workspace, name)
+	short, err := d.Start(ctx, cwd, name)
 	if err != nil {
 		return refuse("session", err)
 	}
@@ -118,7 +126,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	if err := waitListed(ctx, d.List, short, d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
 		return refuse("session", err)
 	}
-	done("session", fmt.Sprintf("started %s in %s", short, d.Workspace))
+	done("session", fmt.Sprintf("started %s in %s", short, cwd))
 
 	// Both writes carry what the card held when it was read: between the read
 	// and here the card may have been moved by a hand or by its own agent, and
@@ -147,6 +155,28 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	done("task", "delivered to "+short)
 	res.OK = true
 	return res, nil
+}
+
+// Workdir is the checkout a card's repo field names under home
+// (board.NormalizeRepo). It must be a directory; anything else is ErrNoRepo
+// with the reason.
+func Workdir(home, repo string) (string, error) {
+	if strings.TrimSpace(repo) == "" {
+		return "", fmt.Errorf("%w: set repo on the card, a path from the home directory, e.g. src/fleetdeck", ErrNoRepo)
+	}
+	rel, err := board.NormalizeRepo(repo)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrNoRepo, err)
+	}
+	dir := filepath.Join(home, rel)
+	info, err := os.Stat(dir)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("%w: repo %s: %w", ErrNoRepo, rel, err)
+	case !info.IsDir():
+		return "", fmt.Errorf("%w: repo %s is not a directory: %s", ErrNoRepo, rel, dir)
+	}
+	return dir, nil
 }
 
 func (d *Dispatcher) wait(v, fallback time.Duration) time.Duration {

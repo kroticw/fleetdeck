@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -61,6 +62,12 @@ func SetField(path, field, value string, expect *string) error {
 			return fmt.Errorf("session must be a short id of 6 to 12 hex digits, got %q", value)
 		}
 		normalized = value
+	case "repo":
+		repo, err := NormalizeRepo(value)
+		if err != nil {
+			return err
+		}
+		normalized = repo
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownField, field)
 	}
@@ -109,9 +116,25 @@ func fieldValue(field string, fm frontmatter) string {
 		return fm.Stage
 	case "progress":
 		return strconv.Itoa(fm.Progress)
+	case "repo":
+		return fm.Repo
 	default:
 		return fm.Session
 	}
+}
+
+// NormalizeRepo is a card's repo field as it is written: a path from the home
+// directory, with a "~/" in front read as the same path and dropped. A path
+// that is empty, absolute, climbs out of home or spans lines is refused.
+func NormalizeRepo(value string) (string, error) {
+	repo := strings.TrimPrefix(strings.TrimSpace(value), "~/")
+	switch {
+	case repo == "":
+		return "", errors.New("repo is empty")
+	case !filepath.IsLocal(repo) || strings.IndexFunc(repo, unicode.IsControl) >= 0:
+		return "", fmt.Errorf("repo %q must be a path inside the home directory, e.g. src/fleetdeck", value)
+	}
+	return filepath.Clean(repo), nil
 }
 
 // normalize is the caller's expected value in the form fieldValue reports:
@@ -132,21 +155,31 @@ func normalize(field, value string) string {
 // writeFrontmatterField puts value in the card's frontmatter: over the field's
 // own line when there is one, and on a new line when there is not.
 //
-// Only session is ever added. A card with no stage or progress line is a card
-// the board's validator already refuses, and inventing the field here would
-// hide that; a card with no session line is one the panel itself wrote before
-// the field was in its template, and it is on the board and legal.
+// Only session and repo are ever added. A card with no stage or progress line
+// is a card the board's validator already refuses, and inventing the field
+// here would hide that; a card with no session line is one the panel itself
+// wrote before the field was in its template, and a card with no repo line is
+// the ordinary card — the field is optional. Both are on the board and legal.
 func writeFrontmatterField(raw []byte, field, value string) ([]byte, error) {
 	out, err := substituteField(raw, field, value)
-	if err == nil || field != "session" || !errors.Is(err, ErrNoSuchField) {
+	if err == nil || (field != "session" && field != "repo") || !errors.Is(err, ErrNoSuchField) {
 		return out, err
 	}
 	return insertField(raw, field, value)
 }
 
-// insertField adds "field: value" to the frontmatter, after progress when that
-// line is there — the order scripts/new_card.py writes — and at the end of the
-// block otherwise.
+// insertAfter is the line each field the panel may add goes after, in the
+// order scripts/new_card.py writes a card: session after progress, repo after
+// session. A card without that line takes the field after progress, and a card
+// without either at the end of the block.
+var insertAfter = map[string][]string{
+	"session": {"progress"},
+	"repo":    {"session", "progress"},
+}
+
+// insertField adds "field: value" to the frontmatter, after the line
+// insertAfter names for it, and at the end of the block when the card has none
+// of them.
 func insertField(raw []byte, field, value string) ([]byte, error) {
 	m := frontmatterRe.FindSubmatch(raw)
 	if m == nil {
@@ -155,8 +188,11 @@ func insertField(raw []byte, field, value string) ([]byte, error) {
 	head := raw[:len(m[0])]
 	line := []byte(field + ": " + value + "\n")
 	at := -1
-	if loc := regexp.MustCompile(`(?m)^progress:.*\n`).FindIndex(head); loc != nil {
-		at = loc[1]
+	for _, anchor := range insertAfter[field] {
+		if loc := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(anchor) + `:.*\n`).FindIndex(head); loc != nil {
+			at = loc[1]
+			break
+		}
 	}
 	if at < 0 {
 		// The closing "---" of the block, which frontmatterRe's own match ends

@@ -18,6 +18,7 @@ zone: planned
 stage: new
 progress: 0
 session: ""
+repo: work/proj
 created: 2026-09-23
 ---
 
@@ -83,9 +84,12 @@ func (f *fakeWorker) set(path, field, value string, expect *string) error {
 
 func dispatcher(t *testing.T, f *fakeWorker) (*Dispatcher, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir, home := t.TempDir(), t.TempDir()
 	card := filepath.Join(dir, "T-042-card.md")
 	if err := os.WriteFile(card, []byte(workCard), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "work", "proj"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return &Dispatcher{
@@ -94,7 +98,7 @@ func dispatcher(t *testing.T, f *fakeWorker) (*Dispatcher, string) {
 		Send:      f.send,
 		SendFirst: f.first,
 		SetField:  f.set,
-		Workspace: dir,
+		Home:      home,
 		Poll:      time.Millisecond,
 		StartWait: 200 * time.Millisecond,
 		SendWait:  200 * time.Millisecond,
@@ -120,7 +124,7 @@ func TestDispatchStartsTheSessionWritesTheIDThenSendsTheTask(t *testing.T) {
 		t.Fatalf("session = %q", res.Session)
 	}
 	want := []string{
-		"start:" + filepath.Dir(card) + ":T-042",
+		"start:" + filepath.Join(d.Home, "work", "proj") + ":T-042",
 		"set:T-042-card.md:session=abc12345:was=",
 		"set:T-042-card.md:stage=active:was=new",
 		"first:abc12345:" + Task("en", card),
@@ -246,6 +250,57 @@ func TestDispatchRefusesACardThatAlreadyNamesASession(t *testing.T) {
 	}
 	if len(f.steps) != 0 {
 		t.Fatalf("a refused dispatch did something: %v", f.steps)
+	}
+}
+
+// A worker works in the repository its card names, under the home directory.
+// A card that names none, or names one that is not there, is refused before
+// anything starts: a session started somewhere else works the wrong checkout,
+// and nothing on the panel says so.
+func TestDispatchRefusesACardWithNoRepositoryToWorkIn(t *testing.T) {
+	for _, tc := range []struct{ name, repo, want string }{
+		{"no repo", "", "names no repo"},
+		{"missing directory", "repo: work/gone", "work/gone"},
+		{"a file, not a directory", "repo: work/file", "not a directory"},
+		{"outside home", "repo: ../elsewhere", "inside the home directory"},
+		{"absolute", "repo: /etc", "inside the home directory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWorker()
+			d, card := dispatcher(t, f)
+			if err := os.WriteFile(filepath.Join(d.Home, "work", "file"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(card, []byte(strings.Replace(workCard, "repo: work/proj", tc.repo, 1)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"})
+			if !errors.Is(err, ErrNoRepo) {
+				t.Fatalf("want ErrNoRepo, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("the refusal must say why: %q lacks %q", err, tc.want)
+			}
+			if len(f.steps) != 0 {
+				t.Fatalf("a refused dispatch did something: %v", f.steps)
+			}
+		})
+	}
+}
+
+// The field is written as the board README says, a path from the home
+// directory; "~/" in front is how a person spells the same thing.
+func TestDispatchReadsATildeRepoAsFromHome(t *testing.T) {
+	f := newWorker()
+	d, card := dispatcher(t, f)
+	if err := os.WriteFile(card, []byte(strings.Replace(workCard, "repo: work/proj", "repo: ~/work/proj", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "start:" + filepath.Join(d.Home, "work", "proj") + ":T-042"; f.steps[0] != want {
+		t.Fatalf("started as %q, want %q", f.steps[0], want)
 	}
 }
 

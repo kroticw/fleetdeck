@@ -246,9 +246,10 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleCreateCard starts a card from a title and a zone. The body carries those
-// two fields and nothing else: a card is started here and written by whoever
-// takes the task on, so anything more is refused rather than half obeyed.
+// handleCreateCard starts a card from a title, a zone and, optionally, the
+// repository its worker is started in. The body carries those fields and
+// nothing else: a card is started here and written by whoever takes the task
+// on, so anything more is refused rather than half obeyed.
 func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	d, ok := d.forFleet(w, r)
 	if !ok {
@@ -261,11 +262,12 @@ func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title string `json:"title"`
 		Zone  string `json:"zone"`
+		Repo  string `json:"repo"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	path, err := d.CreateCard(body.Title, body.Zone)
+	path, err := d.CreateCard(body.Title, body.Zone, body.Repo)
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusCreated, map[string]any{"path": path, "committed": true})

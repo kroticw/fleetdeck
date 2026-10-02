@@ -19,7 +19,7 @@ var createDay = time.Date(2026, 9, 11, 18, 30, 0, 0, time.UTC)
 // the panel could make a card at all.
 func TestACreatedCardTakesASessionWithoutGrowingALine(t *testing.T) {
 	dir := emptyBoard(t)
-	path, err := CreateCard(dir, "Fix the header clamp", "urgent", createDay)
+	path, err := CreateCard(dir, "Fix the header clamp", "urgent", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func emptyBoard(t *testing.T) string {
 
 func TestCreateCardWritesTheTitleAndZoneAndNothingElse(t *testing.T) {
 	dir := emptyBoard(t)
-	path, err := CreateCard(dir, "Fix the header clamp", "urgent", createDay)
+	path, err := CreateCard(dir, "Fix the header clamp", "urgent", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCreateCardWritesTheTitleAndZoneAndNothingElse(t *testing.T) {
 // The operator writes titles in Russian and names card files in latin letters.
 func TestCreateCardTransliteratesACyrillicTitleIntoTheFileName(t *testing.T) {
 	dir := emptyBoard(t)
-	path, err := CreateCard(dir, "fleetdeck: рабочая папка, доска и щётки", "planned", createDay)
+	path, err := CreateCard(dir, "fleetdeck: рабочая папка, доска и щётки", "planned", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestACardIsNotOnTheBoardUntilItIsWhole(t *testing.T) {
 	}
 	t.Cleanup(func() { beforeCardInPlace = func(string) {} })
 
-	path, err := CreateCard(dir, "Whole", "planned", createDay)
+	path, err := CreateCard(dir, "Whole", "planned", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,14 +129,14 @@ func TestACardIsNotOnTheBoardUntilItIsWhole(t *testing.T) {
 // number, which no two cards share.
 func TestCreateCardNeverOverwritesACardWithTheSameName(t *testing.T) {
 	dir := emptyBoard(t)
-	first, err := CreateCard(dir, "Same", "planned", createDay)
+	first, err := CreateCard(dir, "Same", "planned", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(first, []byte("---\nid: T-001\nzone: planned\n---\n\n# Same, edited by an agent\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	second, err := CreateCard(dir, "Same", "urgent", createDay)
+	second, err := CreateCard(dir, "Same", "urgent", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestCreateCardRefusesWhatWouldNotBeAValidCard(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := emptyBoard(t)
-			_, err := CreateCard(dir, tc.title, tc.zone, createDay)
+			_, err := CreateCard(dir, tc.title, tc.zone, "", createDay)
 			if !errors.Is(err, ErrInvalidCard) {
 				t.Fatalf("want ErrInvalidCard, got %v", err)
 			}
@@ -175,7 +175,7 @@ func TestCreateCardRefusesWhatWouldNotBeAValidCard(t *testing.T) {
 
 func TestCreateCardTrimsTheTitle(t *testing.T) {
 	dir := emptyBoard(t)
-	path, err := CreateCard(dir, "  Spaced out  ", "planned", createDay)
+	path, err := CreateCard(dir, "  Spaced out  ", "planned", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,14 +193,14 @@ func TestCreateCardTrimsTheTitle(t *testing.T) {
 // Spaces alone are no title, whether or not a control character is among them.
 func TestCreateCardRefusesATitleOfSpacesAlone(t *testing.T) {
 	dir := emptyBoard(t)
-	if _, err := CreateCard(dir, "     ", "planned", createDay); !errors.Is(err, ErrInvalidCard) {
+	if _, err := CreateCard(dir, "     ", "planned", "", createDay); !errors.Is(err, ErrInvalidCard) {
 		t.Fatalf("want ErrInvalidCard, got %v", err)
 	}
 }
 
 func TestCreateCardNamesATitleWithNoLettersCard(t *testing.T) {
 	dir := emptyBoard(t)
-	path, err := CreateCard(dir, "!!! ???", "planned", createDay)
+	path, err := CreateCard(dir, "!!! ???", "planned", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestCreateCardNamesATitleWithNoLettersCard(t *testing.T) {
 
 func TestCreateCardKeepsTheFileNameShort(t *testing.T) {
 	dir := emptyBoard(t)
-	path, err := CreateCard(dir, strings.Repeat("word ", 40), "planned", createDay)
+	path, err := CreateCard(dir, strings.Repeat("word ", 40), "planned", "", createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestCreateCardKeepsTheFileNameShort(t *testing.T) {
 // card must not be what makes it look like a board.
 func TestCreateCardRefusesABoardWithNoCardsDirectory(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := CreateCard(dir, "A task", "planned", createDay); !errors.Is(err, ErrNoCardsDir) {
+	if _, err := CreateCard(dir, "A task", "planned", "", createDay); !errors.Is(err, ErrNoCardsDir) {
 		t.Fatalf("want ErrNoCardsDir, got %v", err)
 	}
 	if _, err := os.Stat(CardsDir(dir)); !os.IsNotExist(err) {
@@ -246,7 +246,7 @@ func TestCreatedCardPassesTheBoardValidator(t *testing.T) {
 	}
 	dir := emptyBoard(t)
 	for _, zone := range []string{"urgent", "unplanned", "planned", "niceToHave"} {
-		path, err := CreateCard(dir, "Card in "+zone, zone, createDay)
+		path, err := CreateCard(dir, "Card in "+zone, zone, "", createDay)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -24,6 +24,9 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 | `statusline.rate_limits_path` | string (file path) | unset (nothing is written) | not validated; a path that cannot be written is reported nowhere, and the panel reads the account's limits over the network instead |
 | `agent.command` | list of strings | unset (the `claude` on `PATH`, then where Claude Code installs itself) | not starting with an absolute path: `agent.command must start with an absolute path, got %q: a panel opened from the Dock has almost nothing on PATH`; a command that is not there, or that prints no session id, is reported with whatever it did print |
 | `agent.config_dir` | string (absolute path) | unset (`~/.claude`) | relative or starting with `~`: `agent.config_dir must be an absolute path, got %q`; a directory whose daemon is not running: the daemon is reported unavailable rather than another installation's being used |
+| `workers.model` | string | unset (`opus`) | not validated; a model the CLI does not know fails each start, and the start says what the CLI said. See [Worker sessions](#worker-sessions) |
+| `workers.permission_mode` | string | unset (`auto`) | not one of the CLI's modes: `workers.permission_mode "%s" is not one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan` |
+| `workers.sandbox` | boolean | `false` (the worker runs **without** the sandbox) | not validated (must be a boolean) |
 | `name` | string | the folder above `board.path`, `main` when that says nothing | empty, spaces around it or a control character: `the top-level fleet: name ...`; the name of another fleet: see [Several fleets](#several-fleets) |
 | `fleets` | list of fleets | unset (empty) | see [Several fleets](#several-fleets) |
 | `fleets[].name` | string | none: required | empty, spaces around it or a control character: `fleets[N]: name ...`; the name of another fleet: `fleets[1]: name "clining" is already the name of fleets[0]` |
@@ -152,6 +155,21 @@ agent:
 The two installations are told apart by their daemons, and a daemon's runtime directory under `/tmp` is named after its configuration directory — so `config_dir` must be an absolute path, written the same way Claude Code sees it. When that daemon is not running, the panel reports the daemon as unavailable rather than falling back to the other installation's.
 
 `fleetdeck init` writes the statusline and the board permission into the installation the configuration names, not into `~/.claude`. Run it after setting the `agent` section, or move those two settings across by hand.
+
+## Worker sessions
+
+A card dropped into the board's `active` column without a session is handed to a worker session the panel starts (see [getting-started](getting-started.md)). The worker starts in the repository the card's `repo` field names, a path from your home directory such as `src/fleetdeck`; a card with no `repo`, or one naming a directory that is not there, is refused before anything starts.
+
+**By default a worker runs without the sandbox, in auto mode, on `opus`.** It is started with `--model opus --permission-mode auto --settings '{"sandbox":{"enabled":false}}'`, so it works unattended: it does not stop at the first edit to ask, and its Bash commands are not confined by Claude Code's sandbox. That is the default the panel was built for, and it is a real grant of trust: a worker can run any command your user can, in the repository its card names. Set the `workers` section to change it, for every fleet alike:
+
+```yaml
+workers:
+  model: sonnet
+  permission_mode: acceptEdits
+  sandbox: true
+```
+
+Each key left out keeps its default, and the defaults are never written into the file. The three are passed on every start, a default included, so a worker does not take a different value from your own settings file without your saying so here. The orchestrator is not affected: it is started as it always was, with your own settings.
 
 ## Running an isolated stand
 
