@@ -7,7 +7,7 @@ import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
 import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
 import { isWaiting, isWaitingUnknown, isNeedsStalled, isFlagOnlyStalled } from "./needs.js";
-import { UPDATE_BINDING, KNOWN_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
+import { UPDATE_BINDING, KNOWN_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, needsRepaint, onPress, onProgress, settle, updateHTML } from "./update.js";
 
 // The icon beside the fleet's name in the header: small enough to sit in a
 // row of controls, large enough to be the application's mark rather than a
@@ -533,6 +533,9 @@ export function renderHeader(
     switchFleet: goFleet = (name) => switchFleet(name, { storage: pageStorage() }),
     parts = HEADER_PARTS,
     openMenu = false,
+    // A stand's frame of the update control: the report it is held in, which
+    // nothing then takes away (web/js/host.js, open).
+    standUpdate = null,
   } = {},
 ) {
   initTheme();
@@ -590,9 +593,14 @@ export function renderHeader(
   };
   if (hostUpdate) {
     window[PROGRESS_FUNCTION] = tookReport;
+    // A wait's time grows, and the answer to Check for Updates… goes away
+    // after CHECK_SHOWN_MS -- except on a stand, whose frame is of the answer.
     setInterval(() => {
-      if (update.phase === "running") paintUpdate();
+      if (!needsRepaint(update)) return;
+      if (!standUpdate) update = settle(update, Date.now());
+      paintUpdate();
     }, UPDATE_REPAINT_MS);
+    if (standUpdate) tookReport(standUpdate);
     // Asked as the page loads -- the first time, and again after every reload
     // -- because a page misses every report the window sent before it was
     // there. Only a found version is taken from the answer: the page starts

@@ -441,6 +441,13 @@ const en = {
   update_current: "Already up to date ({rev})",
   update_available: "{version} is available",
   update_busy: "An update is already running",
+  // Check for Updates… in the app menu.
+  update_checking: "Checking for updates…",
+  update_latest: "Nothing newer: {version} is the latest",
+  update_check_failed: "Could not check for updates: {detail}",
+  update_check_failed_because: "Could not check for updates: {why} ({detail})",
+  update_check_reason_offline: "GitHub could not be reached",
+  update_check_reason_no_releases: "nothing has been released yet",
   update_failed: "Update failed: {detail}",
   update_failed_because: "{why} ({detail})",
   // Why this build cannot update itself at all.
@@ -822,6 +829,13 @@ const ru = {
   update_current: "Уже последняя версия ({rev})",
   update_available: "Доступна {version}",
   update_busy: "Обновление уже идёт",
+  // «Check for Updates…» в меню приложения.
+  update_checking: "Проверяю обновления…",
+  update_latest: "Новее нет: {version} — последняя",
+  update_check_failed: "Не удалось проверить обновления: {detail}",
+  update_check_failed_because: "Не удалось проверить обновления: {why} ({detail})",
+  update_check_reason_offline: "не удалось достучаться до GitHub",
+  update_check_reason_no_releases: "выпусков пока нет",
   update_failed: "Обновление не удалось: {detail}",
   update_failed_because: "{why} ({detail})",
   // Почему эта сборка не может обновить себя вообще.

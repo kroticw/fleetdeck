@@ -14,10 +14,15 @@ import {
   KNOWN_BINDING,
   WAIT_SHOWN_AFTER_MS,
   UPDATE_REPAINT_MS,
+  CHECK_SHOWN_MS,
   initialState,
   onPress,
   onProgress,
+  needsRepaint,
   reasonKey,
+  settle,
+  STAND_UPDATE,
+  updateControlReport,
   updateHTML,
 } from "../js/update.js";
 import { t } from "../js/i18n.js";
@@ -280,4 +285,135 @@ test("pressing a button that cannot update starts nothing", () => {
 
   assert.equal(pressed.start, false);
   assert.equal(pressed.state.phase, "cannot");
+});
+
+// Check for Updates… in the app menu asks the releases page now. The answer
+// appears where the Update button does, in the reader's language: that it is
+// being checked, what was found, that nothing newer is out, or why there was
+// no answer. "Nothing newer" and a failure go away by themselves after
+// CHECK_SHOWN_MS; a found version stays, with its button.
+
+test("checking is said at once, with no button, and its wait is shown after two seconds", () => {
+  const state = onProgress(initialState(), { step: "checking" }, 1000);
+
+  assert.equal(state.phase, "checking");
+  const html = updateHTML(state, 1000);
+  assert.ok(has(html, "update_checking"), `nothing on screen: ${html}`);
+  assert.doesNotMatch(html, /update-button/);
+  assert.ok(has(updateHTML(state, 3500), "update_elapsed", { n: "2" }));
+});
+
+test("nothing newer is said with the running version, and goes after ten seconds", () => {
+  assert.equal(CHECK_SHOWN_MS, 10_000);
+  const checking = onProgress(initialState(), { step: "checking" }, 0);
+  const latest = onProgress(checking, { step: "latest", detail: "v1.0.0" }, 500);
+
+  const html = updateHTML(latest, 500);
+  assert.ok(has(html, "update_latest", { version: "v1.0.0" }), `nothing on screen: ${html}`);
+  assert.doesNotMatch(html, /update-button/);
+  assert.equal(settle(latest, 500 + CHECK_SHOWN_MS - 1), latest);
+  assert.equal(settle(latest, 500 + CHECK_SHOWN_MS).phase, "idle");
+});
+
+test("a found version stays, with the button that installs it", () => {
+  const checking = onProgress(initialState(), { step: "checking" }, 0);
+  const found = onProgress(checking, { step: "available", detail: "v1.1.0" }, 1);
+
+  assert.equal(found.phase, "available");
+  assert.equal(settle(found, 1 + 60 * CHECK_SHOWN_MS), found);
+  assert.match(updateHTML(found, 2), /class="btn btn-sm update-button"/);
+});
+
+test("a check that got no answer says why in the reader's language, and goes after ten seconds", () => {
+  const checking = onProgress(initialState(), { step: "checking" }, 0);
+  const failed = onProgress(checking, { step: "check-failed", reason: "offline", detail: "dial tcp: no route to host" }, 1);
+
+  const html = updateHTML(failed, 1);
+  assert.ok(has(html, "update_check_failed_because", { why: t("update_check_reason_offline"), detail: "dial tcp: no route to host" }), `not said: ${html}`);
+  assert.match(html, /update-problem/);
+  assert.equal(settle(failed, 1 + CHECK_SHOWN_MS).phase, "idle");
+});
+
+test("a check that failed for a reason nobody foresaw still shows the particulars", () => {
+  const failed = onProgress(initialState(), { step: "check-failed", reason: "other", detail: "something odd" }, 0);
+
+  assert.ok(has(updateHTML(failed, 0), "update_check_failed", { detail: "something odd" }));
+});
+
+// A version found before the check stays found: a failed check is no answer,
+// and the window keeps the version too (watch.go).
+test("a check while a version is on offer keeps the offer through a failure", () => {
+  const offered = onProgress(initialState(), { step: "available", detail: "v1.1.0" }, 0);
+  const checking = onProgress(offered, { step: "checking" }, 1);
+  const failed = onProgress(checking, { step: "check-failed", reason: "offline", detail: "x" }, 2);
+
+  assert.match(updateHTML(failed, 2), /class="btn btn-sm update-button"/, "the button for the version found went away");
+  assert.equal(onPress(failed, { unsent: false, now: 3 }).start, true);
+  const after = settle(failed, 2 + CHECK_SHOWN_MS);
+  assert.equal(after.phase, "available");
+  assert.equal(after.detail, "v1.1.0");
+});
+
+test("a check never interrupts an update, the question about unsent text, or an update just done", () => {
+  const confirm = onPress(onProgress(initialState(), { step: "available", detail: "v1.1.0" }, 0), { unsent: true, now: 1 }).state;
+  const running = onPress(initialState(), { unsent: false, now: 0 }).state;
+  const done = onProgress(running, { step: "done", detail: "abc1234" }, 1);
+  for (const state of [confirm, running, done]) {
+    for (const report of [{ step: "checking" }, { step: "latest", detail: "v1.0.0" }, { step: "check-failed", reason: "offline", detail: "x" }]) {
+      assert.equal(onProgress(state, report, 2), state, `${report.step} knocked ${state.phase} out of the way`);
+    }
+  }
+});
+
+test("the header repaints while there is a wait to count or an answer to take away", () => {
+  assert.equal(needsRepaint(initialState()), false);
+  assert.equal(needsRepaint(onProgress(initialState(), { step: "available", detail: "v1.1.0" }, 0)), false);
+  assert.equal(needsRepaint(onPress(initialState(), { unsent: false, now: 0 }).state), true);
+  assert.equal(needsRepaint(onProgress(initialState(), { step: "checking" }, 0)), true);
+  assert.equal(needsRepaint(onProgress(initialState(), { step: "latest", detail: "v1.0.0" }, 0)), true);
+  assert.equal(needsRepaint(onProgress(initialState(), { step: "check-failed", reason: "offline", detail: "x" }, 0)), true);
+});
+
+test("what a check reports is escaped before it reaches the page", () => {
+  const failed = onProgress(initialState(), { step: "check-failed", reason: "other", detail: "<img src=x onerror=alert(1)>" }, 0);
+  assert.doesNotMatch(updateHTML(failed, 0), /<img/);
+  const latest = onProgress(initialState(), { step: "latest", detail: "<b>v1</b>" }, 0);
+  assert.doesNotMatch(updateHTML(latest, 0), /<b>/);
+});
+
+// A stand's frames of Check for Updates… (FLEETDECK_STAND_OPEN check-*): the
+// header is held in one state, and says what it shows in the window's log for
+// scripts/standcheck (updatecontrol.go there) to hold the frame to.
+test("every state a stand can open has a report to be held in, and only those", () => {
+  assert.deepEqual(Object.keys(STAND_UPDATE).sort(), ["check-available", "check-checking", "check-failed", "check-latest"]);
+  assert.equal(onProgress(initialState(), STAND_UPDATE["check-checking"], 0).phase, "checking");
+  assert.equal(onProgress(initialState(), STAND_UPDATE["check-latest"], 0).phase, "latest");
+  assert.equal(onProgress(initialState(), STAND_UPDATE["check-failed"], 0).phase, "checkFailed");
+  assert.equal(onProgress(initialState(), STAND_UPDATE["check-available"], 0).phase, "available");
+});
+
+// The control as the DOM would hand it over: querySelector by class.
+function controlOf(html) {
+  return {
+    querySelector(selector) {
+      const name = selector.slice(1);
+      const m = html.match(new RegExp(`class="[^"]*\\b${name}\\b[^"]*"[^>]*>([^<]*)<`));
+      return m ? { textContent: m[1] } : null;
+    },
+  };
+}
+
+test("the update control reports its words, its button and whether it is a problem", () => {
+  const failed = updateControlReport(controlOf(updateHTML(onProgress(initialState(), STAND_UPDATE["check-failed"], 0), 0)));
+  assert.equal(failed.report, "update");
+  assert.match(failed.text, /no such host/);
+  assert.equal(failed.button, false);
+  assert.equal(failed.problem, true);
+
+  const found = updateControlReport(controlOf(updateHTML(onProgress(initialState(), STAND_UPDATE["check-available"], 0), 0)));
+  assert.equal(found.button, true);
+  assert.match(found.text, /v1\.1\.0/);
+  assert.equal(found.problem, false);
+
+  assert.deepEqual(updateControlReport(null), { report: "update", text: "", button: false, problem: false });
 });
