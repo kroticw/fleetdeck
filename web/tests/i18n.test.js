@@ -317,6 +317,23 @@ test("and none of them falls through to the key itself", async () => {
   }
 });
 
+// The board refuses a write that breaks one of its cross-field rules with a
+// code (board.RuleRefusal), and the card panel translates by that code. A code
+// with no line falls back to the board's English words, silently, which is
+// why the codes are read from internal/board and checked here.
+test("every rule the board refuses a write by has a line in both dictionaries", () => {
+  const rules = readFileSync(new URL("../../internal/board/write.go", import.meta.url), "utf8");
+  const codes = [...rules.matchAll(/\bcode\w+\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(codes.length > 0, "internal/board/write.go declares no rule code, so this test would look for nothing");
+  const en = dictionary("en");
+  const ru = dictionary("ru");
+  for (const code of codes) {
+    const key = `card_refused_${code}`;
+    assert.ok(declares(en, key), `${key} is missing from the English dictionary`);
+    assert.ok(declares(ru, key), `${key} is missing from the Russian dictionary`);
+  }
+});
+
 test("Russian is chosen for a Russian locale and English for anything else", async () => {
   assert.equal((await loadWith("ru-RU")).t("card_gone"), "карточка исчезла");
   assert.equal((await loadWith("en-GB")).t("card_gone"), "card is gone");

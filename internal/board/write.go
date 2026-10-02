@@ -102,22 +102,48 @@ func substituteField(raw []byte, field, value string) ([]byte, error) {
 	return out, nil
 }
 
+// RuleRefusal is a write refused by one of the board's cross-field rules.
+// Code names the rule, one code per rule whatever the stage or value it was
+// tripped by, so the interface can say the rule in its own language and
+// point at the way out; the words are for logs and for a page with no
+// sentence for the code.
+type RuleRefusal struct {
+	Code string
+	msg  string
+}
+
+func (e *RuleRefusal) Error() string { return e.msg }
+
+// The codes a RuleRefusal can carry. Each becomes a dictionary key in
+// web/js/i18n.js (card_refused_<code>).
+const (
+	codeSessionRequired   = "session_required"
+	codeDoneNeedsProgress = "done_needs_progress_100"
+	codeDoneHoldsProgress = "done_holds_progress_100"
+)
+
+var ruleCodes = []string{codeSessionRequired, codeDoneNeedsProgress, codeDoneHoldsProgress}
+
 // checkCrossFieldRules keeps a card in a state the board's own validator
 // accepts. Both rules are one-directional: progress 100 with a stage other
 // than done is legal, so a card can reach done by having progress set to
 // 100 first and stage set to done second.
+//
+// The session rule is checked first: progress the operator can set from the
+// card, a session they cannot, so when both are missing the one that needs
+// the board is the one to name.
 func checkCrossFieldRules(field, value string, fm frontmatter) error {
 	switch field {
 	case "stage":
-		if value == "done" && fm.Progress != 100 {
-			return fmt.Errorf("cannot set stage to done while progress is %d: the board requires progress 100 at stage done", fm.Progress)
-		}
 		if startedStages[value] && fm.Session == "" {
-			return fmt.Errorf("cannot set stage to %s while session is empty: the board requires a session at stage %s", value, value)
+			return &RuleRefusal{codeSessionRequired, fmt.Sprintf("cannot set stage to %s while session is empty: the board requires a session at stage %s", value, value)}
+		}
+		if value == "done" && fm.Progress != 100 {
+			return &RuleRefusal{codeDoneNeedsProgress, fmt.Sprintf("cannot set stage to done while progress is %d: the board requires progress 100 at stage done", fm.Progress)}
 		}
 	case "progress":
 		if fm.Stage == "done" && value != "100" {
-			return fmt.Errorf("cannot set progress to %s while stage is done: the board requires progress 100 at stage done", value)
+			return &RuleRefusal{codeDoneHoldsProgress, fmt.Sprintf("cannot set progress to %s while stage is done: the board requires progress 100 at stage done", value)}
 		}
 	}
 	return nil

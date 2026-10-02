@@ -120,6 +120,15 @@ const en = {
   card_parse_error: "this card does not parse, so its fields cannot be edited here",
   card_not_committed: "the change is in the card file and did not reach the git history",
   card_write_refused: "the change was refused and nothing was written",
+  // The board's cross-field rules, by the code a refusal carries
+  // (internal/board/write.go, card_refused_<code>). Each names the rule and
+  // the way out. session_required is one sentence for every started stage:
+  // the rule is one, and the session the card is missing is not something
+  // the card panel can give it.
+  card_refused_session_required:
+    "the card has no session, and without one only the stage new is accepted. The session that takes the card on writes itself into it.",
+  card_refused_done_needs_progress_100: "the stage done requires progress 100. Set progress to 100 first, then the stage.",
+  card_refused_done_holds_progress_100: "at the stage done progress stays 100. Change the stage first, then progress.",
   backlinks: "linked from",
   // A card's documents (web/js/card.js) and, the other way, the cards a
   // document belongs to (web/js/doccards.js).
@@ -476,6 +485,10 @@ const ru = {
   card_parse_error: "карточка не разбирается, править её поля отсюда нельзя",
   card_not_committed: "правка лежит в файле карточки и не попала в историю git",
   card_write_refused: "правка отклонена, ничего не записано",
+  card_refused_session_required:
+    "у карточки нет сессии, а без неё принимается только стадия new. Сессию в карточку вписывает та сессия, которая берёт её в работу.",
+  card_refused_done_needs_progress_100: "стадия done требует progress 100. Сначала поставьте progress 100, потом стадию.",
+  card_refused_done_holds_progress_100: "на стадии done progress остаётся 100. Сначала смените стадию, потом progress.",
   backlinks: "ссылаются сюда",
   card_docs: "документы",
   card_doc_missing: "не открывается: нет ни карточки, ни документа с таким именем, или документов с ним несколько",
@@ -716,4 +729,14 @@ const lang = langCode === "ru" ? ru : en;
 // indistinguishable through t() from one translated identically.
 export function t(key) {
   return lang[key] ?? en[key] ?? key;
+}
+
+// reasonText is the sentence for a code the panel was sent, under
+// "<prefix>_<code>", or "" when there is no code or no sentence for it — a
+// newer panel's code, or a rule nobody foresaw — so the caller falls back to
+// the words that came with the code instead of showing a bare key.
+export function reasonText(prefix, code) {
+  if (typeof code !== "string" || code === "") return "";
+  const key = `${prefix}_${code}`;
+  return lang[key] ?? en[key] ?? "";
 }

@@ -210,6 +210,13 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 			"reason":    err.Error(),
 		})
 	default:
+		var rule *board.RuleRefusal
+		if errors.As(err, &rule) {
+			// The code beside the words: the page translates the rule by it
+			// and says the way out, which the words from the board do not.
+			writeJSON(w, cardWriteStatus(err), map[string]string{"error": err.Error(), "code": rule.Code})
+			return
+		}
 		fail(w, cardWriteStatus(err), err.Error())
 	}
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -151,6 +152,34 @@ func TestPatchCardReportsARefusedValueAsBadRequest(t *testing.T) {
 	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"shipping"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a refused value must be 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A refusal by one of the board's cross-field rules carries the rule's code
+// beside the words: the page translates by the code, and a reworded message
+// in internal/board must not turn its sentence back into English.
+func TestPatchCardReportsARuleRefusalWithItsCode(t *testing.T) {
+	d, _, card := cardDeps(t)
+	if err := os.WriteFile(card, []byte("---\nstage: new\nprogress: 0\nsession: \"\"\n---\n"), 0o600); err != nil {
+		t.Fatalf("write card: %v", err)
+	}
+	d.SetCardField = board.SetField
+	rec := do(d, http.MethodPatch, "/api/cards", `{"path":"c.md","field":"stage","value":"active"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("answer is not JSON: %v: %s", err, rec.Body.String())
+	}
+	if body.Code != "session_required" {
+		t.Fatalf("want code session_required, got %q: %s", body.Code, rec.Body.String())
+	}
+	if body.Error == "" {
+		t.Fatalf("the words are missing beside the code: %s", rec.Body.String())
 	}
 }
 

@@ -96,6 +96,34 @@ test("a refusal throws, carrying the server's own words", async () => {
   });
 });
 
+// A refusal by one of the board's rules arrives with a code beside the words.
+// The code is what the panel translates by, so it rides on the error; a
+// refusal without one carries no code at all rather than an empty string,
+// which reasonText would otherwise take for a key.
+test("a refusal carries the server's code when it sent one", async () => {
+  stubFetch(
+    answer({
+      status: 400,
+      body: { error: "cannot set stage to active while session is empty", code: "session_required" },
+    }),
+  );
+
+  await assert.rejects(() => setCardField("/board/c.md", "stage", "active"), {
+    message: "cannot set stage to active while session is empty",
+    code: "session_required",
+  });
+});
+
+test("a refusal without a code carries none", async () => {
+  stubFetch(answer({ status: 422, body: { error: "card has no stage field" } }));
+
+  await assert.rejects(() => setCardField("/board/c.md", "stage", "active"), (err) => {
+    assert.equal(err.message, "card has no stage field");
+    assert.equal("code" in err, false, "a missing code became a property");
+    return true;
+  });
+});
+
 test("a refusal with no JSON body still throws something readable", async () => {
   stubFetch(answer({ status: 503, statusText: "Service Unavailable" }));
   await assert.rejects(() => setCardField("/board/fleet-ui.md", "stage", "review"), {

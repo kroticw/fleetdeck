@@ -22,7 +22,7 @@ import { subscribe as storeSubscribe } from "./store.js";
 import { setCardField } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
-import { t } from "./i18n.js";
+import { t, reasonText } from "./i18n.js";
 import { listDocs as serverDocs, fetchDoc as serverDoc } from "./docs.js";
 import { brokenLinksOf, cardsLinkingTo, docForLink, docTitle, documentBody, documentsOf, noteName } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
@@ -194,7 +194,10 @@ export function renderCard(root, path, onClose, options = {}) {
       const result = await setCardField(card, field, value);
       if (!result.committed) outcome = { kind: "notice", reason: result.reason };
     } catch (err) {
-      outcome = { kind: "error", reason: err.message };
+      // By the code when the board sent one and this build has words for it:
+      // the board's own sentence names the rule in English and not the way
+      // out. The words are the fallback, never nothing.
+      outcome = { kind: "error", reason: reasonText("card_refused", err.code) || err.message };
       written = false;
     }
 

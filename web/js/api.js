@@ -39,8 +39,15 @@ function messageFor(response, body) {
   return detail || `HTTP ${response.status}`;
 }
 
+// refusal is the error a failed route throws. A refusal by one of the board's
+// rules comes with a code beside the words, and the code rides on the error
+// for the panel to translate by; without one the property is absent, not
+// empty, so a caller can tell "no code" from a code it cannot read.
 async function refusal(response) {
-  return new Error(messageFor(response, await readJSON(response)));
+  const body = await readJSON(response);
+  const err = new Error(messageFor(response, body));
+  if (typeof body?.code === "string" && body.code !== "") err.code = body.code;
+  return err;
 }
 
 // setCardField writes one frontmatter field of one card and reports which of the
