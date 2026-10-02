@@ -113,6 +113,19 @@ This section replaced "the startup check" on 2026-09-13 (`cmd/fleetdeck-window/w
 - **Kept: every way of failing to read the mark means ask** — unreadable, from the future, in the plain-time format of the previous version, or missing.
 - **Changed: a window started by a handover looks too.** It stays open as long as the one it replaced would have, and the answer kept for the version before it does not apply.
 
+### Check for Updates…
+
+Added 2026-10-02 (`updateWatch.checkNow`, `cmd/fleetdeck-window/watch.go`). **Measured on the operator's machine, 2026-10-02:** after v1.0.0 was published the installed window offered no update, because it had asked 48 minutes before the release, and "nothing newer" held for the rest of `askEvery`.
+
+- **Decided, by the operator: the item is in the app menu, above Quit, and not in the header.** That is where a Mac app keeps it, and a header button standing there always would undo the 2026-09-13 rule that the Update button's appearing is the notice. The menu is native and English, like the rest of it.
+- **Decided: the press is the same question a look asks.** The same HEAD request to `/releases/latest`, the same mark written the same way. A press therefore starts `askEvery` again: the window asks nothing by itself for six hours after one.
+- **Decided, by the operator: no more often than once a minute (`checkAgainAfter`).** Within a minute of the last question — a press or a look, and the time comes from the mark, so it holds across windows — the press is answered with what that question found, and nothing is asked. A press that got no answer is shown again within the minute, too: pressing over and over on a train does not knock on GitHub each time.
+- **Decided: a press says every outcome; a look stays quiet.** "Checking", the version found, "nothing newer" with the running version, or the failure as a reason code and its particulars (section 7). A press with no answer is still not an answer: it is not written down and does not take a found version away, on either side of the page.
+- **Decided, by the operator: "nothing newer" and a failure go after ten seconds (`CHECK_SHOWN_MS`).** A found version stays, with its button.
+- **Decided: one question at a time.** A press during a look waits for the look's answer and takes it from the mark rather than asking again. A press while an update runs does nothing.
+- **Decided: a build that cannot update itself says why** when the item is chosen, with the `update_cannot_*` sentences, rather than doing nothing.
+- **On the stand:** `FLEETDECK_STAND_OPEN=check-checking|check-latest|check-failed|check-available` holds the header in each state (`STAND_UPDATE`, `web/js/update.js`), and `scripts/standcheck` holds each frame to its words, button and problem mark. **Not verified:** the menu item pressed by a person. The test presses it through its target, as Reload's test does.
+
 ## 7. Refusals are codes, not sentences
 
 **Decided.** The window sends the page a reason code and the particulars separately: `seal:wrong-team` with `the downloaded app is signed by team ZZZZZZZZZZ, not PTLLPQ8LY4`. The page is read in the reader's own language (`web/js/i18n.js` picks by `navigator.language`), and a sentence built in Go arrives already in English. The code chooses the sentence; the detail carries what a person acts on — which team, how much room, what could not be reached.

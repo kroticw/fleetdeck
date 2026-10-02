@@ -140,6 +140,8 @@ When a version newer than the installed one is out, an Update button appears in 
 
 The app finds out about a new version by itself while it is open. Every six hours it asks GitHub which release is newest — one small request, at most four a day however long the window stays open. It keeps the answer, so starting the app again neither asks again nor loses what was found. When GitHub cannot be reached, the app claims nothing: it shows no button if it did not already know of a newer version, and does not hide one it already knew of. It asks again a few minutes later, so once the network is back the button appears by itself.
 
+To find out sooner than that — a release came out an hour ago — choose **Check for Updates…** in the app menu (the bold **fleetdeck** menu, above Quit). The app asks GitHub at once, and the answer appears in the header where the Update button goes: "Checking for updates…", then either the version found with its Update button, or that nothing newer is out, or why GitHub gave no answer. The last two go away by themselves after ten seconds. A check counts as the app's own question, so the next one by itself is six hours later. Choosing it again within a minute of the last question asks nothing new and shows that question's answer again.
+
 What the button does depends on how the app got onto your Mac. An app built from a git checkout brings that checkout forward; an app installed from a release downloads the next release. A build that can do neither does not look for new versions and shows no button.
 
 ### An app built from a checkout
