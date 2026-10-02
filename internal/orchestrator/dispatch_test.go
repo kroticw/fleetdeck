@@ -32,6 +32,8 @@ type fakeWorker struct {
 	startTo error
 	sendErr error
 	setErr  error
+	// firstErrs are returned by SendFirst one per call, then nil.
+	firstErrs []error
 }
 
 func newWorker() *fakeWorker {
@@ -60,6 +62,16 @@ func (f *fakeWorker) send(_ context.Context, short, text string) error {
 	return f.sendErr
 }
 
+func (f *fakeWorker) first(_ context.Context, short, text string) error {
+	f.steps = append(f.steps, "first:"+short+":"+text)
+	if len(f.firstErrs) == 0 {
+		return nil
+	}
+	err := f.firstErrs[0]
+	f.firstErrs = f.firstErrs[1:]
+	return err
+}
+
 func (f *fakeWorker) set(path, field, value string, expect *string) error {
 	was := "<any>"
 	if expect != nil {
@@ -80,6 +92,7 @@ func dispatcher(t *testing.T, f *fakeWorker) (*Dispatcher, string) {
 		Start:     f.start,
 		List:      f.list,
 		Send:      f.send,
+		SendFirst: f.first,
 		SetField:  f.set,
 		Workspace: dir,
 		Poll:      time.Millisecond,
@@ -110,10 +123,84 @@ func TestDispatchStartsTheSessionWritesTheIDThenSendsTheTask(t *testing.T) {
 		"start:" + filepath.Dir(card) + ":T-042",
 		"set:T-042-card.md:session=abc12345:was=",
 		"set:T-042-card.md:stage=active:was=new",
-		"send:abc12345:" + Task("en", card),
+		"first:abc12345:" + Task("en", card),
 	}
 	if strings.Join(f.steps, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("steps:\n%s\nwant\n%s", strings.Join(f.steps, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The task is the first message into a session started with no prompt, and
+// on a fleet whose Send acknowledges a message its session has not read yet,
+// SendFirst is the send that waits for the session to take it. A fleet whose
+// Send is enough gives none, and the task goes by Send.
+func TestDispatchSendsTheTaskBySendWhenThereIsNoSendFirst(t *testing.T) {
+	f := newWorker()
+	d, card := dispatcher(t, f)
+	d.SendFirst = nil
+	res, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("dispatch did not finish: %+v", res.Steps)
+	}
+	if last := f.steps[len(f.steps)-1]; last != "send:abc12345:"+Task("en", card) {
+		t.Fatalf("the task went by %q", last)
+	}
+}
+
+// A session that acknowledged the task and never took it is the failure this
+// path exists to make loud: the card names the session, the session runs, and
+// the task is nowhere. The step is refused by name, once — the task is not sent
+// again, since a text sitting unsubmitted in the prompt would then go in twice.
+func TestDispatchRefusesTheTaskStepWhenTheSessionDidNotTakeIt(t *testing.T) {
+	f := newWorker()
+	f.firstErrs = []error{&daemon.ErrNotTaken{Session: "abc12345", Reason: "the reply was acknowledged, but its list record never showed the text taken"}}
+	d, card := dispatcher(t, f)
+
+	res, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatal("a task the session never took was reported delivered")
+	}
+	if res.Session != "abc12345" {
+		t.Fatalf("the started session must be named in the result, got %q", res.Session)
+	}
+	last := res.Steps[len(res.Steps)-1]
+	if last.Name != "task" || last.Error == "" {
+		t.Fatalf("the refused step must be the task: %+v", res.Steps)
+	}
+	if !strings.Contains(last.Error, "abc12345") || !strings.Contains(last.Error, Task("en", card)) {
+		t.Fatalf("the refusal must name the session and carry the task to send by hand: %q", last.Error)
+	}
+	sends := 0
+	for _, step := range f.steps {
+		if strings.HasPrefix(step, "first:") || strings.HasPrefix(step, "send:") {
+			sends++
+		}
+	}
+	if sends != 1 {
+		t.Fatalf("the task was sent %d times, want once", sends)
+	}
+}
+
+// A session still coming up is asked again, as an appointment's is.
+func TestDispatchAsksAgainWhileTheSessionIsNotTakingTheTask(t *testing.T) {
+	f := newWorker()
+	f.firstErrs = []error{&daemon.ErrStarting{}, &daemon.ErrNoreply{}}
+	d, card := dispatcher(t, f)
+	res, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("not ok: %+v", res.Steps)
+	}
+	if got := strings.Count(strings.Join(f.steps, "\n"), "first:"); got != 3 {
+		t.Fatalf("asked %d times, want three", got)
 	}
 }
 
@@ -214,7 +301,7 @@ func TestASecondDispatchWhileOneRunsIsRefused(t *testing.T) {
 	f := newWorker()
 	d, card := dispatcher(t, f)
 	inside, release := make(chan struct{}), make(chan struct{})
-	d.Send = func(context.Context, string, string) error {
+	d.SendFirst = func(context.Context, string, string) error {
 		close(inside)
 		<-release
 		return nil

@@ -67,6 +67,12 @@ type Appointer struct {
 	List func(ctx context.Context) ([]daemon.Session, error)
 	// Send delivers one message into a session, as the daemon's reply does.
 	Send func(ctx context.Context, short, text string) error
+	// SendFirst delivers the first message into a session this appointment
+	// started, on a fleet whose Send acknowledges a message before the session
+	// can read it: it waits for the session to come up and reports the message
+	// delivered only once the session shows it taken. Nil is a fleet whose
+	// Send is enough, and then Send carries the first message too.
+	SendFirst func(ctx context.Context, short, text string) error
 	// Start starts a background session in cwd under name and returns its
 	// short id. Nil is a panel that does not start sessions.
 	Start func(ctx context.Context, cwd, name string) (string, error)
@@ -141,7 +147,7 @@ func (a *Appointer) Appoint(ctx context.Context, req Request) (Result, error) {
 	}
 	done("brief", "wrote "+path)
 
-	sendWait := a.wait(a.SendWait, defaultSendWait)
+	send, sendWait := a.Send, a.wait(a.SendWait, defaultSendWait)
 	if req.New {
 		cwd := filepath.Dir(a.Paths.Board)
 		short, err := a.Start(ctx, cwd, words[lang].sessionName)
@@ -154,10 +160,10 @@ func (a *Appointer) Appoint(ctx context.Context, req Request) (Result, error) {
 		}
 		done("session", fmt.Sprintf("started %s in %s", short, cwd))
 		// A session that has just come up can take a moment more to take input.
-		sendWait = a.wait(a.StartWait, defaultStartWait)
+		send, sendWait = firstSend(a.Send, a.SendFirst), a.wait(a.StartWait, defaultStartWait)
 	}
 
-	if err := a.deliver(ctx, res.Session, Message(lang, path), sendWait); err != nil {
+	if err := deliver(ctx, send, res.Session, Message(lang, path), sendWait, a.wait(a.Poll, defaultPoll)); err != nil {
 		return refuse("message", err)
 	}
 	done("message", "delivered to "+res.Session)
@@ -246,10 +252,14 @@ func waitListed(ctx context.Context, list func(context.Context) ([]daemon.Sessio
 	}
 }
 
-// deliver sends text into short, asking again while the session is coming up
-// or momentarily not taking input, and not past wait.
-func (a *Appointer) deliver(ctx context.Context, short, text string, wait time.Duration) error {
-	return deliver(ctx, a.Send, short, text, wait, a.wait(a.Poll, defaultPoll))
+// firstSend is the send a session just started is handed its first message by:
+// the fleet's SendFirst, or its Send when it gives none. A function for the
+// same reason waitListed is one — a card is handed to a worker the same way.
+func firstSend(send, first func(ctx context.Context, short, text string) error) func(ctx context.Context, short, text string) error {
+	if first != nil {
+		return first
+	}
+	return send
 }
 
 // deliver sends text into short, asking again while the session is coming up

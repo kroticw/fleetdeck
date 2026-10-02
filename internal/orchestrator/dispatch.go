@@ -46,6 +46,10 @@ type Dispatcher struct {
 	// session as a turn of its own.
 	List func(ctx context.Context) ([]daemon.Session, error)
 	Send func(ctx context.Context, short, text string) error
+	// SendFirst is what the Appointer's is: the send for the first message
+	// into a session just started, on a fleet whose Send acknowledges a
+	// message before the session can read it. Nil, and the task goes by Send.
+	SendFirst func(ctx context.Context, short, text string) error
 	// SetField writes one frontmatter field, refusing when the card no longer
 	// holds the value the write was made against (board.SetField).
 	SetField func(path, field, value string, expect *string) error
@@ -134,8 +138,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	}
 	done("stage", "stage -> active")
 
-	if err := deliver(ctx, d.Send, short, Task(lang, w.Card), d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
-		return refuse("task", err)
+	// The refusal carries the task itself: the card names the session and the
+	// session runs, so what is left for a hand to do is send this line into it.
+	task := Task(lang, w.Card)
+	if err := deliver(ctx, firstSend(d.Send, d.SendFirst), short, task, d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
+		return refuse("task", fmt.Errorf("%w — %s is running and the card names it; send the task by hand: %s", err, short, task))
 	}
 	done("task", "delivered to "+short)
 	res.OK = true

@@ -22,10 +22,11 @@ var claudePlaces = orchestrator.SystemPlaces
 // orchestrator column's picker writes.
 func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Collector) *orchestrator.Appointer {
 	return &orchestrator.Appointer{
-		Paths: orchestrator.Paths{Board: cfg.BoardPath, Docs: cfg.DocsPaths, Config: o.configPath},
-		List:  dc.ListSessions,
-		Send:  dc.SendText,
-		Start: sessionStarter(o, cfg.Agent.Command),
+		Paths:     orchestrator.Paths{Board: cfg.BoardPath, Docs: cfg.DocsPaths, Config: o.configPath},
+		List:      dc.ListSessions,
+		Send:      dc.SendText,
+		SendFirst: dc.SendFirst,
+		Start:     sessionStarter(o, cfg.Agent.Command),
 		Pin: func(short string) error {
 			return setOrchestratorSession(o.configPath, collector, short)
 		},
@@ -41,6 +42,7 @@ func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client) *orchestra
 		Start:     sessionStarter(o, cfg.Agent.Command),
 		List:      dc.ListSessions,
 		Send:      dc.SendText,
+		SendFirst: dc.SendFirst,
 		SetField:  setCardField,
 		Workspace: filepath.Dir(cfg.BoardPath),
 	}

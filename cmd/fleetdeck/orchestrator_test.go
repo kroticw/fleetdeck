@@ -144,9 +144,22 @@ func (fd *fleetDaemon) serve(t *testing.T, existing, startedShort, started strin
 				case "list":
 					jobs := `{"short":"` + existing + `","state":"working","detail":"refactoring the parser"}`
 					if ran(started) {
-						jobs += `,{"short":"` + startedShort + `","state":"idle"}`
+						// The started session's record echoes the last reply
+						// it took in detail, as the daemon's does (section 4).
+						fd.mu.Lock()
+						detail := ""
+						for _, r := range fd.replies {
+							if text, ok := strings.CutPrefix(r, startedShort+" "); ok {
+								detail = text
+							}
+						}
+						fd.mu.Unlock()
+						record, _ := json.Marshal(map[string]string{"short": startedShort, "state": "idle", "detail": detail})
+						jobs += "," + string(record)
 					}
 					resp = `{"ok":true,"op":"list","jobs":[` + jobs + `]}`
+				case "attach":
+					resp = `{"ok":true,"op":"attach","booting":false}`
 				case "reply":
 					fd.mu.Lock()
 					fd.replies = append(fd.replies, req["short"].(string)+" "+req["text"].(string))
