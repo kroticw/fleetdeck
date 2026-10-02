@@ -600,7 +600,9 @@ test("a card someone keeps offers its review", () => {
 });
 
 // A button of the sheet's head, sized with its close: it stays on screen on a
-// document's tab, and the way back from the review lands on that tab.
+// document's tab, and the way back from the review lands on that tab. An icon
+// with its word as the label, not beside it: a word there narrowed the title,
+// and on a narrow sheet the taller head left the docked session too little room.
 test("the review is a head button, and the tab it was opened from goes with it", async () => {
   const opened = [];
   const { root } = open(withDocuments(snapshot()), FLEET_UI, {
@@ -610,9 +612,11 @@ test("the review is a head button, and the tab it was opened from goes with it",
   await settle();
   const button = root.querySelector(".card-head .card-review-link");
   assert.ok(button, "the review sits in the card's head");
-  assert.deepEqual(String(button.className).split(" ").slice(0, 2), ["btn", "btn-md"]);
+  assert.deepEqual(String(button.className).split(" ").slice(0, 3), ["btn", "btn-icon", "btn-md"]);
   assert.ok(button.innerHTML.includes("<svg"), "with its icon");
-  assert.ok(button.textContent.includes(t("review_open")), "and its word");
+  assert.equal(button.getAttribute("aria-label"), t("review_open"), "its word is its label");
+  assert.equal(button.getAttribute("title"), t("review_open"), "and its tooltip");
+  assert.equal(button.textContent.trim(), "", "and takes no width from the title");
 
   fireEvent(root.querySelectorAll(".card-tab")[1], "click");
   await settle();

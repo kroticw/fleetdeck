@@ -276,10 +276,14 @@ export function renderCard(root, path, onClose, options = {}) {
     // document's tab has it as well, and the way back from the review returns
     // to that tab.
     if (onOpenReview && card?.session && card.id) {
-      const review = el("button", "btn btn-md card-review-link");
+      // An icon, its word the label: a word beside it narrows the title, and
+      // on a narrow sheet the taller head leaves the docked session too
+      // little room.
+      const review = el("button", "btn btn-icon btn-md card-review-link");
       review.setAttribute("type", "button");
+      review.setAttribute("aria-label", t("review_open"));
+      review.setAttribute("title", t("review_open"));
       review.innerHTML = reviewIconHTML;
-      review.append(el("span", "card-review-word", t("review_open")));
       review.addEventListener("click", () => onOpenReview(current, active === CARD_TAB ? {} : { doc: active }));
       box.append(review);
     }

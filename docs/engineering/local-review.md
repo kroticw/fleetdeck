@@ -6,7 +6,7 @@ This note is for whoever changes the review. The user-facing description is in [
 
 ## The flow
 
-1. The open card has **review** in its head (`web/js/card.js`). It is offered when the card has a number and a session.
+1. The open card has a review button in its head (`web/js/card.js`): an icon, its word the label and tooltip, so it takes no width from the title. It is offered when the card has a number and a session.
 2. The review opens as an overlay over the board, like the card and the reader. The diff is on top. The card's own session is docked under it (`createCardDock`), so the operator can read the agent's answers and talk to it without leaving the diff.
 3. A comment is added on a line, or on a range of lines in one file and side. A new comment is a **draft** (`round` 0). A draft can be edited and deleted.
 4. **send to the session** freezes every draft into a new round. The drafts get the round's number, the round records the branch head and where each comment stands at that head, and the session is told about it once.
