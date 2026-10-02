@@ -18,7 +18,7 @@
 
 import { createDialog } from "./dialog.js";
 import { setCardField, startWork } from "./api.js";
-import { t } from "./i18n.js";
+import { t, reasonText } from "./i18n.js";
 import { get } from "./store.js";
 
 function el(tag, className, text) {
@@ -96,8 +96,12 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
       dialog.open();
     });
 
+  // By the code when the board sent one and this bundle has words for it, the
+  // way the open card reads the same refusal (card.js): the board's sentence
+  // is English and names the rule without the way out. The words are the
+  // fallback, never nothing — a dispatch that failed carries no code at all.
   const refuse = (err) => {
-    refusedText.textContent = String(err?.message ?? err);
+    refusedText.textContent = reasonText("card_refused", err?.code) || String(err?.message ?? err);
     refusedDialog.open();
     return null;
   };

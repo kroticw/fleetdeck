@@ -15,6 +15,7 @@ let started;
 let patchAnswer;
 let startAnswer;
 let snap;
+let t;
 
 async function fakePatch(path, field, value, expect) {
   patched.push({ path, field, value, expect });
@@ -43,7 +44,13 @@ beforeEach(async () => {
   patchAnswer = { committed: true };
   startAnswer = { ok: true, session: "abc12345", steps: [] };
   snap = { canStartWork: true };
+  // Russian, and set before the first import of the dictionary: i18n.js reads
+  // navigator.language once, when it loads. On the English dictionary an
+  // untranslated sentence is indistinguishable from a translated one, which is
+  // how the refusal below stayed English without a test noticing.
+  Object.defineProperty(globalThis, "navigator", { value: { language: "ru-RU" }, configurable: true });
   const { createBoardMove } = await import("../js/boardmove.js");
+  ({ t } = await import("../js/i18n.js"));
   move = createBoardMove(host, { patch: fakePatch, start: fakeStart, snapshot: () => snap });
 });
 
@@ -65,6 +72,32 @@ test("board move: a refused write says the board's own words and the card stays 
   const drawn = await move({ path: "/b/c.md", from: "new", to: "review", session: "", live: false });
   assert.equal(drawn, null);
   assert.match(host.querySelector("div.bmove-error").textContent, /session is empty/);
+});
+
+// The same translation the open card does, by the same code. Two paths write a
+// stage and only one of them spoke the operator's language: the board's own
+// words are English and name the rule without the way out, so a drag that
+// showed them left the window half translated — a Russian title over an
+// English sentence.
+test("board move: a rule refusal is said by its code, in the page's language", async () => {
+  patchAnswer = Object.assign(new Error("cannot set stage to review while session is empty: the board requires a session at stage review"), {
+    code: "session_required",
+  });
+  const drawn = await move({ path: "/b/c.md", from: "new", to: "review", session: "", live: false });
+  assert.equal(drawn, null);
+  const shown = host.querySelector("div.bmove-error").textContent;
+  assert.equal(shown, t("card_refused_session_required"));
+  assert.match(shown, /[а-яё]/i, "the sentence is not in the page's language");
+  assert.doesNotMatch(shown, /session is empty/, "the server's English came through");
+});
+
+// A code this build has no sentence for — an older page against a newer panel
+// — still shows the server's words rather than an empty window.
+test("board move: a refusal with an unknown code falls back to the server's words", async () => {
+  patchAnswer = Object.assign(new Error("the board refused this for a reason of its own"), { code: "nobody_knows" });
+  const drawn = await move({ path: "/b/c.md", from: "new", to: "review", session: "", live: false });
+  assert.equal(drawn, null);
+  assert.match(host.querySelector("div.bmove-error").textContent, /reason of its own/);
 });
 
 test("board move: a card its session is keeping is not moved until the operator says so", async () => {

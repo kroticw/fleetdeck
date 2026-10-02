@@ -123,11 +123,10 @@ const en = {
   // The board's cross-field rules, by the code a refusal carries
   // (internal/board/write.go, card_refused_<code>). Each names the rule and
   // the way out. session_required is one sentence for every started stage:
-  // the rule is one, and the session the card is missing is not something
-  // the card panel can give it.
+  // the rule is one, and only a drop into the board's active column offers
+  // the session the card is missing.
   card_refused_session_required:
-    "the card has no session, and without one only the stage new is accepted. The session that takes the card on writes itself into it.",
-  card_refused_done_needs_progress_100: "the stage done requires progress 100. Set progress to 100 first, then the stage.",
+    "the card has no session, and without one only the stage new is accepted. To start a session, drag the card into the active column on the board.",
   card_refused_done_holds_progress_100: "at the stage done progress stays 100. Change the stage first, then progress.",
   backlinks: "linked from",
   // A card's documents (web/js/card.js) and, the other way, the cards a
@@ -508,8 +507,7 @@ const ru = {
   card_not_committed: "правка лежит в файле карточки и не попала в историю git",
   card_write_refused: "правка отклонена, ничего не записано",
   card_refused_session_required:
-    "у карточки нет сессии, а без неё принимается только стадия new. Сессию в карточку вписывает та сессия, которая берёт её в работу.",
-  card_refused_done_needs_progress_100: "стадия done требует progress 100. Сначала поставьте progress 100, потом стадию.",
+    "у карточки нет сессии, а без неё принимается только стадия new. Чтобы поднять сессию, перетащите карточку в колонку active на доске.",
   card_refused_done_holds_progress_100: "на стадии done progress остаётся 100. Сначала смените стадию, потом progress.",
   backlinks: "ссылаются сюда",
   card_docs: "документы",

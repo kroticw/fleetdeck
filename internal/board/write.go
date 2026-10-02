@@ -90,6 +90,9 @@ func SetField(path, field, value string, expect *string) error {
 	if err != nil {
 		return fmt.Errorf("card %s %w", path, err)
 	}
+	if out, err = doneProgress(out, field, normalized, fm); err != nil {
+		return fmt.Errorf("card %s %w", path, err)
+	}
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -215,28 +218,20 @@ func (e *RuleRefusal) Error() string { return e.msg }
 // web/js/i18n.js (card_refused_<code>).
 const (
 	codeSessionRequired   = "session_required"
-	codeDoneNeedsProgress = "done_needs_progress_100"
 	codeDoneHoldsProgress = "done_holds_progress_100"
 )
 
-var ruleCodes = []string{codeSessionRequired, codeDoneNeedsProgress, codeDoneHoldsProgress}
+var ruleCodes = []string{codeSessionRequired, codeDoneHoldsProgress}
 
 // checkCrossFieldRules keeps a card in a state the board's own validator
-// accepts. Both rules are one-directional: progress 100 with a stage other
-// than done is legal, so a card can reach done by having progress set to
-// 100 first and stage set to done second.
-//
-// The session rule is checked first: progress the operator can set from the
-// card, a session they cannot, so when both are missing the one that needs
-// the board is the one to name.
+// accepts. The rule is one-directional: progress 100 with a stage other than
+// done is legal, which is what lets doneProgress below write the progress
+// first and the stage second without either order tripping this.
 func checkCrossFieldRules(field, value string, fm frontmatter) error {
 	switch field {
 	case "stage":
 		if startedStages[value] && fm.Session == "" {
 			return &RuleRefusal{codeSessionRequired, fmt.Sprintf("cannot set stage to %s while session is empty: the board requires a session at stage %s", value, value)}
-		}
-		if value == "done" && fm.Progress != 100 {
-			return &RuleRefusal{codeDoneNeedsProgress, fmt.Sprintf("cannot set stage to done while progress is %d: the board requires progress 100 at stage done", fm.Progress)}
 		}
 	case "progress":
 		if fm.Stage == "done" && value != "100" {
@@ -244,6 +239,28 @@ func checkCrossFieldRules(field, value string, fm frontmatter) error {
 		}
 	}
 	return nil
+}
+
+// doneProgress is the second field a move into done writes: the board's schema
+// binds the two (scripts/validate_cards.py, "with stage done, progress must be
+// 100"), so refusing the stage until a separate edit set the progress made
+// every accepted card cost two writes — and the drag, which can only write
+// one, always failed.
+//
+// Only a hand ever arrives here with done: the dispatcher writes active
+// (internal/orchestrator), and an agent edits its card with its own editor
+// without going through this package at all. So this is the operator's own
+// gesture completed, not a value invented behind a writer's back.
+//
+// It goes into the same bytes as the stage rather than a second write, which
+// is what keeps the card off disk in the half state and keeps the window an
+// agent appending to the same file can be lost in exactly as wide as one
+// ordinary write's.
+func doneProgress(out []byte, field, value string, fm frontmatter) ([]byte, error) {
+	if field != "stage" || value != "done" || fm.Progress == 100 {
+		return out, nil
+	}
+	return writeFrontmatterField(out, "progress", "100")
 }
 
 // atomicWrite writes data to path without ever leaving a truncated or empty

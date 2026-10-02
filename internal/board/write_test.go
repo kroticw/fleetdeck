@@ -252,11 +252,12 @@ func TestSubstituteFieldRefusesLineCountChange(t *testing.T) {
 	}
 }
 
-func TestSetFieldEnforcesDoneRequiresProgress100(t *testing.T) {
+// Setting the progress first and the stage second is still an ordinary pair of
+// writes: the rule that made it the only way out is gone, the order itself is
+// not, and an operator who edits the two fields by hand from the open card
+// must not meet a refusal for doing it the way they always did.
+func TestProgress100BeforeDoneIsStillAcceptedFieldByField(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "c.md", sample) // progress 80, stage review, session set
-	if err := SetField(p, "stage", "done", nil); err == nil {
-		t.Fatal("stage done must be refused while progress is not 100")
-	}
 	if err := SetField(p, "progress", "100", nil); err != nil {
 		t.Fatalf("progress 100 must be allowed while stage is review: %v", err)
 	}
@@ -286,7 +287,6 @@ func TestCrossFieldRefusalsCarryACode(t *testing.T) {
 		"review without session":   {cardNoSession, "stage", "review", "session_required"},
 		"done without session":     {cardNoSession, "stage", "done", "session_required"},
 		"blocked without session":  {cardNoSession, "stage", "blocked", "session_required"},
-		"done before progress 100": {sample, "stage", "done", "done_needs_progress_100"},
 		"progress off 100 at done": {cardDone, "progress", "80", "done_holds_progress_100"},
 	}
 	for name, tc := range cases {
@@ -322,6 +322,60 @@ func TestSetFieldRefusesProgressChangeAwayFrom100WhileDone(t *testing.T) {
 	p := writeCard(t, t.TempDir(), "d.md", cardDone)
 	if err := SetField(p, "progress", "80", nil); err == nil {
 		t.Fatal("progress must be refused away from 100 while stage is done")
+	}
+}
+
+// The board's schema binds the two (scripts/validate_cards.py: "with stage
+// done, progress must be 100"), and only a hand ever writes done — the
+// dispatcher writes active, and an agent edits the file without going through
+// here. So the stage carries the progress with it instead of refusing: the
+// operator sets one field and the card lands legal.
+func TestSettingDoneCarriesProgressTo100(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", sample) // stage review, progress 80
+	if err := SetField(p, "stage", "done", nil); err != nil {
+		t.Fatalf("done was refused: %v", err)
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"stage: done", "progress: 100"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("card does not hold %q after accepting it:\n%s", want, raw)
+		}
+	}
+	if strings.Contains(string(raw), "progress: 80") {
+		t.Fatalf("the old progress survived the move into done:\n%s", raw)
+	}
+}
+
+// The drag carries the stage the board drew, and the precondition is about the
+// stage — the progress rides along whatever it held, which is the point: the
+// operator is not asked to know it.
+func TestSettingDoneCarriesProgressUnderAPrecondition(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", sample)
+	was := "review"
+	if err := SetField(p, "stage", "done", &was); err != nil {
+		t.Fatalf("done was refused: %v", err)
+	}
+	raw, _ := os.ReadFile(p)
+	if !strings.Contains(string(raw), "progress: 100") {
+		t.Fatalf("progress did not follow the stage:\n%s", raw)
+	}
+}
+
+// A card with no progress line is one the board's own validator already
+// refuses. Inventing the field here would write a card nobody made and hide
+// that, so the write fails and the card is left exactly as it was.
+func TestSettingDoneOnACardWithNoProgressLineIsRefused(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", cardMissingProgress)
+	before, _ := os.ReadFile(p)
+	if err := SetField(p, "stage", "done", nil); err == nil {
+		t.Fatal("a card with no progress line cannot be moved into done")
+	}
+	after, _ := os.ReadFile(p)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("a refused write changed the card:\n%s", after)
 	}
 }
 
