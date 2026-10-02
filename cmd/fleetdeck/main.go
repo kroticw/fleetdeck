@@ -339,6 +339,13 @@ func main() {
 		return
 	}
 
+	// Before the panel starts, so a start that is itself being profiled is
+	// covered; a bad address is a refusal to start, not a panel running with
+	// a knob that silently did nothing.
+	if err := startPprof(pprofAddr()); err != nil {
+		log.Fatalf("fleetdeck: %v", err)
+	}
+
 	if err := runWith(runOpts{configPath: *configPath, standSocket: *standSocket, standClaude: *standClaude, owner: *ownerPID, port: *port}); err != nil {
 		log.Fatalf("fleetdeck: %v", err)
 	}
