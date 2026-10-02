@@ -714,3 +714,76 @@ test("the review overlay gets the same window sheet as the card and reader panel
   // reader.js), round in a browser tab and in the window alike.
   assert.match(ruleBody(".btn-icon"), /width:\s*var\(--btn-height\)/, "an icon button is not as wide as it is tall");
 });
+
+// The operator's first use: scrolled, the sheet's glass ended mid-diff and the
+// rest ran on over the bare page. The review sheet is a frame like the card
+// sheet: its head stays, its body scrolls inside it, nothing leaves it.
+test("the review sheet keeps its height and scrolls its body inside it", () => {
+  const own = ruleBodies("#review-panel");
+  assert.ok(own.some((b) => /display:\s*flex/.test(b) && /flex-direction:\s*column/.test(b) && /overflow:\s*hidden/.test(b)), "#review-panel is not a clipped column");
+  assert.doesNotMatch(ruleBody(':root[data-surface="board"] #review-panel'), /overflow/, "the window's sheet must not undo the clip");
+  const body = ruleBody(".review-body");
+  assert.match(body, /overflow:\s*auto/);
+  assert.match(body, /min-height:\s*0/);
+  assert.match(body, /flex:\s*1/);
+});
+
+// Each file is an island of its own, with a head that stays while it scrolls,
+// and a line reads as something to press: lit under the pointer, its "+"
+// shown there.
+test("a file of the review is an island with a sticky head, and a line is lit with its + under the pointer", () => {
+  const file = ruleBody(".review-file");
+  assert.match(file, /border-radius:\s*var\(--radius-lg\)/);
+  assert.match(file, /box-shadow:[^;]*var\(--/);
+  assert.match(file, /overflow:\s*clip/, "clip, not hidden: hidden would make a scroll box and unstick the head");
+  const head = ruleBody(".review-file-name");
+  assert.match(head, /position:\s*sticky/);
+  assert.match(head, /top:\s*0/);
+  assert.match(head, /background:\s*var\(--/, "a sticky head needs a ground, or the lines show through it");
+  assert.match(ruleBody(".review-line:hover"), /background/);
+  assert.match(ruleBody("button.review-line-add"), /opacity:\s*0/);
+  assert.match(ruleBody(".review-line:hover button.review-line-add"), /opacity:\s*1/);
+  assert.match(ruleBody("button.review-line-add:focus-visible"), /opacity:\s*1/, "a keyboard still finds the +");
+  assert.match(ruleBody(".review-line-picked"), /background/);
+});
+
+test("the diff's rows, code and gutter are a sixth larger than the panel's small text, the + as tall as its row", () => {
+  const line = ruleBody(".review-line");
+  const factor = /font-size:\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)/.exec(line);
+  assert.ok(factor, ".review-line's font size is not a multiple of --fs-sm");
+  assert.ok(Number(factor[1]) >= 1.15 && Number(factor[1]) <= 1.2, `factor ${factor[1]}`);
+  assert.match(line, /line-height:/);
+  assert.match(line, /align-items:\s*stretch/);
+  assert.match(ruleBody("button.review-line-add"), /align-self:\s*stretch/);
+});
+
+// The expand controls were small pale targets. Each strip is a band as tall
+// as a diff row, in the rows' own size, its buttons the full height of it and
+// lit under the pointer as a line is.
+test("an expand strip is a full diff row, its buttons as tall as the row and lit under the pointer", () => {
+  const strip = ruleBody(".review-expand");
+  const factor = /font-size:\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)/.exec(strip);
+  assert.ok(factor, ".review-expand's font size is not the rows' multiple of --fs-sm");
+  assert.equal(factor[1], /font-size:\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)/.exec(ruleBody(".review-line"))[1], "the strip is not the rows' size");
+  assert.match(strip, /line-height:\s*1\.6/);
+  assert.match(strip, /align-items:\s*stretch/);
+  assert.doesNotMatch(strip, /padding:\s*2px/);
+  const button = ruleBody(".review-expand button");
+  assert.match(button, /align-self:\s*stretch/);
+  assert.match(button, /padding:\s*0 var\(--gap\)/);
+  assert.match(ruleBody(".review-expand button:hover:not(:disabled)"), /background-image:/);
+});
+
+// The form's buttons are .btn capsules (their look is web/tests/buttons-css
+// .test.js's to pin), placed side by side at the right, and nothing in the
+// review names a colour of its own: WebKit's default submit button was the
+// bright blue full-width bar.
+test("the review form's buttons sit side by side at the right, and the review names no colour of its own", () => {
+  const bar = ruleBody(".review-form-actions");
+  assert.match(bar, /display:\s*flex/);
+  assert.match(bar, /justify-content:\s*flex-end/);
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of stripped.matchAll(/([^{}]*\.review-[^{}]*)\{([^}]*)\}/g)) {
+    assert.doesNotMatch(m[2], /#[0-9a-f]{3,8}\b|rgb\(/i, `${m[1].trim()} names a colour of its own`);
+  }
+});

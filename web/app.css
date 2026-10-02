@@ -1240,6 +1240,15 @@ main {
   overflow: auto;
 }
 
+/* The review sheet is a frame too: its head stays, .review-body scrolls inside
+ * it. Left to overflow, a long diff ran on past the sheet's rounded bottom
+ * over the bare page (the operator's first use). */
+#review-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 #card-panel,
 #reader-panel,
 #review-panel {
@@ -2010,27 +2019,62 @@ main {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.review-commit-hint {
+  color: var(--attn);
+  margin: 0 0 var(--gap-sm);
+}
+
+.review-no-commits {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* The sheet's scrolling box, below its head. */
+.review-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Each file is an island of its own, its path on a head that stays at the
+ * top while the file scrolls by. clip rather than hidden for the rounded
+ * corners: hidden makes the island a scroll box, and the head would stick to
+ * it instead of to .review-body. */
 .review-file {
   margin-bottom: var(--gap-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
+  overflow: clip;
 }
 
 .review-file-name {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: var(--gap-sm) var(--gap);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--fs-sm);
-  margin: 0 0 4px;
+  overflow-wrap: anywhere;
 }
 
 .review-file-note {
   color: var(--text-muted);
   font-size: var(--fs-sm);
+  padding: 0 var(--gap);
 }
 
+/* A sixth larger than the panel's small text: code is read here, closely. */
 .review-line {
   display: flex;
-  align-items: baseline;
-  gap: var(--gap-sm);
+  align-items: stretch;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--fs-sm);
-  white-space: pre;
+  font-size: calc(var(--fs-sm) * 1.18);
+  line-height: 1.6;
 }
 
 .review-line-add {
@@ -2041,33 +2085,100 @@ main {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
+/* Lit under the pointer and while a drag covers it: an image over the row's
+ * own ground, so an added or removed line keeps its tint. */
+.review-line:hover {
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 10%, transparent));
+}
+
+.review-line-picked {
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--accent) 22%, transparent));
+}
+
 .review-line-old,
 .review-line-new {
   flex: none;
-  width: 3ch;
+  width: 4ch;
+  padding-right: var(--gap-sm);
   text-align: right;
   color: var(--text-faint);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
+/* Wrapped rather than cut off: the part of a long line past the island's edge
+ * may be the very part a comment is about. */
 .review-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: var(--gap);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* The button that opens a comment form on a line. Off to the side of the
- * line's own text so a click never lands on the code instead.
+/* The button that opens a comment form on a line, in the gutter as tall as
+ * the row and shown on the line under the pointer, as GitLab does. Pressed and
+ * dragged down the gutter it picks a range.
  */
 button.review-line-add {
   flex: none;
-  width: auto;
+  align-self: stretch;
+  width: 2.4ch;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.review-line:hover button.review-line-add,
+.review-line-picked button.review-line-add,
+button.review-line-add:focus-visible {
+  opacity: 1;
+}
+
+button.review-line-add:hover {
+  background: var(--surface-hover);
+}
+
+/* The unchanged lines a gap between hunks hides: a band as tall as a diff
+ * row, in the rows' size, each control the full height of it and lit under
+ * the pointer as a line is. Small pale links here were missed. */
+.review-expand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  background: var(--surface-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(var(--fs-sm) * 1.18);
+  line-height: 1.6;
+}
+
+.review-expand button {
+  align-self: stretch;
+  padding: 0 var(--gap);
+  font: inherit;
+  color: var(--accent);
   background: none;
   border: none;
-  color: var(--text-muted);
   cursor: pointer;
-  padding: 0 4px;
+}
+
+.review-expand button:hover:not(:disabled) {
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 10%, transparent));
+}
+
+.review-expand button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .review-line-comments {
-  margin: 0 0 var(--gap-sm);
+  margin: 0 var(--gap) var(--gap-sm);
 }
 
 .review-comment {
@@ -2152,15 +2263,6 @@ button.review-line-add {
   margin-top: var(--gap-sm);
 }
 
-.review-comment-action {
-  font: inherit;
-  color: var(--accent);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-
 .review-detached {
   margin-bottom: var(--gap-lg);
 }
@@ -2197,20 +2299,6 @@ button.review-line-add {
   color: var(--text-muted);
 }
 
-.review-round-notify {
-  font: inherit;
-  color: var(--accent);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-
-.review-round-notify:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .review-unsent-text {
   width: 100%;
   font: inherit;
@@ -2225,10 +2313,12 @@ button.review-line-add {
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
-  margin: 4px 0;
+  margin: var(--gap-sm) var(--gap);
 }
 
 .review-form-text {
+  min-height: 4.5em;
+  resize: vertical;
   font: inherit;
   font-size: var(--fs-sm);
   padding: var(--gap-sm);
@@ -2241,6 +2331,14 @@ button.review-line-add {
 .review-send:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Cancel and add, side by side at the right under the text. Their look is
+ * .btn's; this only places them. */
+.review-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
 }
 
 /* The cards an open document belongs to (web/js/doccards.js), in the reader and

@@ -21,6 +21,18 @@ function el(tag, className, text) {
   return node;
 }
 
+// How many unchanged lines one press of ↑ or ↓ reveals around a hunk.
+const EXPAND_STEP = 20;
+
+// The context lines around a change in the diff the page is given: git's
+// --unified=3 in internal/review.Git.RawDiff.
+const DIFF_CONTEXT = 3;
+
+// A hunk's first line and the line past it on one side. A side with no lines
+// (count 0) sits after its start line, so both are start + 1 there.
+const firstOf = (start, count) => (count === 0 ? start + 1 : start);
+const pastOf = (start, count) => (count === 0 ? start + 1 : start + count);
+
 const STATE_WORDS = {
   in_place: "",
   changed: "review_state_changed",
@@ -60,7 +72,7 @@ function commentNode(c, reply, actions) {
   // actions gets the comment's own box: editing and replying open a form
   // right under it, the way a line's "+" opens one under the line.
   for (const [label, run] of actions(c, box)) {
-    const b = el("button", "review-comment-action", t(label));
+    const b = el("button", "btn btn-sm review-comment-action", t(label));
     b.setAttribute("type", "button");
     b.addEventListener("click", run);
     bar.append(b);
@@ -102,6 +114,65 @@ export function renderReview(root, cardPath, onClose, options = {}) {
   // the same file and side: the range between the two, ordered by file
   // position rather than by which one was clicked first.
   let lastAdd = null;
+
+  // Every commentable row drawn, with where a comment on it is anchored: what
+  // a drag reads to tell which rows it covers. Rebuilt by each paint.
+  let rows = new Map();
+  // A drag from a line's "+": the anchor it started on and the line it is
+  // over now. A range never leaves its file and side.
+  let drag = null;
+  // The range a released drag picked, marked for as long as its form is open.
+  let picked = null;
+  const sameTarget = (a, b) => a.commit === b.commit && a.path === b.path && a.side === b.side;
+  const markDrag = () => {
+    const range = drag ?? picked;
+    const lo = range && Math.min(range.start, range.end);
+    const hi = range && Math.max(range.start, range.end);
+    for (const [row, at] of rows) {
+      row.classList.toggle("review-line-picked", range !== null && sameTarget(at, range) && at.n >= lo && at.n <= hi);
+    }
+  };
+  const cancelDrag = () => {
+    if (!drag) return;
+    drag = null;
+    markDrag();
+  };
+  // The release opens the range form under the range's last line. A press and
+  // release on one line is a click, and the "+"'s own click handles it.
+  const onRelease = () => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    const anchor = { commit: d.commit, path: d.path, side: d.side, start: Math.min(d.start, d.end), end: Math.max(d.start, d.end) };
+    const last = d.start === d.end ? null : [...rows].find(([, at]) => sameTarget(at, d) && at.n === anchor.end)?.[0];
+    if (last) {
+      lastAdd = { commit: d.commit, path: d.path, side: d.side, start: d.start };
+      picked = anchor;
+      const unpick = () => {
+        picked = null;
+        markDrag();
+      };
+      if (!openForm(last, "", (words) => submitAdd(anchor, words), "review_add", { onClose: unpick })) picked = null;
+    }
+    markDrag();
+  };
+  // A release outside the window never reaches the page: the drag ends when
+  // the pointer leaves the page (a mouseleave with nowhere to go) or comes
+  // back over a row with no button held (the row's mouseover, below).
+  const onLeave = (event) => {
+    if (event.relatedTarget == null) cancelDrag();
+  };
+  document.addEventListener("mouseup", onRelease);
+  document.addEventListener("mouseleave", onLeave, true);
+
+  // Unchanged lines revealed around the hunks, per file, at the head they were
+  // read from: kept across repaints (every write repaints), dropped when the
+  // head moves. total is the file's length once a read has said it.
+  let context = { head: "", files: new Map() };
+  const contextOf = (path) => {
+    if (!context.files.has(path)) context.files.set(path, { lines: new Map(), total: Infinity });
+    return context.files.get(path);
+  };
 
   // What a failed write leaves behind: the anchor (or comment id) the
   // operator was writing about, and the words they had typed. The next paint
@@ -146,21 +217,84 @@ export function renderReview(root, cardPath, onClose, options = {}) {
     );
   };
 
-  const openForm = (row, initialText, onSubmit, okLabel = "review_add") => {
-    if (row.nextSibling?.classList?.contains("review-form")) return;
+  // What each open form is about — the line it is under, or the comment — and
+  // what it does, so a repaint can put it back with the words in it.
+  const formOf = new WeakMap();
+
+  // A form already open under the row gets the focus instead of a second one,
+  // and null comes back. Cancel and Escape drop the form and write nothing; a
+  // submit drops it too, and a failed write brings it back through `restore`.
+  const openForm = (row, initialText, onSubmit, okLabel = "review_add", { onClose, focus = true } = {}) => {
+    const open = row.nextSibling;
+    if (open?.classList?.contains("review-form")) {
+      open.querySelector("textarea")?.focus();
+      return null;
+    }
     const form = el("form", "review-form");
     const text = el("textarea", "review-form-text");
     text.value = initialText;
+    const close = () => {
+      form.remove();
+      onClose?.();
+    };
+    text.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      close();
+    });
+    const cancel = el("button", "btn review-form-cancel", t("review_cancel"));
+    cancel.setAttribute("type", "button");
+    cancel.addEventListener("click", close);
     const ok = el("button", "btn btn-primary review-form-ok", t(okLabel));
     ok.setAttribute("type", "submit");
-    form.append(text, ok);
+    const bar = el("div", "review-form-actions");
+    bar.append(cancel, ok);
+    form.append(text, bar);
     form.addEventListener("submit", (event) => {
       event.preventDefault?.();
       const words = text.value.trim();
       if (words === "") return;
+      close();
       onSubmit(words);
     });
+    const line = rows.get(row);
+    formOf.set(form, { line, comment: line ? undefined : row.dataset.comment, onSubmit, okLabel, onClose });
     row.after(form);
+    if (focus) text.focus();
+    return form;
+  };
+
+  // Every form open in the body, with its words and whether it has the focus:
+  // a repaint rebuilds the body whole, and an unsent comment must not go
+  // with it.
+  const openForms = () =>
+    [...body.querySelectorAll(".review-form")].flatMap((form) => {
+      const about = formOf.get(form);
+      const text = form.querySelector("textarea");
+      return about ? [{ ...about, text: text.value, focused: document.activeElement === text }] : [];
+    });
+
+  // Puts the forms openForms saw back under their line or comment. One whose
+  // place is gone keeps its words on the page, as a failed write's do.
+  const reopen = (saved) => {
+    for (const s of saved) {
+      const at = s.line
+        ? [...rows].find(([, a]) => sameTarget(a, s.line) && a.n === s.line.n)?.[0]
+        : [...body.querySelectorAll("[data-comment]")].find((box) => box.dataset.comment === s.comment);
+      if (at) {
+        openForm(at, s.text, s.onSubmit, s.okLabel, { onClose: s.onClose, focus: s.focused });
+        continue;
+      }
+      s.onClose?.();
+      const box = el("div", "review-unsent");
+      box.append(el("p", "review-unsent-title", t("review_unsent_text")));
+      const text = el("textarea", "review-unsent-text");
+      text.value = s.text;
+      text.setAttribute("readonly", "");
+      box.append(text);
+      body.insertBefore(box, body.firstChild);
+    }
   };
 
   const actions = (c, box) => {
@@ -216,6 +350,23 @@ export function renderReview(root, cardPath, onClose, options = {}) {
       lastAdd = { commit, path, side, start: n };
       openForm(row, "", (words) => submitAdd({ commit, path, side, start, end }, words));
     });
+    // Pressed without a text selection starting under the drag.
+    add.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault?.();
+      drag = { commit, path, side, start: n, end: n };
+      markDrag();
+    });
+    row.addEventListener("mouseover", (event) => {
+      if (drag && event.buttons === 0) {
+        cancelDrag();
+        return;
+      }
+      if (!drag || !sameTarget(drag, { commit, path, side })) return;
+      drag.end = n;
+      markDrag();
+    });
+    rows.set(row, { commit, path, side, n });
     row.append(add);
     row.append(el("code", "review-line-text", line.text));
     // Matched on the range's start line alone: a failed range add is
@@ -260,7 +411,7 @@ export function renderReview(root, cardPath, onClose, options = {}) {
       const answered = v.comments.some((c) => c.round === r.n && repliesFor(c.id).length > 0);
       if (!answered) row.append(el("span", "review-round-unanswered", t("review_round_unanswered").replace("{n}", String(r.n))));
       if (r.delivery || !answered) {
-        const again = el("button", "review-round-notify", t("review_notify_again"));
+        const again = el("button", "btn btn-sm review-round-notify", t("review_notify_again"));
         again.setAttribute("type", "button");
         again.disabled = notifying.has(r.n);
         again.addEventListener("click", () => {
@@ -274,8 +425,52 @@ export function renderReview(root, cardPath, onClose, options = {}) {
     return box;
   };
 
+  // Reads new-side lines from..to of file at the head on screen, keeps them,
+  // and repaints: the revealed lines are then drawn, and commented on, like
+  // any other context line.
+  const expand = async (file, from, to) => {
+    const head = v.head;
+    try {
+      const got = await api.fetchReviewLines(cardPath, head, file.newPath, from, to);
+      if (disposed || context.head !== head) return;
+      const known = contextOf(file.newPath);
+      known.total = got.total;
+      got.lines.forEach((text, i) => known.lines.set(got.from + i, text));
+    } catch (err) {
+      if (disposed) return;
+      notice = `${t("review_expand_failed")}: ${err.message}`;
+    }
+    paint();
+  };
+
+  // The controls of one gap: ↓ the lines under the hunk above, ↑ the lines
+  // over the hunk below, or all of them; a short gap is one press.
+  const expander = (file, from, to, { up, down }) => {
+    const node = el("div", "review-expand");
+    const count = to - from + 1;
+    const offer = (className, label, a, b) => {
+      const button = el("button", className, label);
+      button.setAttribute("type", "button");
+      button.addEventListener("click", () => {
+        button.disabled = true;
+        expand(file, a, b);
+      });
+      node.append(button);
+    };
+    if (count <= EXPAND_STEP) {
+      offer("review-expand-all", t("review_expand_all").replace("{n}", String(count)), from, to);
+      return node;
+    }
+    const step = t("review_expand_step").replace("{n}", String(EXPAND_STEP));
+    if (down) offer("review-expand-down", `↓ ${step}`, from, from + EXPAND_STEP - 1);
+    if (up) offer("review-expand-up", `↑ ${step}`, to - EXPAND_STEP + 1, to);
+    if (Number.isFinite(count)) offer("review-expand-all", t("review_expand_all").replace("{n}", String(count)), from, to);
+    return node;
+  };
+
   const paint = () => {
     if (!v) return;
+    const saved = openForms();
     const placedOn = new Map();
     const detached = [];
     for (const c of v.comments) {
@@ -296,19 +491,68 @@ export function renderReview(root, cardPath, onClose, options = {}) {
     const nodes = [];
     nodes.push(el("p", "review-base", `${t("review_base")} ${v.base.ref} ${v.base.commit.slice(0, 8)} → ${v.head.slice(0, 8)} · ${v.workdir}`));
     if (v.rounds.length > 0) nodes.push(roundsNode());
+    // Review reads commits only: work the session has not committed is named
+    // here and nowhere else, with what it takes to bring it in.
     if (v.uncommitted.length > 0) {
       const box = el("div", "review-uncommitted");
+      box.append(el("p", "review-commit-hint", t("review_commit_hint")));
       box.append(el("p", "review-uncommitted-title", t("review_uncommitted")));
       for (const p of v.uncommitted) box.append(el("code", "review-uncommitted-path", p));
       nodes.push(box);
     }
-    // The base is the fork point; once the branch is merged the fork point is
-    // HEAD itself, the diff is empty, and blank space would read as a defect
-    // rather than as nothing to review.
+    // base == head is an empty diff, and blank space would read as a defect.
+    // Said neutrally: a merged branch and a session that has not committed
+    // yet look the same from here.
     if (v.base.commit === v.head) {
-      nodes.push(el("p", "review-merged", t("review_merged")));
+      nodes.push(el("p", "review-no-commits", t("review_no_commits")));
     }
+    rows = new Map();
+    if (context.head !== v.head) context = { head: v.head, files: new Map() };
     const shownLines = new Set();
+
+    // One diff or context line, the comments traced onto it, and the form a
+    // failed add left on it.
+    const appendLine = (box, file, line) => {
+      const { row, matchesRestore } = lineRow(file, line);
+      box.append(row);
+      if (matchesRestore) {
+        const savedAnchor = { commit: restore.commit, path: restore.path, side: restore.side, start: restore.start, end: restore.end };
+        const text = restore.text;
+        restore = null;
+        openForm(row, text, (words) => submitAdd(savedAnchor, words));
+      }
+      for (const [side, path, n] of [["new", file.newPath, line.new], ["old", file.oldPath, line.old]]) {
+        if (!n) continue;
+        const key = `${side}:${path}:${n}`;
+        shownLines.add(key);
+        for (const c of placedOn.get(key) ?? []) {
+          const holder = el("div", "review-line-comments");
+          holder.dataset[side === "new" ? "newLine" : "oldLine"] = String(n);
+          placeComment(holder, c);
+          box.append(holder);
+        }
+      }
+    };
+
+    // The unchanged new-side lines from..to (to Infinity: up to the file's
+    // end, not yet known), old = new + offset. What was revealed is drawn at
+    // the gap's edges; what is left is one row of expand controls.
+    const gap = (box, file, from, to, offset, { up, down }) => {
+      const known = contextOf(file.newPath);
+      const end = Math.min(to, known.total);
+      const drawn = (n) => ({ kind: " ", old: n + offset, new: n, text: known.lines.get(n) });
+      let top = from;
+      while (top <= end && known.lines.has(top)) appendLine(box, file, drawn(top++));
+      if (!Number.isFinite(end)) {
+        box.append(expander(file, top, end, { up: false, down }));
+        return;
+      }
+      let bottom = end;
+      while (bottom >= top && known.lines.has(bottom)) bottom -= 1;
+      if (top <= bottom) box.append(expander(file, top, bottom, { up, down }));
+      for (let n = bottom + 1; n <= end; n += 1) appendLine(box, file, drawn(n));
+    };
+
     const fileNodes = [];
     for (const file of v.files) {
       const box = el("section", "review-file");
@@ -316,37 +560,26 @@ export function renderReview(root, cardPath, onClose, options = {}) {
       box.append(el("h3", "review-file-name", name));
       if (file.binary) box.append(el("p", "review-file-note", t("review_binary")));
       if (file.truncated) box.append(el("p", "review-file-note", t("review_truncated")));
-      for (const hunk of file.hunks ?? []) {
-        for (const line of hunk.lines) {
-          const { row, matchesRestore } = lineRow(file, line);
-          box.append(row);
-          if (matchesRestore) {
-            const savedAnchor = { commit: restore.commit, path: restore.path, side: restore.side, start: restore.start, end: restore.end };
-            const text = restore.text;
-            restore = null;
-            openForm(row, text, (words) => submitAdd(savedAnchor, words));
-          }
-          if (line.new) {
-            const key = `new:${file.newPath}:${line.new}`;
-            shownLines.add(key);
-            for (const c of placedOn.get(key) ?? []) {
-              const holder = el("div", "review-line-comments");
-              holder.dataset.newLine = String(line.new);
-              placeComment(holder, c);
-              box.append(holder);
-            }
-          }
-          if (line.old) {
-            const key = `old:${file.oldPath}:${line.old}`;
-            shownLines.add(key);
-            for (const c of placedOn.get(key) ?? []) {
-              const holder = el("div", "review-line-comments");
-              holder.dataset.oldLine = String(line.old);
-              placeComment(holder, c);
-              box.append(holder);
-            }
-          }
+      const hunks = file.hunks ?? [];
+      // Only a file on both sides has unchanged code around its hunks: a new
+      // file's hunk is all of it, a deleted one has nothing at head to read.
+      const expandable = Boolean(file.oldPath && file.newPath) && hunks.length > 0;
+      hunks.forEach((hunk, i) => {
+        if (expandable) {
+          const prev = hunks[i - 1];
+          const first = firstOf(hunk.newStart, hunk.newCount);
+          gap(box, file, prev ? pastOf(prev.newStart, prev.newCount) : 1, first - 1, firstOf(hunk.oldStart, hunk.oldCount) - first, { up: true, down: Boolean(prev) });
         }
+        for (const line of hunk.lines) appendLine(box, file, line);
+      });
+      const last = hunks.at(-1);
+      // The shown diff has DIFF_CONTEXT lines of context after a change
+      // wherever the file has them: fewer after the last one means the file
+      // ends there, and there is nothing below to expand.
+      const trailing = expandable ? last.lines.length - 1 - last.lines.findLastIndex((l) => l.kind !== " ") : 0;
+      if (expandable && trailing >= DIFF_CONTEXT) {
+        const past = pastOf(last.newStart, last.newCount);
+        gap(box, file, past, Infinity, pastOf(last.oldStart, last.oldCount) - past, { up: false, down: true });
       }
       fileNodes.push(box);
     }
@@ -377,6 +610,8 @@ export function renderReview(root, cardPath, onClose, options = {}) {
       restore = null;
     }
     body.replaceChildren(...nodes, ...fileNodes);
+    reopen(saved);
+    markDrag();
     const drafts = v.comments.filter((c) => c.round === 0).length;
     send.disabled = sending || drafts === 0;
     status.textContent = notice;
@@ -426,6 +661,8 @@ export function renderReview(root, cardPath, onClose, options = {}) {
   load();
   return () => {
     disposed = true;
+    document.removeEventListener("mouseup", onRelease);
+    document.removeEventListener("mouseleave", onLeave, true);
   };
 }
 

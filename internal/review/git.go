@@ -58,7 +58,9 @@ func (g Git) run(ctx context.Context, args ...string) (string, error) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "", fmt.Errorf("git %s timed out after %s: %w", args[0], timeout, err)
+			// Wraps DeadlineExceeded itself, not only the killed process's
+			// error: a caller tells a timeout from a refusal by it.
+			return "", fmt.Errorf("git %s timed out after %s: %w (%w)", args[0], timeout, context.DeadlineExceeded, err)
 		}
 		return "", &gitError{args: args, stderr: strings.TrimSpace(stderr.String()), err: err}
 	}

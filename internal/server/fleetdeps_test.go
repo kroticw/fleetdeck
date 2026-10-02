@@ -172,6 +172,7 @@ func TestEveryFleetRouteRefusesAnUnknownFleet(t *testing.T) {
 		{http.MethodGet, "/api/orchestrator?fleet=C&lang=en", ""},
 		{http.MethodPost, "/api/orchestrator?fleet=C", `{"session":"cafe0004","lang":"en"}`},
 		{http.MethodGet, "/api/review?fleet=C&card=/x.md", ""},
+		{http.MethodGet, "/api/review/lines?fleet=C&card=/x.md&commit=abcdef0&path=a.go&from=1&to=2", ""},
 		{http.MethodPost, "/api/review/send?fleet=C", `{"card":"/x.md","rev":0}`},
 		{http.MethodPost, "/api/review/notify?fleet=C", `{"card":"/x.md","rev":0,"round":1}`},
 	} {

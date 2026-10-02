@@ -298,6 +298,13 @@ export function fetchReview(card) {
   return reviewCall("GET", `/api/review?card=${encodeURIComponent(card)}`);
 }
 
+// fetchReviewLines reads lines from..to of path at commit, the unchanged
+// context around a hunk: {from, total, lines}, clamped by the server.
+export function fetchReviewLines(card, commit, path, from, to) {
+  const q = new URLSearchParams({ card, commit, path, from: String(from), to: String(to) });
+  return reviewCall("GET", `/api/review/lines?${q}`);
+}
+
 // addReviewComment leaves a comment on one line. anchor is {commit, path,
 // side, start, end}: where the operator pointed. The text under it is read by
 // the server from the commit, never sent from here — a comment cannot claim

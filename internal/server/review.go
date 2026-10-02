@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
@@ -21,6 +22,11 @@ const reviewTimeout = 2 * time.Minute
 // deliveryRetries bounds how many times recordDelivery retries against a
 // fresh revision after ErrStale.
 const deliveryRetries = 3
+
+// maxReviewLines bounds one GET /api/review/lines answer: expanding the
+// context is a page of lines at a time, and a file of a million lines must not
+// come back whole to a single press.
+const maxReviewLines = 500
 
 // commitRe is what a commit looks like: a short or full hex object id. A
 // comment's commit reaches git as a revision (internal/review.Lines), and
@@ -133,6 +139,65 @@ func (d Deps) handleReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// handleReviewLines answers lines from..to of path at commit, for the page to
+// expand the unchanged context around a hunk. Clamped to the file and to
+// maxReviewLines; total is the file's length, so the page knows when nothing
+// is left below.
+func (d Deps) handleReviewLines(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	commit, path := q.Get("commit"), q.Get("path")
+	from, errFrom := strconv.Atoi(q.Get("from"))
+	to, errTo := strconv.Atoi(q.Get("to"))
+	if !commitRe.MatchString(commit) || !treePath(path) || errFrom != nil || errTo != nil || from < 1 || to < from {
+		fail(w, http.StatusBadRequest, "lines need a commit, a relative path inside the tree and a line range from 1")
+		return
+	}
+	t, ok := d.reviewTarget(w, r, q.Get("card"), true)
+	if !ok {
+		return
+	}
+	lines, err := t.git.Lines(r.Context(), commit, path)
+	if err != nil {
+		fail(w, linesFailure(err), err.Error())
+		return
+	}
+	to = min(to, len(lines), from+maxReviewLines-1)
+	out := []string{}
+	if from <= to {
+		out = lines[from-1 : to]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"from": from, "total": len(lines), "lines": out})
+}
+
+// linesFailure is the status a failed read of lines answers: a git that ran
+// out of time is the working tree's trouble, anything else a file that is not
+// there at that commit.
+func linesFailure(err error) int {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout
+	}
+	return http.StatusNotFound
+}
+
+// treePath reports whether path names a file inside the tree the way a diff
+// does: relative, no "." or ".." segment. git's refusal of anything else
+// says whether the path exists on disk, which the page must not learn.
+func treePath(path string) bool {
+	if path == "" || strings.HasPrefix(path, "/") {
+		return false
+	}
+	for seg := range strings.SplitSeq(path, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func (d Deps) handleReviewAdd(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -458,5 +459,110 @@ func TestAReviewGoesThroughTheTabsFleet(t *testing.T) {
 	}
 	if rec := do(d, http.MethodGet, "/api/review?fleet=A&card="+card, ""); rec.Code != http.StatusForbidden {
 		t.Fatalf("fleet A: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// linesView is what GET /api/review/lines answers.
+type linesView struct {
+	From  int      `json:"from"`
+	Total int      `json:"total"`
+	Lines []string `json:"lines"`
+}
+
+func linesURL(card, commit, path, from, to string) string {
+	return "/api/review/lines?card=" + card + "&commit=" + commit + "&path=" + path + "&from=" + from + "&to=" + to
+}
+
+// Expanding the context around a hunk reads the file at a commit: the lines
+// asked for, clamped to the file, with the file's length so the page knows
+// when there is nothing more below.
+func TestContextLinesAreReadFromTheCommitClampedToTheFile(t *testing.T) {
+	t.Parallel()
+	d, _, card, head := reviewDeps(t)
+	rec := do(d, http.MethodGet, linesURL(card, head, "a.go", "2", "99"), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	got := decode[linesView](t, rec.Body.String())
+	if got.From != 2 || got.Total != 3 || !slices.Equal(got.Lines, []string{"", "func A() {}"}) {
+		t.Fatalf("lines = %+v", got)
+	}
+	rec = do(d, http.MethodGet, linesURL(card, head, "a.go", "7", "9"), "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"lines":[]`) || decode[linesView](t, rec.Body.String()).Total != 3 {
+		t.Fatalf("past the end: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A git that timed out is the working tree's trouble, not a missing file.
+func TestAReadThatTimedOutIsAGatewayTimeout(t *testing.T) {
+	t.Parallel()
+	if got := linesFailure(fmt.Errorf("git show timed out: %w", context.DeadlineExceeded)); got != http.StatusGatewayTimeout {
+		t.Fatalf("timeout: %d", got)
+	}
+	if got := linesFailure(errors.New("path 'x' does not exist")); got != http.StatusNotFound {
+		t.Fatalf("missing: %d", got)
+	}
+}
+
+// One request reads at most maxReviewLines lines, however wide the range.
+func TestContextLinesHaveACeilingPerRequest(t *testing.T) {
+	t.Parallel()
+	d, _, card, _ := reviewDeps(t)
+	tree, err := d.ReviewWorkdir(t.Context(), board.Card{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "long.txt"), []byte(strings.Repeat("x\n", maxReviewLines+100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "long.txt"}, {"commit", "--quiet", "--message", "long"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tree
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	head, err := review.Git{Dir: tree}.Head(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := do(d, http.MethodGet, linesURL(card, head, "long.txt", "1", strconv.Itoa(maxReviewLines+100)), "")
+	got := decode[linesView](t, rec.Body.String())
+	if rec.Code != http.StatusOK || len(got.Lines) != maxReviewLines || got.Total != maxReviewLines+100 {
+		t.Fatalf("%d: %d lines of %d", rec.Code, len(got.Lines), got.Total)
+	}
+}
+
+// The same confinement as every review route: a card on this board, a commit
+// shaped like one, a path, and a range that is a range.
+func TestContextLinesAreConfinedLikeEveryReviewRoute(t *testing.T) {
+	t.Parallel()
+	d, _, card, head := reviewDeps(t)
+	out := filepath.Join(t.TempDir(), "x")
+	for _, c := range []struct {
+		target string
+		code   int
+	}{
+		{linesURL("/etc/hosts", head, "a.go", "1", "2"), http.StatusForbidden},
+		{linesURL(card, "--output="+out, "a.go", "1", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "", "1", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "a.go", "x", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "a.go", "0", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "a.go", "3", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "gone.go", "1", "2"), http.StatusNotFound},
+		// git's answer for a path outside the tree names whether it exists
+		// on disk: refused before git is asked.
+		{linesURL(card, head, "/etc/hosts", "1", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "../x/a.go", "1", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "sub/../a.go", "1", "2"), http.StatusBadRequest},
+		{linesURL(card, head, "./a.go", "1", "2"), http.StatusBadRequest},
+	} {
+		if rec := do(d, http.MethodGet, c.target, ""); rec.Code != c.code {
+			t.Errorf("%s: want %d, got %d %s", c.target, c.code, rec.Code, rec.Body.String())
+		}
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatalf("git must not have been run with the commit as an option: %s exists", out)
 	}
 }

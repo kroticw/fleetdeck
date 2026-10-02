@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // repo is a scratch repository on master with one commit, and a function that
@@ -309,5 +310,16 @@ func TestRawDiffIgnoresDiffRelative(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].NewPath != "sub/file.go" {
 		t.Fatalf("files = %+v, want NewPath sub/file.go", files)
+	}
+}
+
+// A git that ran out of time says so as context.DeadlineExceeded, which the
+// panel answers as a gateway timeout rather than a missing file.
+func TestATimedOutGitIsADeadlineExceeded(t *testing.T) {
+	t.Parallel()
+	dir, run := repo(t)
+	_, err := Git{Dir: dir, Timeout: time.Nanosecond}.Lines(t.Context(), run("rev-parse", "HEAD"), "a.go")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
 	}
 }

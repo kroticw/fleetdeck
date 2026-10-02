@@ -300,6 +300,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
 	mux.HandleFunc("GET /api/review", d.handleReview)
+	mux.HandleFunc("GET /api/review/lines", d.handleReviewLines)
 	mux.HandleFunc("POST /api/review/comments", d.handleReviewAdd)
 	mux.HandleFunc("PATCH /api/review/comments", d.handleReviewEdit)
 	mux.HandleFunc("DELETE /api/review/comments", d.handleReviewDelete)
