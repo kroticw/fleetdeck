@@ -37,6 +37,7 @@ import {
   nextMenuState,
   menuGo,
   limitsOf,
+  windowWords,
   joinHeaderParts,
   HEADER_PARTS,
   headerCounts,
@@ -596,9 +597,30 @@ test("control case: the same window renders differently stale vs fresh", () => {
 
 test("a stale reading carries its age, not the reset countdown", () => {
   const threeMinutesAgo = new Date(Date.now() - 3 * 60000).toISOString();
-  const html = gauge("5h", { utilization: 40, resetsAt: "2026-01-01T00:00:00Z" }, true, threeMinutesAgo);
-  assert.equal(html.includes("3m"), true);
+  const html = gauge("5h", { utilization: 40, resetsAt: "2026-01-01T00:00:00Z" }, true, threeMinutesAgo, Date.now(), 300);
+  assert.equal(html.includes(`3${t("unit_minutes")}`), true);
   assert.equal(html.includes(t("last_known")), true);
+});
+
+// The gauge reads the clock it is handed, as every other clock in header.js
+// does: read inside, the answer for a fixed fixture changed with the day the
+// tests ran.
+test("a gauge measures age and countdown against the caller's clock", () => {
+  const now = Date.parse("2026-09-14T10:00:00Z");
+  const window_ = { utilization: 40, resetsAt: "2026-09-14T12:30:00Z" };
+  const fresh = gauge("5h", window_, false, "2026-09-14T09:59:30Z", now, 300);
+  assert.match(fresh, new RegExp(`${t("resets_in")} 2${t("unit_hours")} 30${t("unit_minutes")}`));
+  const stale = gauge("5h", window_, true, "2026-09-13T09:00:00Z", now, 300);
+  assert.match(stale, new RegExp(`1${t("unit_days")} 1${t("unit_hours")}`));
+});
+
+// The label is "5h"; the pointer has room for what that stands for.
+test("a gauge's tooltip names its window in words", () => {
+  const now = Date.parse("2026-09-14T10:00:00Z");
+  const html = gauge("5h", { utilization: 40, resetsAt: "2026-09-14T12:00:00Z" }, false, "2026-09-14T09:59:30Z", now, 300);
+  assert.match(html, new RegExp(`title="${t("limit_over")} ${windowWords(300)} · ${t("resets_in")}`));
+  assert.equal(windowWords(300), `5 ${t("hours_other")}`);
+  assert.equal(windowWords(7 * 24 * 60), `7 ${t("days_other")}`);
 });
 
 // --- isUsageStale: the local-file age half of the same flicker fix -------
@@ -778,17 +800,38 @@ test("the fleet menu switches fleet through the given switcher and goes elsewher
 // than markup; the level has to be the one the header's gauge would show.
 test("the limits as data: the gauge's percentage and level, or none", () => {
   const now = Date.parse("2026-09-14T10:00:00Z");
-  const fresh = { limits: { fetchedAt: "2026-09-14T09:59:30Z", fiveHour: { utilization: 37.4 }, sevenDay: { utilization: 91 } } };
+  const fresh = {
+    limits: {
+      fetchedAt: "2026-09-14T09:59:30Z",
+      fiveHour: { utilization: 37.4, resetsAt: "2026-09-14T12:00:00Z" },
+      sevenDay: { utilization: 91, resetsAt: "2026-09-16T10:00:00Z" },
+    },
+  };
+  const over5h = `${t("limit_over")} ${windowWords(300)}`;
+  const over7d = `${t("limit_over")} ${windowWords(7 * 24 * 60)}`;
   assert.deepEqual(limitsOf(fresh, now), [
-    { label: t("limit_5h"), pct: 37, level: "cool" },
-    { label: t("limit_7d"), pct: 91, level: "hot" },
+    { label: t("limit_5h"), pct: 37, level: "cool", age: "", title: `${over5h} · ${t("resets_in")} 2${t("unit_hours")} 0${t("unit_minutes")}` },
+    { label: t("limit_7d"), pct: 91, level: "hot", age: "", title: `${over7d} · ${t("resets_in")} 2${t("unit_days")} 0${t("unit_hours")}` },
   ]);
   assert.deepEqual(limitsOf({}, now), [
-    { label: t("limit_5h"), pct: null, level: "off" },
-    { label: t("limit_7d"), pct: null, level: "off" },
+    { label: t("limit_5h"), pct: null, level: "off", age: "", title: over5h },
+    { label: t("limit_7d"), pct: null, level: "off", age: "", title: over7d },
   ]);
   const old = { limits: { ...fresh.limits, fetchedAt: "2026-09-13T10:00:00Z" } };
-  assert.deepEqual(limitsOf(old, now).map((limit) => limit.level), ["stale", "stale"]);
+  const aged = limitsOf(old, now);
+  assert.deepEqual(aged.map((limit) => limit.level), ["stale", "stale"]);
+  // The age travels with the value, so the window's capsule can say how old
+  // it is the way the tab's gauge does.
+  assert.deepEqual(aged.map((limit) => limit.age), [`1${t("unit_days")} 0${t("unit_hours")}`, `1${t("unit_days")} 0${t("unit_hours")}`]);
+  assert.equal(aged[0].title, `${over5h} · ${t("last_known")} 1${t("unit_days")} 0${t("unit_hours")}`);
+});
+
+// One window can be absent while the other is not: Claude Code drops a window
+// once it has reset, and the panel keeps the other one (internal/usage).
+test("a window that is absent is a dash beside the one that is there", () => {
+  const now = Date.parse("2026-09-14T10:00:00Z");
+  const snap = { limits: { fetchedAt: "2026-09-14T09:59:30Z", sevenDay: { utilization: 48, resetsAt: "2026-09-16T10:00:00Z" } } };
+  assert.deepEqual(limitsOf(snap, now).map((limit) => [limit.pct, limit.level]), [[null, "off"], [48, "cool"]]);
 });
 
 // In the window the orchestrator surface shows the brand row and the sessions

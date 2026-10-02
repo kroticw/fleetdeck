@@ -14,11 +14,18 @@ export function capsuleModel({ section, themeLabel, limits, t, colors }) {
     ],
     newCard: { label: t("new_card") },
     theme: { label: themeLabel },
-    limits: limits.map(({ label, pct, level }) => ({
+    // An aged value says how old it is in the text, as the browser tab's gauge
+    // does. Without it the window drew a day-old reading exactly like a fresh
+    // one: the age reached only the fill colour of a thin bar, which is not
+    // something an operator glancing at the row notices. tooltip is the
+    // board's sentence about the limit, for the pointer; always a string, so
+    // the window never reads a missing field.
+    limits: limits.map(({ label, pct, level, age, title }) => ({
       label,
-      text: typeof pct === "number" ? `${pct}%` : "—",
+      text: typeof pct === "number" ? `${pct}%${age ? ` · ${age}` : ""}` : "—",
       level,
       color: colors[level],
+      tooltip: title ?? "",
     })),
   };
 }

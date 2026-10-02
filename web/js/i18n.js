@@ -55,6 +55,29 @@ const en = {
   limit_7d: "7d",
   resets_in: "resets in",
   last_known: "last known",
+  // The units of a short span, "2h 30m": how long until a window resets and
+  // how long ago a value was taken (web/js/header.js, humanSpan).
+  unit_minutes: "m",
+  unit_hours: "h",
+  unit_days: "d",
+  // The same units in full, for a tooltip that has room for words: one entry
+  // per plural category Intl.PluralRules names for either language, so the
+  // unit agrees with its number (web/js/header.js, windowWords).
+  minutes_one: "minute",
+  minutes_few: "minutes",
+  minutes_many: "minutes",
+  minutes_other: "minutes",
+  hours_one: "hour",
+  hours_few: "hours",
+  hours_many: "hours",
+  hours_other: "hours",
+  days_one: "day",
+  days_few: "days",
+  days_many: "days",
+  days_other: "days",
+  // What a gauge is, said on the pointer: "usage limit over 5 hours · resets
+  // in 2h 0m".
+  limit_over: "usage limit over",
   usage_down: "limits unavailable",
   usage_down_auth: "limits unavailable — sign-in needed",
   usage_down_rate_limited: "limits unavailable — rate limited, usually recovers on its own",
@@ -439,6 +462,22 @@ const ru = {
   limit_7d: "7д",
   resets_in: "сброс через",
   last_known: "последнее известное",
+  unit_minutes: "м",
+  unit_hours: "ч",
+  unit_days: "д",
+  minutes_one: "минута",
+  minutes_few: "минуты",
+  minutes_many: "минут",
+  minutes_other: "минуты",
+  hours_one: "час",
+  hours_few: "часа",
+  hours_many: "часов",
+  hours_other: "часа",
+  days_one: "день",
+  days_few: "дня",
+  days_many: "дней",
+  days_other: "дня",
+  limit_over: "расход лимита за",
   usage_down: "лимиты недоступны",
   usage_down_auth: "лимиты недоступны — нужен вход",
   usage_down_rate_limited: "лимиты недоступны — превышена частота запросов, обычно восстанавливается само",
@@ -716,4 +755,13 @@ const lang = langCode === "ru" ? ru : en;
 // indistinguishable through t() from one translated identically.
 export function t(key) {
   return lang[key] ?? en[key] ?? key;
+}
+
+const pluralRules = new Intl.PluralRules(langCode);
+
+// plural is the plural category of n in the page's language — "one", "few",
+// "many" or "other" — the suffix of a dictionary key that has a form per
+// category, such as hours_one and hours_many.
+export function plural(n) {
+  return pluralRules.select(n);
 }

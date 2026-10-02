@@ -35,8 +35,22 @@ func TestACapsuleModelKeepsThePagesWordsAndColours(t *testing.T) {
 	}
 }
 
+func TestALimitCarriesThePagesTooltip(t *testing.T) {
+	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[],"newCard":{"label":""},"theme":{"label":""},"limits":[{"label":"5ч","text":"37%","level":"cool","color":"#2f9e44","tooltip":"расход лимита за 5 часов · сброс через 2ч 0м"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Limits[0].Tooltip != "расход лимита за 5 часов · сброс через 2ч 0м" {
+		t.Fatalf("tooltip = %q", m.Limits[0].Tooltip)
+	}
+}
+
+// An aged value says how old it is beside its number ("25% · 21ч 21м"). The
+// percentage is read up to its sign: a whole-text parse answered 0, and the
+// indicator stood empty, claiming nothing had been spent on an account whose
+// number was merely old.
 func TestALimitsPercentageIsReadForTheLevelIndicator(t *testing.T) {
-	cases := map[string]float64{"37%": 37, "100%": 100, "—": 0, "": 0}
+	cases := map[string]float64{"37%": 37, "100%": 100, "—": 0, "": 0, "25% · 21ч 21м": 25, "25% · 1d 0h": 25}
 	for text, want := range cases {
 		if got := limitValue(text); got != want {
 			t.Fatalf("limitValue(%q) = %v, want %v", text, got, want)
@@ -70,6 +84,23 @@ func TestTheCompactLimitsAreEveryLimitInOneLineColouredAsTheWorst(t *testing.T) 
 	}
 	if c.Color != "#e03131" {
 		t.Fatalf("colour = %q, want the hot limit's", c.Color)
+	}
+}
+
+// The compact capsule's tooltip has room for words: a limit's own sentence,
+// which names its window in full, stands after its label and value. A limit
+// that came with none keeps the label and value alone.
+func TestTheCompactTooltipCarriesEachLimitsSentence(t *testing.T) {
+	m := capsuleModel{Limits: []capsuleCap{
+		{Label: "5h", Text: "42%", Level: "cool", Tooltip: "usage limit over 5 hours · resets in 2h 0m"},
+		{Label: "7d", Text: "91%", Level: "hot"},
+	}}
+	c := m.compactLimits()
+	if c.Text != "5h 42% · 7d 91%" {
+		t.Fatalf("text = %q", c.Text)
+	}
+	if want := "5h: 42% · usage limit over 5 hours · resets in 2h 0m\n7d: 91%"; c.Tooltip != want {
+		t.Fatalf("tooltip = %q, want %q", c.Tooltip, want)
 	}
 }
 

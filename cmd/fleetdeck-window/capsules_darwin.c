@@ -95,6 +95,9 @@ static id segmentedDrawn, newCardDrawn, themeDrawn, themeIconDrawn, compactLabel
 static id levelsDrawn[maxLimits];
 static id tabsCapsule, newCardCapsule, compactCapsule, themeCapsule, themeIconCapsule;
 static id limitCapsules[maxLimits];
+// Each limit's content -- label, level and value in a row -- which carries the
+// tooltip, so the pointer finds it anywhere on the capsule.
+static id limitContentsDrawn[maxLimits];
 static int limitsDrawn;
 // capsulesDrawn: how many capsules the row shows.
 static int capsulesDrawn;
@@ -379,7 +382,7 @@ void fd_capsules_clear(void *container) {
   rowDrawn = (id)0;
   segmentedDrawn = newCardDrawn = themeDrawn = themeIconDrawn = compactLabelDrawn = (id)0;
   tabsCapsule = newCardCapsule = compactCapsule = themeCapsule = themeIconCapsule = (id)0;
-  for (int i = 0; i < maxLimits; i++) limitCapsules[i] = levelsDrawn[i] = (id)0;
+  for (int i = 0; i < maxLimits; i++) limitCapsules[i] = levelsDrawn[i] = limitContentsDrawn[i] = (id)0;
   limitsDrawn = 0;
   capsulesDrawn = 0;
   // No row, nothing for the window to keep room for.
@@ -389,7 +392,8 @@ void fd_capsules_clear(void *container) {
 
 double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, const char **tabLabels, int tabCount,
                         int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
-                        const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount,
+                        const char **limitTexts, const char **limitTooltips, const double *limitValues,
+                        const double *limitRGB, int limitCount,
                         const char *compactText, const char *compactTooltip, const double *compactRGB,
                         double frameMinWidth) {
   void *pool = objc_autoreleasePoolPush();
@@ -461,6 +465,8 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id views[3] = {label(limitLabels[i]), level, label(limitTexts[i])};
     id content = row(views, 3);
     sendVoid0(level, sel("release"));
+    if (limitTooltips[i][0]) sendVoid1(content, sel("setToolTip:"), nsstring(limitTooltips[i]));
+    limitContentsDrawn[i] = content;
     limitCapsules[i] = capsule(mode, content, 0, capsulePadding);
     adopt(into, limitCapsules[i]);
   }
@@ -639,6 +645,10 @@ double fd_test_min_content_width(void *container) {
 
 const char *fd_test_compact_text(void) { return cstring(send0(compactLabelDrawn, sel("stringValue"))); }
 const char *fd_test_compact_tooltip(void) { return cstring(send0(compactLabelDrawn, sel("toolTip"))); }
+
+const char *fd_test_limit_tooltip(int i) {
+  return i < limitsDrawn ? cstring(send0(limitContentsDrawn[i], sel("toolTip"))) : "";
+}
 const char *fd_test_theme_icon_title(void) { return cstring(send0(themeIconDrawn, sel("title"))); }
 const char *fd_test_theme_icon_tooltip(void) { return cstring(send0(themeIconDrawn, sel("toolTip"))); }
 

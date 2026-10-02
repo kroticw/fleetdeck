@@ -281,7 +281,7 @@ var (
 )
 
 func collectCapsuleLayoutResults() {
-	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[{"id":"board","label":"Доска","selected":true},{"id":"docs","label":"Доки","selected":false}],"newCard":{"label":"+ карточка"},"theme":{"label":"тема: авто"},"limits":[{"label":"5ч","text":"42%","level":"cool","color":"#2f9e44"},{"label":"7д","text":"91%","level":"hot","color":"#e03131"}]}`))
+	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[{"id":"board","label":"Доска","selected":true},{"id":"docs","label":"Доки","selected":false}],"newCard":{"label":"+ карточка"},"theme":{"label":"тема: авто"},"limits":[{"label":"5ч","text":"42%","level":"cool","color":"#2f9e44","tooltip":"расход лимита за 5 часов · сброс через 2ч 0м"},{"label":"7д","text":"91%","level":"hot","color":"#e03131","tooltip":""}]}`))
 	if err != nil {
 		panic(err)
 	}
@@ -525,6 +525,16 @@ func TestTheFrameKeepsTheRowItsMinimumWhereThePanelsCanNarrow(t *testing.T) {
 				t.Errorf("%v: row %v, narrower than its minimum %v with panels %v and %v", p, p.rowWidth, p.rowMin, p.geometry.Orchestrator.W, p.geometry.Sessions.W)
 			}
 		}
+	}
+}
+
+// Each limit's capsule carries the board's sentence for the pointer, and a
+// limit that came with none carries none rather than its neighbour's.
+func TestEachLimitCapsuleCarriesTheModelsTooltip(t *testing.T) {
+	p := layoutResults[1] // 1440, folded: every limit drawn in its own capsule
+	want := []string{layoutModel.Limits[0].Tooltip, ""}
+	if len(p.limitTooltips) != len(want) || p.limitTooltips[0] != want[0] || p.limitTooltips[1] != want[1] {
+		t.Fatalf("tooltips = %q, want %q", p.limitTooltips, want)
 	}
 }
 

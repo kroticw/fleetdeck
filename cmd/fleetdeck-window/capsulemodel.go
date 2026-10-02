@@ -34,6 +34,10 @@ type capsuleCap struct {
 	Text  string `json:"text"`
 	Level string `json:"level"`
 	Color string `json:"color"`
+	// Tooltip is the board's sentence about the limit for the pointer: its
+	// window in words and when it resets or how old it is. Empty from a board
+	// that sends none.
+	Tooltip string `json:"tooltip"`
 }
 
 func parseCapsuleModel(raw json.RawMessage) (capsuleModel, error) {
@@ -49,8 +53,17 @@ func parseCapsuleModel(raw json.RawMessage) (capsuleModel, error) {
 
 // limitValue is a limit's text as the level indicator's value: "37%" is 37,
 // and the dash of a limit with no number is an empty indicator.
+//
+// The percentage is read up to its sign rather than from the whole text: an
+// aged value says how old it is beside its number ("25% · 21ч 21м"), and a
+// whole-text parse answered 0 for it -- an indicator standing empty, claiming
+// nothing had been spent on an account whose number was merely old.
 func limitValue(text string) float64 {
-	v, err := strconv.ParseFloat(strings.TrimSuffix(text, "%"), 64)
+	pct, _, ok := strings.Cut(text, "%")
+	if !ok {
+		return 0
+	}
+	v, err := strconv.ParseFloat(pct, 64)
 	if err != nil {
 		return 0
 	}
@@ -76,7 +89,11 @@ func (m capsuleModel) compactLimits() compactLimits {
 	worst := m.Limits[0]
 	for _, limit := range m.Limits {
 		parts = append(parts, limit.Label+" "+limit.Text)
-		lines = append(lines, limit.Label+": "+limit.Text)
+		line := limit.Label + ": " + limit.Text
+		if limit.Tooltip != "" {
+			line += " · " + limit.Tooltip
+		}
+		lines = append(lines, line)
 		if limitSeverity[limit.Level] > limitSeverity[worst.Level] {
 			worst = limit
 		}

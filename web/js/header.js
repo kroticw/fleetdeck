@@ -1,6 +1,6 @@
 // web/js/header.js
 import { subscribe } from "./store.js";
-import { t } from "./i18n.js";
+import { t, plural } from "./i18n.js";
 import { envelopeText, incomingMessage } from "./envelope.js";
 import { initTheme, cycleTheme, currentTheme } from "./theme.js";
 import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
@@ -226,29 +226,58 @@ export function escapeHTML(text) {
     .replace(/'/g, "&#39;");
 }
 
-// humanDuration turns a future timestamp into a short "3h 20m" string.
-function humanDuration(iso) {
-  const ms = new Date(iso).getTime() - Date.now();
-  if (!isFinite(ms) || ms <= 0) return "0m";
+// humanSpan is a length of time as a short "3h 20m": the two largest units it
+// reaches, in the page's own units. Written out here, the units read as English
+// on a Russian page, beside a gauge labelled "5ч".
+//
+// Nothing below a minute: this measures how long until a window resets and how
+// long ago a value was taken, and neither is watched by the second.
+function humanSpan(ms) {
+  if (!isFinite(ms) || ms <= 0) return `0${t("unit_minutes")}`;
   const minutes = Math.floor(ms / 60000);
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  return `${minutes}m`;
+  if (days > 0) return `${days}${t("unit_days")} ${hours}${t("unit_hours")}`;
+  if (hours > 0) return `${hours}${t("unit_hours")} ${minutes % 60}${t("unit_minutes")}`;
+  return `${minutes}${t("unit_minutes")}`;
 }
 
-// humanAge is humanDuration's mirror: a past timestamp's "how long ago",
-// rather than a future one's "how long until".
-function humanAge(iso) {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (!isFinite(ms) || ms <= 0) return "0m";
-  const minutes = Math.floor(ms / 60000);
-  const days = Math.floor(minutes / 1440);
-  const hours = Math.floor((minutes % 1440) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  return `${minutes}m`;
+// humanDuration is how long until a future timestamp, humanAge how long since
+// a past one. Both take the caller's clock rather than reading Date.now(), as
+// every other clock in this file does: read here, a fixture's answer changed
+// with the day the tests ran.
+function humanDuration(iso, nowMs) {
+  return humanSpan(new Date(iso).getTime() - nowMs);
+}
+
+function humanAge(iso, nowMs) {
+  return humanSpan(nowMs - new Date(iso).getTime());
+}
+
+// The two windows Claude Code reports, by length. Its statusline names them
+// five_hour and seven_day and states no duration of its own.
+const FIVE_HOURS = 5 * 60;
+const SEVEN_DAYS = 7 * 24 * 60;
+
+// windowWords is a window's length said in full, for a tooltip with room for
+// words: "5 hours" where the label reads "5h". The unit agrees with the number
+// in the page's language, which Russian needs three forms for.
+export function windowWords(durationMinutes) {
+  const [n, unit] =
+    durationMinutes % (24 * 60) === 0 ? [durationMinutes / (24 * 60), "days"]
+    : durationMinutes % 60 === 0 ? [durationMinutes / 60, "hours"]
+    : [durationMinutes, "minutes"];
+  return `${n} ${t(`${unit}_${plural(n)}`)}`;
+}
+
+// limitSentence is what a gauge says on the pointer: which window it is, in
+// words, and then how long until it resets or how old the value is. A gauge
+// with no value has only the first half to say.
+function limitSentence(durationMinutes, window_, stale, fetchedAt, nowMs) {
+  const what = `${t("limit_over")} ${windowWords(durationMinutes)}`;
+  if (!window_) return what;
+  const when = stale ? `${t("last_known")} ${humanAge(fetchedAt, nowMs)}` : `${t("resets_in")} ${humanDuration(window_.resetsAt, nowMs)}`;
+  return `${what} · ${when}`;
 }
 
 // gauge renders one usage window as a <meter>-based bar. No inline style is
@@ -266,23 +295,26 @@ function humanAge(iso) {
 // already carries for a dead session or a stalled counter elsewhere on this
 // page -- this is ordinary network life, not a fresh failure demanding
 // attention.
-export function gauge(label, window_, stale, fetchedAt) {
+//
+// nowMs is the caller's clock, and durationMinutes the window's length, which
+// the tooltip names in words.
+export function gauge(label, window_, stale, fetchedAt, nowMs, durationMinutes) {
+  const title = durationMinutes ? ` title="${limitSentence(durationMinutes, window_, stale, fetchedAt, nowMs)}"` : "";
   if (!window_) {
-    return `<span class="gauge gauge-off">${label} <meter min="0" max="100" value="0" class="gauge-track" disabled></meter> —</span>`;
+    return `<span class="gauge gauge-off"${title}>${label} <meter min="0" max="100" value="0" class="gauge-track" disabled></meter> —</span>`;
   }
   const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
   if (stale) {
-    const age = humanAge(fetchedAt);
     return `
-      <span class="gauge gauge-stale" title="${t("last_known")} ${age}">
+      <span class="gauge gauge-stale"${title}>
         ${label}
         <meter class="gauge-track" min="0" max="100" value="${pct}"></meter>
-        ${pct}% · ${age}
+        ${pct}% · ${humanAge(fetchedAt, nowMs)}
       </span>`;
   }
   const level = gaugeLevel(pct);
   return `
-    <span class="gauge gauge-${level}" title="${t("resets_in")} ${humanDuration(window_.resetsAt)}">
+    <span class="gauge gauge-${level}"${title}>
       ${label}
       <meter class="gauge-track" min="0" max="100" value="${pct}"></meter>
       ${pct}%
@@ -295,16 +327,21 @@ function gaugeLevel(pct) {
 
 // limitsOf is the two limits as data rather than markup — what the gauges above
 // show — for the fleetdeck window, which draws them as capsules of its own
-// (web/js/capsules.js). pct is null where the gauge shows a dash.
+// (web/js/capsules.js). pct is null where the gauge shows a dash, age is how
+// old an aged value is ("" for a fresh one or none), and title is the gauge's
+// tooltip.
 export function limitsOf(snap, nowMs) {
   const stale = isUsageStale(snap, nowMs);
+  const fetchedAt = snap.limits?.fetchedAt;
   return [
-    [t("limit_5h"), snap.limits?.fiveHour],
-    [t("limit_7d"), snap.limits?.sevenDay],
-  ].map(([label, window_]) => {
-    if (!window_) return { label, pct: null, level: "off" };
+    [t("limit_5h"), snap.limits?.fiveHour, FIVE_HOURS],
+    [t("limit_7d"), snap.limits?.sevenDay, SEVEN_DAYS],
+  ].map(([label, window_, minutes]) => {
+    const title = limitSentence(minutes, window_, stale, fetchedAt, nowMs);
+    if (!window_) return { label, pct: null, level: "off", age: "", title };
     const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
-    return { label, pct, level: stale ? "stale" : gaugeLevel(pct) };
+    const age = stale ? humanAge(fetchedAt, nowMs) : "";
+    return { label, pct, level: stale ? "stale" : gaugeLevel(pct), age, title };
   });
 }
 
@@ -656,8 +693,8 @@ export function renderHeader(
       ${hostUpdate ? updateHTML(update, nowMs) : ""}`,
       limits: `
       <div class="limits">
-        ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour, usageStale, snap.limits.fetchedAt) : gauge(t("limit_5h"), null)}
-        ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay, usageStale, snap.limits.fetchedAt) : gauge(t("limit_7d"), null)}
+        ${gauge(t("limit_5h"), snap.limits?.fiveHour, usageStale, snap.limits?.fetchedAt, nowMs, FIVE_HOURS)}
+        ${gauge(t("limit_7d"), snap.limits?.sevenDay, usageStale, snap.limits?.fetchedAt, nowMs, SEVEN_DAYS)}
       </div>`,
       counters: `
       <div class="counters">

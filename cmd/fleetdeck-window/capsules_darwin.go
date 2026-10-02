@@ -49,10 +49,11 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) floa
 	n := len(m.Limits)
 	limitLabels := make([]*C.char, n+1)
 	limitTexts := make([]*C.char, n+1)
+	limitTooltips := make([]*C.char, n+1)
 	values := make([]C.double, n+1)
 	rgb := make([]C.double, 3*n+3)
 	for i, limit := range m.Limits {
-		limitLabels[i], limitTexts[i] = cstr(limit.Label), cstr(limit.Text)
+		limitLabels[i], limitTexts[i], limitTooltips[i] = cstr(limit.Label), cstr(limit.Text), cstr(limit.Tooltip)
 		values[i] = C.double(limitValue(limit.Text))
 		c := rgbOf(limit.Color)
 		copy(rgb[3*i:], c[:])
@@ -60,8 +61,8 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) floa
 	compact := m.compactLimits()
 	compactRGB := rgbOf(compact.Color)
 	return float64(C.fd_capsules_draw(container, cstr(string(mode)), &tabIDs[0], &tabLabels[0], C.int(len(m.Tabs)),
-		C.int(selected), cstr(m.NewCard.Label), cstr(m.Theme.Label), &limitLabels[0], &limitTexts[0], &values[0], &rgb[0],
-		C.int(n), cstr(compact.Text), cstr(compact.Tooltip), &compactRGB[0], C.double(frameMinWidth())))
+		C.int(selected), cstr(m.NewCard.Label), cstr(m.Theme.Label), &limitLabels[0], &limitTexts[0], &limitTooltips[0],
+		&values[0], &rgb[0], C.int(n), cstr(compact.Text), cstr(compact.Tooltip), &compactRGB[0], C.double(frameMinWidth())))
 }
 
 // clearCapsules empties the capsule row. Main thread.
@@ -180,6 +181,7 @@ type capsuleLayoutProbe struct {
 	capsules        []drawnCapsule
 
 	compactText, compactTooltip                           string
+	limitTooltips                                         []string
 	themeIconTitle, themeIconTooltip, themeIconAccessible string
 	iconPresses                                           []string
 }
@@ -217,6 +219,9 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 	}
 	out.compactText = C.GoString(C.fd_test_compact_text())
 	out.compactTooltip = C.GoString(C.fd_test_compact_tooltip())
+	for i := range m.Limits {
+		out.limitTooltips = append(out.limitTooltips, C.GoString(C.fd_test_limit_tooltip(C.int(i))))
+	}
 	out.themeIconTitle = C.GoString(C.fd_test_theme_icon_title())
 	out.themeIconTooltip = C.GoString(C.fd_test_theme_icon_tooltip())
 	out.themeIconAccessible = C.GoString(C.fd_test_theme_icon_accessibility_label())

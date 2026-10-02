@@ -6,8 +6,10 @@
 // the new card button, then at the right edge the theme button and one capsule
 // per limit. mode is "glass", "vibrancy" or "opaque", as the panels'.
 //
-// limitRGB holds three components (0..1) per limit, or -1 for no colour. A
-// press calls fleetdeckCapsulePressed with "tab:<id>", "newCard" or "theme".
+// limitRGB holds three components (0..1) per limit, or -1 for no colour;
+// limitTooltips is what a pointer resting on a limit's capsule reads, "" for
+// nothing. A press calls fleetdeckCapsulePressed with "tab:<id>", "newCard" or
+// "theme".
 //
 // A row too narrow for them all shows the limits as one capsule of
 // compactText, coloured compactRGB (as limitRGB, one colour) with
@@ -16,7 +18,8 @@
 // frameMinWidth -- the panels and gaps around the row -- and that.
 double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, const char **tabLabels, int tabCount,
                         int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
-                        const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount,
+                        const char **limitTexts, const char **limitTooltips, const double *limitValues,
+                        const double *limitRGB, int limitCount,
                         const char *compactText, const char *compactTooltip, const double *compactRGB,
                         double frameMinWidth);
 
@@ -56,6 +59,7 @@ double fd_test_row_width(void);
 double fd_test_min_content_width(void *container);
 const char *fd_test_compact_text(void);
 const char *fd_test_compact_tooltip(void);
+const char *fd_test_limit_tooltip(int i);
 const char *fd_test_theme_icon_title(void);
 const char *fd_test_theme_icon_tooltip(void);
 const char *fd_test_theme_icon_accessibility_label(void);
