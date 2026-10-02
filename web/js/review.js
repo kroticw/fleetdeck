@@ -629,10 +629,18 @@ export function renderReview(root, cardPath, onClose, options = {}) {
       for (let n = bottom + 1; n <= end; n += 1) appendLine(box, file, drawn(n));
     };
 
+    // The height each file is drawn at now. A file off screen is not laid out
+    // (app.css .review-file) and is as tall as its contain-intrinsic-size; the
+    // rebuilt one is given the same, or the files under it would move.
+    // clientHeight, not offsetHeight: the size is the content's, and a border
+    // counted into it grew every file above the screen by two pixels a repaint.
+    const drawnAt = new Map([...body.querySelectorAll(".review-file")].map((box) => [box.dataset.file, box.clientHeight]));
+    const rowHeight = fontSize * 1.6;
     const fileNodes = [];
     for (const file of v.files) {
       const box = el("section", "review-file");
       const name = file.oldPath && file.newPath && file.oldPath !== file.newPath ? `${file.oldPath} → ${file.newPath}` : file.newPath || file.oldPath;
+      box.dataset.file = name;
       box.append(el("h3", "review-file-name", name));
       if (file.binary) box.append(el("p", "review-file-note", t("review_binary")));
       if (file.truncated) box.append(el("p", "review-file-note", t("review_truncated")));
@@ -657,6 +665,9 @@ export function renderReview(root, cardPath, onClose, options = {}) {
         const past = pastOf(last.newStart, last.newCount);
         gap(box, file, past, Infinity, pastOf(last.oldStart, last.oldCount) - past, { up: false, down: true });
       }
+      // auto: once drawn, the browser keeps the real height in place of this.
+      const height = drawnAt.get(name) || Math.round(box.children.length * rowHeight);
+      box.style.setProperty("contain-intrinsic-size", `auto ${height}px`);
       fileNodes.push(box);
     }
     // A comment traced onto a line the diff does not show (unchanged code far

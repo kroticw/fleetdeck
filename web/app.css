@@ -2057,8 +2057,14 @@ main {
 /* Each file is an island of its own, its path on a head that stays at the
  * top while the file scrolls by. clip rather than hidden for the rounded
  * corners: hidden makes the island a scroll box, and the head would stick to
- * it instead of to .review-body. */
+ * it instead of to .review-body.
+ *
+ * A file off screen is neither laid out nor painted: a long diff is tens of
+ * thousands of nodes, and drawn whole it was re-rendered on every change on
+ * the page, a line in the review's own session among them. Its height off
+ * screen is the contain-intrinsic-size review.js sets. */
 .review-file {
+  content-visibility: auto;
   margin-bottom: var(--gap-lg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

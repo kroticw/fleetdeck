@@ -1139,3 +1139,28 @@ test("the code's size is stepped by A−/px/A+ within the terminal's range and r
     else delete globalThis.localStorage;
   }
 });
+
+// A file off screen is not laid out (.review-file's content-visibility), so
+// its box is as tall as contain-intrinsic-size says. Every write rebuilds the
+// diff, and a rebuilt file starting from a guess instead of the height it was
+// drawn at would move everything under it while the operator reads.
+test("a repaint keeps every file at the height it was drawn at, and a new one starts from its rows", async () => {
+  const { renderReview } = await import("../js/review.js");
+  const root = document.createElement("div");
+  renderReview(root, "/b/cards/T-057.md", () => {}, { api: api(view()) });
+  await settle();
+  const first = root.querySelector(".review-file");
+  const guess = first.style.getPropertyValue("contain-intrinsic-size");
+  assert.match(guess, /^auto \d+px$/, "an undrawn file is sized from its rows, not left at zero");
+  assert.ok(Number.parseInt(guess.slice(5), 10) > 0);
+
+  first.clientHeight = 1234;
+  fireEvent(root.querySelector('[data-new-line="2"] .review-line-add'), "click");
+  const form = root.querySelector(".review-form");
+  form.querySelector("textarea").value = "name it";
+  fireEvent(form, "submit");
+  await settle();
+  const rebuilt = root.querySelector(".review-file");
+  assert.notEqual(rebuilt, first, "the write repainted the diff");
+  assert.equal(rebuilt.style.getPropertyValue("contain-intrinsic-size"), "auto 1234px");
+});

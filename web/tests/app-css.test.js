@@ -790,3 +790,14 @@ test("the review form's buttons sit side by side at the right, and the review na
     assert.doesNotMatch(m[2], /#[0-9a-f]{3,8}\b|rgb\(/i, `${m[1].trim()} names a colour of its own`);
   }
 });
+
+// A long diff is tens of thousands of nodes, and without this every repaint on
+// the page — a terminal line in the review's own session — lays out and paints
+// all of it. review.js keeps the skipped files' heights through a rebuild.
+test("a diff's files off screen are skipped by the renderer", () => {
+  const body = css
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .match(/(?:^|\})\s*\.review-file\s*\{([^}]*)\}/)?.[1];
+  assert.ok(body, "web/app.css has a .review-file rule");
+  assert.match(body, /content-visibility:\s*auto/);
+});
