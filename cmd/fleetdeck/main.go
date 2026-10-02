@@ -545,6 +545,10 @@ func serve(parent context.Context, o runOpts) error {
 	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
 	d := deps(p, dc, collector, cfg, o.configPath)
 	d.CreateFleet = fleetMaker(o.configPath, live.add)
+	// Stopped with the claude sessions are started with; nil on a stand given
+	// none, and then a fleet with running sessions is not deleted.
+	home, _ := os.UserHomeDir()
+	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg.Agent.Command), home)
 	// Every fleet's board, docs, pin and wizard, the first fleet's also in
 	// d's own fields, so a request naming no fleet is served as before. Made
 	// before anything below is started, so there is nothing to stop if it fails.
@@ -829,6 +833,8 @@ type liveFleets struct {
 
 	mu sync.Mutex
 	wg sync.WaitGroup
+	// cancels ends one fleet's watch, by name, when the fleet is deleted.
+	cancels map[string]context.CancelFunc
 }
 
 // watchBoard starts the watch of f's board.
@@ -841,11 +847,28 @@ func (l *liveFleets) watchBoard(f fleet.Fleet) {
 // start is watchBoard with mu held. Whether the panel is stopping is add's to
 // check, under the same lock.
 func (l *liveFleets) start(f fleet.Fleet) {
+	ctx, cancel := context.WithCancel(l.ctx)
+	if l.cancels == nil {
+		l.cancels = map[string]context.CancelFunc{}
+	}
+	l.cancels[f.Name] = cancel
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
-		l.watch(l.ctx, f.BoardPath, func() { l.refresh(l.ctx) })
+		l.watch(ctx, f.BoardPath, func() { l.refresh(ctx) })
 	}()
+}
+
+// remove stops serving the fleet named name: its board watch ends and the
+// collector drops it from every snapshot. False when no such fleet was served.
+func (l *liveFleets) remove(name string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if cancel := l.cancels[name]; cancel != nil {
+		cancel()
+		delete(l.cancels, name)
+	}
+	return l.collector.RemoveFleet(name)
 }
 
 // add serves f from now on: in the collector, the fleets a request can name

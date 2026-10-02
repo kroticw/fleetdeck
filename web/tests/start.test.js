@@ -159,6 +159,67 @@ test("choosing a fleet leaves for it", async () => {
   assert.deepEqual(navigated, ["vpn"]);
 });
 
+// The first fleet is the configuration itself and the panel refuses to delete
+// it, so it is not offered; every listed fleet is.
+test("every fleet but the first can be deleted", () => {
+  start();
+  push(snapshot(["fleetdeck", "vpn", "ops"]));
+  const rows = [...root.querySelector(".start-fleets").children];
+  assert.deepEqual(
+    rows.map((row) => row.querySelector(".start-fleet-delete") !== null),
+    [false, true, true],
+  );
+  assert.match(rows[1].querySelector(".start-fleet-delete").getAttribute("aria-label"), /vpn/);
+});
+
+test("deleting a fleet asks first, names it, and only then sends DELETE", async () => {
+  routes["DELETE /api/fleets/vpn"] = reply(200, { ok: true, kept: [] });
+  start();
+  push(snapshot(["fleetdeck", "vpn"]));
+  fireEvent(root.querySelector(".start-fleet-delete"), "click");
+  const dialog = root.querySelector(".start-delete-dialog");
+  assert.equal(dialog.hidden, false);
+  assert.match(root.querySelector(".start-delete-message").textContent, /vpn/);
+  assert.deepEqual(requests, []);
+  fireEvent(root.querySelector(".start-delete-confirm"), "click");
+  await settle();
+  assert.deepEqual(requests, [{ url: "/api/fleets/vpn", method: "DELETE", body: undefined }]);
+  assert.equal(dialog.hidden, true);
+  assert.equal(root.querySelector(".setup-status").textContent, t("start_deleted"));
+});
+
+test("a deleted fleet's documentation kept on disk is named", async () => {
+  routes["DELETE /api/fleets/vpn"] = reply(200, { ok: true, kept: ["/src/project/docs"] });
+  start();
+  push(snapshot(["fleetdeck", "vpn"]));
+  fireEvent(root.querySelector(".start-fleet-delete"), "click");
+  fireEvent(root.querySelector(".start-delete-confirm"), "click");
+  await settle();
+  assert.match(root.querySelector(".setup-status").textContent, /\/src\/project\/docs/);
+});
+
+test("cancelling the question deletes nothing", () => {
+  start();
+  push(snapshot(["fleetdeck", "vpn"]));
+  fireEvent(root.querySelector(".start-fleet-delete"), "click");
+  fireEvent(root.querySelector(".start-delete-cancel"), "click");
+  assert.equal(root.querySelector(".start-delete-dialog").hidden, true);
+  assert.deepEqual(requests, []);
+});
+
+// A refusal changed nothing, and the panel's own words say why: they stay in
+// the window that asked, so the operator can read them before closing it.
+test("a refused deletion is said in the panel's words and the window stays", async () => {
+  routes["DELETE /api/fleets/vpn"] = reply(409, { error: "fleet \"vpn\" has running sessions (abc12345) and this panel cannot stop sessions" });
+  start();
+  push(snapshot(["fleetdeck", "vpn"]));
+  fireEvent(root.querySelector(".start-fleet-delete"), "click");
+  fireEvent(root.querySelector(".start-delete-confirm"), "click");
+  await settle();
+  assert.equal(root.querySelector(".start-delete-dialog").hidden, false);
+  assert.match(root.querySelector(".start-delete-error").textContent, /cannot stop sessions/);
+});
+
 test("the panel not answering is said, rather than shown as a fleetless machine", () => {
   start();
   push(null, false);

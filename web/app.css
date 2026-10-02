@@ -3812,6 +3812,22 @@ body.is-resizing {
   gap: var(--gap);
 }
 
+/* A listed fleet's row carries its delete button beside the entry, which keeps
+   the rest of the row. */
+.start-fleets li {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+/* Deleting removes what does not come back, so both buttons that do it say
+   so in the danger colour; their shape is the button system's. */
+.start-fleet-delete,
+.start-delete-confirm {
+  flex: none;
+  color: var(--danger);
+}
+
 .start-fleet {
   width: 100%;
   display: flex;

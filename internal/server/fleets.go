@@ -1,10 +1,13 @@
 package server
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // handleCreateFleet makes a fleet: a folder with a board and documentation in
-// it, and a line in the configuration naming them. It is the start page's one
-// write (web/js/start.js).
+// it, and a line in the configuration naming them. It is one of the start
+// page's two writes (web/js/start.js); handleDeleteFleet is the other.
 //
 // It reports the way setting up reports — the steps `fleetdeck init` prints,
 // each with what it did or why it was refused — because it is the same write,
@@ -33,4 +36,28 @@ func (d Deps) handleCreateFleet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "steps": steps})
+}
+
+// handleDeleteFleet deletes the listed fleet the path names (Deps.DeleteFleet).
+// A refusal is 409 in the deleter's own words: the request was understood, and
+// the fleet's state is what stands in the way.
+func (d Deps) handleDeleteFleet(w http.ResponseWriter, r *http.Request) {
+	if d.DeleteFleet == nil {
+		unavailable(w, "deleting fleets")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		fail(w, http.StatusBadRequest, "name the fleet to delete")
+		return
+	}
+	kept, err := d.DeleteFleet(name)
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+	if kept == nil {
+		kept = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kept": kept})
 }

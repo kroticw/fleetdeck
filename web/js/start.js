@@ -29,6 +29,7 @@ import { isWaiting } from "./needs.js";
 import { fleetIconHTML } from "./icon.js";
 import { showSteps } from "./steplist.js";
 import { pageStorage, takeReloadFleet } from "./buildcheck.js";
+import { createDialog } from "./dialog.js";
 
 // This module and every one it imports have arrived. The window reads this
 // once the page has loaded, and a page loaded without it -- its scripts cut off
@@ -162,7 +163,57 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
   const status = el("p", "setup-status");
   const footer = el("p", "start-footer", t("start_footer"));
 
-  root.replaceChildren(head, offline, list, newRow, form, error, steps, status, footer);
+  // Deleting a listed fleet: asked in a window that names it, because what it
+  // removes — the fleet's sessions and its folder — does not come back. The
+  // first fleet is the configuration itself and is never offered. A refusal
+  // stays in the window, in the panel's own words; a deletion that kept
+  // documentation configured outside the fleet's folder says what is still on
+  // the disk.
+  let pendingDelete = "";
+  const deleteMessage = el("p", "start-delete-message");
+  const deleteError = el("div", "setup-error start-delete-error");
+  const deleteDialog = createDialog({
+    title: t("start_delete_title"),
+    onClose: () => {
+      pendingDelete = "";
+      deleteError.textContent = "";
+    },
+  });
+  deleteDialog.element.className += " start-delete-dialog";
+  const deleteCancel = button("btn start-delete-cancel", t("start_delete_cancel"));
+  const deleteConfirm = button("btn start-delete-confirm", t("start_delete"));
+  deleteDialog.body.append(deleteMessage, deleteError);
+  deleteDialog.foot.append(deleteCancel, deleteConfirm);
+  deleteCancel.addEventListener("click", () => deleteDialog.close());
+  deleteConfirm.addEventListener("click", async () => {
+    if (pendingDelete === "" || deleteConfirm.disabled) return;
+    const named = pendingDelete;
+    deleteConfirm.disabled = true;
+    deleteError.textContent = "";
+    try {
+      const response = await get(`/api/fleets/${encodeURIComponent(named)}`, { method: "DELETE" });
+      const body = await readJSON(response);
+      if (response.status !== 200) {
+        deleteError.textContent = String(body?.error ?? response.statusText ?? response.status);
+        return;
+      }
+      deleteDialog.close();
+      const kept = Array.isArray(body?.kept) ? body.kept : [];
+      status.textContent = kept.length > 0 ? `${t("start_deleted_kept")} ${kept.join(", ")}` : t("start_deleted");
+    } catch (err) {
+      deleteError.textContent = String(err?.message ?? err);
+    } finally {
+      deleteConfirm.disabled = false;
+    }
+  });
+  const askDelete = (fleet) => {
+    pendingDelete = fleet;
+    deleteError.textContent = "";
+    deleteMessage.textContent = t("start_delete_confirm").replace("{fleet}", fleet);
+    deleteDialog.open();
+  };
+
+  root.replaceChildren(head, offline, list, newRow, form, error, steps, status, footer, deleteDialog.element);
 
   // What a fleet's row says: the sessions running in it — its own and the ones
   // no fleet claims (fleet.js belongsTo) — and, separately, the questions
@@ -197,7 +248,7 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
     const waitingBy = new Map(fleetEntries(snap, isWaiting).map((e) => [e.name, e.waiting]));
     const last = remembered();
     list.replaceChildren(
-      ...fleets.map((fleet) => {
+      ...fleets.map((fleet, index) => {
         const entry = button("start-fleet");
         entry.dataset.fleet = fleet;
         const head = el("span", "start-fleet-head");
@@ -212,6 +263,12 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
         entry.addEventListener("click", () => leave(fleet));
         const row = el("li", "");
         row.append(entry);
+        if (index > 0) {
+          const remove = button("btn btn-sm start-fleet-delete", t("start_delete"));
+          remove.setAttribute("aria-label", `${t("start_delete")} ${fleet}`);
+          remove.addEventListener("click", () => askDelete(fleet));
+          row.append(remove);
+        }
         return row;
       }),
     );

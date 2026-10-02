@@ -380,6 +380,15 @@ const en = {
   start_last: "you were here last time",
   start_footer: "A fleet has a board, documentation and an orchestrator of its own. The machine's sessions are visible from every fleet.",
   start_new: "Start a fleet",
+  // Deleting a listed fleet from the start page. What it removes is said in
+  // the question, because none of it comes back.
+  start_delete: "Delete fleet",
+  start_delete_title: "Delete the fleet",
+  start_delete_confirm:
+    "Fleet {fleet}: its running sessions are stopped, it leaves the configuration, and its folder — the board and the documentation inside it — is removed from the disk. Documentation configured outside that folder stays.",
+  start_delete_cancel: "Cancel",
+  start_deleted: "The fleet is deleted.",
+  start_deleted_kept: "The fleet is deleted. Left on the disk, outside its folder:",
   start_new_title: "A new fleet",
   start_new_text:
     "fleetdeck makes the folder with a board and documentation in it, the same two the first run makes, adds the fleet to the configuration and serves it at once — nothing that is running now is touched.",
@@ -715,6 +724,13 @@ const ru = {
   start_last: "были здесь в прошлый раз",
   start_footer: "У флота своя доска, своя документация и свой оркестратор. Сессии машины видны из любого флота.",
   start_new: "Завести флот",
+  start_delete: "Удалить флот",
+  start_delete_title: "Удаление флота",
+  start_delete_confirm:
+    "Флот {fleet}: его работающие сессии будут остановлены, он уйдёт из настройки, а его папка — доска и документация внутри неё — будет удалена с диска. Документация, настроенная вне этой папки, останется.",
+  start_delete_cancel: "Отмена",
+  start_deleted: "Флот удалён.",
+  start_deleted_kept: "Флот удалён. На диске осталось, вне его папки:",
   start_new_title: "Новый флот",
   start_new_text:
     "fleetdeck создаст папку, а в ней доску и документацию — те же две, что появляются при первом запуске, — допишет флот в настройку и сразу начнёт его показывать; на то, что работает сейчас, это не влияет.",
