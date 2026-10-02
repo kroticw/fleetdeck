@@ -2434,6 +2434,14 @@ main {
   color: var(--text);
 }
 
+.newcard-zone-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
 .newcard-zone,
 .newcard-create,
 .newcard-cancel {

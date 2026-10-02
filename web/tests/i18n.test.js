@@ -77,6 +77,13 @@ const KEYS = [
   "new_card_cancel",
   "new_card_title_required",
   "new_card_not_committed",
+  // The zone list's options. An option falling through to its key would show
+  // "zone_niceToHave" — a schema identifier, which is what the label exists
+  // to keep off the screen.
+  "zone_urgent",
+  "zone_unplanned",
+  "zone_planned",
+  "zone_niceToHave",
   // web/js/setup.js. setup_outside above all: it is the sentence that says
   // what is written outside the chosen folder before the button is pressed.
   "setup_title",
@@ -305,6 +312,20 @@ test("every key the panels ask for is in both dictionaries", () => {
   for (const key of KEYS) {
     assert.ok(declares(en, key), `${key} is missing from the English dictionary`);
     assert.ok(declares(ru, key), `${key} is missing from the Russian dictionary`);
+  }
+});
+
+// The zone list was read as a list of stages: its identifiers were words a
+// board column could have been named by. Neither language may hand back a zone
+// label that spells a stage, or the field reads as the other field again.
+test("no zone label spells a stage of the board", async () => {
+  const stages = ["new", "active", "review", "done", "blocked"];
+  for (const language of ["en-GB", "ru-RU"]) {
+    const { t } = await loadWith(language);
+    for (const zone of ["urgent", "unplanned", "planned", "niceToHave"]) {
+      const label = t(`zone_${zone}`).toLowerCase();
+      assert.ok(!stages.includes(label), `${language}: zone ${zone} is labelled "${label}", which is a stage`);
+    }
   }
 });
 

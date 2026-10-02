@@ -53,6 +53,39 @@ test("new card: the form offers exactly the board's four zones", () => {
   assert.deepEqual(zones, ["urgent", "unplanned", "planned", "niceToHave"]);
 });
 
+// The zone is the card's urgency, not its stage, and the two fields looked the
+// same on screen: an unlabelled list of schema identifiers, read as columns
+// the operator could not find. The list carries a visible label that says
+// urgency, and every option reads as a word from the dictionary. What the
+// option sends is still the schema's identifier: a translated string in the
+// card's zone field is a card the validator rejects.
+test("new card: the zone list is labelled as urgency, and its options read as words, not identifiers", async () => {
+  const { t } = await import("../js/i18n.js");
+  const form = open();
+  const label = form.querySelector("label.newcard-zone-label");
+  assert.ok(label, "the zone list has a visible label");
+  assert.equal(label.querySelector("span.newcard-zone-caption").textContent, t("new_card_zone"));
+  const select = label.querySelector("select.newcard-zone");
+  assert.ok(select, "the label wraps the list, so it names it without an id");
+  for (const option of select.children) {
+    assert.equal(option.textContent, t(`zone_${option.value}`), `option ${option.value} reads from the dictionary`);
+    assert.notEqual(option.textContent, option.value, `option ${option.value} does not show its identifier`);
+  }
+});
+
+test("new card: choosing an option by its label sends the zone's identifier", async () => {
+  const { t } = await import("../js/i18n.js");
+  const form = open();
+  const select = form.querySelector("select.newcard-zone");
+  const chosen = select.children.find((o) => o.textContent === t("zone_niceToHave"));
+  assert.ok(chosen, "the nice-to-have zone is offered under its label");
+  select.value = chosen.value;
+  form.querySelector("input.newcard-title").value = "Later";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.deepEqual(sent, [{ title: "Later", zone: "niceToHave" }]);
+});
+
 test("new card: create sends the trimmed title and the chosen zone, then closes", async () => {
   const form = open();
   form.querySelector("input.newcard-title").value = "  Fix the header  ";
