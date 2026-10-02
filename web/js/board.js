@@ -203,6 +203,23 @@ export function pendingView(snap, pending) {
   return { ...snap, cards };
 }
 
+// The stages the board refuses a card with no session (internal/board,
+// checkCrossFieldRules). Active is not among them: a drop there offers to
+// start one (boardmove.js).
+const NEED_SESSION = new Set(["review", "blocked", "done"]);
+
+// dropVerdict is what a drop of the card being dragged into the column of
+// stage would come to, as far as the page can tell before asking: "source" for
+// its own column, "refused" where the board is known to say no, "open" where
+// the move goes ahead or is asked about. A refused drop is still taken — the
+// board's refusal is what says why.
+export function dropVerdict(move, stage) {
+  if (stage === move.from) return "source";
+  if (!STAGES.includes(stage)) return "refused";
+  if (!move.session && NEED_SESSION.has(stage)) return "refused";
+  return "open";
+}
+
 // The board scrolls itself rather than holding boxes that scroll, so it marks
 // itself. The mechanism and the reasoning behind it live in scrollable.js,
 // which is also where the panel's other scrolling boxes get it from.
@@ -226,6 +243,26 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   };
 
   const draw = () => render(root, pendingView(latest, pending));
+
+  // The columns are lit by hand rather than drawn lit: render skips every
+  // frame while a card is in the air, and a drop can leave the board undrawn
+  // for as long as the move's dialog is up.
+  const columns = () => root.querySelectorAll(":scope > .kcol");
+  const light = (move) => {
+    for (const column of columns()) {
+      const verdict = dropVerdict(move, column.dataset.stage);
+      column.classList.toggle("kcol-drop-open", verdict === "open");
+      column.classList.toggle("kcol-drop-refused", verdict === "refused");
+    }
+  };
+  const aim = (target) => {
+    for (const column of columns()) column.classList.toggle("kcol-drop-over", column === target);
+  };
+  const unlight = () => {
+    for (const column of columns()) {
+      for (const name of ["kcol-drop-open", "kcol-drop-refused", "kcol-drop-over"]) column.classList.remove(name);
+    }
+  };
 
   // One delegated listener rather than one per card: root.innerHTML is
   // replaced whole on every snapshot, so per-card listeners would need to be
@@ -261,20 +298,33 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
     ev.dataTransfer?.setData?.("text/plain", card.dataset.path);
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
     card.classList?.add?.("kcard-dragging");
+    light(dragging);
   });
 
   // A drop target is a column that does not preventDefault on dragover: the
   // browser refuses the drop otherwise, and it refuses it silently.
   root.addEventListener("dragover", (ev) => {
-    if (!dragging || !ev.target.closest(".kcol")) return;
+    if (!dragging) return;
+    const column = ev.target.closest(".kcol");
+    aim(column?.dataset.stage === dragging.from ? null : column);
+    if (!column) return;
     ev.preventDefault();
     if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  });
+
+  // dragleave fires on every child the pointer crosses, so only a pointer
+  // that has left the column for somewhere outside it takes the target off.
+  root.addEventListener("dragleave", (ev) => {
+    const column = ev.target.closest(".kcol");
+    if (!dragging || !column || column.contains(ev.relatedTarget)) return;
+    column.classList.remove("kcol-drop-over");
   });
 
   root.addEventListener("drop", (ev) => {
     const column = ev.target.closest(".kcol");
     const move = dragging;
     hold(null);
+    unlight();
     if (!move || !column) return;
     ev.preventDefault();
     const to = column.dataset.stage;
@@ -299,6 +349,7 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // alone, which a cancelled drag never reaches.
   root.addEventListener("dragend", () => {
     hold(null);
+    unlight();
     draw();
   });
 

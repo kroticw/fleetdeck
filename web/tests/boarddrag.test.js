@@ -250,3 +250,104 @@ test("board: with nothing pending the snapshot is handed on as it came", () => {
   assert.equal(pendingView(snap, new Map()), snap);
   assert.equal(pendingView(null, new Map()), null);
 });
+
+// --- the columns lit while a card is in the air ---
+
+const LIT = ["kcol-drop-open", "kcol-drop-refused", "kcol-drop-over"];
+
+function lit(column) {
+  return LIT.filter((name) => column.classList.contains(name));
+}
+
+function boardOf(...stages) {
+  return Object.fromEntries(stages.map((stage) => [stage, columnNode(stage)]));
+}
+
+test("board: a drag lights the columns a card can go to and marks the ones the board refuses", () => {
+  const cols = boardOf("new", "active", "review", "blocked", "done", "other");
+  const card = cardNode(cols.new, { path: "/b/c.md", stage: "new" });
+  fireEvent(card, "dragstart", { dataTransfer: transfer() });
+
+  assert.deepEqual(lit(cols.new), [], "the column the card came from stays neutral");
+  // Into active a card with no session is offered one, so it is open.
+  assert.deepEqual(lit(cols.active), ["kcol-drop-open"]);
+  for (const stage of ["review", "blocked", "done"]) {
+    assert.deepEqual(lit(cols[stage]), ["kcol-drop-refused"], `${stage} needs a session the card has not got`);
+  }
+  assert.deepEqual(lit(cols.other), ["kcol-drop-refused"], "other is no stage a card can be written with");
+});
+
+test("board: a card with a session may go to every stage", () => {
+  const cols = boardOf("new", "active", "review", "blocked", "done", "other");
+  const card = cardNode(cols.active, { path: "/b/c.md", stage: "active", session: "abc12345" });
+  fireEvent(card, "dragstart", { dataTransfer: transfer() });
+  for (const stage of ["new", "review", "blocked", "done"]) {
+    assert.deepEqual(lit(cols[stage]), ["kcol-drop-open"], stage);
+  }
+  assert.deepEqual(lit(cols.active), []);
+  assert.deepEqual(lit(cols.other), ["kcol-drop-refused"]);
+});
+
+test("board: the column under the card is marked as the target, and only that one", () => {
+  const cols = boardOf("new", "active", "review");
+  const card = cardNode(cols.new, { path: "/b/c.md", stage: "new" });
+  fireEvent(card, "dragstart", { dataTransfer: transfer() });
+
+  fireEvent(cols.active, "dragover", { dataTransfer: transfer() });
+  assert.ok(cols.active.classList.contains("kcol-drop-over"));
+
+  // A card over a card is over that card's column.
+  const inside = cardNode(cols.review, { path: "/b/d.md", stage: "review", session: "abc12345" });
+  fireEvent(inside, "dragover", { dataTransfer: transfer() });
+  assert.ok(cols.review.classList.contains("kcol-drop-over"));
+  assert.ok(!cols.active.classList.contains("kcol-drop-over"), "the target moves, it does not add up");
+
+  fireEvent(cols.new, "dragover", { dataTransfer: transfer() });
+  assert.deepEqual(lit(cols.new), [], "the card's own column is no target");
+  assert.ok(!cols.review.classList.contains("kcol-drop-over"));
+});
+
+test("board: leaving the columns takes the target off", () => {
+  const cols = boardOf("new", "active");
+  const card = cardNode(cols.new, { path: "/b/c.md", stage: "new" });
+  fireEvent(card, "dragstart", { dataTransfer: transfer() });
+  fireEvent(cols.active, "dragover", { dataTransfer: transfer() });
+
+  // The gap between columns is the board itself.
+  fireEvent(board, "dragover", { dataTransfer: transfer() });
+  assert.deepEqual(lit(cols.active), ["kcol-drop-open"]);
+
+  fireEvent(cols.active, "dragover", { dataTransfer: transfer() });
+  const outside = dom.element("div");
+  dom.document.body.appendChild(outside);
+  fireEvent(cols.active, "dragleave", { relatedTarget: outside });
+  assert.deepEqual(lit(cols.active), ["kcol-drop-open"], "a pointer that left the board is over no column");
+
+  // Moving between a column and its own cards is no leaving.
+  fireEvent(cols.active, "dragover", { dataTransfer: transfer() });
+  const inside = cardNode(cols.active, { path: "/b/d.md", stage: "active" });
+  fireEvent(cols.active, "dragleave", { relatedTarget: inside });
+  assert.ok(cols.active.classList.contains("kcol-drop-over"));
+});
+
+test("board: a drop takes every light off, even while the move is still being asked about", () => {
+  const cols = boardOf("new", "active", "review");
+  const card = cardNode(cols.new, { path: "/b/c.md", stage: "new" });
+  // An answer that never comes: the dialog the move opened is still up.
+  answer = new Promise(() => {});
+  fireEvent(card, "dragstart", { dataTransfer: transfer() });
+  fireEvent(cols.active, "dragover", { dataTransfer: transfer() });
+  fireEvent(cols.active, "drop", { dataTransfer: transfer() });
+  assert.equal(moves.length, 1);
+  for (const column of Object.values(cols)) assert.deepEqual(lit(column), [], column.dataset.stage);
+});
+
+test("board: a cancelled drag takes every light off", () => {
+  const cols = boardOf("new", "active", "review");
+  const card = cardNode(cols.new, { path: "/b/c.md", stage: "new" });
+  fireEvent(card, "dragstart", { dataTransfer: transfer() });
+  fireEvent(cols.review, "dragover", { dataTransfer: transfer() });
+  // Escape, or a release over nothing: dragend with no drop before it.
+  fireEvent(card, "dragend");
+  for (const column of Object.values(cols)) assert.deepEqual(lit(column), [], column.dataset.stage);
+});

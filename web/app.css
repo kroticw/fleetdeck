@@ -2107,6 +2107,44 @@ main {
   min-width: 64px;
 }
 
+/* Where a dragged card can go (web/js/board.js): open columns lie under a
+   sheet of the controls' glass, the ones the board refuses fade, and the one
+   under the pointer is ringed. Colour and outline only -- a light that changed
+   a size would move the column out from under the pointer. The outline rather
+   than a shadow: an inset one is painted under the cards, which fill the
+   window's column edge to edge, and an outer one is clipped by the board. By
+   the board's id so that it outranks the window's own .kcol rules. */
+.kcol {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background-color 120ms ease, outline-color 120ms ease, opacity 120ms ease;
+}
+
+#board > .kcol-drop-open {
+  background-color: var(--glass-control);
+  outline-color: var(--glass-control-edge);
+}
+
+#board > .kcol-drop-refused {
+  opacity: 0.45;
+}
+
+#board > .kcol-drop-over {
+  background-color: var(--glass-control-hover);
+  outline-color: var(--accent);
+}
+
+#board > .kcol-drop-refused.kcol-drop-over {
+  background-color: transparent;
+  outline-color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kcol {
+    transition: none;
+  }
+}
+
 .kcol h5 {
   margin: 0 0 2px;
   display: flex;
