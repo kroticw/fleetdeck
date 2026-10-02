@@ -130,3 +130,12 @@ test("before anything paints them, the buttons are off", () => {
 
   assert.deepEqual([smaller.disabled, reset.disabled, bigger.disabled], [true, true, true]);
 });
+
+test("the buttons are the small step of the panel's button scale, wherever they stand", () => {
+  const { smaller, reset, bigger } = controls("s-font-btn");
+
+  for (const b of [smaller, reset, bigger]) {
+    const names = String(b.className).split(" ");
+    for (const name of ["btn", "btn-sm", "s-font-btn"]) assert.ok(names.includes(name), `${b.className}: ${name}`);
+  }
+});

@@ -330,7 +330,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     // to a pointer already hovering it does not exist for a person who has
     // not found it yet — the exact way the theme button's own plain text
     // once went unnoticed.
-    const editBtn = el("button", "o-name-edit", "✎");
+    const editBtn = el("button", "btn btn-icon btn-sm o-name-edit", "✎");
     editBtn.setAttribute("type", "button");
     editBtn.setAttribute("aria-label", t("edit_label"));
     editBtn.setAttribute("title", t("edit_label"));

@@ -91,7 +91,7 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
   offline.hidden = true;
   const list = el("ul", "start-fleets");
 
-  const newButton = button("start-new", t("start_new"));
+  const newButton = button("btn btn-primary start-new", t("start_new"));
   const newRow = el("div", "start-row");
   newRow.append(newButton);
 
@@ -116,7 +116,7 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
   const pathRow = el("label", "setup-row start-field");
   pathRow.append(el("span", "start-field-name", t("start_new_path")), path);
   if (typeof choose === "function") {
-    const chooseButton = button("start-choose", t("setup_choose"));
+    const chooseButton = button("btn start-choose", t("setup_choose"));
     chooseButton.addEventListener("click", async () => {
       // The window has no dictionary of its own, so the chooser's words go
       // with the call. The fleet's own folder is made inside what was picked,
@@ -129,8 +129,8 @@ export function renderStart(root, { subscribe = storeSubscribe, fetch: get = glo
     pathRow.append(chooseButton);
   }
 
-  const createButton = button("wizard-create start-new-create", t("start_new_create"));
-  const cancelButton = button("wizard-skip start-new-cancel", t("start_new_cancel"));
+  const createButton = button("btn btn-primary wizard-create start-new-create", t("start_new_create"));
+  const cancelButton = button("btn wizard-skip start-new-cancel", t("start_new_cancel"));
   const formRow = el("div", "setup-row");
   formRow.append(createButton, cancelButton);
 

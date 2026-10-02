@@ -104,6 +104,15 @@ test("setup: the window's chooser picks the folder the workspace is made in", as
   assert.ok(prompt && !prompt.startsWith("setup_"), `the chooser's button is a word, not a key: ${prompt}`);
 });
 
+// One accent in the row, on the button that writes: choosing a folder is
+// reversible, creating the workspace is not.
+test("setup: the button that writes is the primary one and the chooser is not", async () => {
+  await render({ choose: async () => "" });
+  const classes = (selector) => String(root.querySelector(selector).className).split(" ");
+  assert.ok(classes("button.setup-create").includes("btn") && classes("button.setup-create").includes("btn-primary"));
+  assert.ok(classes("button.setup-choose").includes("btn") && !classes("button.setup-choose").includes("btn-primary"));
+});
+
 test("setup: a chooser closed without a folder leaves the path as it was", async () => {
   await render({ choose: async () => "" });
   fireEvent(root.querySelector("button.setup-choose"), "click");

@@ -237,7 +237,7 @@ export function renderCard(root, path, onClose, options = {}) {
   const head = (title) => {
     const box = el("div", "card-head");
     box.append(el("h3", "card-title", title));
-    const close = el("button", "card-close");
+    const close = el("button", "btn btn-icon btn-md card-close");
     close.innerHTML = closeCrossHTML;
     close.setAttribute("type", "button");
     close.setAttribute("aria-label", t("card_close"));

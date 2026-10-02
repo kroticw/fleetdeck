@@ -162,8 +162,8 @@ test("a failed or refused update keeps its button, so it can be tried again", ()
   const failed = onProgress(running, { step: "failed", reason: "offline", detail: "no route" }, 1);
   const busy = onProgress(running, { step: "busy" }, 1);
 
-  assert.match(updateHTML(failed, 1), /class="update-button"/);
-  assert.match(updateHTML(busy, 1), /class="update-button"/);
+  assert.match(updateHTML(failed, 1), /class="btn btn-sm update-button"/);
+  assert.match(updateHTML(busy, 1), /class="btn btn-sm update-button"/);
 });
 
 // A dev app, opened beside the installed app, says it does not update rather
@@ -258,7 +258,7 @@ test("a version the window found is shown with a button that installs it", () =>
   const html = updateHTML(state, 0);
 
   assert.ok(has(html, "update_available", { version: "v0.4.0" }), `nothing on screen: ${html}`);
-  assert.match(html, /class="update-button"/);
+  assert.match(html, /class="btn btn-sm update-button"/);
   assert.doesNotMatch(html, /disabled/, "the button that would install it is not pressable");
   assert.equal(onPress(state, { unsent: false, now: 1 }).start, true);
 });

@@ -386,7 +386,7 @@ export function themeLabelText() {
 }
 
 function themeButtonHTML() {
-  return `<button type="button" class="theme-toggle">${t(themeLabelKey(currentTheme()))}</button>`;
+  return `<button type="button" class="btn btn-sm theme-toggle">${t(themeLabelKey(currentTheme()))}</button>`;
 }
 
 // alarmHTML renders the two problems that genuinely mean "you see no live
@@ -453,7 +453,7 @@ export function fleetMenuHTML(entries, open) {
     : "";
   return (
     `<div class="fleet-menu">` +
-    `<button type="button" class="fleet-menu-button" data-fleet-menu="toggle" aria-haspopup="true" aria-expanded="${open ? "true" : "false"}" aria-label="${escapeHTML(t("fleet_menu"))}">` +
+    `<button type="button" class="btn btn-sm fleet-menu-button" data-fleet-menu="toggle" aria-haspopup="true" aria-expanded="${open ? "true" : "false"}" aria-label="${escapeHTML(t("fleet_menu"))}">` +
     `${fleetIconHTML(FLEET_ICON_SIZE)}<span class="fleet-menu-name">${escapeHTML(name)}</span>` +
     `<svg class="fleet-menu-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 4 L5 7 L8 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>` +
     `</button>${list}</div>`

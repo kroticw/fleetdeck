@@ -100,7 +100,7 @@ test("a hostile label reaches the row only as escaped text, never as markup", ()
 
 test("the edit button carries the session's transcript UUID, not its short id", () => {
   const html = rowHtml({ short: "gg77", name: "n", sessionId: "11111111-1111-1111-1111-111111111111" });
-  assert.match(html, /class="label-edit-btn" data-session-id="11111111-1111-1111-1111-111111111111"/);
+  assert.match(html, /class="btn btn-icon btn-sm label-edit-btn" data-session-id="11111111-1111-1111-1111-111111111111"/);
 });
 
 test("a session with no transcript UUID gets no edit button — there is nothing to write a label against", () => {

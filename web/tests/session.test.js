@@ -1199,7 +1199,7 @@ test("the panel's terminal is the size remembered for it, and Cmd+- changes that
 // buttons first and close last; only its look changes.
 test("the session head keeps its order: font buttons, name, close", async () => {
   const { root, stop } = await mount();
-  const head = root.querySelector(".s-head").children.map((node) => String(node.className).split(" ")[0]);
+  const head = root.querySelector(".s-head").children.map((node) => String(node.className).split(" ").at(-1));
   assert.deepEqual(head, ["term-font", "s-who", "s-close"]);
   stop();
 });

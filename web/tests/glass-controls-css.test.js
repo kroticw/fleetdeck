@@ -47,12 +47,10 @@ const OPAQUE_ORCHESTRATOR = ':root[data-surface="orchestrator"][data-glass="opaq
 const OPAQUE_BOARD = ':root[data-surface="board"][data-glass="opaque"]';
 
 // class: the control's class; control: the selector the capsule rules use.
-const ISLAND_CONTROLS = [
-  { class: ".o-name-edit", control: ".o-name-edit" },
-  { class: ".o-pick-select", control: ".o-pick-select" },
-  { class: ".col-size-btn", control: ".col-size-btn:not(.col-size-unfold):not(.col-size-fold)" },
-  { class: ".fleet-menu-button", control: ".fleet-menu-button" },
-];
+// The head's buttons (the edit pencil, the font buttons, the fleet menu) are
+// .btn capsules in every surface and in a browser tab alike:
+// web/tests/buttons-css.test.js holds them.
+const ISLAND_CONTROLS = [{ class: ".o-pick-select", control: ".o-pick-select" }];
 const FORM_CONTROLS = [".newcard-title", ".newcard-zone", ".newcard-create", ".newcard-cancel"].map((c) => ({ class: c, control: c }));
 const CONTROLS = [
   ...ISLAND_CONTROLS.map((c) => ({ surface: ORCHESTRATOR, opaque: OPAQUE_ORCHESTRATOR, ...c })),
@@ -174,8 +172,8 @@ test("a disabled capsule is dimmed and not lit under the pointer", () => {
 // Review of #185: the button's accent edge while its list is open went with its
 // border.
 test("the fleet menu's button keeps an accent edge while its list is open", () => {
-  assert.match(ruleBody(`${ORCHESTRATOR} .fleet-menu-button[aria-expanded="true"]`), /box-shadow:\s*inset 0 0 0 1px var\(--accent\)/);
-  assert.match(ruleBody(`${OPAQUE_ORCHESTRATOR} .fleet-menu-button[aria-expanded="true"]`), /box-shadow:\s*inset 0 0 0 1px var\(--accent\)/);
+  assert.match(ruleBody('.fleet-menu-button[aria-expanded="true"]'), /box-shadow:\s*inset 0 0 0 1px var\(--accent\)/);
+  assert.match(ruleBody(':root[data-glass="opaque"] .fleet-menu-button[aria-expanded="true"]'), /box-shadow:\s*inset 0 0 0 1px var\(--accent\)/);
 });
 
 // Run 34949576998 (#185): on the orchestrator island, 313 px wide, the fleet
@@ -230,8 +228,9 @@ test("every theme states the glass capsule's tokens", () => {
   }
 });
 
-// A browser tab has no data-surface: its controls keep the look they had.
-test("a browser tab's controls are not capsules of glass", () => {
+// A browser tab has no data-surface: its fields keep the look they had. Its
+// buttons do not: a .btn is the same capsule wherever it is drawn.
+test("a browser tab's fields are not capsules of glass", () => {
   const names = [...CONTROLS.map((c) => c.class), ".newcard", ".fleet-menu-list"];
   for (const { selector, body } of rules()) {
     if (selector.includes("data-surface")) continue;

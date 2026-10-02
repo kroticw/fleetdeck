@@ -41,7 +41,7 @@ export function buildFontControls({ onStep, buttonClass }) {
 
   const button = (className, text, label, step) => {
     const b = document.createElement("button");
-    b.className = `${buttonClass} ${className}`;
+    b.className = `btn btn-sm ${buttonClass} ${className}`;
     b.setAttribute("type", "button");
     b.setAttribute("aria-label", label);
     b.setAttribute("title", label);

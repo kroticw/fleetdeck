@@ -326,8 +326,9 @@ test("the font buttons never grow their row, go away with a folded column, and l
   }
   assert.match(body("\\.term-font"), /flex:\s*none/, ".term-font shrinks or wraps inside its row");
   assert.match(body('\\.col\\[data-folded="1"\\] \\.term-font'), /display:\s*none/, "a folded column still shows its font buttons");
-  assert.match(body("\\.session-panel \\.s-font-btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off in the session panel looks on");
-  assert.match(body("\\.col-size-btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off in the column looks on");
+  // Every font button is a .btn (web/js/fontcontrols.js), in the column and in
+  // the session panel alike.
+  assert.match(body("\\.btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off looks on");
   // Found live: in a narrow centre the header with the buttons was wider than
   // the panel, the centre scrolled sideways and the close button went off the
   // edge. The header is a size container and gives the buttons up below the
@@ -452,28 +453,16 @@ test("the workspace row's buttons are drawn, at the field's size, with the accen
   assert.notEqual(choose, "", ".setup-choose has no rule in web/app.css, so the browser draws it and nobody can find it");
   assert.notEqual(create, "", ".setup-create has no rule in web/app.css, so the browser draws it");
 
-  // Drawn as a button: an edge, a surface of its own and a pointer that agrees
-  // it is one. Without the border it is a word on the page background.
-  assert.match(choose, /border:\s*1px solid var\(--border-strong\)/, "the choose button has no edge, so it reads as a label beside the field");
-  assert.match(choose, /background:\s*var\(--/, "the choose button has no surface of its own");
-  assert.match(choose, /cursor:\s*pointer/, "the choose button does not say it can be pressed");
-
-  // At the field's size, both of them. The field is font: inherit with a 4px
-  // vertical padding; a button that names a smaller --fs-* step comes out
-  // shorter than what it stands beside, which is the complaint this fixes.
+  // Drawn as a button, and at the field's size: both are .btn (web/js/setup.js),
+  // and the page they stand on asks the scale for its large step, a form
+  // field's height and type. Which one wears the accent is setup.js's to say,
+  // and web/tests/setup.test.js holds it to one.
+  assert.match(declarations(".setup"), /--btn-height:\s*var\(--btn-h-lg\)/, "the setup page's buttons are not at the field's height");
+  assert.match(declarations(".setup"), /--btn-font:\s*var\(--fs-sm\)/, "the setup page's buttons shrink their type below the field");
   for (const [name, rules] of [["choose", choose], ["create", create]]) {
-    assert.match(rules, /font:\s*inherit/, `the ${name} button does not take the row's own type size`);
-    assert.doesNotMatch(rules, /font-size:/, `the ${name} button shrinks its type below the field it stands beside`);
-    assert.match(rules, /padding:\s*4px 12px/, `the ${name} button is not at the field's height`);
+    assert.doesNotMatch(rules, /font-size:|padding:|background:/, `the ${name} button draws itself past the button system`);
     assert.match(rules, /flex:\s*none/, `the ${name} button can be squeezed by the field beside it`);
   }
-
-  // One accent in the row, on the button that writes. Two accents beside each
-  // other say the two actions weigh the same, and they do not: choosing a
-  // folder is reversible, creating the workspace is not.
-  assert.match(create, /background:\s*var\(--accent\)/, "the button that writes does not carry the accent");
-  assert.match(create, /border:\s*1px solid var\(--accent-strong\)/, "the button that writes has no accent edge");
-  assert.doesNotMatch(choose, /background:\s*var\(--accent/, "the choose button wears the accent that belongs to the button that writes");
 });
 
 // The declarations of the rule whose selector list contains selector.
