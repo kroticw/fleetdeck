@@ -186,6 +186,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/hostroutes.js":     true,
 		"js/capsules.js":       true,
 		"js/topband.js":        true,
+		"js/windowdrag.js":     true,
 		"js/standreport.js":    true,
 		"js/standoverflow.js":  true,
 		"js/standheader.js":    true,

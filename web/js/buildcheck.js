@@ -248,8 +248,9 @@ export function brandHTML(build) {
   if (build?.executable) lines.push(`${t("build_executable")}: ${build.executable}`);
 
   const title = lines.length ? ` title="${escape(lines.join("\n"))}"` : "";
-  const rev = label ? ` <span class="build-rev">${escape(label + mark)}</span>` : "";
-  return `<div class="brand"${title}>fleetdeck${rev}</div>`;
+  const rev = label ? ` <span class="build-rev" data-window-ground>${escape(label + mark)}</span>` : "";
+  // Ground: the brand is the window's name, dragged by as a title is (windowdrag.js).
+  return `<div class="brand" data-window-ground${title}>fleetdeck${rev}</div>`;
 }
 
 // Wires the banner to a root element and the store. Kept apart from the

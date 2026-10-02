@@ -77,6 +77,12 @@ func (f *frame) panelContent(side string) unsafe.Pointer {
 // points tall across the window; 0 is none.
 func (f *frame) setDragBand(height float64) { C.fd_frame_set_drag_band(f.p, C.double(height)) }
 
+// press is a press with clicks clicks on a surface's header, on its ground, as
+// the surface's page reports it (windowDragBindingName): the window is dragged
+// by it as by the band, or, on two clicks, does what the system's double click
+// on a title bar does.
+func (f *frame) press(clicks int) { C.fd_frame_press(f.p, C.long(clicks)) }
+
 // titlebarInset is where the title bar's zoom button ends, in points from the
 // window's left edge; 0 when there is none (titlebar.go).
 func (f *frame) titlebarInset() float64 { return float64(C.fd_frame_titlebar_inset(f.p)) }
@@ -344,6 +350,44 @@ func probeBandForTest(g geometry) bandProbe {
 	out.bandAboveAShortBand = within(boardX, 10, band)
 	f.setDragBand(0)
 	out.boardWithNoBand = within(boardX, 10, f.board())
+	return out
+}
+
+// pagePressProbe is what a press a surface's page reports asks of the window
+// (frame.press): counts of drag, zoom, fill, minimize.
+type pagePressProbe struct {
+	// One click while the button is down, and one click after it came up.
+	press, released [4]int
+	doubleClick     map[string][4]int
+	fullScreen      [4]int
+}
+
+func probePagePressForTest() pagePressProbe {
+	out := pagePressProbe{doubleClick: map[string][4]int{}}
+	window := C.fd_test_counting_window(1512, 982)
+	f := installFrame(window)
+	const leftDown, leftUp = 1, 2
+	C.fd_test_reset_window_calls()
+	C.fd_test_frame_press(f.p, leftDown, 1)
+	out.press = windowCalls()
+	C.fd_test_reset_window_calls()
+	C.fd_test_frame_press(f.p, leftUp, 1)
+	out.released = windowCalls()
+	for _, action := range []string{"Maximize", "Fill", "Minimize", "None"} {
+		setting := C.CString(action)
+		C.fd_test_set_double_click_action(setting)
+		C.fd_test_reset_window_calls()
+		C.fd_test_frame_press(f.p, leftDown, 2)
+		out.doubleClick[action] = windowCalls()
+		C.fd_test_set_double_click_action(nil)
+		C.free(unsafe.Pointer(setting))
+	}
+	C.fd_test_set_full_screen(1)
+	C.fd_test_reset_window_calls()
+	C.fd_test_frame_press(f.p, leftDown, 1)
+	C.fd_test_frame_press(f.p, leftDown, 2)
+	out.fullScreen = windowCalls()
+	C.fd_test_set_full_screen(0)
 	return out
 }
 

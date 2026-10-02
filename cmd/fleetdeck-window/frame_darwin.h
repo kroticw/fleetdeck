@@ -36,6 +36,12 @@ void *fd_frame_board(void *frame);
 // capsules and the width strips. 0 takes it away.
 void fd_frame_set_drag_band(void *frame, double height);
 
+// fd_frame_press is a press with clickCount clicks on a surface's header, on its
+// ground, as the surface's page reports it (web/js/windowdrag.js): the surface
+// stands over the band, so the press never reaches it. It does what a press on
+// the band does, with the app's current event -- the press the web view took.
+void fd_frame_press(void *frame, long clickCount);
+
 // fd_frame_board_observed says whether fd_frame_install set the navigation
 // delegate on the board (fleetdeck_observe_navigation): 0 when the window's
 // content view was not a WKWebView.
@@ -111,6 +117,9 @@ void fd_test_set_double_click_action(const char *action);
 int fd_test_has_fill(void);
 void *fd_test_band(void *frame);
 void fd_test_press_band(void *frame, long clickCount);
+// fd_frame_press with a mouse event of eventType (1 left down, 2 left up, 6 left
+// dragged) as the app's current event.
+void fd_test_frame_press(void *frame, long eventType, long clickCount);
 void *fd_test_add_subview(void *parent, fd_rect r);
 
 #endif

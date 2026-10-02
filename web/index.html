@@ -10,7 +10,9 @@
 <body>
   <!-- Filled by js/buildcheck.js when the panel under this page has changed. -->
   <div id="build-banner" role="status" hidden></div>
-  <header id="header"></header>
+  <!-- data-window-ground: in the fleetdeck window a side surface's header is
+       the window's title bar, dragged by wherever no control is (js/windowdrag.js). -->
+  <header id="header" data-window-ground></header>
   <main>
     <section id="orchestrator" class="col col-orchestrator"></section>
     <!-- data-window-ground: the page's ground, not something to click or read;

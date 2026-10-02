@@ -10,9 +10,12 @@ var bandResult bandProbe
 
 var bandStates []bandStateProbe
 
+var pagePressResult pagePressProbe
+
 func collectBandResults() {
 	bandResult = probeBandForTest(frameGeometry)
 	bandStates = probeBandStatesForTest()
+	pagePressResult = probePagePressForTest()
 }
 
 const (
@@ -109,6 +112,36 @@ func TestADoubleClickOnTheBandDoesWhatTheSystemSettingSays(t *testing.T) {
 func TestTheBandDoesNothingInFullScreen(t *testing.T) {
 	if bandResult.fullScreen != [4]int{} {
 		t.Fatalf("in full screen a press and a double click asked for %v (drag, zoom, fill, minimize), want nothing", bandResult.fullScreen)
+	}
+}
+
+// A side surface's header is the page's title bar: its web view stands over the
+// band and takes every press there, so the page reports a press on the header's
+// ground (web/js/windowdrag.js), and the window does with it what it does with
+// one on the band. Without this the window is moved only by the board's top
+// between the panels, never by the header row over either panel.
+func TestAPressAPageReportsOnItsHeaderIsAPressOnTheBand(t *testing.T) {
+	r := pagePressResult
+	if r.press != [4]int{drag: 1} {
+		t.Fatalf("a press the page reports asked the window for %v (drag, zoom, fill, minimize), want one drag", r.press)
+	}
+	// The page's word comes after the event: reported once the button is up,
+	// there is nothing left to drag by.
+	if r.released != [4]int{} {
+		t.Fatalf("a press reported after the button came up asked for %v (drag, zoom, fill, minimize), want nothing", r.released)
+	}
+	fills := [4]int{zoom: 1}
+	if bandResult.hasFill {
+		fills = [4]int{fill: 1}
+	}
+	want := map[string][4]int{"Maximize": {zoom: 1}, "Fill": fills, "Minimize": {minimize: 1}, "None": {}}
+	for action, calls := range want {
+		if got := r.doubleClick[action]; got != calls {
+			t.Errorf("setting %q: two clicks the page reports asked for %v (drag, zoom, fill, minimize), want %v", action, got, calls)
+		}
+	}
+	if r.fullScreen != [4]int{} {
+		t.Fatalf("in full screen the page's presses asked for %v (drag, zoom, fill, minimize), want nothing", r.fullScreen)
 	}
 }
 

@@ -8,6 +8,7 @@ import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
 import { isWaiting, isWaitingUnknown, isNeedsStalled, isFlagOnlyStalled } from "./needs.js";
 import { UPDATE_BINDING, KNOWN_BINDING, PROGRESS_FUNCTION, UPDATE_REPAINT_MS, initialState, onPress, onProgress, updateHTML } from "./update.js";
+import { WINDOW_DRAG_BINDING, titleBarPress } from "./windowdrag.js";
 
 // The icon beside the fleet's name in the header: small enough to sit in a
 // row of controls, large enough to be the application's mark rather than a
@@ -604,6 +605,9 @@ export function renderHeader(
       }, () => {});
     }
   }
+
+  // In the fleetdeck window the header is the title bar (web/js/windowdrag.js).
+  root.addEventListener("mousedown", (event) => titleBarPress(event, window[WINDOW_DRAG_BINDING]));
 
   root.addEventListener("click", (event) => {
     if (hostUpdate && event.target.closest(".update-button")) {

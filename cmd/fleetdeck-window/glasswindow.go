@@ -97,6 +97,17 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 		g.later(g.ctl.topBand(height))
 		return nil, nil
 	})
+	// A press on a surface's header, on its ground: the title bar there
+	// (web/js/windowdrag.js). Straight to the frame, on the main thread, while
+	// the app still holds the press as its current event.
+	g.bind(windowDragBindingName, func(_ string, args json.RawMessage) (any, error) {
+		var clicks int
+		if err := json.Unmarshal(args, &clicks); err != nil {
+			return nil, err
+		}
+		g.w.Dispatch(func() { g.frame.press(clicks) })
+		return nil, nil
+	})
 	g.bind("fleetdeckOpen", func(_ string, args json.RawMessage) (any, error) {
 		var open struct {
 			Kind  string `json:"kind"`

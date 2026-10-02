@@ -14,6 +14,11 @@ import (
 // is dragged by.
 const topBandBindingName = "fleetdeckTopBand"
 
+// windowDragBindingName is how a side surface's page reports a press on its
+// header's ground (web/js/windowdrag.js), with the number of clicks: the header
+// is the window's title bar there, and the surface stands over the band.
+const windowDragBindingName = "fleetdeckWindowDrag"
+
 // topBandScript is web/js/topband.js as a user script for every page the
 // board's web view shows -- the board, the start page, the window's own pages
 // -- telling the window through topBandBindingName. A user script is not a

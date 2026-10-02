@@ -201,27 +201,37 @@ static int respondsTo(id obj, const char *selector) {
   return ((signed char (*)(id, SEL, SEL))objc_msgSend)(obj, sel("respondsToSelector:"), sel(selector)) != 0;
 }
 
-static void bandDown(id self, SEL _cmd, id event) {
-  (void)_cmd;
-  id window = send0(self, sel("window"));
+// titleBarPress is a press with clickCount clicks where the window is dragged
+// by: on the band, or on a surface's header as its page reports it
+// (fd_frame_press). event is the mouse event the press is; a drag needs the
+// button still down, and a page's word may arrive after it came up.
+static void titleBarPress(id window, id event, long clickCount) {
   if (!window) return;
   // Entering or leaving full screen, before the controller hears of it and
   // takes the band away: nothing to move, and a zoom would fight the system's.
   if (((unsigned long)sendLong0(window, sel("styleMask")) & (1UL << 14)) != 0) return;
-  if (sendLong0(event, sel("clickCount")) != 2) {
+  if (clickCount != 2) {
+    if (!event) return;
+    long type = sendLong0(event, sel("type"));
+    if (type != 1 && type != 6) return;  // left mouse down, left mouse dragged
     sendVoid1(window, sel("performWindowDragWithEvent:"), event);
     return;
   }
   const char *action = doubleClickAction();
   if (strcmp(action, "None") == 0) return;
   if (strcmp(action, "Minimize") == 0) {
-    sendVoid1(window, sel("miniaturize:"), self);
+    sendVoid1(window, sel("miniaturize:"), window);
   } else if (strcmp(action, "Fill") == 0 && respondsTo(window, "_zoomFill:")) {
     // What the Window menu's Fill sends; there is no public name for it.
-    sendVoid1(window, sel("_zoomFill:"), self);
+    sendVoid1(window, sel("_zoomFill:"), window);
   } else {
-    sendVoid1(window, sel("zoom:"), self);
+    sendVoid1(window, sel("zoom:"), window);
   }
+}
+
+static void bandDown(id self, SEL _cmd, id event) {
+  (void)_cmd;
+  titleBarPress(send0(self, sel("window")), event, sendLong0(event, sel("clickCount")));
 }
 
 // A press on the top of an inactive window drags it at once, as its title bar
@@ -411,6 +421,15 @@ void fd_frame_set_drag_band(void *frame, double height) {
   double width = sendRect0(f->root, sel("bounds")).size.width;
   sendVoidRect(f->band, sel("setFrame:"), CGRectMake(0, 0, width, height > 0 ? height : 0));
   sendVoidBool(f->band, sel("setHidden:"), !(height > 0));
+}
+
+void fd_frame_press(void *frame, long clickCount) {
+  struct fd_frame *f = frame;
+  // The page's word comes over its message handler, on the main thread, while
+  // the app still holds the press as its current event: the one the surface's
+  // web view took, which never reached the band.
+  id event = send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("currentEvent"));
+  titleBarPress(f->window, event, clickCount);
 }
 
 void *fd_frame_board(void *frame) { return ((struct fd_frame *)frame)->board; }
@@ -626,22 +645,37 @@ void fd_test_set_double_click_action(const char *action) { doubleClickOverride =
 int fd_test_has_fill(void) { return class_getInstanceMethod((Class)objc_getClass("NSWindow"), sel("_zoomFill:")) != NULL; }
 void *fd_test_band(void *frame) { return ((struct fd_frame *)frame)->band; }
 
+// A mouse event of type at inRoot, a point in the frame's root, as AppKit makes
+// one.
+static id testMouseEvent(struct fd_frame *f, long type, CGPoint inRoot, long clickCount) {
+  CGPoint inWindow = ((CGPoint (*)(id, SEL, CGPoint, id))objc_msgSend)(f->root, sel("convertPoint:toView:"), inRoot, (id)0);
+  id window = send0(f->root, sel("window"));
+  return ((id (*)(id, SEL, unsigned long, CGPoint, unsigned long, double, long, id, long, long, float))objc_msgSend)(
+      cls("NSEvent"), sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
+      (unsigned long)type, inWindow, 0, 0, sendLong0(window, sel("windowNumber")), (id)0, 0, clickCount, 1.0f);
+}
+
 // A press with clickCount clicks at the middle of the band, sent as AppKit sends
 // one: to the view a hit test at that point finds.
 void fd_test_press_band(void *frame, long clickCount) {
   struct fd_frame *f = frame;
   CGRect b = sendRect0(f->band, sel("frame"));
   CGPoint inRoot = CGPointMake(b.size.width / 2, b.size.height / 2);
-  CGPoint inWindow = ((CGPoint (*)(id, SEL, CGPoint, id))objc_msgSend)(f->root, sel("convertPoint:toView:"), inRoot, (id)0);
-  id window = send0(f->root, sel("window"));
-  id event = ((id (*)(id, SEL, unsigned long, CGPoint, unsigned long, double, long, id, long, long, float))objc_msgSend)(
-      cls("NSEvent"), sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
-      1, inWindow, 0, 0, sendLong0(window, sel("windowNumber")), (id)0, 0, clickCount, 1.0f);
+  id event = testMouseEvent(f, 1, inRoot, clickCount);
   id superview = send0(f->root, sel("superview"));
   CGPoint p = superview ? ((CGPoint (*)(id, SEL, CGPoint, id))objc_msgSend)(f->root, sel("convertPoint:toView:"), inRoot, superview)
                         : inRoot;
   id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(f->root, sel("hitTest:"), p);
   if (hit) sendVoid1(hit, sel("mouseDown:"), event);
+}
+
+// A press a surface's page reports, with clickCount clicks, while the app holds
+// a mouse event of eventType at the top of the orchestrator panel: what
+// fd_frame_press does with the app's current event.
+void fd_test_frame_press(void *frame, long eventType, long clickCount) {
+  struct fd_frame *f = frame;
+  id event = testMouseEvent(f, eventType, CGPointMake(200, 26), clickCount);
+  titleBarPress(f->window, event, clickCount);
 }
 
 // A plain view put into parent at r, standing in for what a surface or a
