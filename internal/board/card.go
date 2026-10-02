@@ -53,12 +53,16 @@ type Card struct {
 	// back to the same file. It is empty for a card written around that
 	// script, which is a card with no number rather than a broken one —
 	// see ParseCard.
-	ID         string   `json:"id"`
-	Zone       string   `json:"zone"`
-	Stage      string   `json:"stage"`
-	Progress   int      `json:"progress"`
-	Session    string   `json:"session"`
-	Repo       string   `json:"repo"`
+	ID       string `json:"id"`
+	Zone     string `json:"zone"`
+	Stage    string `json:"stage"`
+	Progress int    `json:"progress"`
+	Session  string `json:"session"`
+	Repo     string `json:"repo"`
+	// Worktree is the working tree the agent keeping the card said it works
+	// in. The review's diff is read there; the agent writes it, the panel
+	// never does.
+	Worktree   string   `json:"worktree"`
 	Created    string   `json:"created"`
 	Title      string   `json:"title"`
 	Body       string   `json:"body"`
@@ -73,6 +77,7 @@ type frontmatter struct {
 	Progress int    `yaml:"progress"`
 	Session  string `yaml:"session"`
 	Repo     string `yaml:"repo"`
+	Worktree string `yaml:"worktree"`
 	Created  string `yaml:"created"`
 }
 
@@ -96,6 +101,7 @@ func ParseCard(path string) (Card, error) {
 	}
 	c.ID, c.Zone, c.Stage, c.Progress = fm.ID, fm.Zone, fm.Stage, fm.Progress
 	c.Session, c.Repo, c.Created = fm.Session, fm.Repo, fm.Created
+	c.Worktree = fm.Worktree
 	c.Body = string(raw[len(m[0]):])
 
 	// Title and links are pulled from the body with fenced code regions

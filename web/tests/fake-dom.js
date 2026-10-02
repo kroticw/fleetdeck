@@ -38,15 +38,11 @@ function nodeList(found) {
   return list;
 }
 
-function matchesSelector(node, selector) {
-  // A comma is a list of selectors, and a node matches if it matches any of
-  // them — the panel asks for its scrolling boxes as ".md-table, pre", one
-  // query for two kinds of box.
-  if (selector.includes(",")) {
-    return selector.split(",").some((one) => matchesSelector(node, one));
-  }
-  const parts = SELECTOR.exec(selector.trim());
-  if (!parts) throw new Error(`fake-dom: unsupported selector ${selector}`);
+// Matches one compound selector (no combinator) against one node: an optional
+// tag, an optional class, an optional attribute.
+function matchesCompound(node, compound) {
+  const parts = SELECTOR.exec(compound.trim());
+  if (!parts) throw new Error(`fake-dom: unsupported selector ${compound}`);
   const [, tag, className, attribute, quoted, bare] = parts;
   const attributeValue = quoted ?? bare;
   if (tag && node.tagName !== tag.toUpperCase()) return false;
@@ -58,6 +54,36 @@ function matchesSelector(node, selector) {
     if (attributeValue !== undefined && String(held) !== attributeValue) return false;
   }
   return true;
+}
+
+function matchesSelector(node, selector) {
+  // A comma is a list of selectors, and a node matches if it matches any of
+  // them — the panel asks for its scrolling boxes as ".md-table, pre", one
+  // query for two kinds of box.
+  if (selector.includes(",")) {
+    return selector.split(",").some((one) => matchesSelector(node, one));
+  }
+  const trimmed = selector.trim();
+  // A plain descendant combinator — "A B", any number of space-separated
+  // compounds — the review overlay asks for the "+" button of one specific
+  // line as '[data-new-line="2"] .review-line-add', since the line's own row
+  // and its button can share a class. ":scope > x" keeps the separate
+  // handling querySelectorAll already gives it below, for the board's direct
+  // children.
+  if (!trimmed.startsWith(":scope")) {
+    const parts = trimmed.split(/\s+/);
+    if (parts.length > 1) {
+      if (!matchesCompound(node, parts[parts.length - 1])) return false;
+      let ancestor = node.parentNode;
+      let next = parts.length - 2;
+      while (next >= 0 && ancestor) {
+        if (matchesCompound(ancestor, parts[next])) next -= 1;
+        ancestor = ancestor.parentNode;
+      }
+      return next < 0;
+    }
+  }
+  return matchesCompound(node, trimmed);
 }
 
 class FakeEvent {
@@ -262,6 +288,16 @@ class FakeNode {
 
   get firstChild() {
     return this.children[0] ?? null;
+  }
+
+  // after places siblings right after this node — the review overlay opens its
+  // comment form under the line it was asked for, rather than inside it.
+  after(...nodes) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const at = parent.children.indexOf(this);
+    for (const node of nodes) node.parentNode = parent;
+    parent.children.splice(at + 1, 0, ...nodes);
   }
 
   // insertBefore and remove exist because a column that updates in place has to

@@ -5,6 +5,7 @@ import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
+import { createReviewPanel } from "./review.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
 import { createBoardMove } from "./boardmove.js";
@@ -104,6 +105,10 @@ const cardPanel = center
         cardPanel.close();
         reader.open(path);
       },
+      onOpenReview: (path) => {
+        cardPanel.close();
+        reviewPanel.open(path);
+      },
       // A document the orchestrator wrote, or one whose session is gone, sends
       // to the orchestrator's own terminal (web/js/carddock.js): through the
       // window in the fleetdeck window, in the page in a browser tab.
@@ -120,10 +125,14 @@ const reader = center
   ? createReader(document.getElementById("reader-panel"), {
       onOpenCard: (path) => {
         reader.close();
+        reviewPanel.close();
         cardPanel.open(path);
       },
     })
   : noOverlay;
+// The review overlay: a third overlay over the same column as the card panel
+// and the reader, so only one of the three may be up at a time.
+const reviewPanel = center ? createReviewPanel(document.getElementById("review-panel")) : noOverlay;
 
 // Exactly one session panel at a time, and its stop function held here.
 //
@@ -154,6 +163,7 @@ const terminalLinks = {
   open: (path) => {
     closeSession();
     reader.close();
+    reviewPanel.close();
     cardPanel.open(path);
   },
 };
@@ -165,6 +175,7 @@ function openSession(short) {
   // be up, or they cover each other in whichever order they happened to open.
   cardPanel.close();
   reader.close();
+  reviewPanel.close();
   // A card in the session's history opens the way a [[link]] in its terminal
   // does: the session panel goes, the card panel comes up.
   stopSession = renderSession(sessionPanel, short, closeSession, { links: terminalLinks, onOpenCard: terminalLinks.open });

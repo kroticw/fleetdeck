@@ -279,6 +279,56 @@ export async function fetchSessionCards(short) {
   return Array.isArray(cards) ? cards : [];
 }
 
+// The local-review routes (internal/server/review.go). A GET carries no
+// body; fetch sends none when body is undefined, which is what a GET's own
+// call below leaves it as.
+async function reviewCall(method, path, body) {
+  const response = await fetch(inFleet(path), {
+    method,
+    headers: JSON_HEADERS,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) throw await refusal(response);
+  return readJSON(response);
+}
+
+// fetchReview reads one card's review: its diff against the base it branched
+// from, the comments left on it, and the agent's replies (internal/review.View).
+export function fetchReview(card) {
+  return reviewCall("GET", `/api/review?card=${encodeURIComponent(card)}`);
+}
+
+// addReviewComment leaves a comment on one line. anchor is {commit, path,
+// side, start, end}: where the operator pointed. The text under it is read by
+// the server from the commit, never sent from here — a comment cannot claim
+// code it does not actually sit on.
+export function addReviewComment(card, rev, anchor, body, replyTo = "") {
+  return reviewCall("POST", "/api/review/comments", { card, rev, ...anchor, body, replyTo });
+}
+
+export function editReviewComment(card, rev, id, body) {
+  return reviewCall("PATCH", "/api/review/comments", { card, rev, id, body });
+}
+
+export function deleteReviewComment(card, rev, id) {
+  const q = new URLSearchParams({ card, id, rev: String(rev) });
+  return reviewCall("DELETE", `/api/review/comments?${q}`);
+}
+
+export function resolveReviewComment(card, rev, id, resolved) {
+  return reviewCall("POST", "/api/review/resolve", { card, rev, id, resolved });
+}
+
+// sendReviewRound hands every draft comment to the session as one round.
+export function sendReviewRound(card, rev) {
+  return reviewCall("POST", "/api/review/send", { card, rev });
+}
+
+// notifyReviewRound tells the session about an already sent round once more.
+export function notifyReviewRound(card, rev, round) {
+  return reviewCall("POST", "/api/review/notify", { card, rev, round });
+}
+
 // fetchTerminalToken reads the token a terminal socket must send as its first
 // message (internal/server/pty.go, authenticateTerminal).
 //

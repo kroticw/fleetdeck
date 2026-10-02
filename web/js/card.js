@@ -87,6 +87,7 @@ export function renderCard(root, path, onClose, options = {}) {
   const subscribe = options.subscribe ?? storeSubscribe;
   const onOpenSession = options.onOpenSession ?? null;
   const onOpenDoc = options.onOpenDoc ?? null;
+  const onOpenReview = options.onOpenReview ?? null;
   const listDocs = options.listDocs ?? serverDocs;
   const fetchBody = options.fetchDoc ?? serverDoc;
 
@@ -420,6 +421,14 @@ export function renderCard(root, path, onClose, options = {}) {
         meta.append(link);
       } else {
         meta.append(el("span", "card-session", card.session));
+      }
+      // Offered for a session that is gone too, unlike the jump beside it: a
+      // review reads the working tree, not a terminal.
+      if (onOpenReview && card.id) {
+        const open = el("button", "card-review-link", t("review_open"));
+        open.setAttribute("type", "button");
+        open.addEventListener("click", () => onOpenReview(current));
+        meta.append(open);
       }
     }
     if (orphan) {

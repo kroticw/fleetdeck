@@ -71,7 +71,9 @@ func TestCreateMakesAnEmptyBoardFromTheTemplateAndADocsDirectory(t *testing.T) {
 		"scripts/test_link_docs.py",
 		"scripts/test_new_card.py",
 		"scripts/test_validate_cards.py",
+		"scripts/test_validate_review.py",
 		"scripts/validate_cards.py",
+		"scripts/validate_review.py",
 	}
 	if got := files(t, res.Board); !slices.Equal(got, want) {
 		t.Fatalf("board files:\n got  %v\n want %v", got, want)

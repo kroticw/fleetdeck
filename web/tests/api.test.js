@@ -5,7 +5,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setCardField, resumeSession, fetchSessionCards, fetchTerminalToken, createCard, pickDirectory, attachmentURL, setOrchestratorSession, startWork } from "../js/api.js";
+import { setCardField, resumeSession, fetchSessionCards, fetchTerminalToken, createCard, pickDirectory, attachmentURL, setOrchestratorSession, startWork, notifyReviewRound } from "../js/api.js";
 import { langCode } from "../js/i18n.js";
 
 let calls = [];
@@ -389,4 +389,19 @@ test("without a fleet in the address the writes go where they always did", async
   await createCard("A task", "planned");
   await setOrchestratorSession("cafe0001");
   assert.deepEqual(calls.map((c) => c.url), ["/api/cards", "/api/config"]);
+});
+
+test("a round is resent in the tab's fleet, naming the round", async () => {
+  globalThis.location = { search: "?fleet=B" };
+  try {
+    stubFetch(answer({ status: 200, body: { round: 2, delivery: "" } }));
+    const got = await notifyReviewRound("/b/cards/T-057.md", 4, 2);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "/api/review/notify?fleet=B");
+    assert.equal(calls[0].init.method, "POST");
+    assert.deepEqual(JSON.parse(calls[0].init.body), { card: "/b/cards/T-057.md", rev: 4, round: 2 });
+    assert.equal(got.round, 2);
+  } finally {
+    delete globalThis.location;
+  }
 });

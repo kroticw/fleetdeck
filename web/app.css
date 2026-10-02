@@ -1241,7 +1241,8 @@ main {
 }
 
 #card-panel,
-#reader-panel {
+#reader-panel,
+#review-panel {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -1252,7 +1253,8 @@ main {
 }
 
 .card-head,
-.reader-head {
+.reader-head,
+.review-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -1260,19 +1262,22 @@ main {
 }
 
 .card-title,
-.reader-title {
+.reader-title,
+.review-title {
   margin: 0;
   font-size: var(--fs-md);
 }
 
 .card-close,
-.reader-close {
+.reader-close,
+.review-close {
   flex: none;
   color: var(--text-muted);
 }
 
 .card-close:hover,
-.reader-close:hover {
+.reader-close:hover,
+.review-close:hover {
   color: var(--text);
 }
 
@@ -1967,6 +1972,275 @@ main {
 .reader-error {
   color: var(--danger);
   overflow-wrap: anywhere;
+}
+
+/* Review overlay (web/js/review.js)
+ *
+ * An overlay over the centre column, sharing #card-panel's rules above, for
+ * the same reason .reader-body does: a diff opened from a card is read over
+ * the board it came from.
+ *
+ * Unlike the reader's body, .review-body carries no reading width: a diff's
+ * lines are code, not prose, and a line clipped short would hide the part of
+ * it a comment is about.
+ */
+.review-status {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.review-base {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin: 0 0 var(--gap);
+}
+
+.review-uncommitted {
+  margin-bottom: var(--gap);
+  font-size: var(--fs-sm);
+}
+
+.review-uncommitted-title {
+  color: var(--text-muted);
+  margin: 0 0 4px;
+}
+
+.review-uncommitted-path {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.review-file {
+  margin-bottom: var(--gap-lg);
+}
+
+.review-file-name {
+  font-size: var(--fs-sm);
+  margin: 0 0 4px;
+}
+
+.review-file-note {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.review-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-sm);
+  white-space: pre;
+}
+
+.review-line-add {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.review-line-del {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.review-line-old,
+.review-line-new {
+  flex: none;
+  width: 3ch;
+  text-align: right;
+  color: var(--text-faint);
+}
+
+.review-line-text {
+  overflow-wrap: anywhere;
+}
+
+/* The button that opens a comment form on a line. Off to the side of the
+ * line's own text so a click never lands on the code instead.
+ */
+button.review-line-add {
+  flex: none;
+  width: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.review-line-comments {
+  margin: 0 0 var(--gap-sm);
+}
+
+.review-comment {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm) var(--gap);
+  margin: 4px 0;
+  font-size: var(--fs-sm);
+}
+
+/* A comment whose line is no longer today's — see the state words in
+ * web/js/i18n.js. Not --danger: the comment itself is not wrong, only its
+ * place is uncertain, and painting it as a failure would say the wrong thing.
+ */
+.review-comment-changed,
+.review-comment-deleted,
+.review-comment-file_gone,
+.review-comment-unavailable {
+  border-color: color-mix(in srgb, var(--attn) 45%, var(--border-strong));
+}
+
+.review-comment-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  color: var(--text-muted);
+}
+
+.review-comment-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.review-comment-state {
+  color: var(--attn);
+}
+
+.review-comment-resolved {
+  color: var(--ok);
+}
+
+.review-comment-was {
+  overflow: auto;
+  padding: var(--gap-sm);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.review-comment-body {
+  margin: var(--gap-sm) 0;
+  overflow-wrap: anywhere;
+}
+
+.review-reply {
+  border-top: 1px solid var(--border);
+  padding-top: var(--gap-sm);
+  margin-top: var(--gap-sm);
+}
+
+.review-reply-status {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.review-reply-commit {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: var(--gap-sm);
+}
+
+.review-reply-text {
+  overflow-wrap: anywhere;
+}
+
+.review-reply-partial {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.review-comment-actions {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-sm);
+}
+
+.review-comment-action {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.review-detached {
+  margin-bottom: var(--gap-lg);
+}
+
+.review-detached-title,
+.review-unsent-title {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin: 0 0 4px;
+}
+
+.review-detached-where {
+  display: block;
+  margin-top: var(--gap-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-sm);
+}
+
+.review-rounds,
+.review-unsent {
+  margin-bottom: var(--gap-lg);
+  font-size: var(--fs-sm);
+}
+
+.review-round {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+}
+
+.review-round-delivery,
+.review-round-unanswered {
+  color: var(--text-muted);
+}
+
+.review-round-notify {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.review-round-notify:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.review-unsent-text {
+  width: 100%;
+  font: inherit;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.review-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: 4px 0;
+}
+
+.review-form-text {
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.review-send:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* The cards an open document belongs to (web/js/doccards.js), in the reader and
@@ -4514,13 +4788,14 @@ body.is-resizing {
 
 /* Shown from the overlays' own hidden attribute, so no module keeps a second
    piece of state in step with three panels. */
-:root[data-surface="board"] #center:has(#card-panel:not([hidden]), #reader-panel:not([hidden]), #session-panel:not([hidden])) > #sheet-scrim {
+:root[data-surface="board"] #center:has(#card-panel:not([hidden]), #reader-panel:not([hidden]), #session-panel:not([hidden]), #review-panel:not([hidden])) > #sheet-scrim {
   display: block;
 }
 
 :root[data-surface="board"] #card-panel,
 :root[data-surface="board"] #reader-panel,
-:root[data-surface="board"] #session-panel {
+:root[data-surface="board"] #session-panel,
+:root[data-surface="board"] #review-panel {
   position: absolute;
   inset: auto;
   top: calc(var(--host-inset-top, 64px) - 4px);

@@ -197,6 +197,21 @@ func TestMessageIsOneLineNamingTheBrief(t *testing.T) {
 	}
 }
 
+func TestAReviewRoundNamesTheRoundAndBothFiles(t *testing.T) {
+	got := ReviewRound("en", 2, "/b/reviews/T-057/comments.json", "/b/reviews/T-057/replies.md")
+	for _, want := range []string{"round 2", "`/b/reviews/T-057/comments.json`", "`/b/reviews/T-057/replies.md`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("%q lacks %q", got, want)
+		}
+	}
+	if strings.Contains(got, "\n") {
+		t.Fatalf("one line, as every message the panel sends: %q", got)
+	}
+	if ru := ReviewRound("ru", 2, "/c", "/r"); ru == ReviewRound("en", 2, "/c", "/r") || !strings.Contains(ru, "2") {
+		t.Fatalf("the Russian round is its own words: %q", ru)
+	}
+}
+
 // The preview is what the wizard shows before anything is done, and it is
 // built from the same functions the appointment uses: the page cannot promise
 // one message and the panel send another.

@@ -236,6 +236,11 @@ type Deps struct {
 	// the panel did any of this.
 	CleanupSession func(ctx context.Context, a orchestrator.Accepted) (orchestrator.Result, error)
 
+	// ReviewWorkdir is the working tree of the session keeping a card, where
+	// its branch is read for review. Nil is a panel that cannot tell, and the
+	// review routes say so.
+	ReviewWorkdir func(ctx context.Context, c board.Card) (string, error)
+
 	// SessionListed reports whether the daemon lists session as alive right now —
 	// present in its list and not dying. The terminal bridge asks it when a stream
 	// ends with no reason attached, because that alone does not say the session
@@ -294,6 +299,13 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/resume", d.handleResume)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
+	mux.HandleFunc("GET /api/review", d.handleReview)
+	mux.HandleFunc("POST /api/review/comments", d.handleReviewAdd)
+	mux.HandleFunc("PATCH /api/review/comments", d.handleReviewEdit)
+	mux.HandleFunc("DELETE /api/review/comments", d.handleReviewDelete)
+	mux.HandleFunc("POST /api/review/resolve", d.handleReviewResolve)
+	mux.HandleFunc("POST /api/review/send", d.handleReviewSend)
+	mux.HandleFunc("POST /api/review/notify", d.handleReviewNotify)
 	mux.HandleFunc("POST /api/pick-directory", d.handlePickDirectory)
 	mux.HandleFunc("GET /api/attachments", d.handleAttachment)
 	mux.HandleFunc("POST /api/fleets", d.handleCreateFleet)

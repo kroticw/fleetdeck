@@ -690,11 +690,27 @@ test("nothing the card sheet adds is the window's ground, and the width decides 
 test("the board is dimmed under an open sheet and only then", () => {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
   assert.match(ruleBody("#sheet-scrim"), /display:\s*none/, "the scrim shows with nothing open");
-  for (const panel of ["#card-panel", "#reader-panel", "#session-panel"]) {
+  for (const panel of ["#card-panel", "#reader-panel", "#session-panel", "#review-panel"]) {
     assert.match(
       stripped,
       new RegExp(`:root\\[data-surface="board"\\] #center:has\\([^{]*${panel}:not\\(\\[hidden\\]\\)[^{]*\\) > #sheet-scrim\\s*\\{[^}]*display:\\s*block`),
       `${panel} open does not dim the board`,
     );
   }
+});
+
+// Fix round 1, item 4: the review overlay is a fourth sheet over the same
+// column as the card panel, the reader and the session panel, and in the
+// fleetdeck window it needs the same rounded sheet and round close button as
+// the other three — the base rule alone (#card-panel, #reader-panel,
+// #review-panel, further up this file) only covers a browser tab.
+test("the review overlay gets the same window sheet as the card and reader panels", () => {
+  assert.match(
+    ruleBody(':root[data-surface="board"] #review-panel'),
+    /position:\s*absolute/,
+    "#review-panel is not part of the window's sheet position group",
+  );
+  // Every sheet's close button is a .btn .btn-icon (web/js/review.js, card.js,
+  // reader.js), round in a browser tab and in the window alike.
+  assert.match(ruleBody(".btn-icon"), /width:\s*var\(--btn-height\)/, "an icon button is not as wide as it is tall");
 });

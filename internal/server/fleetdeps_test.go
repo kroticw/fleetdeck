@@ -171,6 +171,9 @@ func TestEveryFleetRouteRefusesAnUnknownFleet(t *testing.T) {
 		{http.MethodPatch, "/api/config?fleet=C", `{"orchestratorSession":"cafe0003"}`},
 		{http.MethodGet, "/api/orchestrator?fleet=C&lang=en", ""},
 		{http.MethodPost, "/api/orchestrator?fleet=C", `{"session":"cafe0004","lang":"en"}`},
+		{http.MethodGet, "/api/review?fleet=C&card=/x.md", ""},
+		{http.MethodPost, "/api/review/send?fleet=C", `{"card":"/x.md","rev":0}`},
+		{http.MethodPost, "/api/review/notify?fleet=C", `{"card":"/x.md","rev":0,"round":1}`},
 	} {
 		rec := do(d, r.method, r.target, r.body)
 		if rec.Code != http.StatusNotFound {

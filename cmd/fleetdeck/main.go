@@ -555,6 +555,7 @@ func serve(parent context.Context, o runOpts) error {
 	}
 	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession, d.StartWork = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession, first.StartWork
 	d.SendToSession, d.CleanupSession = first.SendToSession, first.CleanupSession
+	d.ReviewWorkdir = first.ReviewWorkdir
 
 	var wg sync.WaitGroup
 	wg.Add(1)

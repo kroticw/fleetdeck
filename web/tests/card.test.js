@@ -589,6 +589,16 @@ test("a session id becomes a control only when someone can act on it", () => {
   assert.equal(plain.root.querySelector(".card-session").tagName, "SPAN");
 });
 
+// The review overlay's button, offered beside a session's own jump. Unlike the
+// jump, it is offered for a session that is gone too: a review reads the
+// working tree, not a terminal.
+test("a card someone keeps offers its review", () => {
+  const opened = [];
+  const { root } = open(snapshot(), FLEET_UI, { onOpenReview: (p) => opened.push(p) });
+  fireEvent(root.querySelector(".card-review-link"), "click");
+  assert.deepEqual(opened, [FLEET_UI]);
+});
+
 // --- the jump from a card to its session ---
 //
 // Offered only where there is somewhere to go: a card whose work is under way

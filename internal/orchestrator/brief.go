@@ -173,6 +173,13 @@ func StageByHand(lang, cardPath, from, to string) string {
 	return fmt.Sprintf(words[Lang(lang)].stage, from, to, "`"+cardPath+"`")
 }
 
+// ReviewRound is what the session keeping a card is sent when the operator
+// hands it a round of review, in lang. Like StageByHand it says where, not what
+// to do: how to answer is the card-keeping skill's.
+func ReviewRound(lang string, n int, commentsPath, repliesPath string) string {
+	return fmt.Sprintf(words[Lang(lang)].review, n, "`"+commentsPath+"`", "`"+repliesPath+"`")
+}
+
 // WriteBrief puts content at path, replacing a brief fleetdeck wrote before
 // and refusing anything else there. The directory must exist: it is one the
 // configuration names, and making it is setup's business, not this one's.
@@ -209,7 +216,7 @@ func WriteBrief(path string, content []byte) error {
 // words are the brief's head, the message and a new session's name, in each language the working
 // order is written in, and the one line a worker session is sent with its card (Task).
 var words = map[string]struct {
-	written, board, boardRules, docs, config, message, sessionName, task, stage, workerName string
+	written, board, boardRules, docs, config, message, sessionName, task, stage, review, workerName string
 }{
 	"en": {
 		written:    "fleetdeck's orchestrator wizard wrote this file when it appointed this panel's orchestrator, and will write it again the next time it runs.",
@@ -223,6 +230,8 @@ var words = map[string]struct {
 		task:        "fleetdeck: this session is taking on the board card %s. Read the whole card and work by it, keeping it up to date by the card-keeping skill: it is what the operator sees instead of reading this session.",
 		// What the session keeping a card is told when the operator moves its stage (StageByHand).
 		stage: "fleetdeck: the operator moved this card's stage from %s to %s by hand — that write is not yours. Re-read the card %s before you write anything into it again.",
+		// What the session keeping a card is told when the operator sends it a round of review (ReviewRound).
+		review: "fleetdeck: the operator sent review round %d of your branch: the comments are in %s. Answer in %s by the card-keeping skill's review section.",
 		// What a worker session is called when its card has no number.
 		workerName: "worker",
 	},
@@ -236,6 +245,7 @@ var words = map[string]struct {
 		sessionName: "оркестратор",
 		task:        "fleetdeck: эта сессия берёт в работу карточку доски %s. Прочитай карточку целиком и работай по ней, ведя её по скилу card-keeping: оператор видит карточку вместо того, чтобы читать эту сессию.",
 		stage:       "fleetdeck: оператор вручную перевёл стадию этой карточки из %s в %s — это не твоя запись. Перечитай карточку %s, прежде чем снова в неё писать.",
+		review:      "fleetdeck: оператор прислал раунд ревью %d твоей ветки: замечания в %s. Ответь в %s по разделу о ревью в скиле card-keeping.",
 		workerName:  "исполнитель",
 	},
 }

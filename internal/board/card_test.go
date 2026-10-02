@@ -75,6 +75,21 @@ func TestParseCardWithoutIDIsReadNormallyWithAnEmptyID(t *testing.T) {
 	}
 }
 
+func TestACardCarriesTheWorktreeItsAgentWrote(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.md")
+	body := "---\nid: T-001\nzone: planned\nstage: active\nprogress: 20\nsession: abc12345\nworktree: /w/tree\ncreated: 2026-09-28\n---\n\n# A card\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := ParseCard(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Worktree != "/w/tree" {
+		t.Fatalf("worktree = %q, want /w/tree", c.Worktree)
+	}
+}
+
 func TestParseCardWithBrokenFrontmatterReportsInsteadOfFailing(t *testing.T) {
 	c, err := ParseCard(writeCard(t, t.TempDir(), "b.md", "---\nzone: [unclosed\n---\n\nbody\n"))
 	if err != nil {

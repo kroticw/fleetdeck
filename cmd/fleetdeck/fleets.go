@@ -65,6 +65,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			// here is addressed to a session that has been working for a while
 			// (server.Deps.SendToSession).
 			SendToSession: dc.SendText,
+			ReviewWorkdir: reviewWorkdir(jobStoreDir),
 		}
 		// Left nil without a board, as deps leaves the first fleet's: the route
 		// then says this fleet has no board instead of writing somewhere else.

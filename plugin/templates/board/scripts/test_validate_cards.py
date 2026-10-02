@@ -141,6 +141,13 @@ class ValidateCardTest(unittest.TestCase):
     def test_uppercase_session_is_valid(self):
         self.assertEqual(validate_card("ok.md", card(session="AC43EE")), [])
 
+    def test_worktree_is_a_known_field(self):
+        self.assertEqual(validate_card("ok.md", card(worktree="/Users/x/repo/.claude/worktrees/a")), [])
+
+    def test_worktree_must_be_absolute(self):
+        errors = validate_card("bad.md", card(worktree="repo/.claude/worktrees/a"))
+        self.assertTrue(any("worktree" in e for e in errors), errors)
+
     def test_unknown_field_is_error(self):
         errors = validate_card("bad.md", card(pinned="true"))
         self.assertTrue(any("pinned" in e for e in errors))

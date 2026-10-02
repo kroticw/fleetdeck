@@ -41,6 +41,11 @@ type FleetDeps struct {
 	// the business of the fleet the card belongs to.
 	SendToSession  func(ctx context.Context, session, text string) error
 	CleanupSession func(ctx context.Context, a orchestrator.Accepted) (orchestrator.Result, error)
+
+	// ReviewWorkdir means what the Deps field of the same name means, for
+	// this fleet: the working tree of the session keeping a card, for that
+	// fleet's own review routes.
+	ReviewWorkdir func(ctx context.Context, c board.Card) (string, error)
 }
 
 // forFleet is d with the capabilities of the fleet the request names in its
@@ -68,5 +73,6 @@ func (d Deps) forFleet(w http.ResponseWriter, r *http.Request) (Deps, bool) {
 	d.StartWork = f.StartWork
 	d.SendToSession = f.SendToSession
 	d.CleanupSession = f.CleanupSession
+	d.ReviewWorkdir = f.ReviewWorkdir
 	return d, true
 }
