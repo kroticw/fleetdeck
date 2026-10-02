@@ -1,6 +1,11 @@
 // Package board reads and writes the fleet board: markdown cards with YAML
-// frontmatter. The panel owns two fields, stage and progress. Everything else
-// belongs to the agents.
+// frontmatter. The panel owns three fields — stage, progress and session.
+// Everything else belongs to the agents.
+//
+// session is the panel's only because of the order a card is handed to an
+// agent in: the session is started without a prompt, its short id is written
+// here, and the task is sent after that. An agent told to work a card before
+// the id is on it writes its own copy of the field and the two diverge.
 package board
 
 import (
@@ -20,6 +25,13 @@ var (
 	ErrNoCardsDir = errors.New("board directory has no cards subdirectory")
 	// ErrUnknownField means a write targeted a field the panel does not own.
 	ErrUnknownField = errors.New("field is not writable")
+	// ErrNoSuchField means the card's frontmatter carries no line for the field
+	// being written. The request was well formed; the card cannot take it.
+	ErrNoSuchField = errors.New("has no line for the field")
+	// ErrStale means the card no longer holds the value the write was made
+	// against. Nothing was written, and the caller is looking at a card that
+	// has moved on.
+	ErrStale = errors.New("the card has moved on since this write was made")
 	// ErrNothingToCommit means Commit found nothing staged for the given file.
 	ErrNothingToCommit = errors.New("nothing to commit")
 
@@ -41,12 +53,16 @@ type Card struct {
 	// back to the same file. It is empty for a card written around that
 	// script, which is a card with no number rather than a broken one —
 	// see ParseCard.
-	ID         string   `json:"id"`
-	Zone       string   `json:"zone"`
-	Stage      string   `json:"stage"`
-	Progress   int      `json:"progress"`
-	Session    string   `json:"session"`
-	Repo       string   `json:"repo"`
+	ID       string `json:"id"`
+	Zone     string `json:"zone"`
+	Stage    string `json:"stage"`
+	Progress int    `json:"progress"`
+	Session  string `json:"session"`
+	Repo     string `json:"repo"`
+	// Worktree is the working tree the agent keeping the card said it works
+	// in. The review's diff is read there; the agent writes it, the panel
+	// never does.
+	Worktree   string   `json:"worktree"`
 	Created    string   `json:"created"`
 	Title      string   `json:"title"`
 	Body       string   `json:"body"`
@@ -61,6 +77,7 @@ type frontmatter struct {
 	Progress int    `yaml:"progress"`
 	Session  string `yaml:"session"`
 	Repo     string `yaml:"repo"`
+	Worktree string `yaml:"worktree"`
 	Created  string `yaml:"created"`
 }
 
@@ -84,6 +101,7 @@ func ParseCard(path string) (Card, error) {
 	}
 	c.ID, c.Zone, c.Stage, c.Progress = fm.ID, fm.Zone, fm.Stage, fm.Progress
 	c.Session, c.Repo, c.Created = fm.Session, fm.Repo, fm.Created
+	c.Worktree = fm.Worktree
 	c.Body = string(raw[len(m[0]):])
 
 	// Title and links are pulled from the body with fenced code regions

@@ -326,8 +326,9 @@ test("the font buttons never grow their row, go away with a folded column, and l
   }
   assert.match(body("\\.term-font"), /flex:\s*none/, ".term-font shrinks or wraps inside its row");
   assert.match(body('\\.col\\[data-folded="1"\\] \\.term-font'), /display:\s*none/, "a folded column still shows its font buttons");
-  assert.match(body("\\.session-panel \\.s-font-btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off in the session panel looks on");
-  assert.match(body("\\.col-size-btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off in the column looks on");
+  // Every font button is a .btn (web/js/fontcontrols.js), in the column and in
+  // the session panel alike.
+  assert.match(body("\\.btn:disabled"), /opacity:\s*0?\.\d+/, "a font button that is off looks on");
   // Found live: in a narrow centre the header with the buttons was wider than
   // the panel, the centre scrolled sideways and the close button went off the
   // edge. The header is a size container and gives the buttons up below the
@@ -452,28 +453,16 @@ test("the workspace row's buttons are drawn, at the field's size, with the accen
   assert.notEqual(choose, "", ".setup-choose has no rule in web/app.css, so the browser draws it and nobody can find it");
   assert.notEqual(create, "", ".setup-create has no rule in web/app.css, so the browser draws it");
 
-  // Drawn as a button: an edge, a surface of its own and a pointer that agrees
-  // it is one. Without the border it is a word on the page background.
-  assert.match(choose, /border:\s*1px solid var\(--border-strong\)/, "the choose button has no edge, so it reads as a label beside the field");
-  assert.match(choose, /background:\s*var\(--/, "the choose button has no surface of its own");
-  assert.match(choose, /cursor:\s*pointer/, "the choose button does not say it can be pressed");
-
-  // At the field's size, both of them. The field is font: inherit with a 4px
-  // vertical padding; a button that names a smaller --fs-* step comes out
-  // shorter than what it stands beside, which is the complaint this fixes.
+  // Drawn as a button, and at the field's size: both are .btn (web/js/setup.js),
+  // and the page they stand on asks the scale for its large step, a form
+  // field's height and type. Which one wears the accent is setup.js's to say,
+  // and web/tests/setup.test.js holds it to one.
+  assert.match(declarations(".setup"), /--btn-height:\s*var\(--btn-h-lg\)/, "the setup page's buttons are not at the field's height");
+  assert.match(declarations(".setup"), /--btn-font:\s*var\(--fs-sm\)/, "the setup page's buttons shrink their type below the field");
   for (const [name, rules] of [["choose", choose], ["create", create]]) {
-    assert.match(rules, /font:\s*inherit/, `the ${name} button does not take the row's own type size`);
-    assert.doesNotMatch(rules, /font-size:/, `the ${name} button shrinks its type below the field it stands beside`);
-    assert.match(rules, /padding:\s*4px 12px/, `the ${name} button is not at the field's height`);
+    assert.doesNotMatch(rules, /font-size:|padding:|background:/, `the ${name} button draws itself past the button system`);
     assert.match(rules, /flex:\s*none/, `the ${name} button can be squeezed by the field beside it`);
   }
-
-  // One accent in the row, on the button that writes. Two accents beside each
-  // other say the two actions weigh the same, and they do not: choosing a
-  // folder is reversible, creating the workspace is not.
-  assert.match(create, /background:\s*var\(--accent\)/, "the button that writes does not carry the accent");
-  assert.match(create, /border:\s*1px solid var\(--accent-strong\)/, "the button that writes has no accent edge");
-  assert.doesNotMatch(choose, /background:\s*var\(--accent/, "the choose button wears the accent that belongs to the button that writes");
 });
 
 // The declarations of the rule whose selector list contains selector.
@@ -597,16 +586,31 @@ test("a sheet and the documents keep clear of the sessions panel", () => {
   assert.match(ruleBody(':root[data-surface="board"] .docs'), /--host-inset-content-right/);
 });
 
-// On the board the tab row is out of flow with nothing left in it, so it has no
-// width. v0.10.0's form took its width and its right edge from that row: a
-// column of bare controls at the orchestrator panel's edge. It opens from the
-// row's left edge, which is the board's left inset, as wide as the room between
-// the panels allows.
-test("on the board the new card form opens between the panels at a width of its own", () => {
+// The new card form is a window over the board: centred, about 60% of the
+// room each way, and never wider or taller than the room less a margin, so a
+// narrow window still shows all of it. A fixed box with all four edges and a
+// size is centred by margin: auto.
+test("the new card form opens centred at about 60% of the room", () => {
+  // The rule of its own, not the one that sizes its buttons beside other containers.
+  const form = css.match(/\n\.newcard\s*\{([^}]*)\}/)[1];
+  assert.match(form, /position:\s*fixed/);
+  assert.match(form, /inset:\s*0/);
+  assert.match(form, /margin:\s*auto/);
+  assert.match(form, /width:\s*min\(max\(\d+rem,\s*60vw\),\s*calc\(100vw - 2 \* var\(--gap-lg\)\)\)/);
+  assert.match(form, /height:\s*min\(max\(\d+rem,\s*60vh\),\s*calc\(100vh - 2 \* var\(--gap-lg\)\)\)/);
+});
+
+// On the board the room is between the panels and under the capsules, not the
+// whole web view: the panels are other surfaces drawn over it.
+test("on the board the new card form is centred in the room between the panels", () => {
   const form = ruleBody(':root[data-surface="board"] .newcard');
-  assert.match(form, /left:\s*0/);
-  assert.match(form, /right:\s*auto/);
-  assert.match(form, /width:\s*min\(28rem,\s*calc\(100vw - var\(--host-inset-left[^)]*\) - var\(--host-inset-content-right/);
+  assert.match(form, /top:\s*var\(--host-inset-top/);
+  assert.match(form, /left:\s*var\(--host-inset-left/);
+  assert.match(form, /right:\s*var\(--host-inset-content-right/);
+  assert.match(form, /bottom:\s*0/);
+  assert.match(form, /--newcard-room-w:\s*calc\(100vw - var\(--host-inset-left[^)]*\) - var\(--host-inset-content-right/);
+  assert.match(form, /width:\s*min\(max\(\d+rem,\s*calc\(var\(--newcard-room-w\) \* 0\.6\)\),\s*calc\(var\(--newcard-room-w\) - 2 \* var\(--gap-lg\)\)\)/);
+  assert.match(form, /height:\s*min\(max\(\d+rem,\s*calc\(var\(--newcard-room-h\) \* 0\.6\)\),\s*calc\(var\(--newcard-room-h\) - 2 \* var\(--gap-lg\)\)\)/);
   // Not --host-inset-right: that is 0, the board running on under the sessions
   // glass, and a form that kept clear of it would open under the sessions panel.
   assert.doesNotMatch(form, /--host-inset-right\b/);
@@ -686,11 +690,114 @@ test("nothing the card sheet adds is the window's ground, and the width decides 
 test("the board is dimmed under an open sheet and only then", () => {
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
   assert.match(ruleBody("#sheet-scrim"), /display:\s*none/, "the scrim shows with nothing open");
-  for (const panel of ["#card-panel", "#reader-panel", "#session-panel"]) {
+  for (const panel of ["#card-panel", "#reader-panel", "#session-panel", "#review-panel"]) {
     assert.match(
       stripped,
       new RegExp(`:root\\[data-surface="board"\\] #center:has\\([^{]*${panel}:not\\(\\[hidden\\]\\)[^{]*\\) > #sheet-scrim\\s*\\{[^}]*display:\\s*block`),
       `${panel} open does not dim the board`,
     );
   }
+});
+
+// Fix round 1, item 4: the review overlay is a fourth sheet over the same
+// column as the card panel, the reader and the session panel, and in the
+// fleetdeck window it needs the same rounded sheet and round close button as
+// the other three — the base rule alone (#card-panel, #reader-panel,
+// #review-panel, further up this file) only covers a browser tab.
+test("the review overlay gets the same window sheet as the card and reader panels", () => {
+  assert.match(
+    ruleBody(':root[data-surface="board"] #review-panel'),
+    /position:\s*absolute/,
+    "#review-panel is not part of the window's sheet position group",
+  );
+  // Every sheet's close button is a .btn .btn-icon (web/js/review.js, card.js,
+  // reader.js), round in a browser tab and in the window alike.
+  assert.match(ruleBody(".btn-icon"), /width:\s*var\(--btn-height\)/, "an icon button is not as wide as it is tall");
+});
+
+// The operator's first use: scrolled, the sheet's glass ended mid-diff and the
+// rest ran on over the bare page. The review sheet is a frame like the card
+// sheet: its head stays, its body scrolls inside it, nothing leaves it.
+test("the review sheet keeps its height and scrolls its body inside it", () => {
+  const own = ruleBodies("#review-panel");
+  assert.ok(own.some((b) => /display:\s*flex/.test(b) && /flex-direction:\s*column/.test(b) && /overflow:\s*hidden/.test(b)), "#review-panel is not a clipped column");
+  assert.doesNotMatch(ruleBody(':root[data-surface="board"] #review-panel'), /overflow/, "the window's sheet must not undo the clip");
+  const body = ruleBody(".review-body");
+  assert.match(body, /overflow:\s*auto/);
+  assert.match(body, /min-height:\s*0/);
+  assert.match(body, /flex:\s*1/);
+});
+
+// Each file is an island of its own, with a head that stays while it scrolls,
+// and a line reads as something to press: lit under the pointer, its "+"
+// shown there.
+test("a file of the review is an island with a sticky head, and a line is lit with its + under the pointer", () => {
+  const file = ruleBody(".review-file");
+  assert.match(file, /border-radius:\s*var\(--radius-lg\)/);
+  assert.match(file, /box-shadow:[^;]*var\(--/);
+  assert.match(file, /overflow:\s*clip/, "clip, not hidden: hidden would make a scroll box and unstick the head");
+  const head = ruleBody(".review-file-name");
+  assert.match(head, /position:\s*sticky/);
+  assert.match(head, /top:\s*0/);
+  assert.match(head, /background:\s*var\(--/, "a sticky head needs a ground, or the lines show through it");
+  assert.match(ruleBody(".review-line:hover"), /background/);
+  assert.match(ruleBody("button.review-line-add"), /opacity:\s*0/);
+  assert.match(ruleBody(".review-line:hover button.review-line-add"), /opacity:\s*1/);
+  assert.match(ruleBody("button.review-line-add:focus-visible"), /opacity:\s*1/, "a keyboard still finds the +");
+  assert.match(ruleBody(".review-line-picked"), /background/);
+});
+
+// The operator's size when set (web/js/review.js), the multiple until then.
+const REVIEW_CODE_SIZE = /font-size:\s*var\(--review-code-size,\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)\)/;
+
+test("the diff's rows, code and gutter are a sixth larger than the panel's small text, the + as tall as its row", () => {
+  const line = ruleBody(".review-line");
+  const factor = REVIEW_CODE_SIZE.exec(line);
+  assert.ok(factor, ".review-line's font size is not the operator's, falling back to a multiple of --fs-sm");
+  assert.ok(Number(factor[1]) >= 1.15 && Number(factor[1]) <= 1.2, `factor ${factor[1]}`);
+  assert.match(line, /line-height:/);
+  assert.match(line, /align-items:\s*stretch/);
+  assert.match(ruleBody("button.review-line-add"), /align-self:\s*stretch/);
+});
+
+// The expand controls were small pale targets. Each strip is a band as tall
+// as a diff row, in the rows' own size, its buttons the full height of it and
+// lit under the pointer as a line is.
+test("an expand strip is a full diff row, its buttons as tall as the row and lit under the pointer", () => {
+  const strip = ruleBody(".review-expand");
+  const factor = REVIEW_CODE_SIZE.exec(strip);
+  assert.ok(factor, ".review-expand's font size is not the rows' size");
+  assert.equal(factor[1], REVIEW_CODE_SIZE.exec(ruleBody(".review-line"))[1], "the strip is not the rows' size");
+  assert.match(strip, /line-height:\s*1\.6/);
+  assert.match(strip, /align-items:\s*stretch/);
+  assert.doesNotMatch(strip, /padding:\s*2px/);
+  const button = ruleBody(".review-expand button");
+  assert.match(button, /align-self:\s*stretch/);
+  assert.match(button, /padding:\s*0 var\(--gap\)/);
+  assert.match(ruleBody(".review-expand button:hover:not(:disabled)"), /background-image:/);
+});
+
+// The form's buttons are .btn capsules (their look is web/tests/buttons-css
+// .test.js's to pin), placed side by side at the right, and nothing in the
+// review names a colour of its own: WebKit's default submit button was the
+// bright blue full-width bar.
+test("the review form's buttons sit side by side at the right, and the review names no colour of its own", () => {
+  const bar = ruleBody(".review-form-actions");
+  assert.match(bar, /display:\s*flex/);
+  assert.match(bar, /justify-content:\s*flex-end/);
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of stripped.matchAll(/([^{}]*\.review-[^{}]*)\{([^}]*)\}/g)) {
+    assert.doesNotMatch(m[2], /#[0-9a-f]{3,8}\b|rgb\(/i, `${m[1].trim()} names a colour of its own`);
+  }
+});
+
+// A long diff is tens of thousands of nodes, and without this every repaint on
+// the page — a terminal line in the review's own session — lays out and paints
+// all of it. review.js keeps the skipped files' heights through a rebuild.
+test("a diff's files off screen are skipped by the renderer", () => {
+  const body = css
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .match(/(?:^|\})\s*\.review-file\s*\{([^}]*)\}/)?.[1];
+  assert.ok(body, "web/app.css has a .review-file rule");
+  assert.match(body, /content-visibility:\s*auto/);
 });

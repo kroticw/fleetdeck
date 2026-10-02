@@ -15,6 +15,7 @@
 // header.
 
 import { withFleet, fleetFromSearch } from "./fleet.js";
+import { langCode } from "./i18n.js";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -39,8 +40,15 @@ function messageFor(response, body) {
   return detail || `HTTP ${response.status}`;
 }
 
+// refusal is the error a failed route throws. A refusal by one of the board's
+// rules comes with a code beside the words, and the code rides on the error
+// for the panel to translate by; without one the property is absent, not
+// empty, so a caller can tell "no code" from a code it cannot read.
 async function refusal(response) {
-  return new Error(messageFor(response, await readJSON(response)));
+  const body = await readJSON(response);
+  const err = new Error(messageFor(response, body));
+  if (typeof body?.code === "string" && body.code !== "") err.code = body.code;
+  return err;
 }
 
 // setCardField writes one frontmatter field of one card and reports which of the
@@ -66,13 +74,29 @@ export function inFleet(path) {
   return withFleet(path, fleetFromSearch(globalThis.location?.search ?? ""));
 }
 
-export async function setCardField(path, field, value) {
+// attachmentURL is where a card's link to one of its attachments is served:
+// the card writes it as ../attachments/T-NNN/<name>, relative to itself. Any
+// other target is not an attachment, and gets null.
+export function attachmentURL(src) {
+  const rest = String(src).match(/^\.\.\/attachments\/(.+)$/)?.[1];
+  return rest ? inFleet(`/api/attachments?path=${encodeURIComponent(rest)}`) : null;
+}
+
+export async function setCardField(path, field, value, expect) {
+  const body = { path: String(path), field: String(field), value: String(value) };
+  // Sent only when the caller named one: the key is a pointer on the far side,
+  // and an absent one is "write it whatever the card holds" — which is what
+  // every edit but a drag means.
+  if (expect !== undefined && expect !== null) body.expect = String(expect);
+  // The page's language: a stage set by hand is announced to the session
+  // keeping the card in it.
+  body.lang = langCode;
   const response = await fetch(inFleet("/api/cards"), {
     method: "PATCH",
     headers: JSON_HEADERS,
-    // The route takes three strings; progress arrives here as a number from a
+    // The route takes strings; progress arrives here as a number from a
     // snapshot and as a string from a select, and the server rejects a number.
-    body: JSON.stringify({ path: String(path), field: String(field), value: String(value) }),
+    body: JSON.stringify(body),
   });
   if (response.status === 204) {
     return { committed: true };
@@ -80,24 +104,39 @@ export async function setCardField(path, field, value) {
   if (response.status === 200) {
     const body = await readJSON(response);
     // A 200 whose body could not be read is treated as not committed. That is
-    // the conservative reading: the server only ever answers 200 to say a commit
-    // did not happen, and claiming a commit we cannot see is the one mistake
-    // here that leaves the operator believing the board's history is complete.
-    return { committed: body?.committed === true, reason: String(body?.reason ?? "") };
+    // the conservative reading: the server only ever answers 200 to say
+    // something did not go plainly, and claiming a commit we cannot see is the
+    // one mistake here that leaves the operator believing the board's history
+    // is complete.
+    //
+    // steps are what the server did around the write — the agent told its card
+    // moved, the session behind an accepted card tidied away. Always an array,
+    // so a caller never has to tell an answer without the key from one with an
+    // empty list; both mean nothing happened worth reporting.
+    return {
+      committed: body?.committed === true,
+      reason: String(body?.reason ?? ""),
+      steps: Array.isArray(body?.steps) ? body.steps : [],
+    };
   }
   throw await refusal(response);
 }
 
-// createCard starts a card on the board from a title and a zone — the two fields
-// the route takes, and nothing else. It answers {path, committed, reason}: 201
+// createCard starts a card on the board from a title, a zone, the repository
+// its worker starts in and a description of the task — the fields the route
+// takes, and nothing else. An empty repo is a card without one, an empty
+// description a card with only its title. It answers {path, committed, reason}: 201
 // both when the card was committed and when it reached the board without its
 // commit, because the card exists either way and creating it again would make a
 // second one. A thrown error means no card was made.
-export async function createCard(title, zone) {
+export async function createCard(title, zone, repo = "", description = "", attachments = []) {
+  const card = { title: String(title), zone: String(zone), repo: String(repo), description: String(description) };
+  // Only when there are any: {name, data} with data in base64.
+  if (attachments.length > 0) card.attachments = attachments;
   const response = await fetch(inFleet("/api/cards"), {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ title: String(title), zone: String(zone) }),
+    body: JSON.stringify(card),
   });
   if (response.status !== 201) {
     throw await refusal(response);
@@ -109,6 +148,48 @@ export async function createCard(title, zone) {
     committed: body?.committed === true,
     reason: String(body?.reason ?? ""),
   };
+}
+
+// pickDirectory asks the panel for the Finder's folder dialog, prompt as its
+// title, and answers the folder as a card's repo holds it, "" when the dialog
+// was cancelled. The page cannot ask this of the browser: a page is never told
+// where a folder it was given lives. It waits for as long as the dialog is up.
+export async function pickDirectory(prompt) {
+  const response = await fetch("/api/pick-directory", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ prompt: String(prompt) }),
+  });
+  if (response.status !== 200) {
+    throw await refusal(response);
+  }
+  const body = await readJSON(response);
+  return String(body?.repo ?? "");
+}
+
+// startWork starts a session for one card and hands the card to it: the
+// session comes up with no prompt, its short id is written into the card, and
+// the task is sent after that. The order is the server's to keep (see
+// internal/orchestrator.Dispatcher), and it is the reason this is one call
+// rather than the page starting a session and then writing the card.
+//
+// Like resumeSession it can take the better part of a minute — a session is
+// started and waited for — and the caller must show that it is waiting. It
+// resolves with the steps the dispatch took; it throws with the server's own
+// words, and a throw can still leave a session running, which is why those
+// words have to reach the operator rather than a retry.
+export async function startWork(card) {
+  const response = await fetch(inFleet("/api/sessions"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    // The page's language: the session is sent its card in it, as the
+    // orchestrator is sent its working order in the wizard's.
+    body: JSON.stringify({ card: String(card), lang: langCode }),
+  });
+  if (!response.ok) {
+    throw await refusal(response);
+  }
+  return (await readJSON(response)) ?? {};
 }
 
 async function post(url, body) {
@@ -196,6 +277,63 @@ export async function fetchSessionCards(short) {
   }
   const cards = await readJSON(response);
   return Array.isArray(cards) ? cards : [];
+}
+
+// The local-review routes (internal/server/review.go). A GET carries no
+// body; fetch sends none when body is undefined, which is what a GET's own
+// call below leaves it as.
+async function reviewCall(method, path, body) {
+  const response = await fetch(inFleet(path), {
+    method,
+    headers: JSON_HEADERS,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) throw await refusal(response);
+  return readJSON(response);
+}
+
+// fetchReview reads one card's review: its diff against the base it branched
+// from, the comments left on it, and the agent's replies (internal/review.View).
+export function fetchReview(card) {
+  return reviewCall("GET", `/api/review?card=${encodeURIComponent(card)}`);
+}
+
+// fetchReviewLines reads lines from..to of path at commit, the unchanged
+// context around a hunk: {from, total, lines}, clamped by the server.
+export function fetchReviewLines(card, commit, path, from, to) {
+  const q = new URLSearchParams({ card, commit, path, from: String(from), to: String(to) });
+  return reviewCall("GET", `/api/review/lines?${q}`);
+}
+
+// addReviewComment leaves a comment on one line. anchor is {commit, path,
+// side, start, end}: where the operator pointed. The text under it is read by
+// the server from the commit, never sent from here — a comment cannot claim
+// code it does not actually sit on.
+export function addReviewComment(card, rev, anchor, body, replyTo = "") {
+  return reviewCall("POST", "/api/review/comments", { card, rev, ...anchor, body, replyTo });
+}
+
+export function editReviewComment(card, rev, id, body) {
+  return reviewCall("PATCH", "/api/review/comments", { card, rev, id, body });
+}
+
+export function deleteReviewComment(card, rev, id) {
+  const q = new URLSearchParams({ card, id, rev: String(rev) });
+  return reviewCall("DELETE", `/api/review/comments?${q}`);
+}
+
+export function resolveReviewComment(card, rev, id, resolved) {
+  return reviewCall("POST", "/api/review/resolve", { card, rev, id, resolved });
+}
+
+// sendReviewRound hands every draft comment to the session as one round.
+export function sendReviewRound(card, rev) {
+  return reviewCall("POST", "/api/review/send", { card, rev });
+}
+
+// notifyReviewRound tells the session about an already sent round once more.
+export function notifyReviewRound(card, rev, round) {
+  return reviewCall("POST", "/api/review/notify", { card, rev, round });
 }
 
 // fetchTerminalToken reads the token a terminal socket must send as its first

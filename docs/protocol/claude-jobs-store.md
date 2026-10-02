@@ -39,13 +39,14 @@ Every one of them is optional. The panel reports what it found and never invents
 | `resumeSessionId` | what the daemon actually resumes by — equal to `sessionId` on an ordinary session, different on one resumed from another |
 | `name` | the row's display name |
 | `cwd` | the saved working directory. Its existence is the resumability test, see below |
+| `worktreePath`, `worktreeBranch` | the working tree the session entered after it started; `cwd` never follows it — read by the review |
 | `state` | the last state the session recorded. Shown as the last state, never as a reading of now |
 | `detail` | the last thing the session said about itself |
 | `intent` | the last prompt submitted into it |
 | `backend`, `cliVersion` | how it ran |
 | `createdAt`, `updatedAt` | RFC 3339 strings; `updatedAt` orders the stopped rows, most recent first |
 
-The file carries more than this — `respawnFlags`, `worktreePath`, `linkScanPath`, `bridgeSessionId`, `providerEnv` and others. fleetdeck reads none of them. The read is deliberately shallow: identity, a name, a working directory, and the last words, none of it interpreted beyond what the panel prints.
+The file carries more than this — `respawnFlags`, `linkScanPath`, `bridgeSessionId`, `providerEnv` and others. fleetdeck reads none of them. The read is deliberately shallow: identity, a name, a working directory, and the last words, none of it interpreted beyond what the panel prints.
 
 `tempo`, `needs` and anything else that is a reading of a *running* process is deliberately **not** carried over, even where the file holds it. See section 7.
 

@@ -60,7 +60,7 @@ function draw(options = {}) {
 test("the tabs are a tab list, one selected", () => {
   const { root } = draw({ active: "/d/reports/doc-a.md" });
   assert.equal(root.getAttribute("role"), "tablist");
-  const tabs = root.querySelectorAll(".card-tab");
+  const tabs = [...root.querySelectorAll(".card-tab")];
   assert.equal(tabs.length, 3);
   assert.deepEqual(
     tabs.map((b) => b.getAttribute("aria-selected")),
@@ -72,7 +72,7 @@ test("the tabs are a tab list, one selected", () => {
 
 test("a document's tab carries its author's state on a dot, and says it in words", () => {
   const { root } = draw();
-  const tabs = root.querySelectorAll(".card-tab");
+  const tabs = [...root.querySelectorAll(".card-tab")];
   const dot = tabs[2].querySelector(".card-tab-dot");
   assert.equal(dot.dataset.state, "waiting");
   assert.match(tabs[2].getAttribute("aria-label"), new RegExp(t("author_state_waiting")));
@@ -131,7 +131,7 @@ test("the arrow keys walk the whole row, the focus following the picked tab", ()
     });
   draw("card");
   fireEvent(root, "keydown", { key: "ArrowRight" });
-  const focused = root.querySelectorAll(".card-tab").find((b) => b.focused);
+  const focused = [...root.querySelectorAll(".card-tab")].find((b) => b.focused);
   assert.equal(focused?.dataset.key, "/d/reports/doc-b.md", "the picked tab has the focus");
   fireEvent(root, "keydown", { key: "ArrowRight" });
   assert.deepEqual(picked, ["/d/reports/doc-b.md", "/d/reports/doc-a.md"]);

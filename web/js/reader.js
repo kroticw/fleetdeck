@@ -66,7 +66,7 @@ export function renderReader(root, path, onClose, options = {}) {
   let disposed = false;
 
   const title = el("h3", "reader-title");
-  const close = el("button", "reader-close");
+  const close = el("button", "btn btn-icon btn-md reader-close");
   close.innerHTML = closeCrossHTML;
   close.setAttribute("type", "button");
   close.setAttribute("aria-label", t("reader_close"));

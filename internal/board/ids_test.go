@@ -27,7 +27,7 @@ func newCardPy(t *testing.T) (python, script string) {
 
 func TestCreateCardClaimsTheFirstNumberOnAnEmptyBoard(t *testing.T) {
 	dir := emptyBoard(t)
-	path, err := CreateCard(dir, "A task", "planned", createDay)
+	path, err := CreateCard(dir, NewCard{Title: "A task", Zone: "planned"}, createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestCreateCardClaimsTheFirstNumberOnAnEmptyBoard(t *testing.T) {
 // on byte for byte: the same directory, the same name.
 func TestCreateCardLeavesItsMarkerInTheRegistry(t *testing.T) {
 	dir := emptyBoard(t)
-	if _, err := CreateCard(dir, "A task", "planned", createDay); err != nil {
+	if _, err := CreateCard(dir, NewCard{Title: "A task", Zone: "planned"}, createDay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, idsDir, "T-001")); err != nil {
@@ -59,7 +59,7 @@ func TestCreateCardLeavesItsMarkerInTheRegistry(t *testing.T) {
 func TestCreateCardTakesTheNextNumberAfterTheCardsOnTheBoard(t *testing.T) {
 	dir := emptyBoard(t)
 	write(t, filepath.Join(CardsDir(dir), "T-007-2026-09-10-older.md"), "---\nid: T-007\n---\n")
-	path, err := CreateCard(dir, "A task", "planned", createDay)
+	path, err := CreateCard(dir, NewCard{Title: "A task", Zone: "planned"}, createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestCreateCardCountsTheArchiveAsWell(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(dir, "archive", "T-012-2026-09-01-done.md"), "---\nid: T-012\n---\n")
-	path, err := CreateCard(dir, "A task", "planned", createDay)
+	path, err := CreateCard(dir, NewCard{Title: "A task", Zone: "planned"}, createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestCreateCardDoesNotReuseANumberHeldOnlyByAMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(dir, idsDir, "T-005"), "")
-	path, err := CreateCard(dir, "A task", "planned", createDay)
+	path, err := CreateCard(dir, NewCard{Title: "A task", Zone: "planned"}, createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestCreateCardGivesEveryConcurrentCardItsOwnNumber(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			paths[i], errs[i] = CreateCard(dir, "Task", "planned", createDay)
+			paths[i], errs[i] = CreateCard(dir, NewCard{Title: "Task", Zone: "planned"}, createDay)
 		}()
 	}
 	wg.Wait()
@@ -142,7 +142,7 @@ func TestCreateCardAndNewCardPyDoNotCollide(t *testing.T) {
 	python, script := newCardPy(t)
 	dir := emptyBoard(t)
 
-	first, err := CreateCard(dir, "From the panel", "planned", createDay)
+	first, err := CreateCard(dir, NewCard{Title: "From the panel", Zone: "planned"}, createDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestCreateCardAndNewCardPyDoNotCollide(t *testing.T) {
 		t.Fatalf("the script's card = %s, want T-002 — the two are not sharing the registry", got)
 	}
 
-	third, err := CreateCard(dir, "From the panel again", "planned", createDay)
+	third, err := CreateCard(dir, NewCard{Title: "From the panel again", Zone: "planned"}, createDay)
 	if err != nil {
 		t.Fatal(err)
 	}

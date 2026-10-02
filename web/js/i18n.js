@@ -120,6 +120,14 @@ const en = {
   card_parse_error: "this card does not parse, so its fields cannot be edited here",
   card_not_committed: "the change is in the card file and did not reach the git history",
   card_write_refused: "the change was refused and nothing was written",
+  // The board's cross-field rules, by the code a refusal carries
+  // (internal/board/write.go, card_refused_<code>). Each names the rule and
+  // the way out. session_required is one sentence for every started stage:
+  // the rule is one, and only a drop into the board's active column offers
+  // the session the card is missing.
+  card_refused_session_required:
+    "the card has no session, and without one only the stage new is accepted. To start a session, drag the card into the active column on the board.",
+  card_refused_done_holds_progress_100: "at the stage done progress stays 100. Change the stage first, then progress.",
   backlinks: "linked from",
   // A card's documents (web/js/card.js) and, the other way, the cards a
   // document belongs to (web/js/doccards.js).
@@ -179,11 +187,55 @@ const en = {
   tab_docs: "Docs",
   new_card: "+ card",
   new_card_title: "Card title",
-  new_card_zone: "Zone",
+  new_card_zone: "Urgency",
+  new_card_repo: "Repository from ~, e.g. src/fleetdeck",
+  new_card_desc: "What to do and why (optional)",
+  new_card_pick: "Choose…",
+  new_card_pick_prompt: "Choose the card's repository",
+  new_card_pick_trust: "If no agent has run in this folder yet, start one there first and accept the trust prompt: Claude Code does not start a worker in a folder it does not trust",
+  new_card_attach: "Attach…",
+  new_card_detach: "Remove",
+  // The zone's four values, worded rather than named by the schema's
+  // identifiers: the identifiers were read as stages the board had no
+  // column for.
+  zone_urgent: "Urgent",
+  zone_unplanned: "Unplanned",
+  zone_planned: "Planned",
+  zone_niceToHave: "Nice to have",
   new_card_create: "Create",
   new_card_cancel: "Cancel",
   new_card_title_required: "A card needs a title",
   new_card_not_committed: "Card created, but not recorded in the board's git history",
+
+  // Dragging a card between the board's columns. move_held is the question
+  // asked before a card an agent is keeping is moved by hand: the card is the
+  // operator's to move, but the agent goes on writing the file it thinks it
+  // keeps, so the move is said out loud rather than done quietly.
+  move_held_title: "This card is being kept by its session",
+  move_held_ask: "After it was started the card is the agent's to write, and it goes on writing the one it thinks it keeps. Move it anyway? Session",
+  move_held_go: "Move it",
+  move_cancel: "Leave it",
+  move_close: "Close",
+  move_refused_title: "The card did not move",
+  // Accepting a card, which puts its session out. The question is asked on the
+  // drag and not in the open card's select: a drag is where a slip of the mouse
+  // lands somewhere nobody meant.
+  move_done_title: "Accepting this card puts its session out",
+  move_done_ask:
+    "What the session said goes into the board's archive, its pin is dropped, and then it is stopped — it keeps its history and can be brought back. Session",
+  move_done_go: "Accept and tidy away",
+  move_after_title: "The card moved, and not everything around it did",
+  // The close button of every dialog (web/js/dialog.js), for a screen reader:
+  // on screen it is a ×.
+  dialog_close: "Close",
+  // A card with no session dropped into active. The board takes no started
+  // stage while the session field is empty, so what is offered is the session
+  // rather than a refusal.
+  start_session_title: "Start a session for this card",
+  start_session_ask: "The session comes up with no prompt, its short id is written into the card, and the task is sent after that.",
+  start_session_go: "Start it",
+  start_session_none: "This panel starts no sessions, so it cannot start one for this card: hand the card to a session from the orchestrator.",
+  start_session_failed: "The session was not handed the card",
   setup_title: "Set up fleetdeck",
   setup_intro: "Choose the folder fleetdeck keeps its board and documentation in. It creates two folders inside it:",
   setup_board: "board — an empty board: a git repository with the board's README, archive and card validator (the validator needs python3)",
@@ -328,6 +380,15 @@ const en = {
   start_last: "you were here last time",
   start_footer: "A fleet has a board, documentation and an orchestrator of its own. The machine's sessions are visible from every fleet.",
   start_new: "Start a fleet",
+  // Deleting a listed fleet from the start page. What it removes is said in
+  // the question, because none of it comes back.
+  start_delete: "Delete fleet",
+  start_delete_title: "Delete the fleet",
+  start_delete_confirm:
+    "Fleet {fleet}: its running sessions are stopped, it leaves the configuration, and its folder — the board and the documentation inside it — is removed from the disk. Documentation configured outside that folder stays.",
+  start_delete_cancel: "Cancel",
+  start_deleted: "The fleet is deleted.",
+  start_deleted_kept: "The fleet is deleted. Left on the disk, outside its folder:",
   start_new_title: "A new fleet",
   start_new_text:
     "fleetdeck makes the folder with a board and documentation in it, the same two the first run makes, adds the fleet to the configuration and serves it at once — nothing that is running now is touched.",
@@ -406,6 +467,54 @@ const en = {
   build_commit_time: "commit made",
   build_built_at: "built",
   build_executable: "binary",
+
+  // The review overlay. The state words sit next to a comment that is no
+  // longer on the line it was left on, and each says which of the three things
+  // happened, because "outdated" alone would not tell the operator whether to
+  // look for the code or accept it is gone.
+  review_open: "review",
+  review_title: "Review",
+  review_back: "card",
+  review_close: "close the review",
+  review_send: "send to the session",
+  review_sent: "sent to the session",
+  review_not_delivered: "not delivered:",
+  review_send_failed: "not sent",
+  review_load_failed: "the review could not be read",
+  review_write_failed: "not saved",
+  review_base: "against",
+  review_uncommitted: "not committed:",
+  review_commit_hint: "review works on committed code: the session has to commit its changes for them to appear here and take comments",
+  review_no_commits: "the branch has no commits on top of its base",
+  review_cancel: "cancel",
+  review_expand_step: "{n} more lines",
+  review_expand_all: "show all {n} lines",
+  review_expand_failed: "the lines could not be read",
+  review_binary: "binary file",
+  review_truncated: "too large to show",
+  review_detached: "comments not on a line shown here",
+  review_comment_line: "comment on this line",
+  review_add: "add",
+  review_draft: "draft",
+  review_round: "round",
+  review_resolved: "resolved",
+  review_resolve: "resolve",
+  review_reopen: "reopen",
+  review_delete: "delete",
+  review_edit: "edit",
+  review_save: "save",
+  review_reply: "reply",
+  review_state_changed: "the code under this comment was changed",
+  review_state_deleted: "the code under this comment was deleted",
+  review_state_file_gone: "the file is gone",
+  review_state_unavailable: "the version it was left on is no longer in the repository",
+  review_reply_fixed: "fixed",
+  review_reply_declined: "declined",
+  review_reply_question: "question",
+  review_reply_partial: "may still be being written",
+  review_round_unanswered: "the agent has not answered round {n} yet",
+  review_notify_again: "send the notification again",
+  review_unsent_text: "not saved — your text; the code under it has moved",
 };
 
 const ru = {
@@ -476,6 +585,9 @@ const ru = {
   card_parse_error: "карточка не разбирается, править её поля отсюда нельзя",
   card_not_committed: "правка лежит в файле карточки и не попала в историю git",
   card_write_refused: "правка отклонена, ничего не записано",
+  card_refused_session_required:
+    "у карточки нет сессии, а без неё принимается только стадия new. Чтобы поднять сессию, перетащите карточку в колонку active на доске.",
+  card_refused_done_holds_progress_100: "на стадии done progress остаётся 100. Сначала смените стадию, потом progress.",
   backlinks: "ссылаются сюда",
   card_docs: "документы",
   card_doc_missing: "не открывается: нет ни карточки, ни документа с таким именем, или документов с ним несколько",
@@ -518,11 +630,40 @@ const ru = {
   tab_docs: "Доки",
   new_card: "+ карточка",
   new_card_title: "Заголовок карточки",
-  new_card_zone: "Зона",
+  new_card_zone: "Срочность",
+  new_card_repo: "Репозиторий от ~, например src/fleetdeck",
+  new_card_desc: "Что сделать и зачем (необязательно)",
+  new_card_pick: "Выбрать…",
+  new_card_pick_prompt: "Выберите репозиторий карточки",
+  new_card_pick_trust: "Если в этом каталоге ещё не запускали агента, сначала запусти его там и прими запрос о доверии: в недоверенном каталоге Claude Code исполнителя не запустит",
+  new_card_attach: "Прикрепить…",
+  new_card_detach: "Убрать",
+  zone_urgent: "Срочная",
+  zone_unplanned: "Внеплановая",
+  zone_planned: "Плановая",
+  zone_niceToHave: "Необязательная",
   new_card_create: "Создать",
   new_card_cancel: "Отмена",
   new_card_title_required: "У карточки должен быть заголовок",
   new_card_not_committed: "Карточка создана, но не записана в историю git доски",
+
+  move_held_title: "Карточку ведёт её сессия",
+  move_held_ask: "После запуска карточку пишет агент, и он продолжит писать ту, которую считает своей. Всё равно переставить? Сессия",
+  move_held_go: "Переставить",
+  move_cancel: "Оставить",
+  move_close: "Закрыть",
+  move_refused_title: "Карточка не переехала",
+  move_done_title: "Приёмка карточки погасит её сессию",
+  move_done_ask:
+    "Сказанное сессией уйдёт в архив доски, пин снимется, а потом сессия погаснет — история сохранится, сессию можно поднять снова. Сессия",
+  move_done_go: "Принять и убрать",
+  move_after_title: "Карточка переехала, но вокруг неё вышло не всё",
+  dialog_close: "Закрыть",
+  start_session_title: "Запустить сессию под карточку",
+  start_session_ask: "Сессия поднимется без промпта, её short id будет записан в карточку, и только после этого уйдёт задача.",
+  start_session_go: "Запустить",
+  start_session_none: "Эта панель не запускает сессии, поэтому не может поднять сессию под карточку: передайте карточку сессии через оркестратора.",
+  start_session_failed: "Сессия карточку не получила",
   setup_title: "Настройка fleetdeck",
   setup_intro: "Выберите папку, в которой fleetdeck будет держать доску и документацию. В ней появятся две папки:",
   setup_board: "board — пустая доска: git-репозиторий с README доски, архивом и валидатором карточек (валидатору нужен python3)",
@@ -631,6 +772,13 @@ const ru = {
   start_last: "были здесь в прошлый раз",
   start_footer: "У флота своя доска, своя документация и свой оркестратор. Сессии машины видны из любого флота.",
   start_new: "Завести флот",
+  start_delete: "Удалить флот",
+  start_delete_title: "Удаление флота",
+  start_delete_confirm:
+    "Флот {fleet}: его работающие сессии будут остановлены, он уйдёт из настройки, а его папка — доска и документация внутри неё — будет удалена с диска. Документация, настроенная вне этой папки, останется.",
+  start_delete_cancel: "Отмена",
+  start_deleted: "Флот удалён.",
+  start_deleted_kept: "Флот удалён. На диске осталось, вне его папки:",
   start_new_title: "Новый флот",
   start_new_text:
     "fleetdeck создаст папку, а в ней доску и документацию — те же две, что появляются при первом запуске, — допишет флот в настройку и сразу начнёт его показывать; на то, что работает сейчас, это не влияет.",
@@ -700,6 +848,50 @@ const ru = {
   build_commit_time: "коммит сделан",
   build_built_at: "собран",
   build_executable: "бинарь",
+
+  review_open: "ревью",
+  review_title: "Ревью",
+  review_back: "карточка",
+  review_close: "закрыть ревью",
+  review_send: "отдать сессии",
+  review_sent: "отдано сессии",
+  review_not_delivered: "не доставлено:",
+  review_send_failed: "не отдано",
+  review_load_failed: "ревью не прочиталось",
+  review_write_failed: "не сохранено",
+  review_base: "против",
+  review_uncommitted: "не закоммичено:",
+  review_commit_hint: "ревью работает с закоммиченным кодом: чтобы изменения появились здесь и их можно было комментировать, сессия должна их закоммитить",
+  review_no_commits: "в ветке нет коммитов поверх базы",
+  review_cancel: "отмена",
+  review_expand_step: "ещё строк: {n}",
+  review_expand_all: "показать все строки: {n}",
+  review_expand_failed: "строки не прочитались",
+  review_binary: "бинарный файл",
+  review_truncated: "слишком большой, не показан",
+  review_detached: "замечания не на показанных строках",
+  review_comment_line: "замечание к строке",
+  review_add: "добавить",
+  review_draft: "черновик",
+  review_round: "раунд",
+  review_resolved: "решено",
+  review_resolve: "решить",
+  review_reopen: "переоткрыть",
+  review_delete: "удалить",
+  review_edit: "править",
+  review_save: "сохранить",
+  review_reply: "ответить",
+  review_state_changed: "код под замечанием изменён",
+  review_state_deleted: "код под замечанием удалён",
+  review_state_file_gone: "файла больше нет",
+  review_state_unavailable: "версии, к которой оставлено замечание, в репозитории больше нет",
+  review_reply_fixed: "исправлено",
+  review_reply_declined: "отклонено",
+  review_reply_question: "вопрос",
+  review_reply_partial: "возможно, ещё дописывается",
+  review_round_unanswered: "агент ещё не ответил на раунд {n}",
+  review_notify_again: "отправить уведомление ещё раз",
+  review_unsent_text: "не сохранено — ваш текст; код под ним сдвинулся",
 };
 
 // The language the page speaks, as a code the panel understands: what the
@@ -716,4 +908,14 @@ const lang = langCode === "ru" ? ru : en;
 // indistinguishable through t() from one translated identically.
 export function t(key) {
   return lang[key] ?? en[key] ?? key;
+}
+
+// reasonText is the sentence for a code the panel was sent, under
+// "<prefix>_<code>", or "" when there is no code or no sentence for it — a
+// newer panel's code, or a rule nobody foresaw — so the caller falls back to
+// the words that came with the code instead of showing a bare key.
+export function reasonText(prefix, code) {
+  if (typeof code !== "string" || code === "") return "";
+  const key = `${prefix}_${code}`;
+  return lang[key] ?? en[key] ?? "";
 }

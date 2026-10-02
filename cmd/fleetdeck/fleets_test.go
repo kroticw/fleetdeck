@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/fleet"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
@@ -158,7 +159,7 @@ func TestEachFleetHasItsOwnBoardDocsAndWizard(t *testing.T) {
 	if b.BoardDir != workspace.BoardDir(roots[1]) || len(b.DocsRoots) != 1 || b.DocsRoots[0] != workspace.DocsDir(roots[1]) {
 		t.Fatalf("B's board %q docs %q", b.BoardDir, b.DocsRoots)
 	}
-	path, err := b.CreateCard("a task of B", "planned")
+	path, err := b.CreateCard(board.NewCard{Title: "a task of B", Zone: "planned"})
 	if err != nil {
 		t.Fatalf("CreateCard on B: %v", err)
 	}
@@ -205,6 +206,27 @@ func TestVetPinLeavesItsArgumentAlone(t *testing.T) {
 	}
 	if got := cfg.FleetList()[1].Orchestrator; got != "b0000001" {
 		t.Fatalf("vetPin wrote the pin it was asked about into its caller's configuration: %q", got)
+	}
+}
+
+// A card is handed to a session only by a panel that starts sessions: a stand
+// given no claude must not offer the start, since it would fail, and a panel
+// that looks claude up offers it for every fleet with a board.
+func TestAFleetOffersAStartOnlyWhereThePanelStartsSessions(t *testing.T) {
+	cfgPath, _, c, _ := twoFleetPanel(t, "")
+	stand, err := newFleets(runOpts{configPath: cfgPath, standSocket: "/tmp/no.sock"}, deadDaemon(t), c)("B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stand.StartWork != nil {
+		t.Fatal("a stand given no claude offered to start a worker")
+	}
+	panel, err := newFleets(runOpts{configPath: cfgPath}, deadDaemon(t), c)("B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.StartWork == nil {
+		t.Fatal("a panel that starts sessions did not offer to start a worker for a fleet with a board")
 	}
 }
 

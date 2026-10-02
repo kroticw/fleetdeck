@@ -211,7 +211,7 @@ export function bannerHTML(state, { waiting = false } = {}) {
     const text = waiting ? t("build_stale_waiting") : t("build_stale");
     const button = waiting ? t("build_reload_now") : t("build_reload");
     return `<span class="build-banner-text">${escape(text)}</span>
-      <button type="button" class="build-reload">${escape(button)}</button>`;
+      <button type="button" class="btn btn-sm build-reload">${escape(button)}</button>`;
   }
   if (state === "reloadFailed") {
     // No button here on purpose. The action that just failed is not offered

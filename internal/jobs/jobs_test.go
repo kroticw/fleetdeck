@@ -98,6 +98,16 @@ func TestLoadReadsEveryFieldThePanelShows(t *testing.T) {
 	}
 }
 
+// WorktreePath and WorktreeBranch are the working tree a session entered
+// after it started, which CWD never follows: CWD stays where the session was
+// launched, and the review reads the diff from the worktree instead.
+func TestARecordCarriesTheWorktreeTheSessionEntered(t *testing.T) {
+	r := parse("abc12345", []byte(`{"cwd":"/repo","worktreePath":"/repo/.claude/worktrees/x","worktreeBranch":"worktree-x"}`))
+	if r.CWD != "/repo" || r.WorktreePath != "/repo/.claude/worktrees/x" || r.WorktreeBranch != "worktree-x" {
+		t.Fatalf("got cwd=%q worktree=%q branch=%q", r.CWD, r.WorktreePath, r.WorktreeBranch)
+	}
+}
+
 // The short id is the directory the record lives in, never the daemonShort
 // field inside it: the directory name is the key everything else looks a
 // session up by, so a file disagreeing with its own directory must not be

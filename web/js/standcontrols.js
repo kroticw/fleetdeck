@@ -29,7 +29,7 @@ const CONTROLS = {
     { name: "newCardTitle", selector: ".newcard-title" },
     { name: "newCardZone", selector: ".newcard-zone" },
     { name: "newCardCreate", selector: ".newcard-create" },
-    { name: "newCardCancel", selector: ".newcard-cancel" },
+    { name: "newCardClose", selector: ".newcard-close" },
   ],
 };
 

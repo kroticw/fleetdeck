@@ -213,7 +213,7 @@ func TestAFleetMadeFromTheStartPageIsServedAtOnce(t *testing.T) {
 
 	// Written past the panel, as an agent writes: only vpn's own board watch
 	// can bring it in before the next poll, an hour away.
-	byHand, err := board.CreateCard(vpnBoard, "written by an agent", "urgent", time.Now())
+	byHand, err := board.CreateCard(vpnBoard, board.NewCard{Title: "written by an agent", Zone: "urgent"}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestAFleetMadeFromTheStartPageIsServedAtOnce(t *testing.T) {
 func TestMakingAFleetLeavesTheServedFleetsAlone(t *testing.T) {
 	p := panelOnOneFleetWatched(t)
 
-	before, err := board.CreateCard(p.firstBoard, "the first fleet's task", "urgent", time.Now())
+	before, err := board.CreateCard(p.firstBoard, board.NewCard{Title: "the first fleet's task", Zone: "urgent"}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestMakingAFleetLeavesTheServedFleetsAlone(t *testing.T) {
 		t.Fatalf("the first fleet's board was watched %d times, want its one watch kept", n)
 	}
 
-	after, err := board.CreateCard(p.firstBoard, "written after", "urgent", time.Now())
+	after, err := board.CreateCard(p.firstBoard, board.NewCard{Title: "written after", Zone: "urgent"}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

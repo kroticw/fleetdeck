@@ -303,7 +303,7 @@ func TestCommitFailureIsAWriteThatHappened(t *testing.T) {
 	writeSampleCard(t, dir)
 	card := filepath.Join(dir, "c.md")
 
-	err := setCardField(card, "progress", "40")
+	err := setCardField(card, "progress", "40", nil)
 
 	if err == nil {
 		t.Fatal("a commit that did not happen must be reported, not passed off as a clean write")
@@ -333,7 +333,7 @@ func TestNothingToCommitPassesThroughUnwrapped(t *testing.T) {
 	}
 
 	// The card already carries progress: 20, so this write changes no bytes.
-	err := setCardField(card, "progress", "20")
+	err := setCardField(card, "progress", "20", nil)
 
 	if !errors.Is(err, board.ErrNothingToCommit) {
 		t.Fatalf("want board.ErrNothingToCommit, got %v", err)
@@ -351,7 +351,7 @@ func TestASuccessfulWriteIsCommitted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := setCardField(card, "stage", "review"); err != nil {
+	if err := setCardField(card, "stage", "review", nil); err != nil {
 		t.Fatalf("a write into a real repository must succeed: %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestACreatedCardIsCommitted(t *testing.T) {
 	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path, err := createCard(dir, "A task", "planned", time.Now())
+	path, err := createCard(dir, board.NewCard{Title: "A task", Zone: "planned"}, time.Now())
 	if err != nil {
 		t.Fatalf("a card created in a real repository must be committed: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestACreatedCardThatCannotBeCommittedIsStillCreated(t *testing.T) {
 	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path, err := createCard(dir, "A task", "planned", time.Now())
+	path, err := createCard(dir, board.NewCard{Title: "A task", Zone: "planned"}, time.Now())
 	if !errors.Is(err, server.ErrCardWrittenNotCommitted) {
 		t.Fatalf("want ErrCardWrittenNotCommitted, got %v", err)
 	}
@@ -411,7 +411,7 @@ func TestARefusedCardIsNotCreated(t *testing.T) {
 	if err := os.MkdirAll(board.CardsDir(dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := createCard(dir, "A task", "someday", time.Now())
+	_, err := createCard(dir, board.NewCard{Title: "A task", Zone: "someday"}, time.Now())
 	if !errors.Is(err, board.ErrInvalidCard) {
 		t.Fatalf("want board.ErrInvalidCard, got %v", err)
 	}
@@ -426,7 +426,7 @@ func TestARefusedFieldNeverReachesTheCommit(t *testing.T) {
 	dir := t.TempDir()
 	writeSampleCard(t, dir)
 
-	err := setCardField(filepath.Join(dir, "c.md"), "title", "something")
+	err := setCardField(filepath.Join(dir, "c.md"), "title", "something", nil)
 
 	if !errors.Is(err, board.ErrUnknownField) {
 		t.Fatalf("want board.ErrUnknownField, got %v", err)

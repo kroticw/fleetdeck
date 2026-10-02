@@ -84,6 +84,12 @@ type Record struct {
 	Name string
 	CWD  string
 
+	// WorktreePath and WorktreeBranch are the working tree the session entered
+	// after it started, which CWD never follows: CWD stays where the session
+	// was launched.
+	WorktreePath   string
+	WorktreeBranch string
+
 	// State, Detail and Intent are the last values the session recorded
 	// before it stopped. They are the daemon's own vocabulary, frozen at the
 	// moment it went away — never a reading of anything happening now.
@@ -137,6 +143,8 @@ type state struct {
 	ResumeSessionID string   `json:"resumeSessionId"`
 	Name            string   `json:"name"`
 	CWD             string   `json:"cwd"`
+	WorktreePath    string   `json:"worktreePath"`
+	WorktreeBranch  string   `json:"worktreeBranch"`
 	State           string   `json:"state"`
 	Detail          string   `json:"detail"`
 	Intent          string   `json:"intent"`
@@ -240,6 +248,8 @@ func parse(short string, body []byte) Record {
 		ResumeSessionID: s.ResumeSessionID,
 		Name:            s.Name,
 		CWD:             s.CWD,
+		WorktreePath:    s.WorktreePath,
+		WorktreeBranch:  s.WorktreeBranch,
 		State:           s.State,
 		Detail:          s.Detail,
 		Intent:          s.Intent,

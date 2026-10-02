@@ -89,6 +89,17 @@
   --fs-sm: 0.95rem;
   --fs-md: 1.15rem;
 
+  /* Button scale (the .btn block): three heights, a side padding and a type
+     size each. Small is the least a pointer can hit reliably; large stands
+     beside a form's fields and matches them. Which step a button takes is its
+     container's to say, through the three --btn-* values below. */
+  --btn-h-sm: 24px;
+  --btn-h: 30px;
+  --btn-h-lg: 36px;
+  --btn-height: var(--btn-h);
+  --btn-pad: calc(var(--gap) * 1.5);
+  --btn-font: var(--fs-xs);
+
   /* The fleetdeck window's E layout (the block at the end of this file): what
      sits on glass, the opaque islands content is drawn in, and the sheet a card,
      a session or a document opens as over the board. */
@@ -101,6 +112,10 @@
   --island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%);
   --sheet-shadow: 0 2px 6px rgb(20 22 26 / 10%), 0 18px 48px rgb(20 22 26 / 24%);
   --sheet-scrim: rgb(20 22 26 / 22%);
+  /* A dialog holds the work until it is answered, and its scrim says so: the
+     darker of the two in every theme, with no blur beside it (the .dialog
+     block says why it must not have one). */
+  --dialog-scrim: rgb(20 22 26 / 52%);
   --radius-lg: 12px;
   --radius-xl: 18px;
 }
@@ -152,6 +167,7 @@ html {
     --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
     --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
     --sheet-scrim: rgb(0 0 0 / 48%);
+    --dialog-scrim: rgb(0 0 0 / 68%);
   }
 }
 
@@ -186,6 +202,7 @@ html {
   --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
   --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
   --sheet-scrim: rgb(0 0 0 / 48%);
+  --dialog-scrim: rgb(0 0 0 / 68%);
 }
 
 :root[data-theme="light"] {
@@ -221,6 +238,117 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent-strong);
   outline-offset: 2px;
+}
+
+/* The panel's buttons: one capsule of the window's glass, sized by the scale in
+ * :root. No blur of its own — a control lies on glass or on a frosted dialog,
+ * and a second blur there is the one web/tests/glass-controls-css.test.js
+ * forbids. The step comes from the container (a dialog, a form, a page asks for
+ * large) or from .btn-sm / .btn-md / .btn-lg on the button itself, which wins
+ * because it is set on the element. A class's own rule may place a button and
+ * colour its text, never size or paint it (web/tests/buttons-css.test.js). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  min-height: var(--btn-height);
+  min-width: var(--btn-height);
+  padding: 0 var(--btn-pad);
+  border: none;
+  border-radius: 999px;
+  background-color: var(--glass-control);
+  /* A full pixel of rim and a drop under it, where the head's capsules have
+     half a pixel and none: a button also stands on the flat ground of a browser
+     tab and on a card's white sheet, and on either the thinner rim was gone and
+     the button with it (light theme, stand). */
+  box-shadow: inset 0 0 0 1px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight), 0 1px 2px var(--shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--btn-font);
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 80ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: var(--glass-control-hover);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-primary {
+  background-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-strong), inset 0 1px 0 var(--glass-control-highlight), 0 1px 2px var(--shadow);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--accent-strong);
+}
+
+/* A glyph (×, ✎) is drawn a step larger than a word: at the words' size it is
+   a speck in its circle. */
+.btn-icon {
+  width: var(--btn-height);
+  padding: 0;
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+
+.btn-sm {
+  --btn-height: var(--btn-h-sm);
+  --btn-pad: var(--gap);
+  --btn-font: var(--fs-xs);
+}
+
+.btn-md {
+  --btn-height: var(--btn-h);
+  --btn-pad: calc(var(--gap) * 1.5);
+  --btn-font: var(--fs-xs);
+}
+
+.dialog,
+.newcard,
+.setup,
+.start,
+.btn-lg {
+  --btn-height: var(--btn-h-lg);
+  --btn-pad: var(--gap-lg);
+  --btn-font: var(--fs-sm);
+}
+
+:root[data-glass="opaque"] .btn {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+:root[data-glass="opaque"] .btn:hover:not(:disabled) {
+  background-color: var(--surface-hover);
+}
+
+:root[data-glass="opaque"] .btn-primary {
+  background-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+}
+
+:root[data-glass="opaque"] .btn-primary:hover:not(:disabled) {
+  background-color: var(--accent-strong);
 }
 
 #header {
@@ -265,20 +393,6 @@ body {
 #build-banner.build-banner-failed {
   background: color-mix(in srgb, var(--danger) 14%, var(--surface));
   border-bottom-color: color-mix(in srgb, var(--danger) 35%, var(--border));
-}
-
-#build-banner .build-reload {
-  font: inherit;
-  padding: 0.2em 0.8em;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-}
-
-#build-banner .build-reload:hover {
-  background: var(--surface-hover);
 }
 
 #header .limits {
@@ -436,18 +550,10 @@ body {
  * quiet: it lives beside the brand, not among the counters that are the
  * actual point of the header. */
 .theme-toggle {
-  font: inherit;
-  font-size: var(--fs-xs);
   color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  cursor: pointer;
 }
 
 .theme-toggle:hover {
-  background: var(--surface-hover);
   color: var(--text);
 }
 
@@ -468,27 +574,13 @@ body {
 }
 
 .fleet-menu-button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  font: inherit;
-  font-size: var(--fs-xs);
   font-weight: 600;
-  color: var(--text);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  cursor: pointer;
 }
 
-.fleet-menu-button:hover {
-  background: var(--surface-hover);
-}
-
+/* Open, the button is lit and ringed in the accent: its list hangs from it. */
 .fleet-menu-button[aria-expanded="true"] {
-  border-color: var(--accent);
-  background: var(--surface-hover);
+  background-color: var(--glass-control-hover);
+  box-shadow: inset 0 0 0 1px var(--accent), inset 0 1px 0 var(--glass-control-highlight);
 }
 
 .fleet-menu-chevron {
@@ -627,24 +719,11 @@ body {
 }
 
 .update-button {
-  font: inherit;
-  font-size: var(--fs-xs);
   color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  cursor: pointer;
 }
 
 .update-button:hover:not(:disabled) {
-  background: var(--surface-hover);
   color: var(--text);
-}
-
-.update-button:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 .update-status {
@@ -1161,8 +1240,18 @@ main {
   overflow: auto;
 }
 
+/* The review sheet is a frame too: its head stays, .review-body scrolls inside
+ * it. Left to overflow, a long diff ran on past the sheet's rounded bottom
+ * over the bare page (the operator's first use). */
+#review-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 #card-panel,
-#reader-panel {
+#reader-panel,
+#review-panel {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -1173,7 +1262,8 @@ main {
 }
 
 .card-head,
-.reader-head {
+.reader-head,
+.review-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -1181,24 +1271,39 @@ main {
 }
 
 .card-title,
-.reader-title {
+.reader-title,
+.review-title {
   margin: 0;
   font-size: var(--fs-md);
 }
 
 .card-close,
-.reader-close {
+.reader-close,
+.review-close {
   flex: none;
-  font: inherit;
   color: var(--text-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
 }
 
 .card-close:hover,
-.reader-close:hover {
+.reader-close:hover,
+.review-close:hover {
   color: var(--text);
+}
+
+/* The card's way into its review, beside its close and the same height. */
+.card-review-link {
+  flex: none;
+  margin-left: auto;
+}
+
+/* The review's head holds buttons of one height: centred on each other, the
+ * title taking the room between the way back and the rest. */
+.review-header {
+  align-items: center;
+}
+
+.review-title {
+  flex: 1 1 auto;
 }
 
 .card-fields {
@@ -1219,7 +1324,8 @@ main {
   color: var(--text-muted);
 }
 
-.card-field select {
+.card-field select,
+.card-field input {
   font: inherit;
   color: var(--text);
   background: var(--surface);
@@ -1723,29 +1829,13 @@ main {
 .card-dock-write,
 .card-dock-orchestrator {
   flex: none;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
 }
 
-.card-dock-place[aria-pressed="true"],
-.card-dock-resume,
-.card-dock-write,
-.card-dock-orchestrator {
-  border-color: var(--accent);
-  background: var(--accent);
+/* The place the dock is in, drawn as chosen: the accent, as a primary is. */
+.card-dock-place[aria-pressed="true"] {
+  background-color: var(--accent);
+  box-shadow: inset 0 0 0 0.5px var(--accent-strong);
   color: var(--surface);
-}
-
-.card-dock-place:disabled,
-.card-dock-font:disabled,
-.card-dock-resume:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .card-dock-body {
@@ -1781,16 +1871,7 @@ main {
 }
 
 .card-dock .s-key {
-  min-width: 34px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
-  cursor: pointer;
 }
 
 .card-dock-note {
@@ -1916,6 +1997,374 @@ main {
 .reader-error {
   color: var(--danger);
   overflow-wrap: anywhere;
+}
+
+/* Review overlay (web/js/review.js)
+ *
+ * An overlay over the centre column, sharing #card-panel's rules above, for
+ * the same reason .reader-body does: a diff opened from a card is read over
+ * the board it came from.
+ *
+ * Unlike the reader's body, .review-body carries no reading width: a diff's
+ * lines are code, not prose, and a line clipped short would hide the part of
+ * it a comment is about.
+ */
+.review-status {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.review-base {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin: 0 0 var(--gap);
+}
+
+.review-uncommitted {
+  margin-bottom: var(--gap);
+  font-size: var(--fs-sm);
+}
+
+.review-uncommitted-title {
+  color: var(--text-muted);
+  margin: 0 0 4px;
+}
+
+.review-uncommitted-path {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.review-commit-hint {
+  color: var(--attn);
+  margin: 0 0 var(--gap-sm);
+}
+
+.review-no-commits {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* The sheet's scrolling box, below its head, sharing the stage with the card's
+ * session (.card-stage, .card-dock). */
+.review-body {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Each file is an island of its own, its path on a head that stays at the
+ * top while the file scrolls by. clip rather than hidden for the rounded
+ * corners: hidden makes the island a scroll box, and the head would stick to
+ * it instead of to .review-body.
+ *
+ * A file off screen is neither laid out nor painted: a long diff is tens of
+ * thousands of nodes, and drawn whole it was re-rendered on every change on
+ * the page, a line in the review's own session among them. Its height off
+ * screen is the contain-intrinsic-size review.js sets. */
+.review-file {
+  content-visibility: auto;
+  margin-bottom: var(--gap-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
+  overflow: clip;
+}
+
+.review-file-name {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: var(--gap-sm) var(--gap);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.review-file-note {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  padding: 0 var(--gap);
+}
+
+/* The operator's size from the header's A−/px/A+ (web/js/review.js), a sixth
+ * larger than the panel's small text until it is set: code is read here,
+ * closely. */
+.review-line {
+  display: flex;
+  align-items: stretch;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
+  line-height: 1.6;
+}
+
+.review-line-add {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.review-line-del {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* Lit under the pointer and while a drag covers it: an image over the row's
+ * own ground, so an added or removed line keeps its tint. */
+.review-line:hover {
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 10%, transparent));
+}
+
+.review-line-picked {
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--accent) 22%, transparent));
+}
+
+.review-line-old,
+.review-line-new {
+  flex: none;
+  width: 4ch;
+  padding-right: var(--gap-sm);
+  text-align: right;
+  color: var(--text-faint);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Wrapped rather than cut off: the part of a long line past the island's edge
+ * may be the very part a comment is about. */
+.review-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: var(--gap);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The button that opens a comment form on a line, in the gutter as tall as
+ * the row and shown on the line under the pointer, as GitLab does. Pressed and
+ * dragged down the gutter it picks a range.
+ */
+button.review-line-add {
+  flex: none;
+  align-self: stretch;
+  width: 2.4ch;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.review-line:hover button.review-line-add,
+.review-line-picked button.review-line-add,
+button.review-line-add:focus-visible {
+  opacity: 1;
+}
+
+button.review-line-add:hover {
+  background: var(--surface-hover);
+}
+
+/* The unchanged lines a gap between hunks hides: a band as tall as a diff
+ * row, in the rows' size, each control the full height of it and lit under
+ * the pointer as a line is. Small pale links here were missed. */
+.review-expand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  background: var(--surface-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
+  line-height: 1.6;
+}
+
+.review-expand button {
+  align-self: stretch;
+  padding: 0 var(--gap);
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.review-expand button:hover:not(:disabled) {
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 10%, transparent));
+}
+
+.review-expand button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.review-line-comments {
+  margin: 0 var(--gap) var(--gap-sm);
+}
+
+.review-comment {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--gap-sm) var(--gap);
+  margin: 4px 0;
+  font-size: var(--fs-sm);
+}
+
+/* A comment whose line is no longer today's — see the state words in
+ * web/js/i18n.js. Not --danger: the comment itself is not wrong, only its
+ * place is uncertain, and painting it as a failure would say the wrong thing.
+ */
+.review-comment-changed,
+.review-comment-deleted,
+.review-comment-file_gone,
+.review-comment-unavailable {
+  border-color: color-mix(in srgb, var(--attn) 45%, var(--border-strong));
+}
+
+.review-comment-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  color: var(--text-muted);
+}
+
+.review-comment-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.review-comment-state {
+  color: var(--attn);
+}
+
+.review-comment-resolved {
+  color: var(--ok);
+}
+
+.review-comment-was {
+  overflow: auto;
+  padding: var(--gap-sm);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.review-comment-body {
+  margin: var(--gap-sm) 0;
+  overflow-wrap: anywhere;
+}
+
+.review-reply {
+  border-top: 1px solid var(--border);
+  padding-top: var(--gap-sm);
+  margin-top: var(--gap-sm);
+}
+
+.review-reply-status {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.review-reply-commit {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: var(--gap-sm);
+}
+
+.review-reply-text {
+  overflow-wrap: anywhere;
+}
+
+.review-reply-partial {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.review-comment-actions {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-sm);
+}
+
+.review-detached {
+  margin-bottom: var(--gap-lg);
+}
+
+.review-detached-title,
+.review-unsent-title {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin: 0 0 4px;
+}
+
+.review-detached-where {
+  display: block;
+  margin-top: var(--gap-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-sm);
+}
+
+.review-rounds,
+.review-unsent {
+  margin-bottom: var(--gap-lg);
+  font-size: var(--fs-sm);
+}
+
+.review-round {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+}
+
+.review-round-delivery,
+.review-round-unanswered {
+  color: var(--text-muted);
+}
+
+.review-unsent-text {
+  width: 100%;
+  font: inherit;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.review-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: var(--gap-sm) var(--gap);
+}
+
+.review-form-text {
+  min-height: 4.5em;
+  resize: vertical;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.review-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Cancel and add, side by side at the right under the text. Their look is
+ * .btn's; this only places them. */
+.review-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
 }
 
 /* The cards an open document belongs to (web/js/doccards.js), in the reader and
@@ -2057,6 +2506,44 @@ main {
   min-width: 64px;
 }
 
+/* Where a dragged card can go (web/js/board.js): open columns lie under a
+   sheet of the controls' glass, the ones the board refuses fade, and the one
+   under the pointer is ringed. Colour and outline only -- a light that changed
+   a size would move the column out from under the pointer. The outline rather
+   than a shadow: an inset one is painted under the cards, which fill the
+   window's column edge to edge, and an outer one is clipped by the board. By
+   the board's id so that it outranks the window's own .kcol rules. */
+.kcol {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background-color 120ms ease, outline-color 120ms ease, opacity 120ms ease;
+}
+
+#board > .kcol-drop-open {
+  background-color: var(--glass-control);
+  outline-color: var(--glass-control-edge);
+}
+
+#board > .kcol-drop-refused {
+  opacity: 0.45;
+}
+
+#board > .kcol-drop-over {
+  background-color: var(--glass-control-hover);
+  outline-color: var(--accent);
+}
+
+#board > .kcol-drop-refused.kcol-drop-over {
+  background-color: transparent;
+  outline-color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kcol {
+    transition: none;
+  }
+}
+
 .kcol h5 {
   margin: 0 0 2px;
   display: flex;
@@ -2069,6 +2556,7 @@ main {
 }
 
 .kcount {
+  margin-left: auto;
   font-size: var(--fs-2xs);
   color: var(--text-faint);
 }
@@ -2282,51 +2770,64 @@ main {
   border-bottom-color: var(--accent);
 }
 
-/* Starting a card (web/js/newcard.js). The row is the anchor for the form, and
-   the form opens over the column rather than as a row of its own: nothing moves
-   when it opens or closes. z-index 1 keeps it under the card and session
-   panels (z-index 2), which cover this row when they are up. */
+/* Starting a card (web/js/newcard.js). The row holds the form, which opens as a
+   window over the board rather than as a row of its own: nothing moves when it
+   opens or closes. */
 #tabs {
   position: relative;
   align-items: center;
 }
 
-.newcard-open {
-  margin-left: auto;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+/* The button that opens the form is a row of the new column under its head
+   (web/js/board.js), and the form opens under the tab row, over that column:
+   new is the first column, so the form's left edge is the board's. Its width
+   is the column's, whatever the column's is: a fixed one would stop following
+   a resized column. */
+.kcol-add {
+  width: 100%;
+  white-space: nowrap;
   color: var(--text-muted);
-  font: inherit;
-  font-size: var(--fs-xs);
-  padding: 2px 8px;
-  margin-bottom: var(--gap-sm);
 }
 
-.newcard-open:hover {
+/* The empty new column's floor is its button, not the head: at 64px the
+   button's label wrapped onto two lines. */
+.kcol-empty:has(.kcol-add) {
+  flex-basis: auto;
+  min-width: 0;
+}
+
+.kcol-add:hover {
   color: var(--text);
-  border-color: var(--border-strong);
 }
 
+/* The card under the pointer while it is being dragged. The browser draws the
+   image that follows the cursor; this is the place it came from. */
+.kcard-dragging {
+  opacity: 0.4;
+}
+
+/* A window over the board, centred by margin: auto between four zero edges,
+   about 60% of the room each way and never more than the room less a margin. */
 .newcard {
-  position: absolute;
-  top: 100%;
-  right: var(--gap-lg);
-  z-index: 1;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  margin: auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--gap);
-  width: min(28rem, calc(100% - 2 * var(--gap-lg)));
-  padding: var(--gap);
+  width: min(max(24rem, 60vw), calc(100vw - 2 * var(--gap-lg)));
+  height: min(max(20rem, 60vh), calc(100vh - 2 * var(--gap-lg)));
+  padding: var(--gap-lg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-raised);
   box-shadow: 0 4px 16px var(--shadow);
 }
 
-.newcard-title {
-  flex: 1 1 100%;
+.newcard-title,
+.newcard-repo,
+.newcard-desc {
   font: inherit;
   padding: 4px 6px;
   border: 1px solid var(--border-strong);
@@ -2335,19 +2836,105 @@ main {
   color: var(--text);
 }
 
-.newcard-zone,
-.newcard-create,
-.newcard-cancel {
+.newcard-desc {
+  flex: 1 1 auto;
+  min-height: 4rem;
+  resize: none;
+}
+
+.newcard-repo-row,
+.newcard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.newcard-repo {
+  flex: 1 1 12rem;
+}
+
+.newcard-head,
+.newcard-files-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.newcard-title {
+  flex: 1 1 auto;
+}
+
+/* The form's cross is a .btn-icon a step larger than the scale's largest: the
+   icon's glyph is drawn at --fs-md, so the step is taken there. */
+.newcard-close {
+  flex: none;
+  --btn-height: 40px;
+  --fs-md: 26px;
+}
+
+.newcard-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.newcard-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+}
+
+.newcard-file-remove {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.newcard-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* A picture a card was started with: as wide as the card allows, and short
+   enough that the text after it is still in reach. */
+.md-img {
+  display: block;
+  max-width: 100%;
+  max-height: 24rem;
+  margin: var(--gap-sm) 0;
+  border-radius: var(--radius-sm);
+}
+
+.newcard-actions {
+  justify-content: flex-end;
+}
+
+.newcard-zone-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.newcard-zone {
   font: inherit;
   font-size: var(--fs-sm);
 }
 
-.newcard-create {
-  margin-left: auto;
-}
-
 .newcard-error {
-  flex: 1 1 100%;
+  flex: 1 1 auto;
   color: var(--danger);
   font-size: var(--fs-xs);
 }
@@ -2359,7 +2946,7 @@ main {
 .newcard-note {
   position: absolute;
   top: 100%;
-  right: var(--gap-lg);
+  left: var(--gap-lg);
   z-index: 1;
   color: var(--attn);
   font-size: var(--fs-xs);
@@ -2520,7 +3107,7 @@ main {
   }
 }
 
-.session-panel button {
+.session-panel button:not(.btn) {
   font: inherit;
   font-size: var(--fs-xs);
   color: var(--text);
@@ -2531,35 +3118,20 @@ main {
   cursor: pointer;
 }
 
-.session-panel button:hover {
+.session-panel button:not(.btn):hover {
   background: var(--surface);
 }
 
-/* A font button at the end of the range is off, and says so by looking off
- * rather than by doing nothing when pressed. */
-.session-panel .s-font-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.session-panel .s-font-btn:disabled:hover {
-  background: var(--surface-hover);
-}
-
 .session-panel .s-close {
-  background: transparent;
-  border-color: transparent;
   color: var(--text-muted);
 }
 
 .session-panel .s-close:hover {
   color: var(--text);
-  background: var(--surface-hover);
 }
 
 .session-panel .s-key {
   font-variant-numeric: tabular-nums;
-  min-width: 34px;
 }
 
 /* The two classes of control in this panel, and why they are not one row.
@@ -2873,25 +3445,11 @@ main {
 
 .o-name-edit {
   flex: none;
-  font: inherit;
-  font-size: var(--fs-xs);
   color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 1px 6px;
-  cursor: pointer;
-  line-height: 1.4;
 }
 
 .o-name-edit:hover {
-  background: var(--surface-hover);
   color: var(--text);
-}
-
-.o-name-edit:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .o-name-input {
@@ -2943,19 +3501,10 @@ main {
 
 .label-edit-btn {
   flex: none;
-  font: inherit;
-  font-size: var(--fs-2xs);
   color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 0 4px;
-  cursor: pointer;
-  line-height: 1.5;
 }
 
 .label-edit-btn:hover {
-  background: var(--surface-hover);
   color: var(--text);
 }
 
@@ -3046,7 +3595,7 @@ main {
   justify-content: flex-start;
 }
 
-.col-size-btn {
+.col-size-btn:not(.btn) {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
@@ -3057,7 +3606,7 @@ main {
   cursor: pointer;
 }
 
-.col-size-btn:hover:not(:disabled) {
+.col-size-btn:not(.btn):hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text);
 }
@@ -3065,7 +3614,7 @@ main {
 /* Disabled at the ends of the ladder rather than removed: a control that
    disappears takes its own explanation with it, and a person is left wondering
    whether they imagined it. */
-.col-size-btn:disabled {
+.col-size-btn:not(.btn):disabled {
   opacity: 0.35;
   cursor: default;
 }
@@ -3384,44 +3933,13 @@ body.is-resizing {
  * path out by hand — and this row is the first thing the application shows
  * anybody at all.
  *
- * So both are drawn at the field's own height: font: inherit and its vertical
- * padding, not a smaller --fs-* step, which is what made them read as captions.
- * The accent goes to one of them only, the one that writes: a folder can be
+ * So both are the large step of the button scale, the field's own height, not
+ * a smaller --fs-* step, which is what made them read as captions. The accent
+ * (.btn-primary) goes to one of them only, the one that writes: a folder can be
  * chosen again, a workspace is created once. */
 .setup-choose,
 .setup-create {
   flex: none;
-  font: inherit;
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.setup-choose {
-  color: var(--text);
-  background: var(--surface-raised);
-  border: 1px solid var(--border-strong);
-}
-
-.setup-choose:hover {
-  background: var(--surface-hover);
-}
-
-.setup-create {
-  color: #fff;
-  background: var(--accent);
-  border: 1px solid var(--accent-strong);
-}
-
-.setup-create:hover {
-  background: var(--accent-strong);
-}
-
-/* Held down for as long as the POST is in flight (web/js/setup.js), so it has
-   to look held down rather than merely stop answering. */
-.setup-create:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .setup-error {
@@ -3597,47 +4115,12 @@ body.is-resizing {
 
 /* The wizard's own buttons are sized to their words and read as buttons: a
    grey bar across the whole section looked switched off on the stand. The
-   actions that write are in the accent colour; skipping is not. */
+   actions that write are .btn-primary; skipping is not. */
 .wizard-create,
 .wizard-appoint,
 .wizard-open,
 .wizard-skip {
   align-self: flex-start;
-  font: inherit;
-  font-size: var(--fs-sm);
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.wizard-create,
-.wizard-appoint,
-.wizard-open {
-  color: #fff;
-  background: var(--accent);
-  border: 1px solid var(--accent-strong);
-}
-
-.wizard-create:hover,
-.wizard-appoint:hover,
-.wizard-open:hover {
-  background: var(--accent-strong);
-}
-
-.wizard-skip {
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-}
-
-.wizard-skip:hover {
-  background: var(--surface-hover);
-}
-
-.wizard-create:disabled,
-.wizard-appoint:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .wizard-rerun {
@@ -3727,6 +4210,22 @@ body.is-resizing {
   gap: var(--gap);
 }
 
+/* A listed fleet's row carries its delete button beside the entry, which keeps
+   the rest of the row. */
+.start-fleets li {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+/* Deleting removes what does not come back, so both buttons that do it say
+   so in the danger colour; their shape is the button system's. */
+.start-fleet-delete,
+.start-delete-confirm {
+  flex: none;
+  color: var(--danger);
+}
+
 .start-fleet {
   width: 100%;
   display: flex;
@@ -3791,18 +4290,6 @@ body.is-resizing {
 
 .start-new {
   align-self: flex-start;
-  font: inherit;
-  font-size: var(--fs-sm);
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: #fff;
-  background: var(--accent);
-  border: 1px solid var(--accent-strong);
-}
-
-.start-new:hover {
-  background: var(--accent-strong);
 }
 
 .start-new-form {
@@ -3926,22 +4413,8 @@ body.is-resizing {
 }
 
 .sresume-btn {
-  font-size: var(--fs-2xs);
   font-weight: 600;
   color: var(--accent-strong);
-  background: var(--surface-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  /* Big enough to aim at without a second thought. The row is narrow and the
-     button is small, and a target a person has to be careful with is one they
-     press twice. */
-  padding: 5px 12px;
-  cursor: pointer;
-}
-
-.sresume-btn:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--accent-strong);
 }
 
 /* Pressed and working. The resume does not answer until the session is up or
@@ -3950,8 +4423,6 @@ body.is-resizing {
    plainly that something is happening rather than merely looking inert. */
 .sresume-btn:disabled {
   color: var(--text-muted);
-  border-color: var(--border);
-  background: var(--surface);
   cursor: progress;
 }
 
@@ -4315,20 +4786,22 @@ body.is-resizing {
   box-shadow: var(--island-shadow);
 }
 
-:root[data-surface="board"] #tabs .tab,
-:root[data-surface="board"] #tabs .newcard-open {
+:root[data-surface="board"] #tabs .tab {
   display: none;
 }
 
-/* With its tabs and button hidden the row has no width, so the form does not
-   take one from it: it opens from the row's left edge, the board's left inset,
-   as wide as the room between the panels allows. */
+/* The board's web view runs under both panels and the capsules, so the room the
+   form is centred in is what they leave: the same four edges, and 60% of it. */
 :root[data-surface="board"] .newcard {
-  top: 0;
-  left: 0;
-  right: auto;
-  width: min(28rem, calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px) - 2 * var(--gap-lg)));
-  padding: 10px;
+  --newcard-room-w: calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px));
+  --newcard-room-h: calc(100vh - var(--host-inset-top, 64px));
+  top: var(--host-inset-top, 64px);
+  left: var(--host-inset-left, 394px);
+  right: var(--host-inset-content-right, 356px);
+  bottom: 0;
+  width: min(max(20rem, calc(var(--newcard-room-w) * 0.6)), calc(var(--newcard-room-w) - 2 * var(--gap-lg)));
+  height: min(max(18rem, calc(var(--newcard-room-h) * 0.6)), calc(var(--newcard-room-h) - 2 * var(--gap-lg)));
+  padding: 14px;
   border: none;
   border-radius: var(--radius-xl);
   background-color: var(--surface-on-glass);
@@ -4455,13 +4928,14 @@ body.is-resizing {
 
 /* Shown from the overlays' own hidden attribute, so no module keeps a second
    piece of state in step with three panels. */
-:root[data-surface="board"] #center:has(#card-panel:not([hidden]), #reader-panel:not([hidden]), #session-panel:not([hidden])) > #sheet-scrim {
+:root[data-surface="board"] #center:has(#card-panel:not([hidden]), #reader-panel:not([hidden]), #session-panel:not([hidden]), #review-panel:not([hidden])) > #sheet-scrim {
   display: block;
 }
 
 :root[data-surface="board"] #card-panel,
 :root[data-surface="board"] #reader-panel,
-:root[data-surface="board"] #session-panel {
+:root[data-surface="board"] #session-panel,
+:root[data-surface="board"] #review-panel {
   position: absolute;
   inset: auto;
   top: calc(var(--host-inset-top, 64px) - 4px);
@@ -4475,21 +4949,7 @@ body.is-resizing {
   box-shadow: var(--sheet-shadow);
 }
 
-:root[data-surface="board"] .card-close,
-:root[data-surface="board"] .reader-close,
-:root[data-surface="board"] .session-panel .s-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: var(--surface-hover);
-}
-
-:root[data-surface="board"] .session-panel button {
+:root[data-surface="board"] .session-panel button:not(.btn) {
   border: none;
   border-radius: 999px;
   box-shadow: inset 0 0 0 1px var(--border);
@@ -4517,9 +4977,9 @@ body.is-resizing {
 /* --- the page's controls as capsules of glass ---
  *
  * The window's own capsules over the board are the system's glass; the controls
- * the page draws beside them are capsules too: the orchestrator island's head
- * (the edit pencil, the orchestrator picker, the terminal's font buttons and the
- * fold button, the fleet menu) and the new card form's fields.
+ * the page draws beside them are capsules too: every button is a .btn (the block
+ * after :focus-visible), and here the orchestrator picker and the new card
+ * form's fields join them.
  *
  * Measured on macOS 27 (T-070): a page cannot ask WebKit for the system's
  * material, and a backdrop-filter in a transparent web view blurs the window's
@@ -4529,13 +4989,10 @@ body.is-resizing {
  * list over the island, is frosted: a dense fill and a blur, read the same
  * whatever is under it. With no glass all of it is solid.
  *
- * A browser tab has no data-surface and keeps its bordered controls. */
+ * A browser tab has no data-surface and keeps its bordered fields; its buttons
+ * are .btn capsules there too. */
 
-/* The fold and unfold buttons are round glass buttons of their own, below. */
-:root[data-surface="orchestrator"] .o-name-edit,
-:root[data-surface="orchestrator"] .o-pick-select,
-:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold),
-:root[data-surface="orchestrator"] .fleet-menu-button {
+:root[data-surface="orchestrator"] .o-pick-select {
   min-height: 24px;
   padding: 2px 10px;
   border: none;
@@ -4545,9 +5002,8 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] .newcard-title,
-:root[data-surface="board"] .newcard-zone,
-:root[data-surface="board"] .newcard-create,
-:root[data-surface="board"] .newcard-cancel {
+:root[data-surface="board"] .newcard-repo,
+:root[data-surface="board"] .newcard-zone {
   min-height: 30px;
   padding: 4px 14px;
   border: none;
@@ -4557,37 +5013,37 @@ body.is-resizing {
   box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
 }
 
-/* A disabled capsule is not lit under the pointer: Create while the card is
-   being written looks as unpressable as it is. */
-:root[data-surface="orchestrator"] .o-name-edit:hover:not(:disabled),
+/* A disabled capsule is not lit under the pointer. */
 :root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
-:root[data-surface="orchestrator"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold):hover:not(:disabled),
-:root[data-surface="orchestrator"] .fleet-menu-button:hover:not(:disabled),
 :root[data-surface="board"] .newcard-title:hover:not(:disabled),
-:root[data-surface="board"] .newcard-zone:hover:not(:disabled),
-:root[data-surface="board"] .newcard-create:hover:not(:disabled),
-:root[data-surface="board"] .newcard-cancel:hover:not(:disabled) {
+:root[data-surface="board"] .newcard-repo:hover:not(:disabled),
+:root[data-surface="board"] .newcard-zone:hover:not(:disabled) {
   background-color: var(--glass-control-hover);
-}
-
-:root[data-surface="board"] .newcard-create:disabled,
-:root[data-surface="board"] .newcard-cancel:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* The fleet menu's button, its list open: lit, with the accent round it, as a
-   browser tab's has. */
-:root[data-surface="orchestrator"] .fleet-menu-button[aria-expanded="true"] {
-  background-color: var(--glass-control-hover);
-  box-shadow: inset 0 0 0 1px var(--accent), inset 0 1px 0 var(--glass-control-highlight);
 }
 
 /* The title's placeholder is what an empty form shows: read like the muted text
    beside it, not WebKit's pale default on a frosted panel. */
-:root[data-surface="board"] .newcard-title::placeholder {
+:root[data-surface="board"] .newcard-title::placeholder,
+:root[data-surface="board"] .newcard-repo::placeholder,
+:root[data-surface="board"] .newcard-desc::placeholder {
   color: var(--text-muted);
   opacity: 1;
+}
+
+/* The description is the capsules' glass in a box: several lines do not fit a
+   pill's round ends. */
+:root[data-surface="board"] .newcard-desc {
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  background-color: var(--glass-control);
+  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
+}
+
+:root[data-surface="board"][data-glass="opaque"] .newcard-desc {
+  background-color: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
 /* The closed select is drawn by the page, its chevron in the text's colour; the
@@ -4631,30 +5087,22 @@ body.is-resizing {
 
 /* No glass: solid capsules with the border a column's controls have, and
    nothing blurred. */
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit,
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
-:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold),
-:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
-:root[data-surface="board"][data-glass="opaque"] .newcard-zone,
-:root[data-surface="board"][data-glass="opaque"] .newcard-create,
-:root[data-surface="board"][data-glass="opaque"] .newcard-cancel {
+:root[data-surface="board"][data-glass="opaque"] .newcard-repo,
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone {
   background-color: var(--surface-raised);
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-name-edit:hover:not(:disabled),
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
-:root[data-surface="orchestrator"][data-glass="opaque"] .col-size-btn:not(.col-size-unfold):not(.col-size-fold):hover:not(:disabled),
-:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
-:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
-:root[data-surface="board"][data-glass="opaque"] .newcard-create:hover:not(:disabled),
-:root[data-surface="board"][data-glass="opaque"] .newcard-cancel:hover:not(:disabled) {
+:root[data-surface="board"][data-glass="opaque"] .newcard-repo:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled) {
   background-color: var(--surface-hover);
 }
 
-:root[data-surface="orchestrator"][data-glass="opaque"] .fleet-menu-button[aria-expanded="true"] {
+:root[data-glass="opaque"] .fleet-menu-button[aria-expanded="true"] {
   background-color: var(--surface-hover);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
@@ -4716,4 +5164,107 @@ body.is-resizing {
 :root[data-surface="orchestrator"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled),
 :root[data-surface="sessions"][data-glass="opaque"] .col-size-unfold:hover:not(:disabled) {
   background-color: var(--surface-hover);
+}
+
+/* The dialog (web/js/dialog.js), the page's one modal, which the board's moves
+ * ask their questions in (web/js/boardmove.js).
+ *
+ * The window floats over the content, which is the one case where a blur inside
+ * this page is legal — a control lying on an island carries none, or it blurs
+ * the window's own glass a second time (web/tests/glass-controls-css.test.js
+ * states the rule and what it was measured on). The scrim is NOT that case: it
+ * is fixed over the whole web view, and in the fleetdeck window most of what it
+ * covers is not page content at all but the window's own glass, which is the
+ * very material the rule keeps blurs off. So the scrim dims and does no more.
+ *
+ * Written without a data-surface, so a browser tab is covered too.
+ *
+ * No [hidden] rule of its own: the sheet already forces display:none on
+ * anything hidden. */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--gap-lg);
+  background: var(--dialog-scrim);
+}
+
+.dialog {
+  width: min(400px, 100%);
+  max-height: calc(100vh - 4 * var(--gap-lg));
+  overflow: auto;
+  padding: var(--gap-lg);
+  border: none;
+  border-radius: var(--radius-lg);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--sheet-shadow);
+  color: var(--text);
+}
+
+/* Wide is the form's width, narrow the question's. */
+.dialog[data-size="wide"] {
+  width: min(560px, 100%);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: var(--fs-md);
+}
+
+.dialog-close {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.dialog-close:hover {
+  color: var(--text);
+}
+
+.dialog-body {
+  display: grid;
+  gap: var(--gap);
+  margin-top: var(--gap);
+  line-height: 1.5;
+}
+
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap);
+  margin-top: var(--gap-lg);
+}
+
+.dialog-foot:empty {
+  display: none;
+}
+
+/* Moving a card between the board's columns (web/js/boardmove.js). The dialog
+   above gives the window; these are the things said inside one. */
+.bmove-held-text,
+.bmove-start-text {
+  color: var(--text);
+}
+
+.bmove-error {
+  color: var(--danger);
+}
+
+/* Reduce transparency: solid, and nothing blurred. The scrim is not named here
+   because it has no blur to take away. */
+:root[data-glass="opaque"] .dialog {
+  background-color: var(--surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--sheet-shadow), inset 0 0 0 1px var(--border-strong);
 }

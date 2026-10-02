@@ -21,15 +21,28 @@ function attributeName(name) {
     : null;
 }
 
-function matchesSelector(node, selector) {
-  // A comma is a list of selectors, and a node matches if it matches any of
-  // them — the panel asks for its scrolling boxes as ".md-table, pre", one
-  // query for two kinds of box.
-  if (selector.includes(",")) {
-    return selector.split(",").some((one) => matchesSelector(node, one));
-  }
-  const parts = SELECTOR.exec(selector.trim());
-  if (!parts) throw new Error(`fake-dom: unsupported selector ${selector}`);
+// nodeList is what a real querySelectorAll answers: indexable, iterable, with
+// length and forEach — and with none of the array methods. It is a wrapper
+// rather than the plain array it used to be because the difference is not
+// cosmetic: web/js/dialog.js called .filter on the result and threw on every
+// open() in a real browser, while this DOM answered an array and every test
+// passed. A double quieter than the thing it stands in for is worse than none.
+function nodeList(found) {
+  const list = {
+    length: found.length,
+    item: (i) => found[i] ?? null,
+    forEach: (fn, thisArg) => found.forEach(fn, thisArg),
+    [Symbol.iterator]: () => found[Symbol.iterator](),
+  };
+  for (let i = 0; i < found.length; i += 1) list[i] = found[i];
+  return list;
+}
+
+// Matches one compound selector (no combinator) against one node: an optional
+// tag, an optional class, an optional attribute.
+function matchesCompound(node, compound) {
+  const parts = SELECTOR.exec(compound.trim());
+  if (!parts) throw new Error(`fake-dom: unsupported selector ${compound}`);
   const [, tag, className, attribute, quoted, bare] = parts;
   const attributeValue = quoted ?? bare;
   if (tag && node.tagName !== tag.toUpperCase()) return false;
@@ -41,6 +54,36 @@ function matchesSelector(node, selector) {
     if (attributeValue !== undefined && String(held) !== attributeValue) return false;
   }
   return true;
+}
+
+function matchesSelector(node, selector) {
+  // A comma is a list of selectors, and a node matches if it matches any of
+  // them — the panel asks for its scrolling boxes as ".md-table, pre", one
+  // query for two kinds of box.
+  if (selector.includes(",")) {
+    return selector.split(",").some((one) => matchesSelector(node, one));
+  }
+  const trimmed = selector.trim();
+  // A plain descendant combinator — "A B", any number of space-separated
+  // compounds — the review overlay asks for the "+" button of one specific
+  // line as '[data-new-line="2"] .review-line-add', since the line's own row
+  // and its button can share a class. ":scope > x" keeps the separate
+  // handling querySelectorAll already gives it below, for the board's direct
+  // children.
+  if (!trimmed.startsWith(":scope")) {
+    const parts = trimmed.split(/\s+/);
+    if (parts.length > 1) {
+      if (!matchesCompound(node, parts[parts.length - 1])) return false;
+      let ancestor = node.parentNode;
+      let next = parts.length - 2;
+      while (next >= 0 && ancestor) {
+        if (matchesCompound(ancestor, parts[next])) next -= 1;
+        ancestor = ancestor.parentNode;
+      }
+      return next < 0;
+    }
+  }
+  return matchesCompound(node, trimmed);
 }
 
 class FakeEvent {
@@ -247,6 +290,16 @@ class FakeNode {
     return this.children[0] ?? null;
   }
 
+  // after places siblings right after this node — the review overlay opens its
+  // comment form under the line it was asked for, rather than inside it.
+  after(...nodes) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const at = parent.children.indexOf(this);
+    for (const node of nodes) node.parentNode = parent;
+    parent.children.splice(at + 1, 0, ...nodes);
+  }
+
   // insertBefore and remove exist because a column that updates in place has to
   // put a row back where it belongs and take one away again, rather than
   // rebuilding the list around it.
@@ -311,6 +364,18 @@ class FakeNode {
     // logged rather than inferred.
     this.ownerDocument?.searches?.push({ selector, connected: this.isConnected });
     const found = [];
+    // ":scope > x" is the one combinator this understands, and it is here
+    // because the board asks by it: a column is a direct child of #board, and
+    // a plain ".kcol" would also find a column nested in one — which on a
+    // board being redrawn is the difference between putting a column's scroll
+    // back and putting it somewhere else.
+    const direct = selector.trim().match(/^:scope\s*>\s*(.+)$/);
+    if (direct) {
+      for (const child of this.children) {
+        if (matchesSelector(child, direct[1])) found.push(child);
+      }
+      return nodeList(found);
+    }
     const visit = (node) => {
       for (const child of node.children) {
         if (matchesSelector(child, selector)) found.push(child);
@@ -318,7 +383,7 @@ class FakeNode {
       }
     };
     visit(this);
-    return found;
+    return nodeList(found);
   }
 
   querySelector(selector) {

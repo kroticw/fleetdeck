@@ -35,35 +35,59 @@ var gitWaitDelay = 2 * time.Second
 // this file, and only if this call is the one that staged it. A file the
 // human already had staged is left exactly as they left it.
 func Commit(dir, file, message string) error {
-	if err := validateFile(dir, file); err != nil {
-		return err
+	return commitPaths(dir, message, file)
+}
+
+// CommitCard commits a card the panel started, and its attachments directory
+// when it has one, in one commit from the board's own directory.
+func CommitCard(boardDir, cardPath, message string) error {
+	rel, err := filepath.Rel(boardDir, cardPath)
+	if err != nil {
+		return fmt.Errorf("commit %s: %w", cardPath, err)
 	}
+	paths := []string{rel}
+	if c, err := ParseCard(cardPath); err == nil && c.ID != "" {
+		if _, err := os.Stat(AttachmentsDir(boardDir, c.ID)); err == nil {
+			paths = append(paths, filepath.Join("attachments", c.ID))
+		}
+	}
+	return commitPaths(boardDir, message, paths...)
+}
+
+// commitPaths is Commit for several pathspecs at once, a directory among them.
+func commitPaths(dir, message string, paths ...string) error {
+	for _, p := range paths {
+		if err := validateFile(dir, p); err != nil {
+			return err
+		}
+	}
+	named := strings.Join(paths, ", ")
 
 	if out, err := run(dir, "rev-parse", "--git-dir"); err != nil {
 		return fmt.Errorf("not a git repository: %s: %w", strings.TrimSpace(out), err)
 	}
 
-	alreadyStaged, err := isStaged(dir, file)
+	alreadyStaged, err := isStaged(dir, paths...)
 	if err != nil {
 		return fmt.Errorf("inspect staged changes: %w", err)
 	}
 
-	if out, err := run(dir, "add", "--", file); err != nil {
-		return fmt.Errorf("stage %s: %s: %w", file, strings.TrimSpace(out), err)
+	if out, err := run(dir, append([]string{"add", "--"}, paths...)...); err != nil {
+		return fmt.Errorf("stage %s: %s: %w", named, strings.TrimSpace(out), err)
 	}
 
-	staged, err := isStaged(dir, file)
+	staged, err := isStaged(dir, paths...)
 	if err != nil {
-		restoreIndex(dir, file, alreadyStaged)
+		restoreIndex(dir, alreadyStaged, paths...)
 		return fmt.Errorf("inspect staged changes: %w", err)
 	}
 	if !staged {
-		return fmt.Errorf("nothing to commit for %s: %w", file, ErrNothingToCommit)
+		return fmt.Errorf("nothing to commit for %s: %w", named, ErrNothingToCommit)
 	}
 
-	if out, err := run(dir, "commit", "--signoff", "--message", message, "--", file); err != nil {
-		restoreIndex(dir, file, alreadyStaged)
-		return fmt.Errorf("commit %s: %s: %w", file, strings.TrimSpace(out), err)
+	if out, err := run(dir, append([]string{"commit", "--signoff", "--message", message, "--"}, paths...)...); err != nil {
+		restoreIndex(dir, alreadyStaged, paths...)
+		return fmt.Errorf("commit %s: %s: %w", named, strings.TrimSpace(out), err)
 	}
 	return nil
 }
@@ -95,8 +119,8 @@ func validateFile(dir, file string) error {
 }
 
 // isStaged reports whether file already has staged changes in dir's index.
-func isStaged(dir, file string) (bool, error) {
-	out, err := run(dir, "diff", "--cached", "--name-only", "--", file)
+func isStaged(dir string, paths ...string) (bool, error) {
+	out, err := run(dir, append([]string{"diff", "--cached", "--name-only", "--"}, paths...)...)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", strings.TrimSpace(out), err)
 	}
@@ -107,16 +131,16 @@ func isStaged(dir, file string) (bool, error) {
 // wasAlreadyStaged is false — if the human had the file staged before Commit
 // ran, their index is left alone. This is best effort: its own failure is
 // never surfaced, so it can never mask or replace the caller's real error.
-func restoreIndex(dir, file string, wasAlreadyStaged bool) {
+func restoreIndex(dir string, wasAlreadyStaged bool, paths ...string) {
 	if wasAlreadyStaged {
 		return
 	}
-	if _, err := run(dir, "restore", "--staged", "--", file); err == nil {
+	if _, err := run(dir, append([]string{"restore", "--staged", "--"}, paths...)...); err == nil {
 		return
 	}
 	// A repository with no commits yet has no HEAD to restore from; fall
 	// back to dropping the file from the index directly.
-	_, _ = run(dir, "rm", "--cached", "--quiet", "--", file)
+	_, _ = run(dir, append([]string{"rm", "--cached", "--quiet", "-r", "--"}, paths...)...)
 }
 
 // run executes git with a bounded deadline so a stuck child process — most

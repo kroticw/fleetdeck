@@ -17,8 +17,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -186,8 +188,8 @@ func watchBoard(ctx context.Context, boardDir string, onChange func()) {
 //     says the commit is missing. Reported as a plain failure this is the one that
 //     does damage: the operator redoes an edit that already took effect, and a
 //     progress field applied twice moves somewhere nobody asked for.
-func setCardField(path, field, value string) error {
-	if err := board.SetField(path, field, value); err != nil {
+func setCardField(path, field, value string, expect *string) error {
+	if err := board.SetField(path, field, value, expect); err != nil {
 		return err
 	}
 	msg := fmt.Sprintf("chore(board): set %s to %s", field, value)
@@ -207,16 +209,28 @@ func setCardField(path, field, value string) error {
 // rule for the second: once the file exists, a commit that did not happen is
 // wrapped in server.ErrCardWrittenNotCommitted and returned with the path, so the
 // operator is not invited to create the card a second time.
-func createCard(boardDir, title, zone string, now time.Time) (string, error) {
-	path, err := board.CreateCard(boardDir, title, zone, now)
+func createCard(boardDir string, card board.NewCard, now time.Time) (string, error) {
+	path, err := board.CreateCard(boardDir, card, now)
 	if err != nil {
 		return "", err
 	}
 	msg := "chore(board): add card " + filepath.Base(path)
-	if err := board.Commit(filepath.Dir(path), filepath.Base(path), msg); err != nil {
+	if err := board.CommitCard(boardDir, path, msg); err != nil {
 		return path, fmt.Errorf("%w: %w", server.ErrCardWrittenNotCommitted, err)
 	}
 	return path, nil
+}
+
+// pickDirectory is server.Deps.PickDirectory: the Finder's folder dialog on
+// macOS, and nil anywhere else, where there is no osascript to show one.
+func pickDirectory() func(ctx context.Context, prompt string) (string, error) {
+	home, err := os.UserHomeDir()
+	if runtime.GOOS != "darwin" || err != nil {
+		return nil
+	}
+	return server.ChooseFolder(home, func(ctx context.Context, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, "/usr/bin/osascript", args...).CombinedOutput()
+	})
 }
 
 // setOrchestratorSession is server.Deps.SetOrchestratorSession: pin, or
@@ -531,6 +545,10 @@ func serve(parent context.Context, o runOpts) error {
 	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
 	d := deps(p, dc, collector, cfg, o.configPath)
 	d.CreateFleet = fleetMaker(o.configPath, live.add)
+	// Stopped with the claude sessions are started with; nil on a stand given
+	// none, and then a fleet with running sessions is not deleted.
+	home, _ := os.UserHomeDir()
+	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg.Agent.Command), home)
 	// Every fleet's board, docs, pin and wizard, the first fleet's also in
 	// d's own fields, so a request naming no fleet is served as before. Made
 	// before anything below is started, so there is nothing to stop if it fails.
@@ -539,7 +557,9 @@ func serve(parent context.Context, o runOpts) error {
 	if err != nil {
 		return err
 	}
-	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession
+	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession, d.StartWork = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession, first.StartWork
+	d.SendToSession, d.CleanupSession = first.SendToSession, first.CleanupSession
+	d.ReviewWorkdir = first.ReviewWorkdir
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -814,6 +834,8 @@ type liveFleets struct {
 
 	mu sync.Mutex
 	wg sync.WaitGroup
+	// cancels ends one fleet's watch, by name, when the fleet is deleted.
+	cancels map[string]context.CancelFunc
 }
 
 // watchBoard starts the watch of f's board.
@@ -826,11 +848,28 @@ func (l *liveFleets) watchBoard(f fleet.Fleet) {
 // start is watchBoard with mu held. Whether the panel is stopping is add's to
 // check, under the same lock.
 func (l *liveFleets) start(f fleet.Fleet) {
+	ctx, cancel := context.WithCancel(l.ctx)
+	if l.cancels == nil {
+		l.cancels = map[string]context.CancelFunc{}
+	}
+	l.cancels[f.Name] = cancel
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
-		l.watch(l.ctx, f.BoardPath, func() { l.refresh(l.ctx) })
+		l.watch(ctx, f.BoardPath, func() { l.refresh(ctx) })
 	}()
+}
+
+// remove stops serving the fleet named name: its board watch ends and the
+// collector drops it from every snapshot. False when no such fleet was served.
+func (l *liveFleets) remove(name string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if cancel := l.cancels[name]; cancel != nil {
+		cancel()
+		delete(l.cancels, name)
+	}
+	return l.collector.RemoveFleet(name)
 }
 
 // add serves f from now on: in the collector, the fleets a request can name
@@ -947,10 +986,10 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
-	var create func(title, zone string) (string, error)
+	var create func(board.NewCard) (string, error)
 	if cfg.BoardPath != "" {
-		create = func(title, zone string) (string, error) {
-			return createCard(cfg.BoardPath, title, zone, time.Now())
+		create = func(card board.NewCard) (string, error) {
+			return createCard(cfg.BoardPath, card, time.Now())
 		}
 	}
 	return server.Deps{
@@ -989,8 +1028,9 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// is all it takes to replace it. rand.Text carries at least 128 random bits.
 		TerminalToken: rand.Text(),
 
-		SetCardField: setCardField,
-		CreateCard:   create,
+		SetCardField:  setCardField,
+		CreateCard:    create,
+		PickDirectory: pickDirectory(),
 		// Without this the server has nothing to confine a card write to and answers
 		// every one of them 503 — deliberately, since the path arrives from the
 		// browser and internal/board will rewrite a frontmatter line in any file

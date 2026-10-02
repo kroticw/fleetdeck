@@ -230,7 +230,7 @@ test("every card the session worked on is listed, in order, closed and archived 
   assert.notEqual(row, null, "the panel has no history row");
   assert.equal(row.querySelector(".s-cards-label")?.textContent, t("session_cards"));
 
-  const items = row.querySelectorAll(".s-card");
+  const items = [...row.querySelectorAll(".s-card")];
   assert.equal(items.length, HISTORY.length, "a card is missing from the history");
   HISTORY.forEach((card, i) => {
     assert.equal(items[i].dataset.path, card.path, `card ${i} is out of order`);
@@ -1199,7 +1199,7 @@ test("the panel's terminal is the size remembered for it, and Cmd+- changes that
 // buttons first and close last; only its look changes.
 test("the session head keeps its order: font buttons, name, close", async () => {
   const { root, stop } = await mount();
-  const head = root.querySelector(".s-head").children.map((node) => String(node.className).split(" ")[0]);
+  const head = root.querySelector(".s-head").children.map((node) => String(node.className).split(" ").at(-1));
   assert.deepEqual(head, ["term-font", "s-who", "s-close"]);
   stop();
 });

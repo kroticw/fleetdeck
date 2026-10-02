@@ -430,7 +430,7 @@ test("a drag the system cancels ends there: later moves size nothing", () => {
 test("the keys under the terminal press into it", () => {
   const m = mount({ extra: { expand: true } });
   m.dock.show({ short: ASK, from: "document" }, snap());
-  const enter = m.host.querySelectorAll(".s-key").find((b) => b.dataset.key === "enter");
+  const enter = [...m.host.querySelectorAll(".s-key")].find((b) => b.dataset.key === "enter");
   fireEvent(enter, "click");
   assert.deepEqual(m.terms.made[0].typed, ["\r"]);
 });

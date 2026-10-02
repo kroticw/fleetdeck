@@ -266,6 +266,13 @@ type Snapshot struct {
 	// card moving to review raises its banner whichever fleet a tab shows.
 	// Never served: a view carries its own fleet's cards in Cards.
 	Boards []FleetBoard `json:"-"`
+
+	// CanStartWork says the panel can start a worker session for a card of
+	// this fleet (POST /api/sessions). Stamped by internal/server from what the
+	// panel is wired with, never by the Collector, and false on a panel that
+	// starts no sessions: the page then offers no start rather than one that
+	// fails.
+	CanStartWork bool `json:"canStartWork,omitempty"`
 }
 
 // FleetBoard is one fleet's board as a collect cycle read it.

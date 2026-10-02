@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 )
 
@@ -26,10 +27,25 @@ var ErrOrchestratorTaken = errors.New("the session is another fleet's orchestrat
 type FleetDeps struct {
 	BoardDir               string
 	DocsRoots              []string
-	CreateCard             func(title, zone string) (string, error)
+	CreateCard             func(card board.NewCard) (string, error)
 	SetOrchestratorSession func(id string) error
 	OrchestratorPreview    func(lang string) (orchestrator.Preview, error)
 	Appoint                func(ctx context.Context, req orchestrator.Request) (orchestrator.Result, error)
+	// StartWork means what the Deps field of the same name means, for this
+	// fleet: one dispatcher per fleet holds the lock that keeps two hands from
+	// starting two sessions for one card.
+	StartWork func(ctx context.Context, w orchestrator.Work) (orchestrator.Result, error)
+
+	// SendToSession and CleanupSession mean what the Deps fields of the same
+	// name mean, for this fleet: reaching a session, and putting one out, is
+	// the business of the fleet the card belongs to.
+	SendToSession  func(ctx context.Context, session, text string) error
+	CleanupSession func(ctx context.Context, a orchestrator.Accepted) (orchestrator.Result, error)
+
+	// ReviewWorkdir means what the Deps field of the same name means, for
+	// this fleet: the working tree of the session keeping a card, for that
+	// fleet's own review routes.
+	ReviewWorkdir func(ctx context.Context, c board.Card) (string, error)
 }
 
 // forFleet is d with the capabilities of the fleet the request names in its
@@ -54,5 +70,9 @@ func (d Deps) forFleet(w http.ResponseWriter, r *http.Request) (Deps, bool) {
 	d.SetOrchestratorSession = f.SetOrchestratorSession
 	d.OrchestratorPreview = f.OrchestratorPreview
 	d.Appoint = f.Appoint
+	d.StartWork = f.StartWork
+	d.SendToSession = f.SendToSession
+	d.CleanupSession = f.CleanupSession
+	d.ReviewWorkdir = f.ReviewWorkdir
 	return d, true
 }

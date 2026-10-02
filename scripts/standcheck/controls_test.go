@@ -16,6 +16,15 @@ func goodCapsule(name, glass string) control {
 	return c
 }
 
+// The accent, the one button that writes: solid in every material, as the
+// button system draws it (.btn-primary), so it is never mistaken for a
+// capsule of glass.
+func goodAccent(name, glass string) control {
+	c := goodCapsule(name, glass)
+	c.FillAlpha = 1
+	return c
+}
+
 // A panel floating over content: frosted on glass, solid with no glass.
 func goodPanel(name, glass string) control {
 	c := control{Name: name, Height: 90, Radius: 18, FillAlpha: 0.8, Backdrop: "blur(24px) saturate(160%)", Contrast: 12.4}
@@ -36,7 +45,7 @@ func goodOrchestratorControls(glass string) controlsReport {
 func goodBoardControls(glass string) controlsReport {
 	return controlsReport{Surface: "board", Report: "controls", Glass: glass, Controls: []control{
 		goodPanel("newCard", glass), goodCapsule("newCardTitle", glass), goodCapsule("newCardZone", glass),
-		goodCapsule("newCardCreate", glass), goodCapsule("newCardCancel", glass),
+		goodAccent("newCardCreate", glass), goodCapsule("newCardClose", glass),
 	}}
 }
 

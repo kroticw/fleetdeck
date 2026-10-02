@@ -515,6 +515,12 @@ type Client struct {
 	resumeSettle     time.Duration
 	resumePoll       time.Duration
 	resumeRetryDelay time.Duration
+
+	// How long SendFirst waits for a started session to boot and take its
+	// message, and how often it asks. Fields for the reason the resume ones
+	// are; their values and why are on first.go's constants.
+	firstWait time.Duration
+	firstPoll time.Duration
 }
 
 // New creates a daemon client bound to an explicit socket path for its whole lifetime.
@@ -537,6 +543,8 @@ func New(socketPath string, key func() (string, error)) *Client {
 		resumeSettle:     resumeSettle,
 		resumePoll:       resumePoll,
 		resumeRetryDelay: resumeRetryDelay,
+		firstWait:        firstWait,
+		firstPoll:        firstPoll,
 	}
 }
 
@@ -771,22 +779,30 @@ func readResponse(conn net.Conn) (map[string]interface{}, error) {
 
 // readAttachHeader reads the JSON header line that opens an attach response and
 // returns an error when the daemon refused the attach (e.g. EAUTH, ENOJOB).
-func readAttachHeader(reader *bufio.Reader) error {
+func readAttachHeader(reader *bufio.Reader) (attachHeader, error) {
 	line, err := readBoundedLine(reader)
 	if err != nil {
-		return err
+		return attachHeader{}, err
 	}
 
 	var resp map[string]interface{}
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return err
+		return attachHeader{}, err
 	}
 
 	ok, _ := resp["ok"].(bool)
 	if !ok {
-		return daemonError(resp)
+		return attachHeader{}, daemonError(resp)
 	}
-	return nil
+	booting, _ := resp["booting"].(bool)
+	return attachHeader{Booting: booting}, nil
+}
+
+// attachHeader is what of the attach header line the client keeps. Booting is
+// the one field only this header carries: a session `--bg` has just reported is
+// listed at once, and reads its prompt only when this turns false (first.go).
+type attachHeader struct {
+	Booting bool
 }
 
 // ekickedPrefix is the plain-text marker the daemon writes into an attach stream, in

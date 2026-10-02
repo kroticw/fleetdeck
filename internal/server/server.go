@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 	"github.com/kroticw/fleetdeck/internal/state"
@@ -94,12 +95,16 @@ type Deps struct {
 	// wrapping board.ErrNothingToCommit means the card already held the value, and
 	// is answered as an ordinary success. Everything else is a failed write.
 	//
+	// expect, when not nil, is the value the caller believes the field holds;
+	// an error wrapping board.ErrStale means the card holds something else and
+	// nothing was written, which is answered as a conflict.
+	//
 	// path arrives from the browser and is confined to BoardDir before this
 	// function is called, so what it receives is always an absolute path that
 	// resolves to somewhere inside the board.
-	SetCardField func(path, field, value string) error
+	SetCardField func(path, field, value string, expect *string) error
 
-	// CreateCard starts a card on the board from a title and a zone, and records
+	// CreateCard starts a card on the board from what the form sent, and records
 	// it in the board's git history if the caller wired it to do so. It returns
 	// the new card's path. internal/board decides what a valid title and zone
 	// are; this server maps its refusals onto status codes. An error wrapping
@@ -108,7 +113,12 @@ type Deps struct {
 	//
 	// Nothing from the request names a file: the caller creates the card in its
 	// own board, under a name made from the title.
-	CreateCard func(title, zone string) (string, error)
+	CreateCard func(card board.NewCard) (string, error)
+
+	// PickDirectory shows the operator a folder dialog with prompt and answers
+	// the chosen folder as a card's repo, "" when the dialog was cancelled.
+	// ChooseFolder on macOS; nil elsewhere, where the route answers 503.
+	PickDirectory func(ctx context.Context, prompt string) (string, error)
 
 	// CreateFleet makes a fleet from the start page: the folder with its board
 	// and documentation, and the line in the configuration naming them. It
@@ -125,6 +135,14 @@ type Deps struct {
 	// A panel wired without it makes no fleets and says so (a stand). The fleet
 	// it makes is served after a restart, never at once: see handleCreateFleet.
 	CreateFleet func(name, path string) (steps []SetupStep, ok bool, err error)
+
+	// DeleteFleet deletes a listed fleet from the start page: its own sessions
+	// stopped, its entry gone from the configuration and the running panel, its
+	// workspace removed. It answers the directories it left in place —
+	// documentation configured outside the workspace. An error is a refusal,
+	// and a refusal changed nothing; nil is a panel that does not delete
+	// fleets.
+	DeleteFleet func(name string) (kept []string, err error)
 
 	// BoardDir is the only directory card writes may touch. Every path a card
 	// write arrives with is resolved and checked against it, and anything that
@@ -201,6 +219,36 @@ type Deps struct {
 	// only; the terminal lives until it is closed. Nil leaves the route answering 503.
 	Attach func(ctx context.Context, session string, cols, rows int) (Terminal, error)
 
+	// StartWork starts a session for one card and hands the card to it, in the
+	// order internal/orchestrator.Dispatcher documents. Nil is a panel, or a
+	// fleet, that cannot start a worker session: the route says so, and the
+	// snapshot tells the page (state.Snapshot.CanStartWork) so it does not
+	// offer a start that would fail.
+	StartWork func(ctx context.Context, w orchestrator.Work) (orchestrator.Result, error)
+
+	// SendToSession delivers one line into a session that is already running,
+	// as a message of its own. It is how the agent keeping a card learns that
+	// the operator moved its stage by hand (stagebyhand.go): the panel and the
+	// agent write the same file, and the agent goes on writing the stage it
+	// wrote unless something tells it otherwise.
+	//
+	// It is the ordinary send and not the first-message one: the session it
+	// reaches has been working for a while, so there is no boot to wait out.
+	// Nil is a panel, or a fleet, with no way to reach its sessions; the card
+	// still moves and the answer says the agent was not told.
+	SendToSession func(ctx context.Context, session, text string) error
+
+	// CleanupSession tidies away the session behind a card the operator has
+	// accepted, in the order internal/orchestrator.Cleaner documents. Nil
+	// leaves a card moved into done with its session running, as it was before
+	// the panel did any of this.
+	CleanupSession func(ctx context.Context, a orchestrator.Accepted) (orchestrator.Result, error)
+
+	// ReviewWorkdir is the working tree of the session keeping a card, where
+	// its branch is read for review. Nil is a panel that cannot tell, and the
+	// review routes say so.
+	ReviewWorkdir func(ctx context.Context, c board.Card) (string, error)
+
 	// SessionListed reports whether the daemon lists session as alive right now —
 	// present in its list and not dying. The terminal bridge asks it when a stream
 	// ends with no reason attached, because that alone does not say the session
@@ -255,10 +303,22 @@ func New(d Deps) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
+	mux.HandleFunc("POST /api/sessions", d.handleDispatch)
 	mux.HandleFunc("POST /api/sessions/{id}/resume", d.handleResume)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
+	mux.HandleFunc("GET /api/review", d.handleReview)
+	mux.HandleFunc("GET /api/review/lines", d.handleReviewLines)
+	mux.HandleFunc("POST /api/review/comments", d.handleReviewAdd)
+	mux.HandleFunc("PATCH /api/review/comments", d.handleReviewEdit)
+	mux.HandleFunc("DELETE /api/review/comments", d.handleReviewDelete)
+	mux.HandleFunc("POST /api/review/resolve", d.handleReviewResolve)
+	mux.HandleFunc("POST /api/review/send", d.handleReviewSend)
+	mux.HandleFunc("POST /api/review/notify", d.handleReviewNotify)
+	mux.HandleFunc("POST /api/pick-directory", d.handlePickDirectory)
+	mux.HandleFunc("GET /api/attachments", d.handleAttachment)
 	mux.HandleFunc("POST /api/fleets", d.handleCreateFleet)
+	mux.HandleFunc("DELETE /api/fleets/{name}", d.handleDeleteFleet)
 	mux.HandleFunc("GET /api/docs", d.handleDocsList)
 	mux.HandleFunc("GET /api/docs/content", d.handleDocsContent)
 	mux.HandleFunc("POST /api/status", d.handleStatus)

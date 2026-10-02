@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -21,13 +25,50 @@ var claudePlaces = orchestrator.SystemPlaces
 // orchestrator column's picker writes.
 func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Collector) *orchestrator.Appointer {
 	return &orchestrator.Appointer{
-		Paths: orchestrator.Paths{Board: cfg.BoardPath, Docs: cfg.DocsPaths, Config: o.configPath},
-		List:  dc.ListSessions,
-		Send:  dc.SendText,
-		Start: sessionStarter(o, cfg.Agent.Command),
+		Paths:     orchestrator.Paths{Board: cfg.BoardPath, Docs: cfg.DocsPaths, Config: o.configPath},
+		List:      dc.ListSessions,
+		Send:      dc.SendText,
+		SendFirst: dc.SendFirst,
+		Start:     sessionStarter(o, cfg.Agent.Command),
 		Pin: func(short string) error {
 			return setOrchestratorSession(o.configPath, collector, short)
 		},
+	}
+}
+
+// fleetDispatcher hands one fleet's cards to sessions of their own: started as
+// workers (workerStarter), in the checkout each card's repo field names under
+// the home directory, and written into the card with the same commit the panel
+// makes for a field set by hand. workers is the configuration's workers section
+// as it is when a worker starts.
+func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client, workers func() config.Workers) *orchestrator.Dispatcher {
+	home, _ := os.UserHomeDir()
+	return &orchestrator.Dispatcher{
+		Start:     workerStarter(o, cfg.Agent.Command, workers),
+		List:      dc.ListSessions,
+		Send:      dc.SendText,
+		SendFirst: dc.SendFirst,
+		SetField:  setCardField,
+		Home:      home,
+	}
+}
+
+// workerLaunch is the workers section as the flags a worker is started with;
+// what it leaves unset is orchestrator.Launch's default.
+func workerLaunch(w config.Workers) orchestrator.Launch {
+	return orchestrator.Launch{Model: w.Model, PermissionMode: w.PermissionMode, Sandbox: w.Sandbox}
+}
+
+// workerStarter is sessionStarter for a worker session: the same claude, with
+// the workers section's flags added (orchestrator.Launch), read from workers
+// each time a worker starts so that an edited configuration applies to the
+// next worker. Nil where sessionStarter is nil.
+func workerStarter(o runOpts, command []string, workers func() config.Workers) func(ctx context.Context, cwd, name string) (string, error) {
+	if sessionStarter(o, command) == nil {
+		return nil
+	}
+	return func(ctx context.Context, cwd, name string) (string, error) {
+		return sessionStarter(o, command, workerLaunch(workers()).Args()...)(ctx, cwd, name)
 	}
 }
 
@@ -45,15 +86,18 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 // would start sessions in the wrong fleet. With no command configured, a panel looks
 // claude up each time it starts one, so a claude installed while the panel runs is
 // found without a restart.
-func sessionStarter(o runOpts, command []string) func(ctx context.Context, cwd, name string) (string, error) {
+//
+// extra are flags for the session itself, after the command and before the
+// `--bg --name` StartWith adds: a worker's launch flags (workerStarter).
+func sessionStarter(o runOpts, command []string, extra ...string) func(ctx context.Context, cwd, name string) (string, error) {
 	if o.standSocket != "" {
 		if o.standClaude == "" {
 			return nil
 		}
-		return orchestrator.StartWith([]string{o.standClaude})
+		return orchestrator.StartWith(slices.Concat([]string{o.standClaude}, extra))
 	}
 	if len(command) > 0 {
-		return orchestrator.StartWith(command)
+		return orchestrator.StartWith(slices.Concat(command, extra))
 	}
 	return func(ctx context.Context, cwd, name string) (string, error) {
 		home, _ := os.UserHomeDir()
@@ -61,7 +105,53 @@ func sessionStarter(o runOpts, command []string) func(ctx context.Context, cwd, 
 		if err != nil {
 			return "", err
 		}
-		return orchestrator.StartWith([]string{bin})(ctx, cwd, name)
+		return orchestrator.StartWith(slices.Concat([]string{bin}, extra))(ctx, cwd, name)
+	}
+}
+
+// stopWait bounds one stop. It is a command that asks the daemon and returns;
+// a stop that has not answered in ten seconds is not going to.
+const stopWait = 10 * time.Second
+
+// sessionStopper is how this panel stops a session, or nil when it must not:
+// `stop <short>` run by the same claude sessionStarter starts sessions with,
+// found the same way. The session leaves the list of running ones and stays
+// resumable, with its history.
+//
+// A stand given no claude of its own stops nothing, for the reason it starts
+// nothing: the claude on PATH reaches the operator's real daemon, and a
+// stand's done card would put out a session of the operator's own.
+func sessionStopper(o runOpts, command []string) func(ctx context.Context, short string) error {
+	// Nil is a claude looked up at each stop, as sessionStarter looks one up
+	// at each start.
+	var fixed []string
+	switch {
+	case o.standSocket != "":
+		if o.standClaude == "" {
+			return nil
+		}
+		fixed = []string{o.standClaude}
+	case len(command) > 0:
+		fixed = command
+	}
+	return func(ctx context.Context, short string) error {
+		argv := fixed
+		if argv == nil {
+			home, _ := os.UserHomeDir()
+			bin, err := orchestrator.FindClaude(home, exec.LookPath, claudePlaces)
+			if err != nil {
+				return err
+			}
+			argv = []string{bin}
+		}
+		ctx, cancel := context.WithTimeout(ctx, stopWait)
+		defer cancel()
+		args := slices.Concat(argv[1:], []string{"stop", short})
+		out, err := exec.CommandContext(ctx, argv[0], args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("stop session %s: %w: %s", short, err, strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
 }
 

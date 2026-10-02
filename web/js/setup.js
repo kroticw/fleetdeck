@@ -154,7 +154,7 @@ function renderWorkspaceStep(root, { get, pause, choose, proposed, onReady }) {
   const row = el("div", "setup-row");
   row.append(path);
   if (typeof choose === "function") {
-    const chooseButton = button("setup-choose", t("setup_choose"));
+    const chooseButton = button("btn setup-choose", t("setup_choose"));
     chooseButton.addEventListener("click", async () => {
       // The window has no dictionary of its own, so the chooser's words go
       // with the call.
@@ -163,7 +163,7 @@ function renderWorkspaceStep(root, { get, pause, choose, proposed, onReady }) {
     });
     row.append(chooseButton);
   }
-  const createButton = button("setup-create", t("setup_create"));
+  const createButton = button("btn btn-primary setup-create", t("setup_create"));
   row.append(createButton);
 
   const error = el("div", "setup-error");
@@ -282,7 +282,7 @@ function renderOrchestratorStep(root, { get, open, fleet = "", every, made = [] 
   const newText = el("p", "wizard-new-text");
   const newUnavailable = el("p", "wizard-unavailable", t("wizard_new_unavailable"));
   newUnavailable.hidden = true;
-  const createButton = button("wizard-create", t("wizard_new_button"));
+  const createButton = button("btn btn-primary wizard-create", t("wizard_new_button"));
   const newSection = el("section", "wizard-section wizard-new");
   newSection.append(el("h2", "", t("wizard_new_title")), newText, newUnavailable, createButton);
 
@@ -290,7 +290,7 @@ function renderOrchestratorStep(root, { get, open, fleet = "", every, made = [] 
   const listNote = el("p", "wizard-sessions-note");
   const warning = el("div", "wizard-warning");
   warning.hidden = true;
-  const appointButton = button("wizard-appoint", "");
+  const appointButton = button("btn btn-primary wizard-appoint", "");
   appointButton.hidden = true;
   const existingSection = el("section", "wizard-section wizard-existing");
   existingSection.append(el("h2", "", t("wizard_existing_title")), el("p", "", t("wizard_existing_text")), listNote, list, warning, appointButton);
@@ -298,9 +298,9 @@ function renderOrchestratorStep(root, { get, open, fleet = "", every, made = [] 
   const error = el("div", "wizard-error setup-error");
   const steps = el("ul", "setup-steps");
   const status = el("p", "setup-status");
-  const openButton = button("wizard-open", t("wizard_open"));
+  const openButton = button("btn btn-primary wizard-open", t("wizard_open"));
   openButton.hidden = true;
-  const skipButton = button("wizard-skip", t("wizard_skip"));
+  const skipButton = button("btn wizard-skip", t("wizard_skip"));
   const actions = el("div", "setup-row wizard-actions");
   actions.append(openButton, skipButton);
   const rerun = el("p", "wizard-rerun", t("wizard_rerun_hint"));

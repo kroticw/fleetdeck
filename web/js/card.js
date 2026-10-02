@@ -19,17 +19,17 @@
 // about their edit appear and vanish before reading it.
 
 import { subscribe as storeSubscribe } from "./store.js";
-import { setCardField } from "./api.js";
+import { attachmentURL, setCardField } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
-import { t } from "./i18n.js";
+import { t, reasonText } from "./i18n.js";
 import { listDocs as serverDocs, fetchDoc as serverDoc } from "./docs.js";
 import { brokenLinksOf, cardsLinkingTo, docForLink, docTitle, documentBody, documentsOf, noteName } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
 import { CARD_TAB, renderTabs, tabsOf } from "./cardtabs.js";
 import { authorOf, authorState } from "./docauthor.js";
 import { createCardDock } from "./carddock.js";
-import { closeCrossHTML } from "./icon.js";
+import { closeCrossHTML, reviewIconHTML } from "./icon.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
 // Progress is a list of strings because that is what the write route takes and
@@ -87,6 +87,7 @@ export function renderCard(root, path, onClose, options = {}) {
   const subscribe = options.subscribe ?? storeSubscribe;
   const onOpenSession = options.onOpenSession ?? null;
   const onOpenDoc = options.onOpenDoc ?? null;
+  const onOpenReview = options.onOpenReview ?? null;
   const listDocs = options.listDocs ?? serverDocs;
   const fetchBody = options.fetchDoc ?? serverDoc;
 
@@ -193,8 +194,16 @@ export function renderCard(root, path, onClose, options = {}) {
     try {
       const result = await setCardField(card, field, value);
       if (!result.committed) outcome = { kind: "notice", reason: result.reason };
+      // What the server did around the write: the agent told its card moved,
+      // the session behind an accepted card tidied away. Only the steps that
+      // failed — the rest is the panel narrating itself.
+      const failed = (result.steps ?? []).filter((step) => step.error);
+      if (failed.length > 0) outcome = { ...outcome, steps: failed };
     } catch (err) {
-      outcome = { kind: "error", reason: err.message };
+      // By the code when the board sent one and this build has words for it:
+      // the board's own sentence names the rule in English and not the way
+      // out. The words are the fallback, never nothing.
+      outcome = { kind: "error", reason: reasonText("card_refused", err.code) || err.message };
       written = false;
     }
 
@@ -234,10 +243,51 @@ export function renderCard(root, path, onClose, options = {}) {
     return wrap;
   };
 
-  const head = (title) => {
+  // The repo is free text, written when the operator leaves the field or
+  // presses Enter (the input's change). An empty or unchanged value writes
+  // nothing: clearing it is not offered, the board has no "no repo" value.
+  const repoControl = (value) => {
+    const wrap = el("label", "card-field");
+    wrap.append(el("span", "card-field-name", "repo"));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "card-repo";
+    input.dataset.field = "repo";
+    input.value = value;
+    input.placeholder = t("new_card_repo");
+    input.addEventListener("change", () => {
+      const next = input.value.trim();
+      if (next === "" || next === value) {
+        input.value = value;
+        return;
+      }
+      input.value = next;
+      onFieldChange(input);
+    });
+    wrap.append(input);
+    return wrap;
+  };
+
+  const head = (title, card = null) => {
     const box = el("div", "card-head");
     box.append(el("h3", "card-title", title));
-    const close = el("button", "card-close");
+    // Offered for a session that is gone too, unlike the jump to a session: a
+    // review reads the working tree, not a terminal. In the head, so a
+    // document's tab has it as well, and the way back from the review returns
+    // to that tab.
+    if (onOpenReview && card?.session && card.id) {
+      // An icon, its word the label: a word beside it narrows the title, and
+      // on a narrow sheet the taller head leaves the docked session too
+      // little room.
+      const review = el("button", "btn btn-icon btn-md card-review-link");
+      review.setAttribute("type", "button");
+      review.setAttribute("aria-label", t("review_open"));
+      review.setAttribute("title", t("review_open"));
+      review.innerHTML = reviewIconHTML;
+      review.addEventListener("click", () => onOpenReview(current, active === CARD_TAB ? {} : { doc: active }));
+      box.append(review);
+    }
+    const close = el("button", "btn btn-icon btn-md card-close");
     close.innerHTML = closeCrossHTML;
     close.setAttribute("type", "button");
     close.setAttribute("aria-label", t("card_close"));
@@ -332,7 +382,7 @@ export function renderCard(root, path, onClose, options = {}) {
       return [head(baseName(current)), el("p", "card-empty", t("card_gone"))];
     }
 
-    const nodes = [head(card.title || baseName(current))];
+    const nodes = [head(card.title || baseName(current), card)];
 
     if (card.parseError) {
       // The server answers 422 to a write into a card whose frontmatter does not
@@ -342,6 +392,7 @@ export function renderCard(root, path, onClose, options = {}) {
       const fields = el("div", "card-fields");
       fields.append(fieldControl("stage", STAGES, shownValue(card, "stage")));
       fields.append(fieldControl("progress", PROGRESS, shownValue(card, "progress")));
+      fields.append(repoControl(shownValue(card, "repo")));
       nodes.push(fields);
     }
 
@@ -436,9 +487,17 @@ export function renderCard(root, path, onClose, options = {}) {
     for (const field of ["stage", "progress"]) {
       const outcome = outcomes.get(field);
       if (!outcome) continue;
-      const what = outcome.kind === "error" ? t("card_write_refused") : t("card_not_committed");
-      const text = outcome.reason ? `${field}: ${what}: ${outcome.reason}` : `${field}: ${what}`;
-      nodes.push(el("p", outcome.kind === "error" ? "card-error" : "card-notice", text));
+      if (outcome.kind) {
+        const what = outcome.kind === "error" ? t("card_write_refused") : t("card_not_committed");
+        const text = outcome.reason ? `${field}: ${what}: ${outcome.reason}` : `${field}: ${what}`;
+        nodes.push(el("p", outcome.kind === "error" ? "card-error" : "card-notice", text));
+      }
+      // A notice and never an error: the field is written, and repeating the
+      // edit would not retry the step that failed — it would only write the
+      // field again.
+      for (const step of outcome.steps ?? []) {
+        nodes.push(el("p", "card-notice", `${field}: ${step.name}: ${step.error}`));
+      }
     }
 
     const body = el("div", "card-body");
@@ -448,7 +507,7 @@ export function renderCard(root, path, onClose, options = {}) {
       { has: (name) => docForLink(docs, name) !== null },
       // Said only once the documents are known: until then a link to one
       // opens nothing for a reason that is not the one this names.
-      docs === null ? {} : { missingTitle: t("card_doc_missing") },
+      { attachment: attachmentURL, ...(docs === null ? {} : { missingTitle: t("card_doc_missing") }) },
     );
     nodes.push(body);
 
@@ -561,7 +620,7 @@ export function renderCard(root, path, onClose, options = {}) {
       // rebuild. Putting the focus back is the difference between a panel that
       // can be driven from the keyboard and one that drops out from under it on
       // every edit.
-      root.querySelector(`select[data-field="${focusField}"]`)?.focus?.();
+      root.querySelector(`[data-field="${focusField}"]`)?.focus?.();
     }
   };
 

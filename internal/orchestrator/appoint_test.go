@@ -84,6 +84,15 @@ func (f *fleet) send(_ context.Context, short, text string) error {
 	return nil
 }
 
+// first is the fleet's SendFirst: recorded apart from send, refused the same way.
+func (f *fleet) first(ctx context.Context, short, text string) error {
+	err := f.send(ctx, short, text)
+	f.mu.Lock()
+	f.calls[len(f.calls)-1] = "first " + short
+	f.mu.Unlock()
+	return err
+}
+
 func (f *fleet) pin(short string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -110,11 +119,12 @@ func workspace(t *testing.T) Paths {
 
 func appointer(f *fleet, p Paths) *Appointer {
 	return &Appointer{
-		Paths: p,
-		List:  f.list,
-		Send:  f.send,
-		Start: f.start,
-		Pin:   f.pin,
+		Paths:     p,
+		List:      f.list,
+		Send:      f.send,
+		SendFirst: f.first,
+		Start:     f.start,
+		Pin:       f.pin,
 		// The waits are counted in polls, not seconds, so a test that waits
 		// out a deadline is fast.
 		Poll:      time.Millisecond,
@@ -144,8 +154,8 @@ func TestAppointANewSession(t *testing.T) {
 	if !res.OK || res.Session != "0a1b2c3d" {
 		t.Fatalf("result = %+v, want ok with the started session", res)
 	}
-	if want := []string{"start", "send 0a1b2c3d", "pin 0a1b2c3d"}; !slices.Equal(f.calls, want) {
-		t.Errorf("calls = %v, want %v", f.calls, want)
+	if want := []string{"start", "first 0a1b2c3d", "pin 0a1b2c3d"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls = %v, want %v — a started session is sent its first message by SendFirst", f.calls, want)
 	}
 	if want := filepath.Dir(p.Board); f.startCWD != want {
 		t.Errorf("the session started in %q, want the workspace %q", f.startCWD, want)
@@ -265,6 +275,44 @@ func TestAppointGivesANewSessionLongerToTakeTheMessage(t *testing.T) {
 	}
 	if !res.OK {
 		t.Fatalf("a session still starting was given up on: %+v", res.Steps)
+	}
+}
+
+// A started session that acknowledged the message and never took it is not
+// pinned: an orchestrator that has not read its brief leads nothing. The
+// message is not sent again either.
+func TestAppointDoesNotPinAStartedSessionThatNeverTookTheMessage(t *testing.T) {
+	f := &fleet{startShort: "0a1b2c3d", sendErrs: []error{&daemon.ErrNotTaken{Session: "0a1b2c3d", Reason: "never echoed"}}}
+	res, err := appointer(f, workspace(t)).Appoint(context.Background(), Request{New: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Error("ok though the message never went in")
+	}
+	if want := []string{"start", "first 0a1b2c3d"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls = %v, want %v", f.calls, want)
+	}
+	if got := stepNames(res.Steps); !slices.Equal(got, []string{"brief", "session", "message (refused)"}) {
+		t.Errorf("steps = %v", got)
+	}
+}
+
+// A fleet without a SendFirst sends a started session its message by Send: its
+// acknowledgement is enough there.
+func TestAppointSendsBySendWhenThereIsNoSendFirst(t *testing.T) {
+	f := &fleet{startShort: "0a1b2c3d"}
+	a := appointer(f, workspace(t))
+	a.SendFirst = nil
+	res, err := a.Appoint(context.Background(), Request{New: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("not ok: %+v", res.Steps)
+	}
+	if want := []string{"start", "send 0a1b2c3d", "pin 0a1b2c3d"}; !slices.Equal(f.calls, want) {
+		t.Errorf("calls = %v, want %v", f.calls, want)
 	}
 }
 

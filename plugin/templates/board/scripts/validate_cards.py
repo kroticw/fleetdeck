@@ -16,7 +16,7 @@ STAGES = ("new", "active", "review", "done", "blocked")
 STARTED_STAGES = ("active", "review", "done", "blocked")
 PROGRESS_VALUES = (0, 10, 20, 40, 60, 80, 100)
 REQUIRED_FIELDS = ("id", "zone", "stage", "progress", "created")
-KNOWN_FIELDS = ("id", "zone", "stage", "progress", "session", "repo", "created")
+KNOWN_FIELDS = ("id", "zone", "stage", "progress", "session", "repo", "worktree", "created")
 # Панель свойств Obsidian сама дописывает эти поля во frontmatter карточки.
 # Они не часть схемы доски, но валидатор не вправе их удалять — терпим.
 OBSIDIAN_FIELDS = ("tags", "aliases", "cssclasses", "cssclass")
@@ -132,6 +132,10 @@ def validate_card(name: str, text: str) -> list[str]:
             f"{name}: id {card_id!r} разошёлся с идентификатором "
             f"в имени файла {filename_match.group(1)!r}"
         )
+
+    worktree = strip_quotes(fields.get("worktree", ""))
+    if worktree and not worktree.startswith("/"):
+        errors.append(f"{name}: worktree must be an absolute path, got {worktree!r}")
 
     session = fields.get("session")
     if session and not SESSION_RE.match(session):

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +33,69 @@ func claudeThatRecords(t *testing.T, short string) (bin, ran string) {
 		t.Fatal(err)
 	}
 	return bin, ran
+}
+
+// claudeThatRecordsArgs is claudeThatRecords that also writes its arguments,
+// one per line, into the file it leaves behind.
+func claudeThatRecordsArgs(t *testing.T, short string) (bin, args string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin = filepath.Join(dir, "claude")
+	args = filepath.Join(dir, "args")
+	script := "#!/bin/sh\n: > '" + args + "'\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" + args + "'; done\necho 'backgrounded · " + short + " · worker'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return bin, args
+}
+
+// A worker is started with the model, permission mode and sandbox the
+// configuration holds when it starts, not when the panel did: the section is
+// read through a function each time. The orchestrator is not a worker and is
+// started without them, with the operator's own settings.
+func TestAWorkerIsStartedWithTheLaunchFlagsAndTheOrchestratorWithout(t *testing.T) {
+	standBin, recorded := claudeThatRecordsArgs(t, "66666666")
+	o := runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}
+	workers := config.Workers{}
+	start := workerStarter(o, nil, func() config.Workers { return workers })
+
+	workers = config.Workers{Model: "sonnet"}
+	if _, err := start(context.Background(), t.TempDir(), "T-001"); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := os.ReadFile(recorded)
+	want := slices.Concat(orchestrator.Launch{Model: "sonnet"}.Args(), []string{"--bg", "--name", "T-001"})
+	if got := strings.Split(strings.TrimSpace(string(args)), "\n"); !slices.Equal(got, want) {
+		t.Errorf("worker arguments = %q, want %q", got, want)
+	}
+
+	if _, err := sessionStarter(o, nil)(context.Background(), t.TempDir(), "orchestrator"); err != nil {
+		t.Fatal(err)
+	}
+	args, _ = os.ReadFile(recorded)
+	if strings.Contains(string(args), "--permission-mode") {
+		t.Errorf("the orchestrator was started with the workers' flags: %q", args)
+	}
+}
+
+// With nothing configured a worker gets the defaults the operator chose:
+// opus, auto mode and no sandbox, said on the command line so the operator's
+// own settings file does not decide them.
+func TestAWorkerWithNoWorkersSectionGetsTheDefaults(t *testing.T) {
+	want := []string{"--model", "opus", "--permission-mode", "auto", "--settings", `{"sandbox":{"enabled":false}}`}
+	if got := workerLaunch(config.Workers{}).Args(); !slices.Equal(got, want) {
+		t.Errorf("default worker flags = %q, want %q", got, want)
+	}
+	if got := workerLaunch(config.Workers{Sandbox: true, PermissionMode: "acceptEdits"}).Args(); !slices.Equal(got, []string{"--model", "opus", "--permission-mode", "acceptEdits", "--settings", `{"sandbox":{"enabled":true}}`}) {
+		t.Errorf("configured worker flags = %q", got)
+	}
+}
+
+// A stand given no claude starts no worker, as it starts no orchestrator.
+func TestAStandWithoutItsOwnClaudeStartsNoWorker(t *testing.T) {
+	if workerStarter(runOpts{standSocket: "/tmp/no.sock"}, nil, func() config.Workers { return config.Workers{} }) != nil {
+		t.Fatal("a stand given no claude can start a worker")
+	}
 }
 
 func ran(path string) bool {
@@ -144,9 +208,22 @@ func (fd *fleetDaemon) serve(t *testing.T, existing, startedShort, started strin
 				case "list":
 					jobs := `{"short":"` + existing + `","state":"working","detail":"refactoring the parser"}`
 					if ran(started) {
-						jobs += `,{"short":"` + startedShort + `","state":"idle"}`
+						// The started session's record echoes the last reply
+						// it took in detail, as the daemon's does (section 4).
+						fd.mu.Lock()
+						detail := ""
+						for _, r := range fd.replies {
+							if text, ok := strings.CutPrefix(r, startedShort+" "); ok {
+								detail = text
+							}
+						}
+						fd.mu.Unlock()
+						record, _ := json.Marshal(map[string]string{"short": startedShort, "state": "idle", "detail": detail})
+						jobs += "," + string(record)
 					}
 					resp = `{"ok":true,"op":"list","jobs":[` + jobs + `]}`
+				case "attach":
+					resp = `{"ok":true,"op":"attach","booting":false}`
 				case "reply":
 					fd.mu.Lock()
 					fd.replies = append(fd.replies, req["short"].(string)+" "+req["text"].(string))

@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/kroticw/fleetdeck/internal/board"
@@ -21,6 +20,9 @@ const (
 	// human types in one go while still being small enough that a runaway client
 	// cannot make the panel buffer anything interesting.
 	maxBodyBytes = 1 << 20
+	// maxCardBytes bounds a new card with its attachments, base64 in JSON:
+	// a few screenshots and documents, not a file store.
+	maxCardBytes = 32 << 20
 )
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -54,8 +56,8 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 // decodeBodyLimit is decodeBody with the ceiling named by the caller. It exists
-// because maxBodyBytes is sized for a typed prompt, and one route carries an
-// image instead — see image.go. The limit is a parameter rather than a second
+// because maxBodyBytes is sized for a typed prompt, and a new card carries its
+// attachments instead (maxCardBytes). The limit is a parameter rather than a second
 // copy of this function so the three rules above cannot drift apart between
 // them, and it is applied here rather than by the caller because
 // http.MaxBytesReader replaces the body: a wrapper applied outside would be
@@ -111,8 +113,26 @@ func (d Deps) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 // tab's address, not in the server: two tabs on two fleets are served side by
 // side, and switching one of them changes nothing for the other. The only
 // error is a fleet no configuration has, which the caller answers with 404.
+//
+// CanStartWork is stamped here rather than in the collect cycle: whether this
+// panel can start a worker for the fleet is a fact about what it is wired
+// with, asked of the fleet by the same name forFleet asks every write route.
 func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
-	return state.ForFleet(d.Snapshot(), r.URL.Query().Get(fleetParam))
+	name := r.URL.Query().Get(fleetParam)
+	view, err := state.ForFleet(d.Snapshot(), name)
+	if err != nil {
+		return view, err
+	}
+	start := d.StartWork
+	if d.Fleet != nil {
+		f, err := d.Fleet(name)
+		if err != nil {
+			return view, nil // a fleet the snapshot accepted and the configuration does not: nothing to start
+		}
+		start = f.StartWork
+	}
+	view.CanStartWork = start != nil
+	return view, nil
 }
 
 // handleResume brings a stopped session back.
@@ -167,6 +187,13 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		Path  string `json:"path"`
 		Field string `json:"field"`
 		Value string `json:"value"`
+		// Expect is a pointer because an empty session is a value a caller may
+		// legitimately expect, and because a request that names no expectation
+		// has to go on meaning "write it whatever the card holds".
+		Expect *string `json:"expect"`
+		// Lang is the page's language: a stage set by hand is announced to the
+		// session keeping the card in it (stagebyhand.go).
+		Lang string `json:"lang"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -187,9 +214,17 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		unavailable(w, "a readable board directory")
 		return
 	}
-	switch err := d.SetCardField(path, body.Field, body.Value); {
+	// Read before the write, not after: what the operator moved the card away
+	// from, and who is keeping it, are both gone from the file the moment the
+	// write lands (stagebyhand.go).
+	before := cardBefore(path)
+	switch err := d.SetCardField(path, body.Field, body.Value, body.Expect); {
 	case err == nil:
-		w.WriteHeader(http.StatusNoContent)
+		d.answerCardWrite(w, d.stageByHand(r, before, body.Field, body.Value, body.Lang), true, "")
+	case errors.Is(err, board.ErrStale):
+		// Nothing was written and nothing about the request was wrong: the card
+		// moved on between the snapshot the caller acted on and this write.
+		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, board.ErrNothingToCommit):
 		// The card already held this value, so the write changed no bytes and
 		// there was no history to record. Nothing happened and nothing is
@@ -204,19 +239,24 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		// on a progress field would apply it twice. So the outcome goes out as a
 		// success carrying the part that did not happen and why, for the panel to
 		// show as it likes.
-		writeJSON(w, http.StatusOK, map[string]any{
-			"written":   true,
-			"committed": false,
-			"reason":    err.Error(),
-		})
+		d.answerCardWrite(w, d.stageByHand(r, before, body.Field, body.Value, body.Lang), false, err.Error())
 	default:
+		var rule *board.RuleRefusal
+		if errors.As(err, &rule) {
+			// The code beside the words: the page translates the rule by it
+			// and says the way out, which the words from the board do not.
+			writeJSON(w, cardWriteStatus(err), map[string]string{"error": err.Error(), "code": rule.Code})
+			return
+		}
 		fail(w, cardWriteStatus(err), err.Error())
 	}
 }
 
-// handleCreateCard starts a card from a title and a zone. The body carries those
-// two fields and nothing else: a card is started here and written by whoever
-// takes the task on, so anything more is refused rather than half obeyed.
+// handleCreateCard starts a card from a title, a zone and, optionally, the
+// repository its worker is started in and a description of the task. The body
+// carries those fields and
+// nothing else: a card is started here and written by whoever takes the task
+// on, so anything more is refused rather than half obeyed.
 func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	d, ok := d.forFleet(w, r)
 	if !ok {
@@ -227,13 +267,16 @@ func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Title string `json:"title"`
-		Zone  string `json:"zone"`
+		Title       string             `json:"title"`
+		Zone        string             `json:"zone"`
+		Repo        string             `json:"repo"`
+		Description string             `json:"description"`
+		Attachments []board.Attachment `json:"attachments"`
 	}
-	if !decodeBody(w, r, &body) {
+	if !decodeBodyLimit(w, r, &body, maxCardBytes) {
 		return
 	}
-	path, err := d.CreateCard(body.Title, body.Zone)
+	path, err := d.CreateCard(board.NewCard{Title: body.Title, Zone: body.Zone, Repo: body.Repo, Description: body.Description, Attachments: body.Attachments})
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusCreated, map[string]any{"path": path, "committed": true})
@@ -291,28 +334,28 @@ func cardWriteStatus(err error) int {
 // unwritableCard lists board.SetField's own wording for the failures that are
 // the card's fault rather than the request's.
 //
-// Matching on message text is a seam, and it is here because internal/board
-// draws no sentinel around this family: a reworded message there turns a 422
-// silently back into a 400, which no test in this package would notice. A
-// sentinel in internal/board would close it properly.
+// Matching on message text is a seam: a reworded message in internal/board
+// turns a 422 silently back into a 400, which no test in this package would
+// notice. The family's one common case — a card with no line for the field —
+// has a sentinel of its own (board.ErrNoSuchField) and is matched by it; these
+// three are what is left without one.
 var unwritableCard = []string{
 	"has no frontmatter to write into",
 	"has malformed frontmatter",
 	"line count would change",
 }
 
-// hasNoFieldLine matches board's "card <path> has no <field> field", a card whose
-// frontmatter simply does not carry the line the write would replace.
-var hasNoFieldLine = regexp.MustCompile(`has no [a-z]+ field`)
-
 func isUnwritableCard(err error) bool {
+	if errors.Is(err, board.ErrNoSuchField) {
+		return true
+	}
 	msg := err.Error()
 	for _, phrase := range unwritableCard {
 		if strings.Contains(msg, phrase) {
 			return true
 		}
 	}
-	return hasNoFieldLine.MatchString(msg)
+	return false
 }
 
 func isFilesystemError(err error) bool {

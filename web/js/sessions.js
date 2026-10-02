@@ -248,7 +248,7 @@ export function rowHtml(s, stalledNow) {
   // carries the session's own transcript UUID: the write route is keyed on
   // that, never on the short id short is (see api.js's setSessionLabel).
   const editBtn = s.sessionId
-    ? `<button type="button" class="label-edit-btn" data-session-id="${escapeHtml(s.sessionId)}" aria-label="${escapeHtml(t("edit_label"))}" title="${escapeHtml(t("edit_label"))}">✎</button>`
+    ? `<button type="button" class="btn btn-icon btn-sm label-edit-btn" data-session-id="${escapeHtml(s.sessionId)}" aria-label="${escapeHtml(t("edit_label"))}" title="${escapeHtml(t("edit_label"))}">✎</button>`
     : "";
 
   return `
@@ -333,7 +333,7 @@ export function goneRowHtml(s, state = {}) {
   // one resume becomes two.
   const how = resumable
     ? `<div class="sresume">
-        <button type="button" class="sresume-btn" data-short="${escapeHtml(s.short)}"${state.busy ? " disabled" : ""} title="${escapeHtml(t("resume_hint"))}">${escapeHtml(state.busy ? t("resume_working") : t("resume"))}</button>
+        <button type="button" class="btn btn-sm sresume-btn" data-short="${escapeHtml(s.short)}"${state.busy ? " disabled" : ""} title="${escapeHtml(t("resume_hint"))}">${escapeHtml(state.busy ? t("resume_working") : t("resume"))}</button>
       </div>`
     : "";
 

@@ -121,7 +121,7 @@ test("the cards the document belongs to are listed by number and open with one c
   const { root, opened } = open();
   await settle();
 
-  const cards = root.querySelectorAll(".doc-card");
+  const cards = [...root.querySelectorAll(".doc-card")];
   assert.equal(cards.length, 1);
   assert.match(cards[0].textContent, /T-004/);
   assert.match(cards[0].textContent, /Fleet UI/);

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { installDOM, fireEvent, fireDocumentEvent, settle } from "./fake-dom.js";
-import { t } from "../js/i18n.js";
+import { t, langCode } from "../js/i18n.js";
 
 const FIXTURE = readFileSync(new URL("./testdata/snapshot.json", import.meta.url), "utf8");
 const FLEET_UI = "/board/fleet-ui.md";
@@ -126,6 +126,16 @@ test("a card that is no longer on the board says so", () => {
   assert.equal(root.querySelector(".card-empty").textContent, t("card_gone"));
 });
 
+// A card started with a screenshot shows it: the panel serves the board's
+// attachments, and the card links them relative to itself.
+test("a card's attached picture is shown in its body", () => {
+  const snap = snapshot();
+  snap.cards[0].body += "\n## Вложения\n\n- ![shot.png](../attachments/T-001/shot.png)\n";
+  const { root } = open(snap);
+  const html = root.querySelector(".card-body").innerHTML;
+  assert.ok(html.includes('<img class="md-img" src="/api/attachments?path=T-001%2Fshot.png"'), html);
+});
+
 test("the title is shown as text, never as markup", () => {
   const { root } = open(snapshot());
   assert.equal(root.querySelector("h3").textContent, 'Fleet UI <panel> "v2"');
@@ -143,6 +153,36 @@ test("both fields show what the card holds", () => {
   const { root } = open(snapshot());
   assert.equal(root.querySelector("select[data-field=stage]").value, "active");
   assert.equal(root.querySelector("select[data-field=progress]").value, "40");
+});
+
+// The repo is where the card's worker is started (T-061), so it is shown and
+// can be changed from the card, as stage and progress are.
+test("the repo is shown and a change is written into the card", async () => {
+  const { root } = open(snapshot());
+  const calls = stubFetch(answer(204));
+  const repo = root.querySelector("input[data-field=repo]");
+  assert.ok(repo, "the card has a repo field");
+  assert.equal(repo.value, "fleetdeck");
+
+  repo.value = " src/fleetdeck ";
+  fireEvent(repo, "change");
+  await settle();
+
+  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "repo", value: "src/fleetdeck", lang: langCode });
+  assert.equal(root.querySelector("input[data-field=repo]").value, "src/fleetdeck");
+});
+
+test("an unchanged or emptied repo writes nothing", async () => {
+  const { root } = open(snapshot());
+  const calls = stubFetch(answer(204));
+  const repo = root.querySelector("input[data-field=repo]");
+  repo.value = "fleetdeck";
+  fireEvent(repo, "change");
+  repo.value = "  ";
+  fireEvent(repo, "change");
+  await settle();
+  assert.equal(calls.length, 0);
+  assert.equal(root.querySelector("input[data-field=repo]").value, "fleetdeck");
 });
 
 test("a card that does not parse offers no controls", () => {
@@ -228,7 +268,7 @@ test("204 is a silent success and the control keeps the new value", async () => 
   fireEvent(stage, "change");
   await settle();
 
-  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "stage", value: "review" });
+  assert.deepEqual(calls[0].body, { path: FLEET_UI, field: "stage", value: "review", lang: langCode });
   assert.equal(root.querySelector(".card-error"), null);
   assert.equal(root.querySelector(".card-notice"), null);
   assert.equal(root.querySelector("select[data-field=stage]").value, "review");
@@ -252,6 +292,37 @@ test("written but not committed keeps the value, names the reason, offers no ret
   assert.equal(notice.querySelectorAll("button").length, 0);
   assert.equal(root.querySelector(".card-error"), null);
   assert.equal(root.querySelector("select[data-field=stage]").value, "review");
+});
+
+// A stage set here does more than write the field: the agent keeping the card
+// is told, and an accepted card has its session tidied away. A step that failed
+// is the only place the operator can learn that the session is still running.
+test("a step that failed around the write is shown beside the field it belongs to", async () => {
+  const { root } = open(snapshot());
+  stubFetch(
+    answer(200, {
+      written: true,
+      committed: true,
+      steps: [
+        { name: "words", note: "read 40 characters of what abc12345 said" },
+        { name: "session", error: "abc12345 is still running: claude is not installed" },
+      ],
+    }),
+  );
+
+  const stage = root.querySelector("select[data-field=stage]");
+  stage.value = "done";
+  fireEvent(stage, "change");
+  await settle();
+
+  const notices = [...root.querySelectorAll(".card-notice")].map((n) => n.textContent).join("\n");
+  assert.ok(notices.includes("claude is not installed"), notices);
+  assert.ok(notices.includes("stage"), "an unlabelled line does not say which edit it is about: " + notices);
+  assert.ok(!notices.includes("read 40 characters"), "a step that worked is not news: " + notices);
+  // The field is written; the control must not go back, and nothing here may
+  // read as a refusal.
+  assert.equal(root.querySelector(".card-error"), null);
+  assert.equal(root.querySelector("select[data-field=stage]").value, "done");
 });
 
 test("the not-committed notice survives the next snapshot", async () => {
@@ -294,6 +365,50 @@ test("a refusal is shown and the control goes back to what the file holds", asyn
   // Nothing was written, so a control still showing "done" would be a lie about
   // the card file.
   assert.equal(root.querySelector("select[data-field=stage]").value, "active");
+});
+
+// A refusal by one of the board's rules is said in the page's language, by
+// its code: the words the server sends are the board's own, in English, and
+// they name the rule without the way out. One code covers every started
+// stage, so the sentence is the same whichever of them was asked for.
+test("a rule refusal is said by its code, in the page's language", async () => {
+  for (const stage of ["review", "done", "blocked"]) {
+    const { root, dispose } = open(snapshot());
+    stubFetch(
+      answer(400, {
+        error: `cannot set stage to ${stage} while session is empty: the board requires a session at stage ${stage}`,
+        code: "session_required",
+      }),
+    );
+
+    const select = root.querySelector("select[data-field=stage]");
+    select.value = stage;
+    fireEvent(select, "change");
+    await settle();
+
+    const error = root.querySelector(".card-error");
+    assert.ok(error, `a refused ${stage} was silent`);
+    assert.equal(error.textContent, `stage: ${t("card_write_refused")}: ${t("card_refused_session_required")}`);
+    assert.doesNotMatch(error.textContent, /session is empty/, "the server's English came through");
+    assert.equal(root.querySelector("select[data-field=stage]").value, "active");
+    dispose();
+  }
+});
+
+// A code this build has no sentence for — a newer panel, or a rule nobody
+// foresaw — still shows the server's words rather than nothing.
+test("a rule refusal with an unknown code falls back to the server's words", async () => {
+  const { root } = open(snapshot());
+  stubFetch(answer(400, { error: "the board refused this for a reason of its own", code: "nobody_knows" }));
+
+  const select = root.querySelector("select[data-field=stage]");
+  select.value = "review";
+  fireEvent(select, "change");
+  await settle();
+
+  const error = root.querySelector(".card-error");
+  assert.ok(error, "a refused write was silent");
+  assert.equal(error.textContent, `stage: ${t("card_write_refused")}: the board refused this for a reason of its own`);
 });
 
 test("a repeated edit clears the previous notice", async () => {
@@ -472,6 +587,41 @@ test("a session id becomes a control only when someone can act on it", () => {
 
   const plain = open(snapshot());
   assert.equal(plain.root.querySelector(".card-session").tagName, "SPAN");
+});
+
+// The review overlay's button, offered beside a session's own jump. Unlike the
+// jump, it is offered for a session that is gone too: a review reads the
+// working tree, not a terminal.
+test("a card someone keeps offers its review", () => {
+  const opened = [];
+  const { root } = open(snapshot(), FLEET_UI, { onOpenReview: (p, how) => opened.push([p, how]) });
+  fireEvent(root.querySelector(".card-review-link"), "click");
+  assert.deepEqual(opened, [[FLEET_UI, {}]]);
+});
+
+// A button of the sheet's head, sized with its close: it stays on screen on a
+// document's tab, and the way back from the review lands on that tab. An icon
+// with its word as the label, not beside it: a word there narrowed the title,
+// and on a narrow sheet the taller head left the docked session too little room.
+test("the review is a head button, and the tab it was opened from goes with it", async () => {
+  const opened = [];
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    onOpenReview: (p, how) => opened.push([p, how]),
+  });
+  await settle();
+  const button = root.querySelector(".card-head .card-review-link");
+  assert.ok(button, "the review sits in the card's head");
+  assert.deepEqual(String(button.className).split(" ").slice(0, 3), ["btn", "btn-icon", "btn-md"]);
+  assert.ok(button.innerHTML.includes("<svg"), "with its icon");
+  assert.equal(button.getAttribute("aria-label"), t("review_open"), "its word is its label");
+  assert.equal(button.getAttribute("title"), t("review_open"), "and its tooltip");
+  assert.equal(button.textContent.trim(), "", "and takes no width from the title");
+
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  fireEvent(root.querySelector(".card-head .card-review-link"), "click");
+  assert.deepEqual(opened, [[FLEET_UI, { doc: DOCS[0].path }]]);
 });
 
 // --- the jump from a card to its session ---
@@ -791,7 +941,7 @@ function withDocuments(snap) {
 // The card's own documents open in the card, on their tab (T-091); only a
 // document the card does not link goes to the reader over the board.
 function activeTab(root) {
-  return root.querySelectorAll(".card-tab").find((b) => b.getAttribute("aria-selected") === "true")?.dataset.key;
+  return [...root.querySelectorAll(".card-tab")].find((b) => b.getAttribute("aria-selected") === "true")?.dataset.key;
 }
 
 test("a card's documents are listed and each opens on its tab with one click", async () => {
@@ -807,7 +957,7 @@ test("a card's documents are listed and each opens on its tab with one click", a
   });
   await settle();
 
-  const entries = root.querySelectorAll(".card-doc");
+  const entries = [...root.querySelectorAll(".card-doc")];
   assert.deepEqual(
     entries.map((entry) => entry.textContent),
     ["reports/2026-09-12-report", "reports/2026-09-13-design"],
@@ -936,7 +1086,7 @@ test("the tabs are the card and its documents, in the order its body links them"
   const { root } = open(withDocuments(snapshot()), FLEET_UI, { listDocs: async () => DOCS });
   await settle();
   assert.deepEqual(
-    root.querySelectorAll(".card-tab").map((b) => b.dataset.key),
+    [...root.querySelectorAll(".card-tab")].map((b) => b.dataset.key),
     ["card", "/board/docs/reports/2026-09-12-report.md", "/board/docs/reports/2026-09-13-design.md"],
   );
   assert.equal(activeTab(root), "card");
@@ -1003,7 +1153,7 @@ test("a document's body is fetched once, not again on its tab or on every snapsh
     },
   });
   await settle();
-  const tabs = () => root.querySelectorAll(".card-tab");
+  const tabs = () => [...root.querySelectorAll(".card-tab")];
   fireEvent(tabs()[1], "click");
   await settle();
   store.push(withDocuments(snapshot()));
@@ -1041,7 +1191,7 @@ test("a document that could not be fetched is asked for again when its tab is pi
     },
   });
   await settle();
-  const tabs = () => root.querySelectorAll(".card-tab");
+  const tabs = () => [...root.querySelectorAll(".card-tab")];
   fireEvent(tabs()[1], "click");
   await settle();
   fireEvent(tabs()[0], "click");
@@ -1221,7 +1371,7 @@ test("another card that links the same document still opens on its own tab", asy
   link.dataset.link = baseNameOf(CARD_KEEPING);
   root.querySelector(".card-pane").appendChild(link);
   fireEvent(link, "click");
-  assert.ok(root.querySelectorAll(".card-tab").some((b) => b.dataset.key === "/board/docs/reports/2026-09-12-report.md"), "the other card has that tab too");
+  assert.ok([...root.querySelectorAll(".card-tab")].some((b) => b.dataset.key === "/board/docs/reports/2026-09-12-report.md"), "the other card has that tab too");
   assert.equal(activeTab(root), "card");
 });
 

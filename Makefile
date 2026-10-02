@@ -116,7 +116,7 @@ else
 EXPECT_SEAL := developer-id
 endif
 
-.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app notarize-app dist-dmg verify-dist-dmg notarize-dmg publish-release dmg-background dmg-layout window-app dev-app install icon
+.PHONY: build test test-web lint run verify-ldflags dist verify-dist dist-app verify-dist-app notarize-app dist-dmg verify-dist-dmg notarize-dmg publish-release dmg-background dmg-layout fleetdeck window-app dev-app install icon
 
 # Build every command under ./cmd into $(BINDIR) -- fleetdeck-window only on darwin,
 # see BUILD_BIN_NAMES above.
@@ -340,6 +340,14 @@ run: build
 		exit 1; \
 	fi
 	$(BINDIR)/fleetdeck
+
+# fleetdeck is the interactive way to build and place the desktop application:
+# it asks where fleetdeck.app goes (scripts/select-fleetdeck-install-dir.sh)
+# and runs window-app with that BINDIR. The bundle itself is window-app's alone,
+# so an interactive build and a scripted one cannot drift apart.
+fleetdeck:
+	@install_dir=$$(scripts/select-fleetdeck-install-dir.sh "$(CURDIR)") || exit $$?; \
+	$(MAKE) --no-print-directory window-app BINDIR="$$install_dir"
 
 # window-app stages the fleetdeck app: an .app bundle holding cmd/fleetdeck-window and
 # the panel it starts, side by side in Contents/MacOS -- the window looks for the panel

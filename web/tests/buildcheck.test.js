@@ -129,7 +129,7 @@ test("no banner while the page is current or there is nothing to compare", () =>
 
 test("a stale page offers the reload", () => {
   const html = bannerHTML("stale");
-  assert.match(html, /class="build-reload"/);
+  assert.match(html, /class="btn btn-sm build-reload"/);
 });
 
 // The whole point of the failed state: the action that just did not work is
@@ -329,7 +329,7 @@ test("a stale page waiting on unsent text says it will reload by itself", () => 
   const waiting = bannerHTML("stale", { waiting: true });
   assert.ok(waiting.includes(t("build_stale_waiting")), "the banner must say the reload will come by itself");
   assert.ok(!bannerHTML("stale").includes(t("build_stale_waiting")), "and only while waiting");
-  assert.match(waiting, /class="build-reload"/, "reloading now stays possible, at the person's own choice");
+  assert.match(waiting, /class="btn btn-sm build-reload"/, "reloading now stays possible, at the person's own choice");
 });
 
 // Reading the sessionStorage property throws where site data is blocked. A

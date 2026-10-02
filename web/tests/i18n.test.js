@@ -77,6 +77,13 @@ const KEYS = [
   "new_card_cancel",
   "new_card_title_required",
   "new_card_not_committed",
+  // The zone list's options. An option falling through to its key would show
+  // "zone_niceToHave" — a schema identifier, which is what the label exists
+  // to keep off the screen.
+  "zone_urgent",
+  "zone_unplanned",
+  "zone_planned",
+  "zone_niceToHave",
   // web/js/setup.js. setup_outside above all: it is the sentence that says
   // what is written outside the chosen folder before the button is pressed.
   "setup_title",
@@ -308,12 +315,43 @@ test("every key the panels ask for is in both dictionaries", () => {
   }
 });
 
+// The zone list was read as a list of stages: its identifiers were words a
+// board column could have been named by. Neither language may hand back a zone
+// label that spells a stage, or the field reads as the other field again.
+test("no zone label spells a stage of the board", async () => {
+  const stages = ["new", "active", "review", "done", "blocked"];
+  for (const language of ["en-GB", "ru-RU"]) {
+    const { t } = await loadWith(language);
+    for (const zone of ["urgent", "unplanned", "planned", "niceToHave"]) {
+      const label = t(`zone_${zone}`).toLowerCase();
+      assert.ok(!stages.includes(label), `${language}: zone ${zone} is labelled "${label}", which is a stage`);
+    }
+  }
+});
+
 test("and none of them falls through to the key itself", async () => {
   const english = await loadWith("en-GB");
   const russian = await loadWith("ru-RU");
   for (const key of KEYS) {
     assert.notEqual(english.t(key), key, `${key} renders as its own name in English`);
     assert.notEqual(russian.t(key), key, `${key} renders as its own name in Russian`);
+  }
+});
+
+// The board refuses a write that breaks one of its cross-field rules with a
+// code (board.RuleRefusal), and the card panel translates by that code. A code
+// with no line falls back to the board's English words, silently, which is
+// why the codes are read from internal/board and checked here.
+test("every rule the board refuses a write by has a line in both dictionaries", () => {
+  const rules = readFileSync(new URL("../../internal/board/write.go", import.meta.url), "utf8");
+  const codes = [...rules.matchAll(/\bcode\w+\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(codes.length > 0, "internal/board/write.go declares no rule code, so this test would look for nothing");
+  const en = dictionary("en");
+  const ru = dictionary("ru");
+  for (const code of codes) {
+    const key = `card_refused_${code}`;
+    assert.ok(declares(en, key), `${key} is missing from the English dictionary`);
+    assert.ok(declares(ru, key), `${key} is missing from the Russian dictionary`);
   }
 });
 

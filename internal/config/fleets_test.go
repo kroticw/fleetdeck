@@ -203,3 +203,70 @@ func TestSaveRefusesFleetsLoadWouldRefuse(t *testing.T) {
 		t.Fatal("Save wrote a fleet with no board, which the next Load would refuse")
 	}
 }
+
+func TestRemoveFleetRemovesOnlyTheNamedListedFleet(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := Default()
+	cfg.BoardPath = filepath.Join(t.TempDir(), "main", "board")
+	cfg.Fleets = []fleet.Fleet{
+		{Name: "one", BoardPath: filepath.Join(t.TempDir(), "one", "board")},
+		{Name: "two", BoardPath: filepath.Join(t.TempDir(), "two", "board")},
+	}
+	if err := Save(p, cfg); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := RemoveFleet(p, "one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Name != "one" || len(got.Fleets) != 1 || got.Fleets[0].Name != "two" {
+		t.Fatalf("removed %+v, fleets after removal %+v", removed, got.Fleets)
+	}
+}
+
+// The file is the operator's: removing one entry leaves every other line,
+// comments included, as it was.
+func TestRemoveFleetPreservesTheRestOfTheFile(t *testing.T) {
+	t.Parallel()
+
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	raw := "# operator comment\nboard:\n  path: /main/board\nfleets:\n  - name: one\n    board:\n      path: /one/board\n  - name: two # keep this comment\n    board:\n      path: /two/board\nserver:\n  port: 7777 # hand tuned\n"
+	if err := os.WriteFile(p, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveFleet(p, "one"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# operator comment\nboard:\n  path: /main/board\nfleets:\n  - name: two # keep this comment\n    board:\n      path: /two/board\nserver:\n  port: 7777 # hand tuned\n"
+	if string(got) != want {
+		t.Fatalf("config after removal:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The first fleet is the configuration's top-level keys, not an entry in the
+// list, and a name the list does not hold is refused rather than ignored.
+func TestRemoveFleetRefusesTheFirstFleetAndAnUnknownOne(t *testing.T) {
+	t.Parallel()
+
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	raw := "name: main\nboard:\n  path: /main/board\nfleets:\n  - name: one\n    board:\n      path: /one/board\n"
+	if err := os.WriteFile(p, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"main", "nobody"} {
+		if _, err := RemoveFleet(p, name); err == nil {
+			t.Errorf("RemoveFleet(%q) succeeded", name)
+		}
+	}
+	if got, _ := os.ReadFile(p); string(got) != raw {
+		t.Fatalf("a refused removal changed the file:\n%s", got)
+	}
+}

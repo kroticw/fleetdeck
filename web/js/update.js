@@ -142,7 +142,7 @@ function fill(key, values) {
 
 export function updateHTML(state, now) {
   const button = (label, disabled) =>
-    `<button type="button" class="update-button"${disabled ? " disabled" : ""}>${escapeHTML(label)}</button>`;
+    `<button type="button" class="btn btn-sm update-button"${disabled ? " disabled" : ""}>${escapeHTML(label)}</button>`;
   const status = (text, cls = "") => `<span class="update-status ${cls}">${escapeHTML(text)}</span>`;
   let inner;
   switch (state.phase) {

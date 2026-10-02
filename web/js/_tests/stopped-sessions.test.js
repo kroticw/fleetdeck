@@ -45,7 +45,7 @@ test("a stopped row says it is stopped and carries the button that brings it bac
   const html = goneRowHtml({ short: "aa11", name: "a paused task", lifecycle: "stopped" });
   assert.match(html, /sbadge-stopped/, "it carries the stopped badge");
   assert.match(html, /class="sname">a paused task</);
-  assert.match(html, /class="sresume-btn" data-short="aa11"/, "the row carries the button that resumes it");
+  assert.match(html, /class="btn btn-sm sresume-btn" data-short="aa11"/, "the row carries the button that resumes it");
   assert.ok(!html.includes("claude resume aa11"),
     "the command to type in a terminal is gone: the button does it here");
   assert.ok(!html.includes("sbadge-stalled"), "a stopped session is not a stalled one");
@@ -62,15 +62,15 @@ test("a stopped row says it is stopped and carries the button that brings it bac
 // process picks its dictionary from the machine's own locale (see i18n.js),
 // so a test naming either language's wording would pass or fail depending on
 // whose machine ran it. What it must do is change, and stop taking presses.
-const buttonLabel = (html) => html.match(/<button[^>]*class="sresume-btn"[^>]*>([^<]*)</)?.[1] ?? "";
+const buttonLabel = (html) => html.match(/<button[^>]*class="btn btn-sm sresume-btn"[^>]*>([^<]*)</)?.[1] ?? "";
 
 test("while a resume is in flight the button says so and takes no more presses", () => {
   const session = { short: "aa11", name: "a paused task", lifecycle: "stopped" };
   const idle = goneRowHtml(session);
   const busy = goneRowHtml(session, { busy: true });
 
-  assert.match(busy, /class="sresume-btn"[^>]*disabled/, "the button refuses a second press");
-  assert.ok(!/class="sresume-btn"[^>]*disabled/.test(idle), "and takes one when nothing is in flight");
+  assert.match(busy, /class="btn btn-sm sresume-btn"[^>]*disabled/, "the button refuses a second press");
+  assert.ok(!/class="btn btn-sm sresume-btn"[^>]*disabled/.test(idle), "and takes one when nothing is in flight");
   assert.notEqual(buttonLabel(busy), "", "a button with no words on it says nothing is happening");
   assert.notEqual(buttonLabel(busy), buttonLabel(idle),
     "it says what it is doing rather than looking untouched for the minute this takes");
@@ -87,7 +87,7 @@ test("a failed resume stays on its row, in the words it failed in", () => {
   );
   assert.match(html, /class="sresume-error"/);
   assert.ok(html.includes("crashed during startup: exit 1"), "the daemon's own words survive to the screen");
-  assert.match(html, /class="sresume-btn"/, "and the button is still there to try again with");
+  assert.match(html, /class="btn btn-sm sresume-btn"/, "and the button is still there to try again with");
 });
 
 test("a resume failure reaches the row as escaped text, never as markup", () => {

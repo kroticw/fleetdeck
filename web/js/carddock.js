@@ -170,14 +170,14 @@ export function createCardDock(host, options) {
   const needs = el("span", "card-dock-needs");
   const places = el("div", "card-dock-places");
   places.setAttribute("role", "group");
-  const toBottom = button("card-dock-place card-dock-place-bottom", "⬓");
+  const toBottom = button("btn btn-sm card-dock-place card-dock-place-bottom", "⬓");
   toBottom.setAttribute("aria-label", t("dock_bottom"));
   toBottom.dataset.place = "bottom";
-  const toRight = button("card-dock-place card-dock-place-right", "◨");
+  const toRight = button("btn btn-sm card-dock-place card-dock-place-right", "◨");
   toRight.setAttribute("aria-label", t("dock_right"));
   toRight.dataset.place = "right";
   places.append(toBottom, toRight);
-  const openClose = button("card-dock-open");
+  const openClose = button("btn btn-sm card-dock-open");
   // The type's size, as in the session panel and the orchestrator column
   // (web/js/fontcontrols.js), there only while a terminal is.
   const fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "card-dock-font" });
@@ -204,7 +204,7 @@ export function createCardDock(host, options) {
   const keyRow = el("div", "card-dock-keys");
   keyRow.append(el("span", "s-keys-label", t("keys_to_session")));
   for (const key of pressKeys) {
-    const b = button("s-key", key.labelKey ? t(key.labelKey) : key.label);
+    const b = button("btn btn-sm s-key", key.labelKey ? t(key.labelKey) : key.label);
     b.dataset.key = key.id;
     if (key.hintKey) b.title = t(key.hintKey);
     b.addEventListener("click", () => live?.type(key.bytes));
@@ -212,12 +212,12 @@ export function createCardDock(host, options) {
   }
   const stoppedNote = el("div", "card-dock-note card-dock-stopped");
   const stoppedText = el("p", "card-dock-note-text", t("dock_stopped_note"));
-  const resumeButton = button("card-dock-resume", t("dock_resume"));
+  const resumeButton = button("btn btn-sm btn-primary card-dock-resume", t("dock_resume"));
   const resumeLine = el("p", "card-dock-error");
   stoppedNote.append(stoppedText, resumeButton, resumeLine);
   const goneNote = el("div", "card-dock-note card-dock-gone");
-  goneNote.append(el("p", "card-dock-note-text", t("dock_gone")), button("card-dock-write", t("dock_write_orchestrator")));
-  const orchestratorButton = button("card-dock-orchestrator", t("dock_to_orchestrator"));
+  goneNote.append(el("p", "card-dock-note-text", t("dock_gone")), button("btn btn-primary card-dock-write", t("dock_write_orchestrator")));
+  const orchestratorButton = button("btn btn-sm btn-primary card-dock-orchestrator", t("dock_to_orchestrator"));
   body.append(errorLine, term, keyRow, stoppedNote, goneNote, orchestratorButton);
   host.replaceChildren(handle, body);
 

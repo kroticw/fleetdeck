@@ -52,4 +52,9 @@ export function fleetIconHTML(size) {
 export const closeCrossHTML =
   `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M3 3 L9 9 M9 3 L3 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`;
 
+// reviewIconHTML is the review button's mark: a plus over a minus, a diff's two
+// kinds of line.
+export const reviewIconHTML =
+  `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M4.5 1.5 V7.5 M1.5 4.5 H7.5 M6.5 11 H12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`;
+
 export default fleetIconHTML;

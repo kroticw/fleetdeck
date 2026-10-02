@@ -104,6 +104,15 @@ test("setup: the window's chooser picks the folder the workspace is made in", as
   assert.ok(prompt && !prompt.startsWith("setup_"), `the chooser's button is a word, not a key: ${prompt}`);
 });
 
+// One accent in the row, on the button that writes: choosing a folder is
+// reversible, creating the workspace is not.
+test("setup: the button that writes is the primary one and the chooser is not", async () => {
+  await render({ choose: async () => "" });
+  const classes = (selector) => String(root.querySelector(selector).className).split(" ");
+  assert.ok(classes("button.setup-create").includes("btn") && classes("button.setup-create").includes("btn-primary"));
+  assert.ok(classes("button.setup-choose").includes("btn") && !classes("button.setup-choose").includes("btn-primary"));
+});
+
 test("setup: a chooser closed without a folder leaves the path as it was", async () => {
   await render({ choose: async () => "" });
   fireEvent(root.querySelector("button.setup-choose"), "click");
@@ -117,7 +126,7 @@ test("setup: create sends the path and shows every step, a refused one with its 
   await create();
   const post = requests.find((r) => r.method === "POST");
   assert.deepEqual(post.body, { path: "/srv/fleet" });
-  const items = root.querySelectorAll("li.setup-step");
+  const items = [...root.querySelectorAll("li.setup-step")];
   assert.equal(items.length, 4);
   assert.match(items[2].textContent, /statusline/);
   assert.match(items[2].textContent, /no fleetdeck-status found/);
@@ -141,7 +150,7 @@ test("setup: once made, the page waits for the panel to answer, then goes on to 
   assert.equal(root.querySelector("input.setup-path"), null, "the folder step is gone");
   assert.equal(reloaded, 0, "the panel is opened from the orchestrator step, not before it");
   // What setup did stays readable: the next step carries it.
-  const carried = root.querySelector("div.wizard-made").querySelectorAll("li.setup-step");
+  const carried = [...root.querySelector("div.wizard-made").querySelectorAll("li.setup-step")];
   assert.equal(carried.length, 4);
   assert.match(carried[2].textContent, /no fleetdeck-status found/);
 });

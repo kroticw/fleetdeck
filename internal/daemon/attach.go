@@ -73,6 +73,9 @@ type Attachment struct {
 	key    string
 	keyErr error
 
+	// booting is the header's word on whether the session is still coming up.
+	booting bool
+
 	// Owned by the Read goroutine.
 	buf     []byte
 	pending []byte // read but not yet released: may be the start of a kick marker
@@ -145,7 +148,8 @@ func (c *Client) attachOnce(ctx context.Context, session string, cols, rows int)
 		return nil, err
 	}
 	reader := bufio.NewReader(conn)
-	if err := readAttachHeader(reader); err != nil {
+	header, err := readAttachHeader(reader)
+	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -162,6 +166,7 @@ func (c *Client) attachOnce(ctx context.Context, session string, cols, rows int)
 		reader:  reader,
 		key:     key,
 		keyErr:  keyErr,
+		booting: header.Booting,
 		buf:     make([]byte, attachReadChunk),
 	}, nil
 }

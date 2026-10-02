@@ -39,6 +39,7 @@ The fields below and their allowed values are the schema enforced by the board's
 | `created` | string | yes | a date in `YYYY-MM-DD` format |
 | `session` | string | required once `stage` is `active`, `review`, `done`, or `blocked` | 6 to 12 hexadecimal characters |
 | `repo` | string | no | any string; not otherwise validated |
+| `worktree` | string | no | the absolute path of the working tree the agent works in; written by the agent, read by the panel's review |
 
 The validator also tolerates four fields that Obsidian's own property panel can add on its own — `tags`, `aliases`, `cssclasses`, `cssclass` — without treating them as unknown. Any other field name is rejected.
 
@@ -56,17 +57,28 @@ A card with no `id` is one created by hand past both paths, or inherited from a 
 
 Two rules connect `stage`, `progress`, and `session` to each other, and both are enforced on both the panel's writing code and the validator script:
 
-- Setting `stage` to `done` requires `progress` to already be, or to also be set to, `100`. The panel's write path refuses with `cannot set stage to done while progress is %d: the board requires progress 100 at stage done`; conversely, setting `progress` to anything but `100` while `stage` is `done` is refused with `cannot set progress to %s while stage is done: the board requires progress 100 at stage done`. The validator script enforces the same rule and reports it (in Russian, its only output language) as `при stage done значение progress обязано быть 100`.
+- Setting `stage` to `done` requires `progress` to be `100`. The panel sets both in the one write when its `stage` write moves a card to `done`: the progress goes into the same bytes as the stage, so the card is never on disk in the half state. Conversely, setting `progress` to anything but `100` while `stage` is `done` is refused with `cannot set progress to %s while stage is done: the board requires progress 100 at stage done`. The validator script enforces the same rule and reports it (in Russian, its only output language) as `при stage done значение progress обязано быть 100`.
 - Setting `stage` to `active`, `review`, `done`, or `blocked` requires `session` to be non-empty — the panel refuses with `cannot set stage to %s while session is empty: the board requires a session at stage %s`. The validator script's message explains why: `при stage {stage} поле session обязано быть заполнено: оно единственное связывает карточку с сессией` ("session must be filled in at this stage: it is the only field that connects the card to a session").
 
 ## Who writes what
 
 The board splits ownership by who is writing:
 
-- The panel writes exactly two fields: `stage` and `progress`. Its write path accepts no other field name — asking it to write `zone`, `session`, `repo`, or `created` is refused as an unwritable field, reported as `field is not writable: <field>`.
+- The panel writes four fields: `stage`, `progress`, `session` and `repo`. Its write path accepts no other field name — asking it to write `zone` or `created` is refused as an unwritable field, reported as `field is not writable: <field>`. `session` is accepted only as a short id of 6 to 12 hexadecimal characters; emptying it is not offered. `repo` is a path from the home directory, the checkout a worker the panel starts works in; a `~/` in front is dropped, and a path that is empty, absolute or climbs out of the home directory is refused. A write may also name the value it expects the field to hold, and is then refused with `the card has moved on since this write was made` when the card holds something else: a hand dragging a card acts on a snapshot up to a second old.
 - The body of the card — its heading, its context section, and its log — belongs to the agents working on the task. The panel never edits the body.
-- The `session` field is filled in by the orchestrator when it starts a session for a card, not by the panel and not by the agent working the task.
-- `repo`, `created`, and `zone` are not written by the panel, and are not documented as belonging to the agent either. In practice they are set once, by whoever creates the card from the template, and left alone.
+- The `session` field is filled in by whoever starts a session for the card, before the session is told about the card: the orchestrator, or the panel when a card is dropped into the board's active column. The panel starts the session with no prompt, writes its short id into the card, sets the stage to `active`, and only then sends it one line naming the card; an agent told to work a card before its id is on it writes its own copy of the field.
+- `created` and `zone` are not written by the panel after a card is started, and are not documented as belonging to the agent either. In practice they are set once, by whoever creates the card, and left alone. `repo` is set the same way, and the panel also writes it when asked from the open card.
+- `worktree` belongs to the agent keeping the card: it writes the absolute path of the working tree it works in, once, when it enters it. The panel never writes it; its review reads the branch there ([local review](../engineering/local-review.md)).
+
+## What happens around a stage write
+
+A card's stage is written by two hands: the agent keeping it, and the operator, by dragging the card between columns or with the `stage` field in the open card. The agent edits the file itself, while the operator goes through the panel, and that is how the two are told apart: everything that reaches the panel's write route is the operator, and an agent is never sent an echo of its own write, because its write never went there.
+
+After a stage written by hand succeeds, the panel sends the session named in the `session` field one line in the page's language: which stage it was, which it is now, and that the write was not the session's. It is a message, not a refusal: both writes succeed, and without it the agent keeps the stage the operator has just cancelled in mind and sooner or later writes it back. A session the panel could not reach does not undo the move: the panel answers with a success and says, in a line of its own, that the agent was not told.
+
+Moving a card to `done` is the acceptance, and with it the panel tidies the session away, in exactly this order: it drops the pin, reads the session's last words off its transcript, appends a line to `archive/AGENTS-ARCHIVE.md` with them and the transcript's path, and only then stops the session — gracefully, so it can be brought back with its history. The order is enforced by code: if the words could not be read or the archive line was not written, the session keeps running and the panel names the step it stopped at. Stopping before the words are taken is the one way to lose what a session knew for good, and it is closed. The panel also says when there was nothing to stop: a session that is no longer listed is named in the report, not skipped silently.
+
+Before an acceptance by drag the panel asks, naming the session, so that a slip of the mouse does not stop a session. The open card asks nothing: choosing `done` from a list of values takes two deliberate actions, and a question on every move would make the board awkward to use.
 
 ## How the title and links are extracted
 
@@ -120,9 +132,9 @@ The Go code the panel uses to read cards (`internal/board`) and the Python valid
 | `stage: done` requires `progress: 100`, and vice versa | not checked | enforced | enforced |
 | A started stage requires a non-empty `session` | not checked | enforced | enforced |
 
-A card the panel starts (`CreateCard`, behind the **+ card** button) is the one thing the Go code writes whole, and it is written to pass the validator script: exactly `zone` — one of the four allowed values, checked — `stage: new`, `progress: 0` and `created`, and a title. A test runs the validator script itself on such a card in each of the four zones.
+A card the panel starts (`CreateCard`, behind the **+ card** button) is the one thing the Go code writes whole, and it is written to pass the validator script: exactly `zone` — one of the four allowed values, checked — `stage: new`, `progress: 0`, an empty `session` and `created`, and a title. A test runs the validator script itself on such a card in each of the four zones.
 
-The Go reader is a lenient reader and a surgical writer of two fields; it was not built to be a schema gate. The validator script is the strict gate, and it has to be run on purpose — by a person or by an agent — since nothing in the Go code calls it. A card that the panel reads without complaint can still fail the validator script, and a card that fails the validator script can still be read and have its `stage` or `progress` field updated by the panel without any warning that something else about it is malformed.
+The Go reader is a lenient reader and a surgical writer of three fields; it was not built to be a schema gate. The validator script is the strict gate, and it has to be run on purpose — by a person or by an agent — since nothing in the Go code calls it. A card that the panel reads without complaint can still fail the validator script, and a card that fails the validator script can still be read and have its `stage` or `progress` field updated by the panel without any warning that something else about it is malformed.
 
 ## The card-write race
 

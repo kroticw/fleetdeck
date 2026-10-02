@@ -319,7 +319,7 @@ export function renderSession(
     // interpolated into markup.
     nameLine.title = short;
 
-    const close = el("button", "s-close", "✕");
+    const close = el("button", "btn btn-icon btn-md s-close", "✕");
     close.type = "button";
     close.title = t("close_session");
     close.addEventListener("click", () => {
@@ -357,7 +357,7 @@ export function renderSession(
     const keys = el("div", "s-keys");
     keys.appendChild(el("span", "s-keys-label", t("keys_to_session")));
     for (const key of KEYS) {
-      const button = el("button", "s-key", key.labelKey ? t(key.labelKey) : key.label);
+      const button = el("button", "btn btn-sm s-key", key.labelKey ? t(key.labelKey) : key.label);
       button.type = "button";
       button.dataset.key = key.id;
       if (key.hintKey) button.title = t(key.hintKey);

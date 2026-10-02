@@ -72,6 +72,23 @@ test("a column's heading stays in place while its cards scroll under it", () => 
   assert.match(head, /background:\s*var\(--bg\)/);
 });
 
+// The button that starts a card is as wide as the column it sits in, whatever
+// width the column has: a square in the head was missed by eye and by pointer.
+// Its look is the button system's (.btn); the rule here only places it.
+test("the add button takes the column's width and has none of its own", () => {
+  const add = ruleBody(".kcol-add");
+  assert.match(add, /width:\s*100%/);
+  assert.doesNotMatch(add, /width:\s*\d+px/);
+  assert.doesNotMatch(add, /margin-left/);
+  for (const body of ruleBodies(`${BOARD} .kcol-add`)) assert.doesNotMatch(body, /width:\s*\d+px/);
+  // An empty new column is as wide as its button's label, on one line: at the
+  // empty column's 64px floor the label wrapped.
+  assert.match(add, /white-space:\s*nowrap/);
+  const floor = ruleBody(".kcol-empty:has(.kcol-add)");
+  assert.match(floor, /flex-basis:\s*auto/);
+  assert.match(floor, /min-width:\s*0/);
+});
+
 // The form opens from the tab row, which is #board's sibling, not inside it: a
 // board that clips what is past its height does not cut the form.
 test("the new card form opens outside the box that clips the columns", () => {
@@ -94,4 +111,29 @@ test("in a browser tab the board and its columns scroll as they did", () => {
   assert.doesNotMatch(column, /scrollbar/);
   assert.doesNotMatch(ruleBody(".kcol h5"), /position/);
   assert.equal(ruleBodies(".kcol::-webkit-scrollbar").length, 0, "a column's bar is styled outside the window");
+});
+
+// The columns lit while a card is dragged (web/js/board.js). By the board's
+// id: the window's own .kcol rules outrank a bare class, and the light has to
+// read the same on every surface.
+const LIGHTS = ["#board > .kcol-drop-open", "#board > .kcol-drop-refused", "#board > .kcol-drop-over"];
+const LAYOUT = /(^|[\s;])(width|height|min-width|max-width|min-height|max-height|flex[\w-]*|padding[\w-]*|margin[\w-]*|border(-width)?|gap)\s*:/;
+
+test("a column a card can be dropped into, the one it cannot and the one under it each have a look", () => {
+  for (const selector of LIGHTS) assert.ok(ruleBody(selector).trim(), `${selector} draws nothing`);
+  assert.match(ruleBody("#board > .kcol-drop-open"), /var\(--glass-control/, "the light is the glass the controls are made of");
+  assert.notEqual(ruleBody("#board > .kcol-drop-over"), ruleBody("#board > .kcol-drop-open"), "the target must stand out from the rest");
+});
+
+test("lighting a column never moves the layout", () => {
+  for (const selector of [...LIGHTS, "#board > .kcol-drop-refused.kcol-drop-over"]) {
+    assert.doesNotMatch(ruleBody(selector), LAYOUT, `${selector} changes a size`);
+  }
+});
+
+test("the light fades in, and not for an operator who asked for less motion", () => {
+  assert.ok(ruleBodies(".kcol").some((body) => /transition:/.test(body)), "no column carries a transition");
+  const reduced = stripped.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?\})\s*\}/);
+  assert.ok(reduced, "web/app.css has no prefers-reduced-motion block");
+  assert.match(reduced[1], /\.kcol\s*\{[^}]*transition:\s*none/);
 });

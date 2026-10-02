@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/fleet"
@@ -34,6 +35,18 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 		}
 		return wizards[f.Name]
 	}
+	// One per fleet for the reason the wizard is: a dispatcher holds the
+	// one-at-a-time lock that keeps two hands from starting two sessions for
+	// one card.
+	dispatchers := map[string]*orchestrator.Dispatcher{}
+	dispatcherOf := func(f fleet.Fleet) *orchestrator.Dispatcher {
+		mu.Lock()
+		defer mu.Unlock()
+		if dispatchers[f.Name] == nil {
+			dispatchers[f.Name] = fleetDispatcher(o, fleetConfig(collector.Config(), f), dc, func() config.Workers { return collector.Config().Workers })
+		}
+		return dispatchers[f.Name]
+	}
 	return func(name string) (server.FleetDeps, error) {
 		f, err := fleet.Select(collector.Config().FleetList(), name)
 		if err != nil {
@@ -48,13 +61,30 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			},
 			OrchestratorPreview: wizard.Preview,
 			Appoint:             wizard.Appoint,
+			// The ordinary send, not the first-message one: what goes through
+			// here is addressed to a session that has been working for a while
+			// (server.Deps.SendToSession).
+			SendToSession: dc.SendText,
+			ReviewWorkdir: reviewWorkdir(jobStoreDir),
 		}
 		// Left nil without a board, as deps leaves the first fleet's: the route
 		// then says this fleet has no board instead of writing somewhere else.
 		if f.BoardPath != "" {
-			board := f.BoardPath
-			fd.CreateCard = func(title, zone string) (string, error) {
-				return createCard(board, title, zone, time.Now())
+			boardDir := f.BoardPath
+			fd.CreateCard = func(card board.NewCard) (string, error) {
+				return createCard(boardDir, card, time.Now())
+			}
+			// Left nil where the panel starts no sessions (a stand given no
+			// claude): the snapshot then tells the page not to offer a start.
+			if d := dispatcherOf(f); d.Start != nil {
+				fd.StartWork = d.Dispatch
+			}
+			// Made per request rather than kept: a cleaner holds nothing
+			// between cleanups. Wired with the board and not beside it, since
+			// the cleanup's third step writes the board's archive.
+			cfg := collector.Config()
+			if c := fleetCleaner(o, cfg.Agent.Command, boardDir, dc, projectsDir(claudeDirOf(cfg))); c != nil {
+				fd.CleanupSession = c.Cleanup
 			}
 		}
 		return fd, nil

@@ -5,8 +5,10 @@ import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
 import { createReader } from "./reader.js";
+import { createReviewPanel } from "./review.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
+import { createBoardMove } from "./boardmove.js";
 import { probeColumnScroll, watchBoardScroll, watchCardSheetOnStand, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
 import { watchControls } from "./standcontrols.js";
@@ -103,6 +105,10 @@ const cardPanel = center
         cardPanel.close();
         reader.open(path);
       },
+      onOpenReview: (path, how) => {
+        cardPanel.close();
+        reviewPanel.open(path, how);
+      },
       // A document the orchestrator wrote, or one whose session is gone, sends
       // to the orchestrator's own terminal (web/js/carddock.js): through the
       // window in the fleetdeck window, in the page in a browser tab.
@@ -119,7 +125,24 @@ const reader = center
   ? createReader(document.getElementById("reader-panel"), {
       onOpenCard: (path) => {
         reader.close();
+        reviewPanel.close();
         cardPanel.open(path);
+      },
+    })
+  : noOverlay;
+// The review overlay: a third overlay over the same column as the card panel
+// and the reader, so only one of the three may be up at a time. The way back
+// reopens the card it came from; the card's session in it is wired as the
+// card's own.
+const reviewPanel = center
+  ? createReviewPanel(document.getElementById("review-panel"), {
+      onBack: (path, how) => {
+        reviewPanel.close();
+        cardPanel.open(path, how);
+      },
+      toOrchestrator: () => routes.openOrchestrator(),
+      get links() {
+        return terminalLinks;
       },
     })
   : noOverlay;
@@ -153,6 +176,7 @@ const terminalLinks = {
   open: (path) => {
     closeSession();
     reader.close();
+    reviewPanel.close();
     cardPanel.open(path);
   },
 };
@@ -164,6 +188,7 @@ function openSession(short) {
   // be up, or they cover each other in whichever order they happened to open.
   cardPanel.close();
   reader.close();
+  reviewPanel.close();
   // A card in the session's history opens the way a [[link]] in its terminal
   // does: the session panel goes, the card panel comes up.
   stopSession = renderSession(sessionPanel, short, closeSession, { links: terminalLinks, onOpenCard: terminalLinks.open });
@@ -216,7 +241,17 @@ if (headerParts.length > 0) {
 // One web view checks the build: in the window, the board. Its reload is the
 // window's, which reloads all three, and its reload ceiling stays in one place.
 if (regions.has("build")) renderBuildBanner(document.getElementById("build-banner"), subscribe);
-if (regions.has("center")) renderBoard(document.getElementById("board"), cardPanel.open);
+// Both are built further down, after createSections has replaced the tab row's
+// children — it would throw away anything put there before it — so the board
+// reaches them through a closure rather than by value.
+let newCard = null;
+let boardMove = null;
+if (regions.has("center")) {
+  renderBoard(document.getElementById("board"), cardPanel.open, {
+    onAddCard: () => newCard?.open(),
+    onMove: (move) => boardMove?.(move) ?? null,
+  });
+}
 if (regions.has("orchestrator")) {
   renderOrchestrator(document.getElementById("orchestrator"), { links: { resolve: terminalLinks.resolve, open: routes.openCard } });
 }
@@ -235,7 +270,6 @@ if (regions.has("orchestrator")) {
 // documentation directories configured would otherwise ask for them — and take
 // the server's 404 — before the operator had opened that section at all.
 let sections = null;
-let newCard = null;
 if (regions.has("center")) {
   sections = createSections(document.getElementById("tabs"), [
     { id: "board", label: t("tab_board"), root: document.getElementById("board") },
@@ -248,7 +282,10 @@ if (regions.has("center")) {
   ]);
 
   // After the tabs, not before: createSections replaces the row's children.
+  // The form and the move dialogs both hang off the tab row rather than off
+  // #board, which every snapshot replaces whole.
   newCard = createNewCard(document.getElementById("tabs"));
+  boardMove = createBoardMove(document.getElementById("tabs"));
   // A stand's frame with the form open (web/js/host.js, open).
   if (host?.open?.includes("newcard")) newCard.open();
 }

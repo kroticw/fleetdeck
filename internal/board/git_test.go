@@ -46,6 +46,32 @@ func TestCommitStagesOnlyTheNamedFile(t *testing.T) {
 	}
 }
 
+// A card started with attachments is recorded with them, in one commit, and
+// still nothing else the working tree holds.
+func TestCommitCardTakesItsAttachmentsAlong(t *testing.T) {
+	dir := initRepo(t)
+	if err := os.MkdirAll(CardsDir(dir), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path, err := CreateCard(dir, NewCard{Title: "Со вложением", Zone: "planned", Attachments: []Attachment{{Name: "a.png", Data: []byte("png")}}}, createDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCard(t, dir, "stray.md", sample)
+	if err := CommitCard(dir, path, "test: card"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	if strings.Contains(string(out), "cards/") || strings.Contains(string(out), "attachments/") {
+		t.Fatalf("the card and its attachments must be committed:\n%s", out)
+	}
+	if !strings.Contains(string(out), "stray.md") {
+		t.Fatalf("a file the panel did not write must stay uncommitted:\n%s", out)
+	}
+}
+
 func TestCommitOutsideRepositoryIsAnError(t *testing.T) {
 	dir := t.TempDir()
 	writeCard(t, dir, "a.md", sample)

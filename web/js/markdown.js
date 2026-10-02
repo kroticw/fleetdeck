@@ -1,5 +1,5 @@
 // A deliberately small markdown renderer: headings, unordered lists, fenced and
-// inline code, bold, and Obsidian wiki links. A card is written to be read, not
+// inline code, bold, Obsidian wiki links and a card's attachments. A card is written to be read, not
 // typeset, and vendoring a full implementation would be a dependency this
 // project cannot justify.
 //
@@ -88,6 +88,9 @@ const CODE_SPAN = /`([^`]+)`/g;
 // Nothing to link against. Shared and frozen: read on every render, never written.
 const NO_NAMES = Object.freeze(new Set());
 const BOLD = /\*\*([^*]+)\*\*/g;
+// A markdown link or image, which this renderer draws only for a card's own
+// attachments: renderMarkdown's `attachment` option says which those are.
+const ATTACHMENT = /(!?)\[([^\]\n]*)\]\(([^)\s]+)\)/g;
 
 // linkParts splits a wiki link's inner text the way internal/board's
 // trimLinkTarget does: everything up to the first "#" or "|" is the note name.
@@ -113,7 +116,21 @@ function inline(text, known) {
   // already been through escapeHTML, so it holds no "<" at all, and "<0>"
   // cannot occur in it. Nothing emitted below matches <digits> either.
   const spans = [];
-  const lifted = text.replace(CODE_SPAN, (_, code) => `<${spans.push(code) - 1}>`);
+  let lifted = text.replace(CODE_SPAN, (_, code) => `<${spans.push(code) - 1}>`);
+
+  // Attachments are lifted out the same way and for the same reason: the
+  // text of one goes into an attribute, where a wiki link must not open.
+  const files = [];
+  if (known.attachment) {
+    lifted = lifted.replace(ATTACHMENT, (whole, bang, label, src) => {
+      const url = known.attachment(unescapeHTML(src));
+      if (!url) return whole;
+      const html = bang
+        ? `<img class="md-img" src="${escapeHTML(url)}" alt="${label}" loading="lazy">`
+        : `<a class="md-file" href="${escapeHTML(url)}" target="_blank" rel="noopener">${label}</a>`;
+      return `<f${files.push(html) - 1}>`;
+    });
+  }
 
   return lifted
     .replace(WIKILINK, (whole, inner) => {
@@ -142,7 +159,8 @@ function inline(text, known) {
       return `<span class="wikilink wikilink-missing"${known.missingTitle}>${label === "" ? whole : label}</span>`;
     })
     .replace(BOLD, "<strong>$1</strong>")
-    .replace(/<(\d+)>/g, (_, index) => `<code>${spans[Number(index)]}</code>`);
+    .replace(/<(\d+)>/g, (_, index) => `<code>${spans[Number(index)]}</code>`)
+    .replace(/<f(\d+)>/g, (_, index) => files[Number(index)]);
 }
 
 // renderMarkdown turns a card or documentation body into an HTML string.
@@ -195,12 +213,14 @@ function renderTable(header, alignments, rows, known) {
 }
 
 // `missingTitle`, when given, is written as the title of every link that opens
-// nothing, so hovering it says why.
-export function renderMarkdown(text, knownCards, knownDocs, { missingTitle = "" } = {}) {
+// nothing, so hovering it says why. `attachment`, when given, answers the URL a
+// link's target is served at, or null for a target that is not an attachment.
+export function renderMarkdown(text, knownCards, knownDocs, { missingTitle = "", attachment = null } = {}) {
   const known = {
     cards: knownCards ?? NO_NAMES,
     docs: knownDocs ?? NO_NAMES,
     missingTitle: missingTitle ? ` title="${escapeHTML(missingTitle)}"` : "",
+    attachment,
   };
   const lines = escapeHTML(text).split("\n");
   const out = [];

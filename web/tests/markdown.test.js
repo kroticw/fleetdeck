@@ -524,3 +524,37 @@ test("a thematic break does not glue itself to the line below", () => {
   assert.ok(html.indexOf("абзац") < html.indexOf("---"), "the paragraph above closes first");
 });
 
+// A card's attachments (internal/board): a picture is shown, any other file is
+// a link to it. Only what the caller's resolver answers for is touched; a link
+// it does not know stays the text it was.
+const attachment = (src) => (src.startsWith("../attachments/") ? `/api/attachments?path=${encodeURIComponent(src.slice(15))}` : null);
+
+test("an attached picture is shown and an attached file is a link", () => {
+  const html = renderMarkdown(
+    "- ![shot.png](../attachments/T-001/shot.png)\n- [отчёт.pdf](../attachments/T-001/отчёт.pdf)",
+    new Set(),
+    undefined,
+    { attachment },
+  );
+  assert.ok(html.includes('<img class="md-img" src="/api/attachments?path=T-001%2Fshot.png" alt="shot.png" loading="lazy">'), html);
+  assert.ok(
+    html.includes(`<a class="md-file" href="/api/attachments?path=${encodeURIComponent("T-001/отчёт.pdf")}" target="_blank" rel="noopener">отчёт.pdf</a>`),
+    html,
+  );
+});
+
+test("a link the resolver does not know, or a render without one, stays text", () => {
+  const body = "![x](https://example.com/x.png) and [y](../attachments/T-1/y.pdf)";
+  assert.ok(!renderMarkdown(body, new Set(), undefined, { attachment }).includes("example.com/x.png\""));
+  assert.ok(!renderMarkdown(body, new Set()).includes("<img"));
+  assert.ok(!renderMarkdown(body, new Set()).includes("<a "));
+});
+
+// The alt text is the card's text, already escaped, and a wiki link inside it
+// must not open a button inside the attribute.
+test("an attachment's text cannot break out of its attribute", () => {
+  const html = renderMarkdown('![a" onerror="x [[T-001]]](../attachments/T-001/a.png)', cardNames, undefined, { attachment });
+  assert.ok(!html.includes('" onerror="'), html);
+  assert.ok(!/alt="[^"]*<button/.test(html), html);
+});
+

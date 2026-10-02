@@ -54,10 +54,20 @@ var translit = map[rune]string{
 	'я': "ya",
 }
 
+// NewCard is what a card is started from. Repo, Description and Attachments
+// may be empty.
+type NewCard struct {
+	Title, Zone, Repo, Description string
+	Attachments                    []Attachment
+}
+
 // CreateCard starts a card on the board at boardDir: a title and a zone, in
-// stage new at progress 0, created on the given day. Nothing else — the rest of
-// a card is written by the agent or the person who takes the task on, and the
-// panel only has to be able to start one.
+// stage new at progress 0, created on the given day, the repository the work
+// belongs to when one is given (NormalizeRepo), and the description under the
+// task heading when there is one, and its attachments (AttachmentsDir) listed
+// under their own heading. Nothing else — the rest of a card is written
+// by the agent or the person who takes the task on, and the panel only has to
+// be able to start one.
 //
 // The card gets a number first (see claimNumber): the board's validator
 // requires one, and a card the panel made without one is a card the board
@@ -69,8 +79,16 @@ var translit = map[rune]string{
 // The file is cards/T-NNN-<date>-<slug>.md, the slug made from the title. It is
 // created exclusively, and no existing card is ever overwritten. It returns the
 // path of the new card.
-func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
-	title = strings.TrimSpace(title)
+func CreateCard(boardDir string, card NewCard, day time.Time) (string, error) {
+	title, zone, repo := strings.TrimSpace(card.Title), card.Zone, card.Repo
+	repoLine := ""
+	if strings.TrimSpace(repo) != "" {
+		r, err := NormalizeRepo(repo)
+		if err != nil {
+			return "", fmt.Errorf("%w: %w", ErrInvalidCard, err)
+		}
+		repoLine = "repo: " + r + "\n"
+	}
 	switch {
 	case !validZones[zone]:
 		return "", fmt.Errorf("%w: unknown zone %q", ErrInvalidCard, zone)
@@ -80,6 +98,14 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 		return "", fmt.Errorf("%w: the title is longer than %d characters", ErrInvalidCard, maxTitleRunes)
 	case strings.IndexFunc(title, unicode.IsControl) >= 0:
 		return "", fmt.Errorf("%w: the title must be one line", ErrInvalidCard)
+	}
+	if err := checkAttachments(card.Attachments); err != nil {
+		return "", err
+	}
+
+	task := ""
+	if d := strings.TrimSpace(strings.ReplaceAll(card.Description, "\r\n", "\n")); d != "" {
+		task = "\n## Постановка\n\n" + d + "\n"
 	}
 
 	cardsDir := CardsDir(boardDir)
@@ -99,17 +125,30 @@ func CreateCard(boardDir, title, zone string, day time.Time) (string, error) {
 
 		id := fmt.Sprintf(idFormat, number)
 		path := filepath.Join(cardsDir, id+"-"+tail+".md")
-		content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\ncreated: %s\n---\n\n# %s\n", id, zone, date, title)
-		placed, err := placeCard(cardsDir, path, content)
+		// session is written empty rather than left out, as scripts/new_card.py
+		// writes it: the panel fills it in when a card is handed to an agent,
+		// and SetField replaces a line rather than adding one.
+		// The attachments go first, into a directory no other card can have:
+		// its number is claimed. A card on the board never links a file that
+		// is not there yet.
+		attachDir := AttachmentsDir(boardDir, id)
+		files, err := writeAttachments(attachDir, id, card.Attachments)
+		if err == nil {
+			content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\nsession: \"\"\n%screated: %s\n---\n\n# %s\n%s%s", id, zone, repoLine, date, title, task, files)
+			var placed bool
+			placed, err = placeCard(cardsDir, path, content)
+			if err == nil && placed {
+				return path, nil
+			}
+		}
+		if len(card.Attachments) > 0 {
+			_ = os.RemoveAll(attachDir)
+		}
 		if err != nil {
 			return "", err
 		}
-		if !placed {
-			// The number is spent either way: a claimed number is never
-			// released, so the next attempt takes the one after it.
-			continue
-		}
-		return path, nil
+		// The name was taken. The number is spent either way: a claimed number
+		// is never released, so the next attempt takes the one after it.
 	}
 	return "", fmt.Errorf("create card: %d names starting %s are already taken", maxNameAttempts, tail)
 }
