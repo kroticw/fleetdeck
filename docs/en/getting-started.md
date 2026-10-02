@@ -214,6 +214,12 @@ A card does not need the panel either: it is a markdown file with YAML frontmatt
 
 A card is connected to a running session through one frontmatter field: `session`. The orchestrator fills this field in when it starts a session for a card, and from that point the card's `session` value is the identifier the panel uses to find that session's live state on the daemon. With several fleets, the same field is what puts the session in the fleet whose board the card is on.
 
+## Reviewing a session's branch
+
+A card with a session has **review** in its head. It opens the diff of the branch the session works on, beside the session itself, so you can read the code and talk to the agent at once. Leave a comment on any line of the diff; comments stay drafts until you press **send to the session**. Sending freezes the round at the branch's current commit and tells the session, in one line, where the comments are and where to answer. The agent answers each comment in the board's `reviews/T-NNN/replies.md`, and the answers appear under the comments. A round that did not reach the session can be sent again from the review.
+
+The diff is read in the working tree the card's `worktree` field names, which the agent writes when it enters one; without it, in the directory Claude Code's job record says the session works in. Only committed code is reviewed: uncommitted changes are listed, with a note, but take no comments. **card** and Escape go back to the card, and the code size has its own A−/A+. The comments live under the board's `reviews/` directory, kept out of git. [Local review](../engineering/local-review.md) has the details.
+
 ## Why `session` is the only connecting field
 
 fleetdeck's design keeps three sources of truth, and it never merges them and never lets one stand in for another:

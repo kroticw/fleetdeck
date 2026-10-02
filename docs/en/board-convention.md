@@ -39,6 +39,7 @@ The fields below and their allowed values are the schema enforced by the board's
 | `created` | string | yes | a date in `YYYY-MM-DD` format |
 | `session` | string | required once `stage` is `active`, `review`, `done`, or `blocked` | 6 to 12 hexadecimal characters |
 | `repo` | string | no | any string; not otherwise validated |
+| `worktree` | string | no | the absolute path of the working tree the agent works in; written by the agent, read by the panel's review |
 
 The validator also tolerates four fields that Obsidian's own property panel can add on its own — `tags`, `aliases`, `cssclasses`, `cssclass` — without treating them as unknown. Any other field name is rejected.
 
@@ -67,6 +68,7 @@ The board splits ownership by who is writing:
 - The body of the card — its heading, its context section, and its log — belongs to the agents working on the task. The panel never edits the body.
 - The `session` field is filled in by whoever starts a session for the card, before the session is told about the card: the orchestrator, or the panel when a card is dropped into the board's active column. The panel starts the session with no prompt, writes its short id into the card, sets the stage to `active`, and only then sends it one line naming the card; an agent told to work a card before its id is on it writes its own copy of the field.
 - `created` and `zone` are not written by the panel after a card is started, and are not documented as belonging to the agent either. In practice they are set once, by whoever creates the card, and left alone. `repo` is set the same way, and the panel also writes it when asked from the open card.
+- `worktree` belongs to the agent keeping the card: it writes the absolute path of the working tree it works in, once, when it enters it. The panel never writes it; its review reads the branch there ([local review](../engineering/local-review.md)).
 
 ## What happens around a stage write
 
