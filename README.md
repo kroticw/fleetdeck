@@ -41,6 +41,8 @@ make build            # the binaries, into bin/
 make window-app       # bin/fleetdeck.app
 ```
 
+To put the app somewhere other than `bin/`, run `make fleetdeck` instead of `make window-app`. It asks where `fleetdeck.app` goes — the checkout's `bin/` (the default, taken on Enter), `~/Applications/`, or a directory you type — and builds it there. A build already in that directory is replaced, so running it again after `git pull` with the same answer updates the app.
+
 `init` looks for the statusline reporter beside the panel binary, so keep the two together. A panel with no configuration asks for a folder and makes the board itself, which makes `init` optional. [Getting started](docs/en/getting-started.md) has the whole flow.
 
 ## Build and test
