@@ -93,6 +93,27 @@ var jobStoreDir = func() string {
 	return dir
 }()
 
+// locatedTTL is how long a transcript's path is served from memory before it is
+// looked up again.
+//
+// transcript.Locate globs every project directory on the machine, so it costs a
+// full read of each of them — measured at 0.8 ms against 48 project directories,
+// paid per live session on every collect cycle, while the answer for a running
+// session does not change. Caching it makes the same answer cost one os.Stat.
+//
+// The lookup still repeats, because there is one way the answer does change:
+// a project directory renamed under a running panel leaves the old copy on disk
+// and readable, so a path that is only ever checked for existence would keep
+// naming a transcript nothing writes to. Locate picks the newest copy, and after
+// this long the panel asks it again.
+const locatedTTL = time.Minute
+
+// locatedPath is one transcript path together with when it was looked up.
+type locatedPath struct {
+	path string
+	at   time.Time
+}
+
 // cachedUsage remembers the last context estimate together with the file state it was
 // computed from, so an idle session costs no reads at all. Transcripts reach tens of
 // megabytes and Collect runs every couple of seconds; without this the panel would
@@ -124,13 +145,14 @@ type Collector struct {
 	usage       *usage.Fetcher
 	projectsDir string
 
-	// cacheMu guards contextCache alone, and reportMu guards reports alone. They are
-	// two mutexes rather than one because they are contended by different callers:
-	// reports arrive on HTTP handler goroutines while a collect cycle may be part way
-	// through reading a transcript from disk, and one lock would make the reporter
-	// wait on that read.
+	// cacheMu guards the two caches a collect cycle fills, and reportMu guards
+	// reports alone. They are two mutexes rather than one because they are
+	// contended by different callers: reports arrive on HTTP handler goroutines
+	// while a collect cycle may be part way through reading a transcript from
+	// disk, and one lock would make the reporter wait on that read.
 	cacheMu      sync.Mutex
 	contextCache map[string]cachedUsage
+	pathCache    map[string]locatedPath // session id -> its transcript
 
 	reportMu sync.Mutex
 	reports  map[string]reported
@@ -149,6 +171,7 @@ func NewCollector(cfg config.Config, dc *daemon.Client, uf *usage.Fetcher, proje
 		usage:        uf,
 		projectsDir:  projectsDir,
 		contextCache: map[string]cachedUsage{},
+		pathCache:    map[string]locatedPath{},
 		reports:      map[string]reported{},
 		now:          time.Now,
 	}
@@ -362,6 +385,36 @@ func (c *Collector) transcriptState(path string) (transcript.Usage, bool, time.D
 	return u, true, silentFor, unansweredFor, voice.InCall
 }
 
+// transcriptPath is transcript.Locate with the answer remembered for locatedTTL.
+//
+// A cached path is still checked for existence — a session whose transcript was
+// removed must stop being read, not keep being served from memory — and a failed
+// check falls through to a fresh lookup, which is also what reports the session as
+// having no transcript at all.
+func (c *Collector) transcriptPath(sessionID string) (string, error) {
+	c.cacheMu.Lock()
+	hit, ok := c.pathCache[sessionID]
+	c.cacheMu.Unlock()
+	if ok && c.now().Sub(hit.at) < locatedTTL {
+		if _, err := os.Stat(hit.path); err == nil {
+			return hit.path, nil
+		}
+	}
+
+	path, err := transcript.Locate(c.projectsDir, sessionID)
+	if err != nil {
+		c.cacheMu.Lock()
+		delete(c.pathCache, sessionID)
+		c.cacheMu.Unlock()
+		return "", err
+	}
+
+	c.cacheMu.Lock()
+	c.pathCache[sessionID] = locatedPath{path: path, at: c.now()}
+	c.cacheMu.Unlock()
+	return path, nil
+}
+
 // since is now minus t, or zero for a zero t or a moment in the future: zero is "not
 // measured" everywhere a duration crosses into the snapshot.
 func (c *Collector) since(t time.Time) time.Duration {
@@ -437,7 +490,7 @@ func (c *Collector) enrich(views []state.SessionView, labels map[string]string) 
 		if !views[i].Live() {
 			continue
 		}
-		if path, err := transcript.Locate(c.projectsDir, id); err == nil {
+		if path, err := c.transcriptPath(id); err == nil {
 			live[path] = struct{}{}
 			estimate, haveEstimate, silentFor, unansweredFor, inCall := c.transcriptState(path)
 			views[i].SilentFor = silentFor
@@ -468,15 +521,21 @@ func (c *Collector) enrich(views []state.SessionView, labels map[string]string) 
 	return live
 }
 
-// pruneContextCache forgets the estimate of every transcript that is no longer behind
-// a live session. Without it the cache keeps one entry per session the panel has ever
-// seen, for as long as the process runs.
-func (c *Collector) pruneContextCache(live map[string]struct{}) {
+// pruneCaches forgets everything remembered about a transcript that is no longer
+// behind a live session: its estimate and the lookup that found it. Without this
+// both caches keep one entry per session the panel has ever seen, for as long as
+// the process runs.
+func (c *Collector) pruneCaches(live map[string]struct{}) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
 	for path := range c.contextCache {
 		if _, ok := live[path]; !ok {
 			delete(c.contextCache, path)
+		}
+	}
+	for id, located := range c.pathCache {
+		if _, ok := live[located.path]; !ok {
+			delete(c.pathCache, id)
 		}
 	}
 }
@@ -601,7 +660,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	}
 	snap.OrphanCards = state.OrphanCards(snap.Sessions, snap.Boards[0].Cards)
 	snap.StoppedCards = state.StoppedCards(snap.Sessions, snap.Boards[0].Cards)
-	c.pruneContextCache(c.enrich(snap.Sessions, cfg.SessionLabels))
+	c.pruneCaches(c.enrich(snap.Sessions, cfg.SessionLabels))
 
 	if cfg.UsageEnabled && c.usage != nil {
 		if l, err := usage.ReadLocal(localRateLimitsPath); err == nil {
