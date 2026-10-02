@@ -15,7 +15,26 @@ type updateControlReport struct {
 	Text    string `json:"text"`
 	Button  bool   `json:"button"`
 	Problem bool   `json:"problem"`
+	// Shown: the panel is on screen, not hidden for want of a terminal.
+	Shown bool `json:"shown"`
+	// Box is the panel's, in the surface's coordinates; TermTop the top of
+	// the terminal it lies over; PageWidth the surface's width.
+	Box *struct {
+		Top    float64 `json:"top"`
+		Left   float64 `json:"left"`
+		Right  float64 `json:"right"`
+		Bottom float64 `json:"bottom"`
+	} `json:"box"`
+	TermTop   float64 `json:"termTop"`
+	PageWidth float64 `json:"pageWidth"`
+	// Clipped: the words are wider or taller than their box, or run past the
+	// panel's edge.
+	Clipped bool `json:"clipped"`
 }
+
+// geometrySlack is how far a box may stand past a line before it counts as
+// crossing it: the page measures in fractions of a point.
+const geometrySlack = 0.5
 
 // updateControlWants is what each state's frame has to show: the particulars
 // the page's stand fixture carries (web/js/main.js, STAND_UPDATE), whether the
@@ -68,6 +87,25 @@ func updateControlCheck(log string, open []string) []string {
 		}
 		if r.Problem != want.problem {
 			say("is marked as a problem: %v, want %v", r.Problem, want.problem)
+		}
+		// Where it lies. The panel lies over the top of the terminal and no
+		// higher -- the brand row, the window's buttons and the island's head
+		// above it stay uncovered -- inside the surface, with its words whole.
+		if !r.Shown {
+			say("is not shown")
+		}
+		if r.Clipped {
+			say("has its words clipped: they do not fit inside its box")
+		}
+		if r.Box == nil {
+			say("reports no box")
+			continue
+		}
+		if r.Box.Top < r.TermTop-geometrySlack {
+			say("reaches above the terminal: its top is at %v, the terminal's at %v", r.Box.Top, r.TermTop)
+		}
+		if r.Box.Left < -geometrySlack || r.Box.Right > r.PageWidth+geometrySlack {
+			say("runs past the page: %v to %v in %v", r.Box.Left, r.Box.Right, r.PageWidth)
 		}
 	}
 	return problems

@@ -418,6 +418,22 @@ jobs:
           FLEETDECK_STAND_CAPSULES: glass
           FLEETDECK_STAND_OPEN: check-available
         run: scripts/ci-window-stand.sh new/fleetdeck.app 7861 out/dark-check-available exec content
+      # The same panel in a wide orchestrator column: the width the window keeps
+      # for the column is written into the stand's own defaults suite before the
+      # stand starts, and taken out after, so no later stand opens with it.
+      - name: This build's window in its frame, glass, dark, a wide orchestrator column, with a check that got no answer
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: glass
+          FLEETDECK_STAND_OPEN: check-failed
+        run: |
+          defaults write dev.fleetdeck.stand.widths glassOrchestratorWidth -float 480
+          status=0
+          scripts/ci-window-stand.sh new/fleetdeck.app 7863 out/dark-wide-check-failed exec content || status=$?
+          defaults delete dev.fleetdeck.stand.widths glassOrchestratorWidth
+          exit "$status"
       # With a session open: the session opens as a sheet over the dimmed board,
       # and the dimmed board covers the centre column from its very top. On
       # v0.12.0 that took the band the window is dragged by down to nothing --
@@ -671,6 +687,33 @@ jobs:
           osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
           echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
           scripts/ci-window-stand.sh new/fleetdeck.app 7851 out/opaque-light-fleetmenu exec content
+      # The update panel of Check for Updates… with no glass, light and dark.
+      - name: This build's window in its frame, opaque, the system dark and the app light, with a newer version found
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: light
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: dark
+          FLEETDECK_STAND_OPEN: check-available
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7865 out/opaque-light-check-available exec content
+      - name: This build's window in its frame, opaque, the system light and the app dark, with a check that got no answer
+        if: ${{ !cancelled() }}
+        env:
+          FLEETDECK_STAND_WINDOW_SIZE: 1000x700
+          FLEETDECK_STAND_APPEARANCE: dark
+          FLEETDECK_STAND_CAPSULES: opaque
+          FLEETDECK_STAND_SYSTEM: light
+          FLEETDECK_STAND_OPEN: check-failed
+        run: |
+          defaults write com.apple.universalaccess reduceTransparency -bool true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false'
+          echo "=== System Events says dark mode: $(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode')"
+          scripts/ci-window-stand.sh new/fleetdeck.app 7867 out/opaque-dark-check-failed exec content
       # The sessions panel folded to its strip, opaque, light and dark; glass
       # above. scripts/standcheck holds the strip's surface to nothing wider
       # than the strip or past its edge, and its unfold control reached.
