@@ -747,10 +747,13 @@ test("a file of the review is an island with a sticky head, and a line is lit wi
   assert.match(ruleBody(".review-line-picked"), /background/);
 });
 
+// The operator's size when set (web/js/review.js), the multiple until then.
+const REVIEW_CODE_SIZE = /font-size:\s*var\(--review-code-size,\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)\)/;
+
 test("the diff's rows, code and gutter are a sixth larger than the panel's small text, the + as tall as its row", () => {
   const line = ruleBody(".review-line");
-  const factor = /font-size:\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)/.exec(line);
-  assert.ok(factor, ".review-line's font size is not a multiple of --fs-sm");
+  const factor = REVIEW_CODE_SIZE.exec(line);
+  assert.ok(factor, ".review-line's font size is not the operator's, falling back to a multiple of --fs-sm");
   assert.ok(Number(factor[1]) >= 1.15 && Number(factor[1]) <= 1.2, `factor ${factor[1]}`);
   assert.match(line, /line-height:/);
   assert.match(line, /align-items:\s*stretch/);
@@ -762,9 +765,9 @@ test("the diff's rows, code and gutter are a sixth larger than the panel's small
 // lit under the pointer as a line is.
 test("an expand strip is a full diff row, its buttons as tall as the row and lit under the pointer", () => {
   const strip = ruleBody(".review-expand");
-  const factor = /font-size:\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)/.exec(strip);
-  assert.ok(factor, ".review-expand's font size is not the rows' multiple of --fs-sm");
-  assert.equal(factor[1], /font-size:\s*calc\(var\(--fs-sm\)\s*\*\s*([\d.]+)\)/.exec(ruleBody(".review-line"))[1], "the strip is not the rows' size");
+  const factor = REVIEW_CODE_SIZE.exec(strip);
+  assert.ok(factor, ".review-expand's font size is not the rows' size");
+  assert.equal(factor[1], REVIEW_CODE_SIZE.exec(ruleBody(".review-line"))[1], "the strip is not the rows' size");
   assert.match(strip, /line-height:\s*1\.6/);
   assert.match(strip, /align-items:\s*stretch/);
   assert.doesNotMatch(strip, /padding:\s*2px/);

@@ -947,3 +947,195 @@ test("a drag released outside the window is forgotten, not turned into a form by
   fireDocumentEvent(document, "mouseup");
   assert.equal(root.querySelector(".review-form"), null, "leaving the page ends the drag too");
 });
+
+// --- the way back, the card's session beside the diff, and the code's size ---
+
+const CARD = "/b/cards/T-057.md";
+const SHORT = "a41c09d2";
+
+function reviewSnap(overrides = {}) {
+  return {
+    orchestratorSession: "0c7e1a2b",
+    cards: [{ path: CARD, id: "T-057", session: SHORT }],
+    sessions: [{ short: SHORT, name: "T-057 review", needs: "answer: which base?", lifecycle: "live" }],
+    ...overrides,
+  };
+}
+
+// The overlay's live parts faked the way web/tests/carddock.test.js fakes the
+// card's: a snapshot handed over once, a terminal that records, a fixed width.
+function withSession(extra = {}) {
+  const made = [];
+  let unsubscribed = 0;
+  const options = {
+    subscribe: (fn) => {
+      fn(extra.snap ?? reviewSnap());
+      return () => {
+        unsubscribed += 1;
+      };
+    },
+    terminal: (host, short) => {
+      const term = {
+        host,
+        short,
+        stopped: 0,
+        typed: [],
+        open() {},
+        stop() {
+          this.stopped += 1;
+        },
+        type(bytes) {
+          this.typed.push(bytes);
+        },
+        stepFont() {},
+      };
+      made.push(term);
+      return term;
+    },
+    observe: (_, fn) => {
+      fn(1000);
+      return () => {};
+    },
+    storage: { getItem: () => null, setItem() {}, removeItem() {} },
+  };
+  return {
+    options,
+    made,
+    get unsubscribed() {
+      return unsubscribed;
+    },
+  };
+}
+
+test("the way back returns to the card, from its button and from Escape", async () => {
+  const { renderReview } = await import("../js/review.js");
+  const root = document.createElement("div");
+  const back = [];
+  const closed = [];
+  const dispose = renderReview(root, CARD, () => closed.push(true), { api: api(view()), onBack: (p) => back.push(p) });
+  await settle();
+  const button = root.querySelector(".review-back");
+  assert.ok(button, "the header offers the way back");
+  assert.ok(button.className.split(" ").includes("btn"));
+  fireEvent(button, "click");
+  assert.deepEqual(back, [CARD]);
+
+  fireDocumentEvent(document, "keydown", { key: "Escape", target: root.querySelector(".review-body") });
+  assert.deepEqual(back, [CARD, CARD], "Escape goes back to the card too");
+  assert.deepEqual(closed, [], "neither closes the review onto the board");
+
+  dispose();
+  fireDocumentEvent(document, "keydown", { key: "Escape", target: document.body });
+  assert.equal(back.length, 2, "a disposed review hears no more keys");
+});
+
+test("an Escape a comment form or the session took is not a way back", async () => {
+  const { renderReview } = await import("../js/review.js");
+  const root = document.createElement("div");
+  const back = [];
+  const s = withSession();
+  renderReview(root, CARD, () => {}, { api: api(view()), onBack: (p) => back.push(p), ...s.options });
+  await settle();
+  fireDocumentEvent(document, "keydown", { key: "Escape", target: root.querySelector(".card-dock-term") });
+  assert.deepEqual(back, [], "Escape in the session's terminal is the session's");
+  fireDocumentEvent(document, "keydown", { key: "Escape", target: root.querySelector(".review-body"), defaultPrevented: true });
+  assert.deepEqual(back, [], "an Escape already handled closes the form only");
+});
+
+test("the card's session is mounted beside the diff, open, with its terminal and keys", async () => {
+  const { renderReview } = await import("../js/review.js");
+  const root = document.createElement("div");
+  const s = withSession();
+  const dispose = renderReview(root, CARD, () => {}, { api: api(view()), ...s.options });
+  await settle();
+  const stage = root.querySelector(".review-stage");
+  assert.ok(stage, "the diff and the session share a stage");
+  assert.ok(stage.querySelector(".review-body"), "the diff is on the stage");
+  const dock = stage.querySelector(".card-dock");
+  assert.ok(dock, "the session is the card's own dock, not a second one");
+  assert.equal(dock.hidden, false);
+  assert.equal(dock.dataset.open, "true", "open from the start: review and session are read together");
+  assert.equal(dock.dataset.short, SHORT);
+  assert.ok(dock.textContent.includes("which base?"), "the handle says what the session waits on");
+  assert.ok(dock.querySelector(".term-font"), "the terminal's own A−/px/A+");
+  assert.deepEqual(
+    s.made.map((m) => m.short),
+    [SHORT],
+    "one terminal, attached to the card's session",
+  );
+  fireEvent(dock.querySelector(".s-key"), "click");
+  assert.equal(s.made[0].typed.length, 1, "the key row types into the session");
+
+  dispose();
+  assert.equal(s.made[0].stopped, 1, "closing the review lets go of the terminal");
+  assert.equal(s.unsubscribed, 1, "and of the snapshots");
+});
+
+test("a card with no session has no session place in its review", async () => {
+  const { renderReview } = await import("../js/review.js");
+  const root = document.createElement("div");
+  const s = withSession({ snap: reviewSnap({ cards: [{ path: CARD, id: "T-057", session: "" }] }) });
+  renderReview(root, CARD, () => {}, { api: api(view()), ...s.options });
+  await settle();
+  assert.equal(root.querySelector(".card-dock").hidden, true);
+  assert.equal(s.made.length, 0);
+});
+
+function fontStorage(initial = {}) {
+  const map = new Map(Object.entries(initial));
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+    map,
+  };
+}
+
+test("the code's size is stepped by A−/px/A+ within the terminal's range and remembered apart from it", async () => {
+  const { renderReview, REVIEW_FONT_KEY, REVIEW_DEFAULT_FONT_SIZE } = await import("../js/review.js");
+  const { MAX_FONT_SIZE, FONT_KEYS } = await import("../js/terminalfont.js");
+  assert.equal(REVIEW_FONT_KEY, "fleetdeck-review-font");
+  assert.ok(!Object.values(FONT_KEYS).includes(REVIEW_FONT_KEY), "not a terminal's key");
+  assert.equal(REVIEW_DEFAULT_FONT_SIZE, 16, "the size the code had before it could be changed");
+
+  const had = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const storage = fontStorage();
+  globalThis.localStorage = storage;
+  try {
+    const root = document.createElement("div");
+    const dispose = renderReview(root, CARD, () => {}, { api: api(view()) });
+    await settle();
+    const body = root.querySelector(".review-body");
+    const controls = root.querySelector(".review-header .term-font");
+    assert.ok(controls, "the size controls sit in the review's header");
+    const [smaller, reset, bigger] = controls.children;
+    assert.equal(body.style.getPropertyValue("--review-code-size"), "16px");
+    assert.equal(reset.textContent, "16 px");
+    assert.equal(reset.disabled, true, "at the default there is nothing to reset");
+
+    fireEvent(bigger, "click");
+    fireEvent(bigger, "click");
+    assert.equal(body.style.getPropertyValue("--review-code-size"), "18px");
+    assert.equal(reset.textContent, "18 px");
+    assert.equal(storage.map.get(REVIEW_FONT_KEY), "18");
+    fireEvent(smaller, "click");
+    assert.equal(storage.map.get(REVIEW_FONT_KEY), "17");
+    fireEvent(reset, "click");
+    assert.equal(storage.map.has(REVIEW_FONT_KEY), false, "the default is forgotten, not written");
+    dispose();
+
+    storage.map.set(REVIEW_FONT_KEY, "99");
+    const again = document.createElement("div");
+    renderReview(again, CARD, () => {}, { api: api(view()) });
+    await settle();
+    assert.equal(
+      again.querySelector(".review-body").style.getPropertyValue("--review-code-size"),
+      `${MAX_FONT_SIZE}px`,
+      "a stored size comes back, clamped",
+    );
+    assert.equal(again.querySelector(".review-header .term-font-bigger").disabled, true);
+  } finally {
+    if (had) Object.defineProperty(globalThis, "localStorage", had);
+    else delete globalThis.localStorage;
+  }
+});

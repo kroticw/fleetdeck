@@ -1290,6 +1290,22 @@ main {
   color: var(--text);
 }
 
+/* The card's way into its review, beside its close and the same height. */
+.card-review-link {
+  flex: none;
+  margin-left: auto;
+}
+
+/* The review's head holds buttons of one height: centred on each other, the
+ * title taking the room between the way back and the rest. */
+.review-header {
+  align-items: center;
+}
+
+.review-title {
+  flex: 1 1 auto;
+}
+
 .card-fields {
   display: flex;
   flex-wrap: wrap;
@@ -2029,9 +2045,11 @@ main {
   font-size: var(--fs-sm);
 }
 
-/* The sheet's scrolling box, below its head. */
+/* The sheet's scrolling box, below its head, sharing the stage with the card's
+ * session (.card-stage, .card-dock). */
 .review-body {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
 }
@@ -2068,12 +2086,14 @@ main {
   padding: 0 var(--gap);
 }
 
-/* A sixth larger than the panel's small text: code is read here, closely. */
+/* The operator's size from the header's A−/px/A+ (web/js/review.js), a sixth
+ * larger than the panel's small text until it is set: code is read here,
+ * closely. */
 .review-line {
   display: flex;
   align-items: stretch;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: calc(var(--fs-sm) * 1.18);
+  font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
   line-height: 1.6;
 }
 
@@ -2154,7 +2174,7 @@ button.review-line-add:hover {
   align-items: stretch;
   background: var(--surface-hover);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: calc(var(--fs-sm) * 1.18);
+  font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
   line-height: 1.6;
 }
 

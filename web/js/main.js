@@ -105,9 +105,9 @@ const cardPanel = center
         cardPanel.close();
         reader.open(path);
       },
-      onOpenReview: (path) => {
+      onOpenReview: (path, how) => {
         cardPanel.close();
-        reviewPanel.open(path);
+        reviewPanel.open(path, how);
       },
       // A document the orchestrator wrote, or one whose session is gone, sends
       // to the orchestrator's own terminal (web/js/carddock.js): through the
@@ -131,8 +131,21 @@ const reader = center
     })
   : noOverlay;
 // The review overlay: a third overlay over the same column as the card panel
-// and the reader, so only one of the three may be up at a time.
-const reviewPanel = center ? createReviewPanel(document.getElementById("review-panel")) : noOverlay;
+// and the reader, so only one of the three may be up at a time. The way back
+// reopens the card it came from; the card's session in it is wired as the
+// card's own.
+const reviewPanel = center
+  ? createReviewPanel(document.getElementById("review-panel"), {
+      onBack: (path, how) => {
+        reviewPanel.close();
+        cardPanel.open(path, how);
+      },
+      toOrchestrator: () => routes.openOrchestrator(),
+      get links() {
+        return terminalLinks;
+      },
+    })
+  : noOverlay;
 
 // Exactly one session panel at a time, and its stop function held here.
 //

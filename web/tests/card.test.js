@@ -594,9 +594,30 @@ test("a session id becomes a control only when someone can act on it", () => {
 // working tree, not a terminal.
 test("a card someone keeps offers its review", () => {
   const opened = [];
-  const { root } = open(snapshot(), FLEET_UI, { onOpenReview: (p) => opened.push(p) });
+  const { root } = open(snapshot(), FLEET_UI, { onOpenReview: (p, how) => opened.push([p, how]) });
   fireEvent(root.querySelector(".card-review-link"), "click");
-  assert.deepEqual(opened, [FLEET_UI]);
+  assert.deepEqual(opened, [[FLEET_UI, {}]]);
+});
+
+// A button of the sheet's head, sized with its close: it stays on screen on a
+// document's tab, and the way back from the review lands on that tab.
+test("the review is a head button, and the tab it was opened from goes with it", async () => {
+  const opened = [];
+  const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+    listDocs: async () => DOCS,
+    onOpenReview: (p, how) => opened.push([p, how]),
+  });
+  await settle();
+  const button = root.querySelector(".card-head .card-review-link");
+  assert.ok(button, "the review sits in the card's head");
+  assert.deepEqual(String(button.className).split(" ").slice(0, 2), ["btn", "btn-md"]);
+  assert.ok(button.innerHTML.includes("<svg"), "with its icon");
+  assert.ok(button.textContent.includes(t("review_open")), "and its word");
+
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  fireEvent(root.querySelector(".card-head .card-review-link"), "click");
+  assert.deepEqual(opened, [[FLEET_UI, { doc: DOCS[0].path }]]);
 });
 
 // --- the jump from a card to its session ---

@@ -50,12 +50,12 @@ function read(key) {
  * is nothing trustworthy there. A terminal with no key has nowhere to remember
  * anything and always starts at the default.
  */
-export function storedFontSize(key) {
-  if (!key) return DEFAULT_FONT_SIZE;
+export function storedFontSize(key, fallback = DEFAULT_FONT_SIZE) {
+  if (!key) return fallback;
   const raw = read(key);
-  if (raw === null || String(raw).trim() === "") return DEFAULT_FONT_SIZE;
+  if (raw === null || String(raw).trim() === "") return fallback;
   const size = Number(String(raw).trim());
-  if (!Number.isFinite(size)) return DEFAULT_FONT_SIZE;
+  if (!Number.isFinite(size)) return fallback;
   return clampFontSize(size);
 }
 
@@ -63,10 +63,10 @@ export function storedFontSize(key) {
  * rememberFontSize writes a chosen size. Choosing the default forgets the
  * choice instead of writing it, so Cmd+0 leaves storage as a first run left it.
  */
-export function rememberFontSize(key, size) {
+export function rememberFontSize(key, size, fallback = DEFAULT_FONT_SIZE) {
   if (!key) return;
   try {
-    if (size === DEFAULT_FONT_SIZE) localStorage.removeItem(key);
+    if (size === fallback) localStorage.removeItem(key);
     else localStorage.setItem(key, String(size));
   } catch {
     // Same trade as reading: a remembered size is not worth an error.

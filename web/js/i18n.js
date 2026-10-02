@@ -465,6 +465,7 @@ const en = {
   // look for the code or accept it is gone.
   review_open: "review",
   review_title: "Review",
+  review_back: "card",
   review_close: "close the review",
   review_send: "send to the session",
   review_sent: "sent to the session",
@@ -834,6 +835,7 @@ const ru = {
 
   review_open: "ревью",
   review_title: "Ревью",
+  review_back: "карточка",
   review_close: "закрыть ревью",
   review_send: "отдать сессии",
   review_sent: "отдано сессии",

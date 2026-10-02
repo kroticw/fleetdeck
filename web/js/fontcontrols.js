@@ -25,9 +25,10 @@ import { DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE } from "./terminalfont.
  * button that cannot do anything at it: A− at the smallest size, A+ at the
  * largest, the reset at the default. `paint(null)` is a place with no terminal
  * to size, and turns all three off. Until the first paint they are off too:
- * there is no size to claim before a terminal has one.
+ * there is no size to claim before a terminal has one. `defaultSize` is what
+ * the reset puts back, for a place whose type does not start at a terminal's.
  */
-export function buildFontControls({ onStep, buttonClass }) {
+export function buildFontControls({ onStep, buttonClass, defaultSize = DEFAULT_FONT_SIZE }) {
   const node = document.createElement("span");
   node.className = "term-font";
   // Pressing the buttons leaves the focus where it was — in the terminal the
@@ -60,7 +61,7 @@ export function buildFontControls({ onStep, buttonClass }) {
     const known = Number.isFinite(size);
     reset.textContent = `${known ? size : "—"} px`;
     smaller.disabled = !known || size <= MIN_FONT_SIZE;
-    reset.disabled = !known || size === DEFAULT_FONT_SIZE;
+    reset.disabled = !known || size === defaultSize;
     bigger.disabled = !known || size >= MAX_FONT_SIZE;
   };
 

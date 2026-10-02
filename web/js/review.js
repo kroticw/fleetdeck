@@ -11,8 +11,19 @@
 // the hunks shown — is listed above the diff with the code it was left on.
 
 import * as serverApi from "./api.js";
+import { createCardDock } from "./carddock.js";
+import { buildFontControls } from "./fontcontrols.js";
 import { t } from "./i18n.js";
 import { closeCrossHTML } from "./icon.js";
+import { subscribe as storeSubscribe } from "./store.js";
+import { clampFontSize, rememberFontSize, storedFontSize } from "./terminalfont.js";
+
+// The code's size is the review's own, not a terminal's: the diff is read, not
+// typed into, and its column is as wide as the sheet.
+export const REVIEW_FONT_KEY = "fleetdeck-review-font";
+// What the code was drawn at before it could be changed: .review-line's
+// --fs-sm × 1.18 off the 14 px root, rounded.
+export const REVIEW_DEFAULT_FONT_SIZE = 16;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -85,15 +96,26 @@ function commentNode(c, reply, actions) {
  * renderReview draws the review of the card at cardPath into root and returns
  * its dispose function. options.api replaces the review calls of api.js,
  * for a test.
+ *
+ * options.onBack(cardPath) goes back to the card, from the header's button and
+ * from Escape; without it both close the review. The card's session is drawn
+ * beside the diff by the card's own dock (web/js/carddock.js), and
+ * options.subscribe, links, toOrchestrator, terminal, observe, storage and
+ * resume reach it the way renderCard's do.
  */
 export function renderReview(root, cardPath, onClose, options = {}) {
   const api = options.api ?? serverApi;
+  const subscribe = options.subscribe ?? storeSubscribe;
+  const onBack = options.onBack ?? (() => onClose());
   let v = null;
   let disposed = false;
   let sending = false;
   let notice = "";
 
   const header = el("div", "review-header");
+  const back = el("button", "btn btn-md review-back", `← ${t("review_back")}`);
+  back.setAttribute("type", "button");
+  back.addEventListener("click", () => onBack(cardPath));
   const title = el("h2", "review-title", t("review_title"));
   const close = el("button", "btn btn-icon btn-md review-close");
   close.setAttribute("type", "button");
@@ -103,10 +125,64 @@ export function renderReview(root, cardPath, onClose, options = {}) {
   const send = el("button", "btn btn-primary review-send", t("review_send"));
   send.setAttribute("type", "button");
   const status = el("p", "review-status");
-  header.append(title, send, close);
   const body = el("div", "review-body");
-  root.replaceChildren(header, status, body);
+
+  let fontSize = storedFontSize(REVIEW_FONT_KEY, REVIEW_DEFAULT_FONT_SIZE);
+  const font = buildFontControls({
+    buttonClass: "review-font",
+    defaultSize: REVIEW_DEFAULT_FONT_SIZE,
+    onStep: (step) => {
+      fontSize = step === 0 ? REVIEW_DEFAULT_FONT_SIZE : clampFontSize(fontSize + step);
+      rememberFontSize(REVIEW_FONT_KEY, fontSize, REVIEW_DEFAULT_FONT_SIZE);
+      paintFont();
+    },
+  });
+  const paintFont = () => {
+    body.style.setProperty("--review-code-size", `${fontSize}px`);
+    font.paint(fontSize);
+  };
+  paintFont();
+
+  header.append(back, title, font.node, send, close);
+
+  // The diff and the card's session on one stage, laid out by the card
+  // sheet's rules (.card-stage, .card-dock): the session is read and answered
+  // while the diff stays on screen.
+  const stage = el("div", "card-stage review-stage");
+  const grip = el("div", "card-dock-grip");
+  const dock = el("div", "card-dock");
+  grip.hidden = true;
+  dock.hidden = true;
+  stage.dataset.dock = "bottom";
+  stage.append(body, grip, dock);
+  root.replaceChildren(header, status, stage);
   root.hidden = false;
+
+  const sessionPlace = createCardDock(dock, {
+    stage,
+    grip,
+    expand: true,
+    links: options.links,
+    toOrchestrator: options.toOrchestrator,
+    terminal: options.terminal,
+    observe: options.observe,
+    storage: options.storage,
+    resume: options.resume,
+  });
+  const unsubscribe = subscribe((snap) => {
+    if (disposed) return;
+    const card = (snap?.cards ?? []).find((c) => c.path === cardPath);
+    sessionPlace.show(card?.session ? { short: card.session, from: "card" } : null, snap);
+  });
+
+  // Escape inside the session is the session's, and one a comment form took
+  // (it prevents the default) closes only the form.
+  const onKey = (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    if (dock.contains(event.target)) return;
+    onBack(cardPath);
+  };
+  document.addEventListener("keydown", onKey);
 
   const repliesFor = (id) => (v?.replies ?? []).filter((r) => r.id === id);
 
@@ -661,6 +737,9 @@ export function renderReview(root, cardPath, onClose, options = {}) {
   load();
   return () => {
     disposed = true;
+    unsubscribe();
+    sessionPlace.dispose();
+    document.removeEventListener("keydown", onKey);
     document.removeEventListener("mouseup", onRelease);
     document.removeEventListener("mouseleave", onLeave, true);
   };
@@ -681,9 +760,13 @@ export function createReviewPanel(panel, options = {}) {
     panel.hidden = true;
   };
   return {
-    open(cardPath) {
+    // open(cardPath, how): how is the card sheet's own opening (its tab), handed
+    // back with the card to options.onBack so the way back lands where the
+    // review was opened from.
+    open(cardPath, how = {}) {
       close();
-      dispose = renderReview(panel, cardPath, close, options);
+      const onBack = options.onBack ? (path) => options.onBack(path, how) : undefined;
+      dispose = renderReview(panel, cardPath, close, { ...options, onBack });
     },
     close,
   };

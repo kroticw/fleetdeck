@@ -29,7 +29,7 @@ import { docCardsRow } from "./doccards.js";
 import { CARD_TAB, renderTabs, tabsOf } from "./cardtabs.js";
 import { authorOf, authorState } from "./docauthor.js";
 import { createCardDock } from "./carddock.js";
-import { closeCrossHTML } from "./icon.js";
+import { closeCrossHTML, reviewIconHTML } from "./icon.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
 // Progress is a list of strings because that is what the write route takes and
@@ -268,9 +268,21 @@ export function renderCard(root, path, onClose, options = {}) {
     return wrap;
   };
 
-  const head = (title) => {
+  const head = (title, card = null) => {
     const box = el("div", "card-head");
     box.append(el("h3", "card-title", title));
+    // Offered for a session that is gone too, unlike the jump to a session: a
+    // review reads the working tree, not a terminal. In the head, so a
+    // document's tab has it as well, and the way back from the review returns
+    // to that tab.
+    if (onOpenReview && card?.session && card.id) {
+      const review = el("button", "btn btn-md card-review-link");
+      review.setAttribute("type", "button");
+      review.innerHTML = reviewIconHTML;
+      review.append(el("span", "card-review-word", t("review_open")));
+      review.addEventListener("click", () => onOpenReview(current, active === CARD_TAB ? {} : { doc: active }));
+      box.append(review);
+    }
     const close = el("button", "btn btn-icon btn-md card-close");
     close.innerHTML = closeCrossHTML;
     close.setAttribute("type", "button");
@@ -366,7 +378,7 @@ export function renderCard(root, path, onClose, options = {}) {
       return [head(baseName(current)), el("p", "card-empty", t("card_gone"))];
     }
 
-    const nodes = [head(card.title || baseName(current))];
+    const nodes = [head(card.title || baseName(current), card)];
 
     if (card.parseError) {
       // The server answers 422 to a write into a card whose frontmatter does not
@@ -421,14 +433,6 @@ export function renderCard(root, path, onClose, options = {}) {
         meta.append(link);
       } else {
         meta.append(el("span", "card-session", card.session));
-      }
-      // Offered for a session that is gone too, unlike the jump beside it: a
-      // review reads the working tree, not a terminal.
-      if (onOpenReview && card.id) {
-        const open = el("button", "card-review-link", t("review_open"));
-        open.setAttribute("type", "button");
-        open.addEventListener("click", () => onOpenReview(current));
-        meta.append(open);
       }
     }
     if (orphan) {
