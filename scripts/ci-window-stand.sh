@@ -100,6 +100,8 @@ set -eu
 
 # shellcheck source=scripts/stand-capture.sh
 . "$(dirname "$0")/stand-capture.sh"
+# shellcheck source=scripts/stand-column-scroll.sh
+. "$(dirname "$0")/stand-column-scroll.sh"
 
 if [ "$#" -ne 4 ] && [ "$#" -ne 5 ]; then
 	echo "usage: $0 <app> <port> <out-dir> <exec|open> [page|frame|content]" >&2
@@ -359,6 +361,14 @@ if [ "$expect" = content ] && [ "${FLEETDECK_STAND_FULLSCREEN:-}" = on ]; then
 	[ "$trips" -eq 2 ] && fullscreen=yes
 	echo "--- full screen: in and out $trips times of 2"
 fi
+# For content, the board's word on its scrolled column before the window is
+# closed: it comes once the board has drawn two snapshots after scrolling, two
+# to five seconds after the page loads, and nothing above waits for it
+# (scripts/stand-column-scroll.sh, T-074).
+column_wait=30
+if [ "$expect" = content ]; then
+	wait_column_scroll "$out/window.log" "$column_wait" "$window" || true
+fi
 # The screenshot comes after every page said so: for frame, it is the frame's.
 sleep 3
 capture_screen "$out/window.png"
@@ -508,15 +518,7 @@ fi
 # still frame does not show it.
 column_kept=yes
 if [ "$expect" = content ]; then
-	kept_said=$(sed -n 's/.*fleetdeck-window: the board reports its column scroll: \({.*}\)$/\1/p' "$out/window.log" | tail -n 1)
-	kept_field() { printf '%s\n' "$kept_said" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
-	asked=$(kept_field asked)
-	renders=$(kept_field renders)
-	kept_top=$(kept_field scrollTop)
-	echo "--- the done column scrolled to ${asked:-not reported} px: after ${renders:-no} snapshots drawn it is at ${kept_top:-not reported} px"
-	if ! whole "$asked" || ! whole "$renders" || ! whole "$kept_top" || [ "$renders" -lt 2 ] || [ "$asked" -eq 0 ] || [ "$kept_top" != "$asked" ]; then
-		column_kept=no
-	fi
+	column_scroll_verdict "$out/window.log" "$column_wait" || column_kept=no
 fi
 
 # For content, the grounds the sessions list lies on, as the sessions surface

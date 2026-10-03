@@ -75,12 +75,15 @@ type NotifyConfig struct {
 // Both fields are empty by default and describe one installation together — a command
 // pointed at one installation with a ConfigDir naming another would start sessions the
 // panel then cannot see. Neither is validated against the other, because nothing here
-// can tell which directory a command will end up using.
+// can tell which directory a command will end up using. With no Command, the claude the
+// panel finds is run with CLAUDE_CONFIG_DIR set to ConfigDir, or with none at all when
+// ConfigDir is empty, so a ConfigDir alone is enough to reach another installation.
 type AgentConfig struct {
 	// Command starts a background session, with `--bg --name <name>` appended to it:
 	// a wrapper and its own arguments, or a single-element command for a plain
 	// binary. Empty means the claude found on PATH and in the places Claude Code
-	// installs itself (internal/orchestrator's FindClaude).
+	// installs itself (internal/orchestrator's FindClaude), run in ConfigDir's
+	// installation. A Command is run with the panel's environment as it is.
 	Command []string
 	// ConfigDir is the installation's configuration directory — what Claude Code
 	// itself would read CLAUDE_CONFIG_DIR for. Empty means ~/.claude. Must be

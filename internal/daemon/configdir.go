@@ -40,7 +40,9 @@ func DefaultConfigDir() string {
 
 // daemonDirName is the runtime directory Claude Code's daemon creates for the
 // installation rooted at configDir: the first eight hex digits of the SHA-256 of that
-// directory's path.
+// directory's path once cleaned. Claude Code hashes path.resolve of the directory, so
+// /x/.claude-work/ and /x/./.claude-work are the installation /x/.claude-work names and
+// must find its daemon (checked against Claude Code 2.1.283 on 2026-10-03).
 //
 // This is a foreign format, the same kind of dependency internal/jobs carries and for
 // the same reason — nothing in the daemon's protocol answers "which socket belongs to
@@ -51,7 +53,7 @@ func DefaultConfigDir() string {
 // stops finding a socket and says the daemon is unavailable; it never silently
 // answers with another installation's.
 func daemonDirName(configDir string) string {
-	sum := sha256.Sum256([]byte(configDir))
+	sum := sha256.Sum256([]byte(filepath.Clean(configDir)))
 	return hex.EncodeToString(sum[:])[:8]
 }
 

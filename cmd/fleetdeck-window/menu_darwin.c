@@ -63,11 +63,20 @@ static void reloadAll(id self, SEL _cmd, id sender) {
   fleetdeckMenuReload();
 }
 
+// The target of Check for Updates…: the window asks the releases page now.
+static void checkForUpdates(id self, SEL _cmd, id sender) {
+  (void)self;
+  (void)_cmd;
+  (void)sender;
+  fleetdeckMenuCheckForUpdates();
+}
+
 static id menuTarget(void) {
   static id instance;
   if (instance) return instance;
   Class klass = objc_allocateClassPair((Class)objc_getClass("NSObject"), "FleetdeckMenuTarget", 0);
   class_addMethod(klass, sel("fleetdeckReloadAll:"), (IMP)reloadAll, "v@:@");
+  class_addMethod(klass, sel("fleetdeckCheckForUpdates:"), (IMP)checkForUpdates, "v@:@");
   objc_registerClassPair(klass);
   instance = send0((id)klass, sel("new"));
   return instance;
@@ -83,6 +92,13 @@ void fleetdeck_install_menu(const char *appName) {
   // Cmd+V -- Cmd+Q has nothing to route through either.
   id appMenuItem = newMenuItem(appName, NULL, "");
   id appMenu = newMenu(appName);
+  // Check for Updates…, where every Mac app keeps it. The window finds a
+  // newer version by itself, but asks the releases page at most every six
+  // hours; this asks now (watch.go). The answer appears in the page's header.
+  id checkItem = newMenuItem("Check for Updates…", "fleetdeckCheckForUpdates:", "");
+  sendVoid1(checkItem, sel("setTarget:"), menuTarget());
+  menuAddItem(appMenu, checkItem);
+  menuAddItem(appMenu, separatorItem());
   char quit[128];
   snprintf(quit, sizeof quit, "Quit %s", appName);
   menuAddItem(appMenu, newMenuItem(quit, "terminate:", "q"));

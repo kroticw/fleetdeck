@@ -384,6 +384,9 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   let pause = null;
   let pauseStep = 0;
   let calm = null;
+  // Whether the size this terminal last gave the session is smaller than its
+  // pane: a take-back where another attacher is smaller (see growBack).
+  let shortOfPane = false;
   // The pieces of the stream handed to xterm, the last piece xterm has finished
   // reading, and the last piece that had arrived when the session was last given
   // a size (see noticeBigger).
@@ -508,10 +511,30 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     if (paneSize && paneSize[0] === cols && paneSize[1] === rows) return false;
     sendSize(cols, rows);
     paneSize = [cols, rows];
+    shortOfPane = false;
     // A pane of a new size starts over: a terminal that stopped taking the size
     // back takes it back again.
     standUp();
     return true;
+  };
+
+  // growBack gives the session this terminal's whole size again after a
+  // take-back gave it less. The daemon records the smaller size as this
+  // terminal's, and when the smaller attacher leaves it gives the session that
+  // size: measured, a 44 × 39 pane stayed at 44 × 24 after a 120 × 24 attacher
+  // left. Nothing in the stream says that attacher has gone, so the size is
+  // given back when someone uses the terminal — it takes the focus or is typed
+  // into — and once per take-back. An attacher still there and smaller takes
+  // the size back in turn if it does that, which costs one round per focus that
+  // follows a take-back, never a loop: after giving the size back this terminal
+  // has nothing to give until it takes the size back again.
+  const growBack = () => {
+    if (!shortOfPane || !terminal || settle !== null || unfitted) return;
+    const open = globalThis.WebSocket?.OPEN ?? 1;
+    if (!socket || socket.readyState !== open) return;
+    shortOfPane = false;
+    sendSize(terminal.cols, terminal.rows);
+    paneSize = [terminal.cols, terminal.rows];
   };
 
   // sendSize puts a size into the session through the open socket. Any size
@@ -643,6 +666,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     const rows = taller || streamLowest === null ? terminal.rows : Math.min(terminal.rows, streamLowest + 1);
     sendSize(cols, rows);
     paneSize = [terminal.cols, terminal.rows];
+    shortOfPane = cols < terminal.cols || rows < terminal.rows;
     const take = timers.setTimeout(() => recentTakes.delete(take), RECLAIM_WINDOW_MS);
     recentTakes.add(take);
     if (calm !== null) timers.clearTimeout(calm);
@@ -950,6 +974,7 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     ws.binaryType = "arraybuffer";
     socket = ws;
     paneSize = [cols, rows];
+    shortOfPane = false;
     // The attach gives the session this size, so whatever an earlier stream
     // sent that xterm has not read yet is from before it, and a terminal that
     // had stopped taking the size back starts over.
@@ -991,7 +1016,10 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     // One wiring at a time: an opening after a reconnect replaces the last one
     // rather than adding to it, or every key would be typed once per attempt.
     if (typing) typing.dispose();
-    typing = term.onData((data) => sendBytes(encoder.encode(data)));
+    typing = term.onData((data) => {
+      growBack();
+      sendBytes(encoder.encode(data));
+    });
   };
 
   // A page the browser keeps in its back/forward cache keeps its sockets open:
@@ -1005,10 +1033,12 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   return {
     open() {
       page.addEventListener?.("pagehide", onPageHide);
+      host.addEventListener?.("focusin", growBack);
       void openStream();
     },
     stop() {
       page.removeEventListener?.("pagehide", onPageHide);
+      host.removeEventListener?.("focusin", growBack);
       closeStream();
       disposeTerminal();
     },

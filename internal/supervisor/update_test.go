@@ -239,6 +239,7 @@ func (r *updateRig) launch(staged, canonical, handover string) (func(), error) {
 		Registry:      r.registry,
 		LockPath:      r.lockPath,
 		OldWindowGone: r.old.gone,
+		OldWindowQuit: r.old.exited,
 		RetireWait:    r.retireWait,
 		RetireEvery:   r.retireEvery,
 		Done:          func() { close(r.done) },
@@ -631,6 +632,29 @@ func TestTheBundleSwappedOutIsRemovedWhenTheOldWindowQuitsPastTheWait(t *testing
 	}
 	if _, err := os.Stat(filepath.Join(StagingDir(r.canonical), "handover")); err != nil {
 		t.Fatalf("the handover file went with the bundle: %v", err)
+	}
+}
+
+// Past the close watch the tries are rare, and a bundle left between two of
+// them is the old version LaunchServices still knows. The old window quitting
+// is the moment removal can succeed, so it is tried then, not at the next try.
+func TestTheBundleSwappedOutGoesAsSoonAsTheOldWindowQuitsPastTheWait(t *testing.T) {
+	r := newUpdateRig(t)
+	r.retireWait = 300 * time.Millisecond
+	r.retireEvery = time.Hour
+	if err := r.update("old").Run(context.Background()); err != nil {
+		t.Fatalf("update: %v (steps %v)", err, r.steps())
+	}
+	waitSaid(t, r.said, "try 1")
+
+	r.old.quit()
+	waitClosed(t, r.takeoverDone, "the new window's takeover, once the old window quit past the close watch")
+	staged := filepath.Join(StagingDir(r.canonical), BundleName)
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("the bundle swapped out is still at %s once the old window quit: %v", staged, err)
+	}
+	if !toldAfterRemoval(r.registry.told(), staged, r.canonical) {
+		t.Fatalf("LaunchServices was not told again once the bundle had gone: %+v", r.registry.told())
 	}
 }
 

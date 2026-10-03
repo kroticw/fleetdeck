@@ -35,6 +35,7 @@ var reportSubjects = map[string]string{
 	"controls":     "controls",
 	"topband":      "top band",
 	"cardSheet":    "card sheet",
+	"update":       "update control",
 }
 
 // reportSubject is what a page's report is of: each kind is a log line of its

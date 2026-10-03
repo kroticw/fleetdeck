@@ -39,7 +39,7 @@ func TestAWindowBuiltFromAReleaseCanUpdateFromTheReleasesPage(t *testing.T) {
 // TreeSource's refusal to make, at the moment it needs them
 // (TestATreeSourceSaysWhichToolItCannotFind).
 func TestAWindowBuiltFromACheckoutStillUpdatesFromItsTree(t *testing.T) {
-	way := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "dev"})
+	way := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "dev", revision: "4f1c2e9"})
 
 	if way.Refusal != "" {
 		t.Fatalf("a checkout build refuses to update: %q", way.Refusal)
@@ -57,7 +57,7 @@ func TestAWindowBuiltFromACheckoutStillUpdatesFromItsTree(t *testing.T) {
 // is the build somebody is working on, and downloading a release over it would
 // throw their work away.
 func TestASignedCheckoutBuildStillPrefersItsTree(t *testing.T) {
-	way := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "v0.3.0", teamID: "PTLLPQ8LY4"})
+	way := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "v0.3.0", teamID: "PTLLPQ8LY4", revision: "4f1c2e9"})
 
 	if _, ok := way.Source.(*supervisor.TreeSource); !ok {
 		t.Fatalf("a signed checkout build updates from %T, want a *supervisor.TreeSource", way.Source)
@@ -75,7 +75,7 @@ func TestAWayNamesTheVersionItsSourceComparesWith(t *testing.T) {
 		t.Errorf("a release build says it runs %q, and its source compares with %+v", release.Running, release.Source)
 	}
 
-	tree := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "dev"})
+	tree := updateWay(config{tree: "/src/fleetdeck", exe: inBundle, version: "dev", revision: "4f1c2e9"})
 	if src, _ := tree.Source.(*supervisor.TreeSource); src == nil || tree.Running != src.Running {
 		t.Errorf("a checkout build says it runs %q, and its source compares with %+v", tree.Running, tree.Source)
 	}
@@ -109,6 +109,14 @@ func TestAWindowThatCannotUpdateSaysWhichWayItCannot(t *testing.T) {
 			name: "signed but with no release version",
 			cfg:  config{tree: "", exe: inBundle, version: "dev", teamID: "PTLLPQ8LY4"},
 			want: refusalNoVersion,
+		},
+		{
+			// A checkout build that does not know its own commit cannot tell
+			// the tree's newest commit from the one it runs: it would offer
+			// that commit for ever, and building it could be a step back.
+			name: "built from a checkout with no commit written in",
+			cfg:  config{tree: "/src/fleetdeck", exe: inBundle, version: "dev", revision: ""},
+			want: refusalNoRevision,
 		},
 	}
 	for _, c := range cases {

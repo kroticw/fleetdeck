@@ -45,6 +45,14 @@ var (
 	reloadRuns    int
 	reloadPressed bool
 
+	appMenuTitles     []string
+	checkHasTarget    bool
+	checkKey          string
+	checkKeyOK        bool
+	checkRuns         int
+	checkPressed      bool
+	checkPressedUnset bool
+
 	closeHideWindow             unsafe.Pointer
 	closeHideShouldCloseResult  int
 	closeHideVisibleAfterClose  bool
@@ -88,6 +96,14 @@ func TestMain(m *testing.M) {
 	setMenuReload(func() { reloadRuns++ })
 	reloadPressed = testMenuItemPerform("View", "fleetdeckReloadAll:")
 	setMenuReload(nil)
+
+	appMenuTitles = testMenuItemTitles("fleetdeck")
+	checkKey, checkKeyOK = testMenuItemKey("fleetdeck", "fleetdeckCheckForUpdates:")
+	checkHasTarget = testMenuItemHasTarget("fleetdeck", "fleetdeckCheckForUpdates:")
+	checkPressedUnset = testMenuItemPerform("fleetdeck", "fleetdeckCheckForUpdates:")
+	setMenuCheckForUpdates(func() { checkRuns++ })
+	checkPressed = testMenuItemPerform("fleetdeck", "fleetdeckCheckForUpdates:")
+	setMenuCheckForUpdates(nil)
 
 	closeHideWindow = testNewHiddenWindow()
 	if closeHideWindow != nil {
@@ -156,6 +172,34 @@ func TestReloadReloadsEveryWebViewNotOnlyTheFocusedOne(t *testing.T) {
 	}
 	if !reloadPressed || reloadRuns != 1 {
 		t.Fatalf("pressing Reload: taken = %v, the window's reload ran %d times; want it run once", reloadPressed, reloadRuns)
+	}
+}
+
+// Check for Updates… is where a Mac app keeps it: in the app menu, above
+// Quit. A press asks the releases page now instead of waiting out askEvery
+// (watch.go); the answer appears in the header, where the Update button is.
+// It has a target of its own, as Reload does, and no key equivalent.
+func TestTheAppMenuHasCheckForUpdatesAboveQuit(t *testing.T) {
+	want := []string{"Check for Updates…", "", "Quit fleetdeck"}
+	if len(appMenuTitles) != len(want) {
+		t.Fatalf("app menu items = %q, want %q", appMenuTitles, want)
+	}
+	for i := range want {
+		if appMenuTitles[i] != want[i] {
+			t.Fatalf("app menu items = %q, want %q", appMenuTitles, want)
+		}
+	}
+	if !checkKeyOK || checkKey != "" {
+		t.Fatalf("Check for Updates… key equivalent = %q (found %v), want none", checkKey, checkKeyOK)
+	}
+	if !checkHasTarget {
+		t.Fatal("Check for Updates… has no target of its own: its action would go up the responder chain and find nothing")
+	}
+	if !checkPressed || checkRuns != 1 {
+		t.Fatalf("pressing Check for Updates…: taken = %v, the check ran %d times; want it run once", checkPressed, checkRuns)
+	}
+	if !checkPressedUnset {
+		t.Fatal("pressing Check for Updates… before the window set what it does was not taken")
 	}
 }
 

@@ -136,9 +136,11 @@ rm ~/Library/LaunchAgents/dev.fleetdeck.panel.plist
 
 ## Updating the app
 
-When a version newer than the installed one is out, an Update button appears in the app's header, with the version beside it. While there is nothing to update to, there is no button at all: its appearing is the notice. The button is only ever in the app: a browser tab has nothing to run an update with.
+When a version newer than the installed one is out, an Update button appears in the app, with the version beside it, in a panel over the top of the orchestrator's terminal. While there is nothing to update to, there is no button at all: its appearing is the notice. The button is only ever in the app: a browser tab has nothing to run an update with.
 
-The app finds out about a new version by itself while it is open. Every six hours it asks GitHub which release is newest — one small request, at most four a day however long the window stays open. It keeps the answer, so starting the app again neither asks again nor loses what was found. When GitHub cannot be reached, the app claims nothing: it shows no button if it did not already know of a newer version, and does not hide one it already knew of. It asks again a few minutes later, so once the network is back the button appears by itself.
+The app finds out about a new version by itself while it is open. Every six hours it asks GitHub which release is newest — one small request, at most four a day however long the window stays open. It keeps the answer, so starting the app again neither asks again nor loses what was found. When GitHub cannot be reached, the app claims nothing: it shows no button if it did not already know of a newer version, and does not hide one it already knew of. It asks again a few minutes later, so once the network is back the button appears by itself. When GitHub answers but not with a version — it is overloaded, rate-limits the request, or the newest release has a tag the app cannot read — the app asks again less and less often, ten minutes after the first such answer and up to every six hours, until GitHub answers properly; **Check for Updates…** asks at once whatever the pause.
+
+To find out sooner than that — a release came out an hour ago — choose **Check for Updates…** in the app menu (the bold **fleetdeck** menu, above Quit). The app asks GitHub at once, and the answer appears in the same panel over the top of the orchestrator's terminal: "Checking for updates…", then either the version found with its Update button, or that nothing newer is out, or why GitHub gave no answer. The last two go away by themselves after ten seconds. A check counts as the app's own question, so the next one by itself is six hours later. Choosing it again within a minute of the last question asks nothing new and shows that question's answer again.
 
 What the button does depends on how the app got onto your Mac. An app built from a git checkout brings that checkout forward; an app installed from a release downloads the next release. A build that can do neither does not look for new versions and shows no button.
 
@@ -165,9 +167,10 @@ Pressing the button downloads the newest release and installs it over this one:
 
 The check in step 3 is the point of doing this inside the app at all. Without it, a program that downloads an archive and puts it over the running app is a way to hand you anything at all.
 
-There are two things the button cannot do, and it says so rather than trying:
+There are three things the button cannot do, and it says so rather than trying:
 
 - **An app you built yourself** with `make window-app`, without a checkout written into it, is signed by nobody. There is no release that corresponds to it, so there is nothing to update it to — build it again from your checkout.
+- **An app built from a checkout without its commit written in** — `go build -buildvcs=false`, or a copy of the sources outside git — cannot tell a newer commit from its own, so updating could take it backwards. Build it again with `make window-app` from your clone.
 - **A binary run outside an app bundle** — `go run`, or the executable on its own — has no app to replace.
 
 ## Opening the panel

@@ -14,8 +14,10 @@ import (
 // author's session docked below or beside it and open, the way the operator
 // answers a document's question from the card (T-091); "carddoc-rail" with the
 // session folded beside it, a strip like the folded session list; "carddoc-flip"
-// beside it and then moved below once its terminal has attached.
-var standOpenNames = []string{"newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip"}
+// beside it and then moved below once its terminal has attached. "check-*"
+// hold the update control beside the brand in a state of Check for Updates…:
+// checking, nothing newer, no answer, and a version found.
+var standOpenNames = []string{"newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip", "check-checking", "check-latest", "check-failed", "check-available"}
 
 // On a stand, and only there, the window takes a few settings from its
 // environment that a person's window never has. A variable set without the

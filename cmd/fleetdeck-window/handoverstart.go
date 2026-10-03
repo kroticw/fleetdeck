@@ -25,14 +25,15 @@ import (
 // window is made ends the process there, with no window shown: the window that
 // started this one says why, and starts its panel again.
 //
-// LaunchServices: this window starts by exec from the staged path, and that
-// path is registered by the time the window is ready; when in the process's
-// start it is registered is not measured (docs/engineering/window-and-panel.md,
-// on taking the panel over before the window is made). With the takeover ahead of the window, the check-in may come
-// after the takeover has had LaunchServices forget that path, and put it back.
-// So once the window runs -- its check-in behind it, whether that is made when
-// the application object is created or when it finishes launching -- a
-// takeover that has swapped the bundles has LaunchServices forget the staged
+// LaunchServices: this window starts by exec from the staged path, and its
+// check-in registers that path inside webview.New, before AppKit's
+// will-finish-launching (measured, T-117: docs/engineering/window-and-panel.md,
+// on taking the panel over before the window is made). With the takeover ahead
+// of the window, the check-in may come after the takeover has had
+// LaunchServices forget that path, and put it back: on a cold first start
+// webview.New returned 1575 ms into the process. So once the window runs --
+// main opens the gate only after webview.New, so its check-in is behind it --
+// a takeover that has swapped the bundles has LaunchServices forget the staged
 // path and take the canonical one again. A swap made after that point is
 // followed by the takeover's own reregistering, which then comes after the
 // check-in anyway.

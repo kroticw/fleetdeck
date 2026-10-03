@@ -239,6 +239,9 @@ func main() {
 			// Works with an old window of any version, which says nothing of
 			// itself in the handover.
 			OldWindowGone: func() bool { return os.Getppid() != oldWindow },
+			// And the moment it exits is told, so the bundle goes then rather
+			// than at the next try past the close watch.
+			OldWindowQuit: exitOf(oldWindow, func() bool { return os.Getppid() == oldWindow }),
 			Logf:          func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) },
 		}
 		// Every start of the keeper held inside the old window's deadline: the
@@ -462,16 +465,18 @@ func main() {
 	// handover looks too: it stays open as long as the one it replaced would
 	// have, and the answer kept for the version before it does not apply.
 	var watching atomic.Pointer[updateWatch]
-	go func() {
-		defer panics.in("in the goroutine watching for an update").guard()
+	// watchOf is made once, by whichever comes first: the looking below, or a
+	// press of Check for Updates… while this build is still working out how it
+	// updates. nil when it cannot look.
+	watchOf := sync.OnceValue(func() *updateWatch {
 		how := updateWayOf()
 		if how.Source == nil {
-			return
+			return nil
 		}
 		markPath, err := askedMarkPath()
 		if err != nil {
 			log.Printf("fleetdeck-window: no home directory to keep the answer about a newer version in, so this window will not look for one: %v", err)
-			return
+			return nil
 		}
 		watch := &updateWatch{
 			source:   how.Source,
@@ -481,7 +486,13 @@ func main() {
 			now:      time.Now,
 		}
 		watching.Store(watch)
-		watch.run(context.Background(), time.NewTicker(lookEvery).C)
+		return watch
+	})
+	go func() {
+		defer panics.in("in the goroutine watching for an update").guard()
+		if watch := watchOf(); watch != nil {
+			watch.run(context.Background(), time.NewTicker(lookEvery).C)
+		}
 	}()
 	// A page asks this as it loads -- the first time, and again after every
 	// reload -- because it misses every report sent before it was there. Asked
@@ -513,12 +524,39 @@ func main() {
 				tell(glass.view(), refusalProgress(how.Refusal))
 				return
 			}
-			runUpdate(glass.view(), *url, canonical, how.Source, kept)
+			source := how.Source
+			if watch := watchOf(); watch != nil {
+				source = watch.heard(source)
+			}
+			runUpdate(glass.view(), *url, canonical, source, kept)
 		}()
 	}
 	if err := w.Bind(updateBindingName, update); err != nil {
 		log.Printf("fleetdeck-window: the update button will not work: %v", err)
 	}
+	// Check for Updates… in the app menu asks the releases page now (watch.go).
+	// It asks nothing while an update runs, and one press at a time; a build
+	// that cannot update itself says why, as the update binding does.
+	var checking atomic.Bool
+	setMenuCheckForUpdates(func() {
+		if updating.Load() || !checking.CompareAndSwap(false, true) {
+			return
+		}
+		go func() {
+			defer panics.in("in the goroutine checking for an update").guard()
+			defer checking.Store(false)
+			if how := updateWayOf(); how.Refusal != "" {
+				tell(glass.view(), refusalProgress(how.Refusal))
+				return
+			}
+			watch := watchOf()
+			if watch == nil {
+				tell(glass.view(), report{Step: "check-failed", Reason: reasonOther, Detail: "there is no home directory to keep the answer in"})
+				return
+			}
+			watch.checkNow(context.Background())
+		}()
+	})
 	// The update button lives in the orchestrator's surface.
 	glass.share(knownBindingName, func() (any, error) { return known(), nil })
 	glass.share(updateBindingName, func() (any, error) {

@@ -23,6 +23,7 @@ const CONTROLS = {
     { name: "fold", selector: ".col-size-fold" },
     { name: "fleetButton", selector: ".fleet-menu-button" },
     { name: "fleetList", selector: ".fleet-menu-list" },
+    { name: "updatePanel", selector: ".update-panel" },
   ],
   board: [
     { name: "newCard", selector: ".newcard" },

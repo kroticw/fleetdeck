@@ -150,3 +150,27 @@ func TestDiscoverInResolvesOnlyItsOwnConfigDir(t *testing.T) {
 		t.Fatalf("resolved %q, want %q", got, want)
 	}
 }
+
+// Claude Code names its daemon's runtime directory after the configuration
+// directory resolved (path.resolve), so a path written with a trailing slash or a
+// "." element is the same installation — and must find the same daemon, not
+// report it unavailable.
+func TestSocketPathForFindsTheDaemonOfAnUncleanSpelling(t *testing.T) {
+	base := shortTempDir(t)
+	orig := socketGlobBase
+	socketGlobBase = base
+	t.Cleanup(func() { socketGlobBase = orig })
+
+	want := plantLiveSocket(t, daemonDirFor(t, base, "/x/.claude-work"))
+
+	for _, spelling := range []string{"/x/.claude-work/", "/x/./.claude-work", "/x//.claude-work"} {
+		got, err := SocketPathFor(spelling)
+		if err != nil {
+			t.Errorf("SocketPathFor(%q): %v", spelling, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("SocketPathFor(%q) = %q, want %q", spelling, got, want)
+		}
+	}
+}

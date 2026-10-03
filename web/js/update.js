@@ -33,8 +33,18 @@ export const WAIT_SHOWN_AFTER_MS = 2000;
 // How often a running update is repainted: the time of a wait appears no
 // later than this after it passes WAIT_SHOWN_AFTER_MS.
 export const UPDATE_REPAINT_MS = 250;
+// How long the answer to Check for Updates… stays when there is nothing to
+// install -- "nothing newer", or why there was no answer (decided by the
+// operator, 2026-10-02). A version found stays, with its button.
+export const CHECK_SHOWN_MS = 10_000;
 
 // phase: idle | available | cannot | confirm | running | done | current | busy | failed
+//        | checking | latest | checkFailed
+//
+// The last three are Check for Updates… in the app menu, which asks the
+// releases page now. They carry offer: the version on offer before the check,
+// so that a check with no answer does not take it away -- the window keeps it
+// too (cmd/fleetdeck-window/watch.go).
 export function initialState() {
   return { phase: "idle" };
 }
@@ -78,16 +88,125 @@ export function onProgress(state, { step, detail = "", reason = "" }, now) {
     // longer one. Nobody pressed anything, so a version has to show itself.
     // It never interrupts a press -- an update running, the question about
     // unsent text, or an update just done and about to reload the page.
+    // Nor does it take away the words of a press that failed: it only
+    // says whether there is still something to try again with.
     case "available":
     case "none":
-      if (state.phase === "running" || state.phase === "confirm" || state.phase === "done") return state;
+      if (busyWithAPress(state)) return state;
+      if (state.phase === "failed" || state.phase === "busy") return { ...state, withdrawn: step === "none" };
       return step === "available" ? { phase: "available", detail } : initialState();
+    // What Check for Updates… in the app menu reports. A person asked, so
+    // every outcome is said; none of it interrupts a press either.
+    case "checking":
+      if (busyWithAPress(state)) return state;
+      return { phase: "checking", since: now, offer: offerOf(state) };
+    case "latest":
+      if (busyWithAPress(state)) return state;
+      return { phase: "latest", detail, since: now };
+    case "check-failed":
+      if (busyWithAPress(state)) return state;
+      return { phase: "checkFailed", reason, detail, since: now, offer: offerOf(state) };
     default:
       // A new step starts its own clock: the time shown is how long this step
       // has taken, which is the wait the person is in now.
       if (state.phase === "running" && state.step === step) return state;
       return running(step, detail, now);
   }
+}
+
+// STAND_UPDATE is the report a stand holds the update control in, by what it
+// opened (FLEETDECK_STAND_OPEN check-*, web/js/host.js). The particulars are
+// what scripts/standcheck looks for in the frame's words (updatecontrol.go).
+export const STAND_UPDATE = {
+  "check-checking": { step: "checking" },
+  "check-latest": { step: "latest", detail: "v1.0.0" },
+  "check-failed": {
+    step: "check-failed",
+    reason: "offline",
+    detail: 'Head "https://github.com/kroticw/fleetdeck/releases/latest": dial tcp: lookup github.com: no such host',
+  },
+  "check-available": { step: "available", detail: "v1.1.0" },
+};
+
+// The update control is a panel of its own over the top of the orchestrator's
+// terminal, not a part of the brand row (decided by the operator, 2026-10-02).
+// The brand row of a 313 pt column is full with the brand and the fleet
+// button: a found version and its button were cut to "Updat" there, and the
+// surface scrolled sideways. PANEL_INSET is how far it stands in from the
+// column's sides and the terminal's top.
+export const PANEL_INSET = 8;
+// Narrower than this the column is folded to its strip, and the panel stays
+// hidden: there is no room for words in it.
+const PANEL_MIN_WIDTH = 120;
+
+// panelPlace is where the panel goes, in the page's coordinates, given the
+// orchestrator column's box and its terminal's: over the top of the terminal,
+// as wide as the column less an inset each side. null where there is no
+// terminal to lie over or no room. The panel never reaches above the
+// terminal's top, so the brand row, the window's buttons and the island's head
+// stay uncovered.
+export function panelPlace(column, term) {
+  if (!column || !term || term.height <= 0) return null;
+  const width = column.width - 2 * PANEL_INSET;
+  if (width < PANEL_MIN_WIDTH) return null;
+  return { top: term.top + PANEL_INSET, left: column.left + PANEL_INSET, width };
+}
+
+// updatePanelReport is what a stand's orchestrator surface says of its update
+// panel in the window's log: its words, whether the Update button is there,
+// whether the words are marked as a problem, whether it is shown, where it lies
+// against the terminal and the page, and whether its words fit their box.
+export function updatePanelReport(win, panel, term) {
+  const status = panel?.querySelector(".update-status");
+  const box = panel?.getBoundingClientRect();
+  const words = status?.getBoundingClientRect();
+  const slack = 0.5;
+  const clipped =
+    !!status &&
+    (status.scrollWidth > status.clientWidth + slack ||
+      status.scrollHeight > status.clientHeight + slack ||
+      words.left < box.left - slack ||
+      words.right > box.right + slack ||
+      words.top < box.top - slack ||
+      words.bottom > box.bottom + slack);
+  return {
+    report: "update",
+    text: status?.textContent ?? "",
+    button: !!panel?.querySelector(".update-button"),
+    problem: !!panel?.querySelector(".update-problem"),
+    shown: !!panel && !panel.hidden,
+    box: box ? { top: box.top, left: box.left, right: box.right, bottom: box.bottom } : null,
+    termTop: term ? term.getBoundingClientRect().top : null,
+    pageWidth: win.innerWidth,
+    clipped,
+  };
+}
+
+// busyWithAPress: an update running, the question about unsent text, or an
+// update just done and about to reload the page. Nothing the window finds or
+// is asked to check knocks those out of the way.
+function busyWithAPress(state) {
+  return state.phase === "running" || state.phase === "confirm" || state.phase === "done";
+}
+
+// offerOf is the version on offer in state, or "".
+function offerOf(state) {
+  if (state.phase === "available") return state.detail;
+  return state.offer ?? "";
+}
+
+// settle takes away the answer to a check once it has been on screen for
+// CHECK_SHOWN_MS, back to the version on offer before it, if any.
+export function settle(state, now) {
+  if (state.phase !== "latest" && state.phase !== "checkFailed") return state;
+  if (now - state.since < CHECK_SHOWN_MS) return state;
+  return state.offer ? { phase: "available", detail: state.offer } : initialState();
+}
+
+// needsRepaint says whether the header has to repaint state as time passes:
+// a wait whose time is shown, or an answer that is to go away.
+export function needsRepaint(state) {
+  return ["running", "checking", "latest", "checkFailed"].includes(state.phase);
 }
 
 const STEP_KEYS = {
@@ -179,8 +298,32 @@ export function updateHTML(state, now) {
       inner = button(t("update_button"), false) + status(fill("update_available", { version: state.detail }), "update-available");
       break;
     case "busy":
-      inner = button(t("update_button"), false) + status(t("update_busy"), "update-problem");
+      inner = (state.withdrawn ? "" : button(t("update_button"), false)) + status(t("update_busy"), "update-problem");
       break;
+    // Check for Updates…: the releases page is being asked. No button: what
+    // there is to install is not known until the answer.
+    case "checking": {
+      let text = t("update_checking");
+      const waited = now - state.since;
+      if (waited >= WAIT_SHOWN_AFTER_MS) {
+        text += " " + fill("update_elapsed", { n: Math.floor(waited / 1000) });
+      }
+      inner = status(text);
+      break;
+    }
+    case "latest":
+      inner = status(fill("update_latest", { version: state.detail }));
+      break;
+    // A check with no answer. It says why in the reader's language, with the
+    // particulars beside it, and keeps the button for a version already found.
+    case "checkFailed": {
+      const why = reasonText("update_check_reason", state.reason);
+      const text = why
+        ? fill("update_check_failed_because", { why, detail: state.detail })
+        : fill("update_check_failed", { detail: state.detail });
+      inner = (state.offer ? button(t("update_button"), false) : "") + status(text, "update-problem");
+      break;
+    }
     case "failed": {
       // The sentence comes from the reason code, so it is in the reader's
       // language; the detail is what the system said, in whatever language it
@@ -191,7 +334,7 @@ export function updateHTML(state, now) {
       const text = why
         ? fill("update_failed_because", { why, detail: state.detail })
         : fill("update_failed", { detail: state.detail });
-      inner = button(t("update_button"), false) + status(text, "update-problem");
+      inner = (state.withdrawn ? "" : button(t("update_button"), false)) + status(text, "update-problem");
       break;
     }
     // This build cannot update itself at all. It never finds anything to
