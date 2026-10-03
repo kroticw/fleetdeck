@@ -1,0 +1,139 @@
+name: stand-repeat
+
+# Temporary, for T-074 and T-106 only: removed before the branch is merged.
+# Runs the two stands that flaked many times over on this build, and each stand
+# once on a build broken the way its gate exists to catch.
+
+on:
+  push:
+    branches: [fix/stand-probe-flakes]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [base, mutant-column, mutant-fullscreen]
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      # mutant-column: the board draws a scrolled column back at its top.
+      # mutant-fullscreen: the orchestrator page stays laid out for full screen
+      # once the window is out of it.
+      - name: Break the build the way the gate has to catch
+        run: |
+          case ${{ matrix.variant }} in
+            mutant-column)
+              sed -i '' 's/if (top !== undefined) column.scrollTop = top;/void top;/' web/js/board.js
+              ! grep -q 'column.scrollTop = top' web/js/board.js
+              ;;
+            mutant-fullscreen)
+              sed -i '' 's/else delete page.dataset.fullscreen;/else void 0;/' web/js/main.js
+              ! grep -q 'delete page.dataset.fullscreen' web/js/main.js
+              ;;
+          esac
+          git diff --stat
+      - name: Build the app the way the release does
+        run: make dist-app VERSION=v0.0.0-ci DISTDIR=dist SIGN_IDENTITY= BUNDLE_ID=dev.fleetdeck.stand
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-${{ matrix.variant }}
+          path: dist/fleetdeck-v0.0.0-ci-macos.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  repeat:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: app-base
+          path: new
+      - run: ditto -x -k new/fleetdeck-v0.0.0-ci-macos.zip new
+      - name: The runner's transparency and contrast, turned off for the stands
+        run: |
+          for key in reduceTransparency increaseContrast; do
+            defaults write com.apple.universalaccess "$key" -bool false || true
+          done
+      - name: Both stands, 5 times each
+        run: |
+          failed=0
+          for i in 1 2 3 4 5; do
+            if FLEETDECK_STAND_WINDOW_SIZE=1000x700 FLEETDECK_STAND_APPEARANCE=light FLEETDECK_STAND_CAPSULES=glass FLEETDECK_STAND_OPEN=newcard \
+              scripts/ci-window-stand.sh new/fleetdeck.app 7825 "out/newcard-$i" exec content >"out-newcard-$i.txt" 2>&1; then
+              echo "=== shard ${{ matrix.shard }} run $i light-newcard: pass"
+            else
+              echo "=== shard ${{ matrix.shard }} run $i light-newcard: FAIL"; failed=$((failed + 1)); cat "out-newcard-$i.txt"
+            fi
+            grep -- '--- the done column' "out-newcard-$i.txt" || true
+            if FLEETDECK_STAND_WINDOW_SIZE=1000x700 FLEETDECK_STAND_APPEARANCE=dark FLEETDECK_STAND_CAPSULES=glass FLEETDECK_STAND_FULLSCREEN=on FLEETDECK_STAND_FOLD=orchestrator \
+              scripts/ci-window-stand.sh new/fleetdeck.app 7811 "out/fold-$i" exec content >"out-fold-$i.txt" 2>&1; then
+              echo "=== shard ${{ matrix.shard }} run $i fold-orchestrator-fullscreen-glass-dark: pass"
+            else
+              echo "=== shard ${{ matrix.shard }} run $i fold-orchestrator-fullscreen-glass-dark: FAIL"; failed=$((failed + 1)); cat "out-fold-$i.txt"
+            fi
+            grep '^frame: ' "out-fold-$i.txt" || true
+          done
+          echo "=== shard ${{ matrix.shard }}: $failed failed of 10"
+          [ "$failed" -eq 0 ]
+
+  mutant:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: mutant-column
+            want: "--- the done column scrolled to 120 px: after 2 snapshots drawn it is at 0 px"
+          - variant: mutant-fullscreen
+            want: "frame: after full screen 1: no overflow report from the folded orchestrator strip laid out out of full screen"
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: app-${{ matrix.variant }}
+          path: new
+      - run: ditto -x -k new/fleetdeck-v0.0.0-ci-macos.zip new
+      - name: The runner's transparency and contrast, turned off for the stands
+        run: |
+          for key in reduceTransparency increaseContrast; do
+            defaults write com.apple.universalaccess "$key" -bool false || true
+          done
+      - name: The stand fails, and says why
+        env:
+          WANT: ${{ matrix.want }}
+        run: |
+          case ${{ matrix.variant }} in
+            mutant-column) export FLEETDECK_STAND_APPEARANCE=light FLEETDECK_STAND_OPEN=newcard; port=7825 ;;
+            mutant-fullscreen) export FLEETDECK_STAND_APPEARANCE=dark FLEETDECK_STAND_FULLSCREEN=on FLEETDECK_STAND_FOLD=orchestrator; port=7811 ;;
+          esac
+          export FLEETDECK_STAND_WINDOW_SIZE=1000x700 FLEETDECK_STAND_CAPSULES=glass
+          status=0
+          scripts/ci-window-stand.sh new/fleetdeck.app "$port" out/mutant exec content >out.txt 2>&1 || status=$?
+          cat out.txt
+          echo "=== stand exited $status"
+          [ "$status" -ne 0 ] || { echo "=== the mutant passed the stand"; exit 1; }
+          grep -F -- "$WANT" out.txt || { echo "=== the stand failed, but not on: $WANT"; exit 1; }
