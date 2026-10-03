@@ -271,6 +271,30 @@ func (u *updateWatch) checkNow(ctx context.Context) {
 	u.answer(newest)
 }
 
+// heard is source as a press of the update button asks it: what its Check
+// answers is kept the way a look's answer is, so an update that finds a
+// release taken back takes the button away for good rather than until the
+// page reloads. A question with no answer changes nothing, as for a look.
+func (u *updateWatch) heard(source supervisor.Source) supervisor.Source {
+	return heardSource{Source: source, watch: u}
+}
+
+type heardSource struct {
+	supervisor.Source
+	watch *updateWatch
+}
+
+func (s heardSource) Check(ctx context.Context) (string, error) {
+	newest, err := s.Source.Check(ctx)
+	if err != nil {
+		return "", err
+	}
+	u := s.watch
+	writeMark(u.markPath, mark{Asked: u.now(), Running: u.running, Newest: newest})
+	u.learn(newest)
+	return newest, nil
+}
+
 // answer tells the page what a press found, whether or not it changes what
 // the page shows.
 func (u *updateWatch) answer(newest string) {

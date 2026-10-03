@@ -521,7 +521,11 @@ func main() {
 				tell(glass.view(), refusalProgress(how.Refusal))
 				return
 			}
-			runUpdate(glass.view(), *url, canonical, how.Source, kept)
+			source := how.Source
+			if watch := watchOf(); watch != nil {
+				source = watch.heard(source)
+			}
+			runUpdate(glass.view(), *url, canonical, source, kept)
 		}()
 	}
 	if err := w.Bind(updateBindingName, update); err != nil {

@@ -206,6 +206,60 @@ func TestAWindowOpenedAgainShowsWhatWasFoundWithoutAsking(t *testing.T) {
 	}
 }
 
+// A press of the update button asks the source too, before anything else.
+// When a release found by a look has been taken back since, that press says
+// there is nothing to update to -- and what the look found, and wrote down,
+// has to go with it, or a page that reloads, or a window opened again, puts
+// the button back for the rest of askEvery.
+func TestAnUpdateThatFindsNothingTakesTheFoundVersionAway(t *testing.T) {
+	c := &clock{now: start}
+	src := &releasesPage{offer: "v0.8.0"}
+	p := &page{}
+	w := newWatch(t, src, c, p)
+	w.look(context.Background())
+
+	c.pass(time.Hour)
+	src.set("", nil)
+	newest, err := w.heard(src).Check(context.Background())
+
+	if newest != "" || err != nil {
+		t.Fatalf("the update's question answered %q, %v", newest, err)
+	}
+	if got := w.known(); got.Step != "none" {
+		t.Fatalf("after the update found nothing, a reloading page would be told %+v", got)
+	}
+	if got := p.reports(); len(got) != 2 || got[1].Step != "none" {
+		t.Fatalf("the page was told %+v, want the version taken back", got)
+	}
+	asked := src.times()
+	again := &updateWatch{source: src, running: "v0.7.0", markPath: w.markPath, tell: (&page{}).tell, now: c.Now}
+	again.look(context.Background())
+	if src.times() != asked {
+		t.Fatal("a window opened again asked, so the update's answer was not written down")
+	}
+	if got := again.known(); got.Step != "none" {
+		t.Fatalf("a window opened again offers %+v", got)
+	}
+}
+
+// An update whose question gets no answer leaves what the look knows as it
+// was, the same as a look with no answer does.
+func TestAnUpdateWithNoAnswerLeavesTheFoundVersion(t *testing.T) {
+	c := &clock{now: start}
+	src := &releasesPage{offer: "v0.8.0"}
+	w := newWatch(t, src, c, &page{})
+	w.look(context.Background())
+
+	src.set("", offline)
+	if _, err := w.heard(src).Check(context.Background()); err == nil {
+		t.Fatal("the update's question hid its failure")
+	}
+
+	if got := w.known(); got != (report{Step: "available", Detail: "v0.8.0"}) {
+		t.Fatalf("after an update with no answer a reloading page would be told %+v", got)
+	}
+}
+
 // What was found was found for the version that asked. After an update the
 // running version is the one that was offered, and the old answer would put
 // the button back for an update that has already happened.
