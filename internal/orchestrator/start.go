@@ -39,6 +39,13 @@ func ParseShort(out string) string {
 // directory and then execs claude is reached by its own words, and they have to
 // arrive before the first argument this function adds.
 func StartWith(argv []string) func(ctx context.Context, cwd, name string) (string, error) {
+	return StartWithEnv(argv, nil)
+}
+
+// StartWithEnv is StartWith run with env as the command's whole environment, or with
+// this process's own when env is nil — how a claude is pointed at an installation
+// (CLAUDE_CONFIG_DIR) without a wrapper of its own.
+func StartWithEnv(argv, env []string) func(ctx context.Context, cwd, name string) (string, error) {
 	return func(ctx context.Context, cwd, name string) (string, error) {
 		if len(argv) == 0 {
 			return "", errors.New("no command to start a session with")
@@ -46,6 +53,7 @@ func StartWith(argv []string) func(ctx context.Context, cwd, name string) (strin
 		args := append(append([]string{}, argv[1:]...), "--bg", "--name", name)
 		cmd := exec.CommandContext(ctx, argv[0], args...)
 		cmd.Dir = cwd
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		text := strings.TrimSpace(ansi.ReplaceAllString(string(out), ""))
 		spoken := strings.Join(argv, " ")

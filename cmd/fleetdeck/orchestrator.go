@@ -29,7 +29,7 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 		List:      dc.ListSessions,
 		Send:      dc.SendText,
 		SendFirst: dc.SendFirst,
-		Start:     sessionStarter(o, cfg.Agent.Command),
+		Start:     sessionStarter(o, cfg.Agent),
 		Pin: func(short string) error {
 			return setOrchestratorSession(o.configPath, collector, short)
 		},
@@ -44,7 +44,7 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client, workers func() config.Workers) *orchestrator.Dispatcher {
 	home, _ := os.UserHomeDir()
 	return &orchestrator.Dispatcher{
-		Start:     workerStarter(o, cfg.Agent.Command, workers),
+		Start:     workerStarter(o, cfg.Agent, workers),
 		List:      dc.ListSessions,
 		Send:      dc.SendText,
 		SendFirst: dc.SendFirst,
@@ -63,12 +63,12 @@ func workerLaunch(w config.Workers) orchestrator.Launch {
 // the workers section's flags added (orchestrator.Launch), read from workers
 // each time a worker starts so that an edited configuration applies to the
 // next worker. Nil where sessionStarter is nil.
-func workerStarter(o runOpts, command []string, workers func() config.Workers) func(ctx context.Context, cwd, name string) (string, error) {
-	if sessionStarter(o, command) == nil {
+func workerStarter(o runOpts, agent config.AgentConfig, workers func() config.Workers) func(ctx context.Context, cwd, name string) (string, error) {
+	if sessionStarter(o, agent) == nil {
 		return nil
 	}
 	return func(ctx context.Context, cwd, name string) (string, error) {
-		return sessionStarter(o, command, workerLaunch(workers()).Args()...)(ctx, cwd, name)
+		return sessionStarter(o, agent, workerLaunch(workers()).Args()...)(ctx, cwd, name)
 	}
 }
 
@@ -85,19 +85,19 @@ func workerStarter(o runOpts, command []string, workers func() config.Workers) f
 // other than the default one is reached, and looking for a claude of our own instead
 // would start sessions in the wrong fleet. With no command configured, a panel looks
 // claude up each time it starts one, so a claude installed while the panel runs is
-// found without a restart.
+// found without a restart, and runs it in the installation the panel reads (claudeEnv).
 //
 // extra are flags for the session itself, after the command and before the
 // `--bg --name` StartWith adds: a worker's launch flags (workerStarter).
-func sessionStarter(o runOpts, command []string, extra ...string) func(ctx context.Context, cwd, name string) (string, error) {
+func sessionStarter(o runOpts, agent config.AgentConfig, extra ...string) func(ctx context.Context, cwd, name string) (string, error) {
 	if o.standSocket != "" {
 		if o.standClaude == "" {
 			return nil
 		}
 		return orchestrator.StartWith(slices.Concat([]string{o.standClaude}, extra))
 	}
-	if len(command) > 0 {
-		return orchestrator.StartWith(slices.Concat(command, extra))
+	if len(agent.Command) > 0 {
+		return orchestrator.StartWith(slices.Concat(agent.Command, extra))
 	}
 	return func(ctx context.Context, cwd, name string) (string, error) {
 		home, _ := os.UserHomeDir()
@@ -105,8 +105,26 @@ func sessionStarter(o runOpts, command []string, extra ...string) func(ctx conte
 		if err != nil {
 			return "", err
 		}
-		return orchestrator.StartWith(slices.Concat([]string{bin}, extra))(ctx, cwd, name)
+		return orchestrator.StartWithEnv(slices.Concat([]string{bin}, extra), claudeEnv(os.Environ(), agent.ConfigDir))(ctx, cwd, name)
 	}
+}
+
+// claudeEnv is the environment a claude found by FindClaude runs with: environ with
+// CLAUDE_CONFIG_DIR set to configDir, or with no CLAUDE_CONFIG_DIR at all when
+// configDir is empty. Claude Code picks its installation by that one variable, and the
+// panel reads the installation the configuration names (claudeDirOf) — so the child
+// gets it from the configuration, never from however the panel happened to be launched:
+// a terminal that exported the variable would otherwise start sessions in one
+// installation while the panel, opened from the Dock, shows another. A configured
+// command is not given this: it is a wrapper that picks its installation itself.
+func claudeEnv(environ []string, configDir string) []string {
+	env := slices.DeleteFunc(slices.Clone(environ), func(kv string) bool {
+		return strings.HasPrefix(kv, "CLAUDE_CONFIG_DIR=")
+	})
+	if configDir != "" {
+		env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
+	}
+	return env
 }
 
 // stopWait bounds one stop. It is a command that asks the daemon and returns;
@@ -115,13 +133,13 @@ const stopWait = 10 * time.Second
 
 // sessionStopper is how this panel stops a session, or nil when it must not:
 // `stop <short>` run by the same claude sessionStarter starts sessions with,
-// found the same way. The session leaves the list of running ones and stays
-// resumable, with its history.
+// found the same way and run in the same installation. The session leaves the
+// list of running ones and stays resumable, with its history.
 //
 // A stand given no claude of its own stops nothing, for the reason it starts
 // nothing: the claude on PATH reaches the operator's real daemon, and a
 // stand's done card would put out a session of the operator's own.
-func sessionStopper(o runOpts, command []string) func(ctx context.Context, short string) error {
+func sessionStopper(o runOpts, agent config.AgentConfig) func(ctx context.Context, short string) error {
 	// Nil is a claude looked up at each stop, as sessionStarter looks one up
 	// at each start.
 	var fixed []string
@@ -131,11 +149,11 @@ func sessionStopper(o runOpts, command []string) func(ctx context.Context, short
 			return nil
 		}
 		fixed = []string{o.standClaude}
-	case len(command) > 0:
-		fixed = command
+	case len(agent.Command) > 0:
+		fixed = agent.Command
 	}
 	return func(ctx context.Context, short string) error {
-		argv := fixed
+		argv, env := fixed, []string(nil)
 		if argv == nil {
 			home, _ := os.UserHomeDir()
 			bin, err := orchestrator.FindClaude(home, exec.LookPath, claudePlaces)
@@ -143,11 +161,14 @@ func sessionStopper(o runOpts, command []string) func(ctx context.Context, short
 				return err
 			}
 			argv = []string{bin}
+			env = claudeEnv(os.Environ(), agent.ConfigDir)
 		}
 		ctx, cancel := context.WithTimeout(ctx, stopWait)
 		defer cancel()
 		args := slices.Concat(argv[1:], []string{"stop", short})
-		out, err := exec.CommandContext(ctx, argv[0], args...).CombinedOutput()
+		cmd := exec.CommandContext(ctx, argv[0], args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("stop session %s: %w: %s", short, err, strings.TrimSpace(string(out)))
 		}

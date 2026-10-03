@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/jobs"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
@@ -39,8 +40,8 @@ type cleanupDeps struct {
 // not: a fleet with no board has nowhere to record the session it would put
 // out, and a panel that stops no sessions (sessionStopper) has nothing to put
 // it out with. Nil leaves a card moved into done with its session running.
-func fleetCleaner(o runOpts, command []string, boardDir string, dc *daemon.Client, projects string) *orchestrator.Cleaner {
-	stop := sessionStopper(o, command)
+func fleetCleaner(o runOpts, agent config.AgentConfig, boardDir string, dc *daemon.Client, projects string) *orchestrator.Cleaner {
+	stop := sessionStopper(o, agent)
 	if boardDir == "" || stop == nil {
 		return nil
 	}
