@@ -710,3 +710,58 @@ func TestADragBandKeptInFullScreenIsAProblem(t *testing.T) {
 	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), fs, goodBoard(true), goodFrame(false), goodBoard(false))
 	wantProblem(t, check(log, 1), "drag band in full screen")
 }
+
+// stripIn is the folded orchestrator strip's report as the page laid it out in
+// full screen (fullScreen) or out of it, its unfold control top pt down.
+func stripIn(t *testing.T, fullScreen bool, top float64) stripReport {
+	t.Helper()
+	s := goodStrip()
+	s.FullScreen = &fullScreen
+	s.Unfold.Top, s.Unfold.Bottom = top, top+40
+	return s
+}
+
+// foldedTripLog is a stand with the orchestrator panel folded that goes into
+// full screen and out twice, as run 36977200789 logged it (T-106): the page
+// lays its strip out for full screen and reports it some 60 ms before the
+// window logs its frame in full screen, so the report comes after the last
+// frame out of it. after is the strip's report once the window is out of full
+// screen the first time.
+func foldedTripLog(t *testing.T, after stripReport) string {
+	out := foldedOrchestrator(goodFrame(false), 89)
+	in := foldedOrchestrator(goodFrame(true), 66)
+	return logLine(t, "11:00:01.000000", out) +
+		logLine(t, "11:00:01.100000", besideFoldedStrip(goodBoard(false))) +
+		logLine(t, "11:00:01.200000", goodHeader(false)) +
+		logLine(t, "11:00:01.300000", stripIn(t, false, 78)) +
+		logLine(t, "11:00:06.940000", stripIn(t, true, 4)) +
+		logLine(t, "11:00:07.000000", in) +
+		logLine(t, "11:00:07.030000", besideFoldedStrip(goodBoard(true))) +
+		logLine(t, "11:00:19.000000", out) +
+		logLine(t, "11:00:19.080000", besideFoldedStrip(goodBoard(false))) +
+		logLine(t, "11:00:19.080000", after) +
+		logLine(t, "11:00:26.940000", stripIn(t, true, 4)) +
+		logLine(t, "11:00:27.000000", in) +
+		logLine(t, "11:00:27.030000", besideFoldedStrip(goodBoard(true))) +
+		logLine(t, "11:00:39.000000", out) +
+		logLine(t, "11:00:39.080000", besideFoldedStrip(goodBoard(false))) +
+		logLine(t, "11:00:39.080000", stripIn(t, false, 78))
+}
+
+// T-106: the strip's report of its full screen layout, logged just before the
+// window's frame in full screen, is not the strip out of full screen. Held to
+// the frame before it, its unfold control 4 pt down lay under the window's
+// buttons "after full screen 1", while the strip out of full screen had said
+// 78 pt down.
+func TestAStripReportOfTheFullScreenLayoutIsNotHeldToTheFrameOutOfIt(t *testing.T) {
+	if got := check(foldedTripLog(t, stripIn(t, false, 78)), 2); len(got) != 0 {
+		t.Fatalf("problems %q, want none", got)
+	}
+}
+
+// And the gate still sees a strip that, out of full screen, lays its unfold
+// control under the window's buttons.
+func TestAStripOutOfFullScreenWithItsUnfoldControlUnderTheButtonsStillFails(t *testing.T) {
+	problems := check(foldedTripLog(t, stripIn(t, false, 4)), 2)
+	wantProblem(t, problems, "after full screen 1: ", "unfold control at 12..52 lies under the window's close button")
+}

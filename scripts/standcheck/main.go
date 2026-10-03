@@ -181,8 +181,11 @@ type stripReport struct {
 		Left        float64 `json:"left"`
 		Right       float64 `json:"right"`
 	} `json:"overflowing"`
-	Shown  []string `json:"shown"`
-	Unfold *struct {
+	// FullScreen is the layout the page measured, in full screen or out of it,
+	// as the window last told it; nil from a page that does not say.
+	FullScreen *bool    `json:"fullscreen"`
+	Shown      []string `json:"shown"`
+	Unfold     *struct {
 		Left      float64 `json:"left"`
 		Top       float64 `json:"top"`
 		Right     float64 `json:"right"`
@@ -194,6 +197,17 @@ type stripReport struct {
 type stripAfter struct {
 	frame int
 	stripReport
+}
+
+// laidOutFor is whether the report can be of the run r: a page that says which
+// layout it measured, in full screen or out of it, is of a run in that one
+// only. The page lays itself out for full screen when the window tells it, and
+// reports that layout before the window logs its first frame in full screen:
+// run 36977200789 logged the strip's full screen report 60 ms ahead of it, and
+// held to the frame out of full screen before, its unfold control lay under the
+// window's buttons (T-106).
+func (s stripAfter) laidOutFor(r run) bool {
+	return s.FullScreen == nil || *s.FullScreen == r.fullScreen
 }
 
 // standLog is what the log says, in order: the frames, the header's reports,
@@ -645,7 +659,7 @@ func (l standLog) stripProblems(when string, r run, buttons bool) []string {
 func (l standLog) unfoldedOrchestratorProblems(when string, r run) []string {
 	var s *stripReport
 	for k := len(l.strips) - 1; k >= 0; k-- {
-		if l.strips[k].frame <= r.to && l.strips[k].Surface == "orchestrator" && !l.strips[k].Folded {
+		if l.strips[k].frame <= r.to && l.strips[k].Surface == "orchestrator" && !l.strips[k].Folded && l.strips[k].laidOutFor(r) {
 			s = &l.strips[k].stripReport
 			break
 		}
@@ -677,7 +691,7 @@ func (l standLog) foldedStripProblems(when string, r run, surface string, panel 
 	f := l.frames[r.to]
 	var s *stripReport
 	for k := len(l.strips) - 1; k >= 0; k-- {
-		if l.strips[k].frame <= r.to && l.strips[k].Surface == surface {
+		if l.strips[k].frame <= r.to && l.strips[k].Surface == surface && l.strips[k].laidOutFor(r) {
 			s = &l.strips[k].stripReport
 			break
 		}
