@@ -11,6 +11,7 @@ import { createNewCard } from "./newcard.js";
 import { createBoardMove } from "./boardmove.js";
 import { probeColumnScroll, watchBoardScroll, watchCardSheetOnStand, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
+import { STAND_UPDATE, updatePanelReport } from "./update.js";
 import { watchControls } from "./standcontrols.js";
 import { watchOverflow } from "./standoverflow.js";
 import { renderDocs } from "./docs.js";
@@ -234,7 +235,14 @@ const headerParts = regions.has("header")
 if (headerParts.length > 0) {
   // A stand's frame with the fleet menu open (web/js/host.js, open).
   const openMenu = host?.open?.includes("fleetmenu") ?? false;
-  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu });
+  // And one with the update control held in a state of Check for Updates….
+  const standUpdate = STAND_UPDATE[host?.open?.find((name) => Object.hasOwn(STAND_UPDATE, name))] ?? null;
+  // In the orchestrator surface the update control is a panel over the top of
+  // its terminal: the brand row of a narrow column has no room for it.
+  const updateAt = host?.surface === "orchestrator"
+    ? { column: () => document.getElementById("orchestrator"), term: () => document.querySelector("#orchestrator .o-term") }
+    : null;
+  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu, standUpdate, updateAt });
 } else {
   initTheme();
 }
@@ -341,6 +349,28 @@ if (host) {
   // orchestrator island's head and the board's new card form (web/js/standcontrols.js).
   if (host.stand && (host.surface === "orchestrator" || host.surface === "board")) {
     watchControls(window, host.surface, (report) => callHost(window, "fleetdeckStandReport", report));
+  }
+  // And what the update panel shows and where it lies, when the stand held it
+  // in a state of Check for Updates… (web/js/update.js, STAND_UPDATE).
+  if (standHeader && host.open?.some((name) => Object.hasOwn(STAND_UPDATE, name))) {
+    let last = "";
+    let queued = false;
+    const measure = () => {
+      queued = false;
+      const report = updatePanelReport(window, document.querySelector(".update-panel"), document.querySelector("#orchestrator .o-term"));
+      const text = JSON.stringify(report);
+      if (text === last) return;
+      last = text;
+      callHost(window, "fleetdeckStandReport", report);
+    };
+    const later = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(measure);
+    };
+    window.addEventListener("resize", later);
+    new MutationObserver(later).observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    later();
   }
   // The window's panel folds with the column: a fold the column makes itself
   // (its own button) is passed on, and one the window sends is not passed back.

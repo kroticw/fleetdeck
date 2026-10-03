@@ -47,7 +47,7 @@ type controlsReport struct {
 
 // floatingPanels are frosted over content in glass; every other control is a
 // capsule lying on its surface.
-var floatingPanels = map[string]bool{"newCard": true, "fleetList": true}
+var floatingPanels = map[string]bool{"newCard": true, "fleetList": true, "updatePanel": true}
 
 // accents are the buttons that write (.btn-primary): an accent fill, solid in
 // every material, so the action stands apart from the capsules of glass around
@@ -64,6 +64,11 @@ var opened = map[string]struct {
 }{
 	"newcard":   {"board", []string{"newCard", "newCardTitle", "newCardZone", "newCardCreate", "newCardClose"}},
 	"fleetmenu": {"orchestrator", []string{"fleetList"}},
+	// The update panel over the orchestrator's terminal (updatecontrol.go).
+	"check-checking":  {"orchestrator", []string{"updatePanel"}},
+	"check-latest":    {"orchestrator", []string{"updatePanel"}},
+	"check-failed":    {"orchestrator", []string{"updatePanel"}},
+	"check-available": {"orchestrator", []string{"updatePanel"}},
 }
 
 // openList is FLEETDECK_STAND_OPEN as the window reads it: names, comma-separated.

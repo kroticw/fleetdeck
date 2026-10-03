@@ -744,6 +744,56 @@ body {
   font-weight: 600;
 }
 
+/* In the window's orchestrator surface the control is a panel over the top of
+   the terminal, as wide as the column (web/js/update.js, panelPlace): the brand
+   row of a 313 pt column has no room for a version, its button or a sentence
+   about the network. header.js places it; it takes clicks in its own box only,
+   and the terminal under it keeps its size. */
+.update-panel {
+  position: fixed;
+  z-index: 30;
+  box-sizing: border-box;
+  display: flex;
+  padding: var(--gap-sm) var(--gap);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: 0 4px 16px var(--shadow);
+}
+
+.update-panel .update-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm) var(--gap);
+  min-width: 0;
+  width: 100%;
+}
+
+.update-panel .update-status {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:root[data-surface="orchestrator"] .update-panel {
+  border: none;
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--island-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
+}
+
+:root[data-surface="orchestrator"][data-glass="opaque"] .update-panel {
+  background-color: var(--surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--island-shadow), inset 0 0 0 1px var(--border-strong);
+}
+
 main {
   flex: 1;
   display: flex;

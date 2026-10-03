@@ -41,6 +41,12 @@ const (
 	lookEvery = 10 * time.Minute
 )
 
+// checkAgainAfter is how soon after the last question a press of Check for
+// Updates… asks again (decided by the operator, 2026-10-02). Within it the
+// press is answered with what that question found: a person pressing twice,
+// or pressing while offline, does not knock on the releases page each time.
+const checkAgainAfter = time.Minute
+
 // askTimeout bounds one question. Nothing waits on it -- looking runs beside
 // the window, not in front of it -- but a request with no bound is a goroutine
 // that outlives the reason it was started.
@@ -100,6 +106,12 @@ func (m mark) answers(running string, now time.Time) bool {
 	return now.Sub(m.Asked) < askEvery
 }
 
+// answersAPress says whether the mark is recent enough to answer a press of
+// Check for Updates… at now without asking again.
+func (m mark) answersAPress(running string, now time.Time) bool {
+	return m.answers(running, now) && now.Sub(m.Asked) < checkAgainAfter
+}
+
 func writeMark(path string, m mark) {
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -124,8 +136,17 @@ type updateWatch struct {
 	tell     func(report)
 	now      func() time.Time
 
+	// asking is held for one question, from reading the mark to writing it, so
+	// that a press and a look never ask at the same time: the second would
+	// only repeat the first one's answer.
+	asking sync.Mutex
+
 	mu     sync.Mutex
 	newest string
+	// failed is the last press that got no answer, and when; within
+	// checkAgainAfter of it a press is shown it again rather than asking.
+	failed   report
+	failedAt time.Time
 }
 
 // run looks once at once, then once for every tick, until ctx ends.
@@ -151,6 +172,8 @@ func (u *updateWatch) run(ctx context.Context, ticks <-chan time.Time) {
 // "GitHub could not be reached" every time a laptop opens on a train is
 // noise. Pressing the button, once there is one, shows every refusal.
 func (u *updateWatch) look(ctx context.Context) {
+	u.asking.Lock()
+	defer u.asking.Unlock()
 	now := u.now()
 	if m, ok := readMark(u.markPath); ok && m.answers(u.running, now) {
 		u.learn(m.Newest)
@@ -165,6 +188,67 @@ func (u *updateWatch) look(ctx context.Context) {
 	}
 	writeMark(u.markPath, mark{Asked: now, Running: u.running, Newest: newest})
 	u.learn(newest)
+}
+
+// checkNow is a press of Check for Updates… in the app menu: the releases page
+// is asked now, whatever the mark says, so a release published an hour after
+// the last look need not wait out askEvery.
+//
+// It is the same question a look asks, and its answer is written down the
+// same way, so askEvery starts again from the press. What differs is who
+// asked: a person did, so every outcome is said -- that it is being checked,
+// what was found, that nothing newer is out, or why there was no answer. A
+// question with no answer is still not written down and does not take a
+// found version away.
+//
+// Within checkAgainAfter of the last question -- a press or a look -- the
+// press is answered with what that question found, and nothing is asked.
+func (u *updateWatch) checkNow(ctx context.Context) {
+	u.tell(report{Step: "checking"})
+	u.asking.Lock()
+	defer u.asking.Unlock()
+	now := u.now()
+	if m, ok := readMark(u.markPath); ok && m.answersAPress(u.running, now) {
+		u.answer(m.Newest)
+		return
+	}
+	u.mu.Lock()
+	failed, failedAt := u.failed, u.failedAt
+	u.mu.Unlock()
+	if failed.Step != "" && !failedAt.After(now) && now.Sub(failedAt) < checkAgainAfter {
+		u.tell(failed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, askTimeout)
+	defer cancel()
+	newest, err := u.source.Check(ctx)
+	if err != nil {
+		log.Printf("fleetdeck-window: checking for a newer version, as asked, got no answer: %v", err)
+		r := report{Step: "check-failed", Reason: reasonOf(err), Detail: err.Error()}
+		u.mu.Lock()
+		u.failed, u.failedAt = r, now
+		u.mu.Unlock()
+		u.tell(r)
+		return
+	}
+	writeMark(u.markPath, mark{Asked: now, Running: u.running, Newest: newest})
+	u.answer(newest)
+}
+
+// answer tells the page what a press found, whether or not it changes what
+// the page shows.
+func (u *updateWatch) answer(newest string) {
+	u.mu.Lock()
+	u.newest = newest
+	u.failed = report{}
+	u.mu.Unlock()
+	if newest == "" {
+		log.Printf("fleetdeck-window: checked as asked: nothing newer than %s", u.running)
+		u.tell(report{Step: "latest", Detail: u.running})
+		return
+	}
+	log.Printf("fleetdeck-window: checked as asked: %s is available", newest)
+	u.tell(report{Step: "available", Detail: newest})
 }
 
 // learn takes what is newest, and tells the page only when that changes what

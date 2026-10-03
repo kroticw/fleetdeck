@@ -55,6 +55,22 @@ func TestTheCapsulesReportGoesToTheLogAsALineOfItsOwn(t *testing.T) {
 	}
 }
 
+// The update control beside the brand, held by a stand in a state of Check for
+// Updates…, says what it shows in a line of its own that scripts/standcheck
+// reads (updatecontrol.go there).
+func TestTheUpdateControlsReportGoesToTheLogAsALineOfItsOwn(t *testing.T) {
+	report := `{"report":"update","text":"v1.1.0 is available","button":true,"problem":false}`
+	var logged []string
+	b := newBridge()
+	handleStandReports(b, true, func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) })
+	if _, err := b.call("orchestrator", standReportBindingName, json.RawMessage(report)); err != nil {
+		t.Fatal(err)
+	}
+	if want := "fleetdeck-window: the orchestrator surface reports its update control: " + report; len(logged) != 1 || logged[0] != want {
+		t.Fatalf("logged %q, want %q", logged, want)
+	}
+}
+
 // The board's word on a scrolled column after the panel's next snapshots is a
 // line of its own: the stand's gate on the board's scrolling reads the last
 // scrolling line, and this is not one.

@@ -377,3 +377,203 @@ func TestItAsksNoMoreOftenThanAPersonNeeds(t *testing.T) {
 		t.Errorf("lookEvery = %s: an offline laptop would retry every few seconds", lookEvery)
 	}
 }
+
+// Check for Updates… in the app menu is a person asking now, rather than
+// waiting out askEvery after a release they know is out.
+
+func TestAPressAsksEvenWhileTheMarkIsFresh(t *testing.T) {
+	src := &releasesPage{offer: ""}
+	p := &page{}
+	c := &clock{now: start}
+	w := newWatch(t, src, c, p)
+	w.look(context.Background())
+
+	src.set("v0.8.0", nil)
+	c.pass(48 * time.Minute)
+	w.checkNow(context.Background())
+
+	if src.times() != 2 {
+		t.Fatalf("asked %d times, want the press to ask although the mark was %s old", src.times(), 48*time.Minute)
+	}
+	got := p.reports()
+	if len(got) != 2 || got[0] != (report{Step: "checking"}) || got[1] != (report{Step: "available", Detail: "v0.8.0"}) {
+		t.Fatalf("the page was told %+v, want checking and then v0.8.0 available", got)
+	}
+	if got := w.known(); got != (report{Step: "available", Detail: "v0.8.0"}) {
+		t.Fatalf("a page loading now would be told %+v", got)
+	}
+}
+
+// The press answers in words even when there is nothing newer: the person
+// asked, and silence would read as a press that did nothing.
+func TestAPressThatFindsNothingNewerSaysSo(t *testing.T) {
+	p := &page{}
+	w := newWatch(t, &releasesPage{offer: ""}, &clock{now: start}, p)
+
+	w.checkNow(context.Background())
+
+	got := p.reports()
+	if len(got) != 2 || got[1] != (report{Step: "latest", Detail: "v0.7.0"}) {
+		t.Fatalf("the page was told %+v, want that v0.7.0 is the latest", got)
+	}
+}
+
+// The press asks the same question the window asks by itself, so its answer
+// is written down the same way and starts askEvery again: the window asks
+// nothing more for six hours after a press.
+func TestAPressWritesItsAnswerDownAndTheNextLookUsesIt(t *testing.T) {
+	src := &releasesPage{offer: "v0.8.0"}
+	c := &clock{now: start}
+	w := newWatch(t, src, c, &page{})
+
+	w.checkNow(context.Background())
+	c.pass(askEvery - time.Minute)
+	w.look(context.Background())
+
+	if src.times() != 1 {
+		t.Fatalf("asked %d times, want the look after a press to answer from the mark", src.times())
+	}
+	m, ok := readMark(w.markPath)
+	if !ok || !m.Asked.Equal(start) || m.Running != "v0.7.0" || m.Newest != "v0.8.0" {
+		t.Fatalf("the mark after a press is %+v (%v)", m, ok)
+	}
+}
+
+// Pressed again within a minute of the last question -- the press before, or
+// the window's own look -- the releases page is not asked: the answer is a
+// minute old at most and is shown again as it is.
+func TestAPressWithinAMinuteOfTheLastQuestionAnswersWithoutAsking(t *testing.T) {
+	src := &releasesPage{offer: "v0.8.0"}
+	p := &page{}
+	c := &clock{now: start}
+	w := newWatch(t, src, c, p)
+
+	w.checkNow(context.Background())
+	c.pass(checkAgainAfter - time.Second)
+	w.checkNow(context.Background())
+
+	if src.times() != 1 {
+		t.Fatalf("asked %d times within %s, want once", src.times(), checkAgainAfter)
+	}
+	got := p.reports()
+	if len(got) != 4 || got[3] != (report{Step: "available", Detail: "v0.8.0"}) {
+		t.Fatalf("the second press told the page %+v, want the answer again", got)
+	}
+
+	c.pass(time.Second)
+	w.checkNow(context.Background())
+	if src.times() != 2 {
+		t.Fatalf("asked %d times, want again once %s had passed", src.times(), checkAgainAfter)
+	}
+}
+
+// A press is a question somebody asked, so a failure is theirs to see, as a
+// code the page can put in their language. It is still not an answer: it is
+// not written down, and a version already found stays found.
+func TestAPressThatCannotReachTheReleasesPageSaysWhyAndMarksNothing(t *testing.T) {
+	src := &releasesPage{offer: "v0.8.0"}
+	p := &page{}
+	c := &clock{now: start}
+	w := newWatch(t, src, c, p)
+	w.look(context.Background())
+	if err := os.Remove(w.markPath); err != nil {
+		t.Fatal(err)
+	}
+
+	src.set("", offline)
+	w.checkNow(context.Background())
+
+	got := p.reports()
+	last := got[len(got)-1]
+	if last.Step != "check-failed" || last.Reason != reasonOffline || last.Detail != offline.Error() {
+		t.Fatalf("the page was told %+v, want check-failed, offline, with the particulars", last)
+	}
+	if _, err := os.Stat(w.markPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a press with no answer was written down as asked (%v)", err)
+	}
+	if got := w.known(); got != (report{Step: "available", Detail: "v0.8.0"}) {
+		t.Fatalf("after a failed press a loading page would be told %+v", got)
+	}
+}
+
+// Pressing again and again while offline does not knock on the network each
+// time either: within a minute the failure is shown again as it was.
+func TestAPressWithinAMinuteOfAFailedPressShowsTheFailureWithoutAsking(t *testing.T) {
+	src := &releasesPage{err: offline}
+	p := &page{}
+	c := &clock{now: start}
+	w := newWatch(t, src, c, p)
+
+	w.checkNow(context.Background())
+	c.pass(30 * time.Second)
+	w.checkNow(context.Background())
+
+	if src.times() != 1 {
+		t.Fatalf("asked %d times within %s of a failed press, want once", src.times(), checkAgainAfter)
+	}
+	got := p.reports()
+	if len(got) != 4 || got[3].Step != "check-failed" || got[3].Reason != reasonOffline {
+		t.Fatalf("the second press told the page %+v", got)
+	}
+
+	c.pass(checkAgainAfter)
+	src.set("", nil)
+	w.checkNow(context.Background())
+	if src.times() != 2 {
+		t.Fatalf("asked %d times, want again a minute after the failure", src.times())
+	}
+}
+
+// The press and the window's own look never ask at the same time: the second
+// question would only repeat the first one's answer.
+func TestAPressDuringALookTakesTheLooksAnswer(t *testing.T) {
+	src := &heldPage{releasesPage: releasesPage{offer: "v0.8.0"}, entered: make(chan struct{}), release: make(chan struct{})}
+	p := &page{}
+	w := newWatch(t, src, &clock{now: start}, p)
+
+	looked := make(chan struct{})
+	go func() {
+		w.look(context.Background())
+		close(looked)
+	}()
+	<-src.entered
+	pressed := make(chan struct{})
+	go func() {
+		w.checkNow(context.Background())
+		close(pressed)
+	}()
+	close(src.release)
+	<-looked
+	<-pressed
+
+	if n := src.times(); n != 1 {
+		t.Fatalf("asked %d times, want the press to take the look's answer", n)
+	}
+	got := p.reports()
+	if last := got[len(got)-1]; last != (report{Step: "available", Detail: "v0.8.0"}) {
+		t.Fatalf("the press ended with %+v", last)
+	}
+}
+
+func TestAPressAsksNoMoreOftenThanOnceAMinute(t *testing.T) {
+	if checkAgainAfter != time.Minute {
+		t.Fatalf("checkAgainAfter = %s, the operator decided on a minute", checkAgainAfter)
+	}
+}
+
+// heldPage holds the first question until it is released, so that a test can
+// press while a look is asking.
+type heldPage struct {
+	releasesPage
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *heldPage) Check(ctx context.Context) (string, error) {
+	p.once.Do(func() {
+		close(p.entered)
+		<-p.release
+	})
+	return p.releasesPage.Check(ctx)
+}

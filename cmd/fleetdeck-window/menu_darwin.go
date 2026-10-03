@@ -35,6 +35,30 @@ func fleetdeckMenuReload() {
 	}
 }
 
+// menuCheckForUpdates is what the app menu's Check for Updates… does: main.go
+// sets it to ask the releases page now. Until it is set, the item does
+// nothing.
+var menuCheckForUpdates = struct {
+	sync.Mutex
+	run func()
+}{}
+
+func setMenuCheckForUpdates(run func()) {
+	menuCheckForUpdates.Lock()
+	defer menuCheckForUpdates.Unlock()
+	menuCheckForUpdates.run = run
+}
+
+//export fleetdeckMenuCheckForUpdates
+func fleetdeckMenuCheckForUpdates() {
+	menuCheckForUpdates.Lock()
+	run := menuCheckForUpdates.run
+	menuCheckForUpdates.Unlock()
+	if run != nil {
+		run()
+	}
+}
+
 // installMenu builds the app's menu bar. Call it any time after
 // webview.New() returns -- by then the app has already finished launching
 // (see main.go's package doc for why that is already true, not assumed).

@@ -247,6 +247,25 @@ func testMenuItemPerform(menuTitle, action string) bool {
 	return false
 }
 
+// testMenuItemTitles lists, in order, the titles of the items in the
+// top-level menu titled menuTitle; a separator's title is "".
+func testMenuItemTitles(menuTitle string) []string {
+	mainMenu := C.t_main_menu()
+	for i := 0; i < int(C.t_menu_item_count(mainMenu)); i++ {
+		item := C.t_menu_item_at(mainMenu, C.int(i))
+		if C.GoString(C.t_item_title(item)) != menuTitle {
+			continue
+		}
+		menu := C.t_submenu(item)
+		var titles []string
+		for j := 0; j < int(C.t_menu_item_count(menu)); j++ {
+			titles = append(titles, C.GoString(C.t_item_title(C.t_menu_item_at(menu, C.int(j)))))
+		}
+		return titles
+	}
+	return nil
+}
+
 func testHasTopLevelMenuTitled(title string) bool {
 	mainMenu := C.t_main_menu()
 	n := int(C.t_menu_item_count(mainMenu))
