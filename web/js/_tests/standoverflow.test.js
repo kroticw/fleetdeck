@@ -32,7 +32,7 @@ const box = ({ className = "", tag = "DIV", clientWidth = 40, scrollWidth = clie
 // surface is a side surface width wide whose page is scrollWidth wide, folded
 // or not, drawing boxes; unfold is the column's unfold control, and hit what a
 // press at a point reaches.
-function surface({ width = 48, scrollWidth = width, folded = true, boxes = [], unfold = null, hit = (u) => u } = {}) {
+function surface({ width = 48, scrollWidth = width, folded = true, fullscreen = false, boxes = [], unfold = null, hit = (u) => u } = {}) {
   const column = {
     dataset: folded ? { folded: "1" } : {},
     querySelector: (selector) => (assert.equal(selector, ".col-size-unfold"), unfold),
@@ -41,7 +41,7 @@ function surface({ width = 48, scrollWidth = width, folded = true, boxes = [], u
     column,
     win: {
       document: {
-        documentElement: { clientWidth: width, scrollWidth },
+        documentElement: { clientWidth: width, scrollWidth, dataset: fullscreen ? { fullscreen: "1" } : {} },
         body: { querySelectorAll: (selector) => (assert.equal(selector, "*"), boxes) },
         elementFromPoint: () => hit(unfold),
       },
@@ -56,12 +56,27 @@ test("a folded rail where everything fits reports it folded, its width and nothi
     surface: "orchestrator",
     report: "overflow",
     folded: true,
+    fullscreen: false,
     width: 48,
     scrollWidth: 48,
     overflowing: [],
     shown: ["div.col-size", "button.col-size-btn.col-size-unfold"],
     unfold: { left: 7, top: 60, right: 41, bottom: 94, reachable: true },
   });
+});
+
+// The orchestrator's page lays its strip out anew for full screen, when the
+// window tells it (data-fullscreen), and reports that before the window logs
+// its frame in full screen: the report says which layout it measured, so the
+// stand holds it to the frame of that layout (T-106, run 36977200789).
+test("the report says whether the page was laid out for full screen", () => {
+  const unfold = box({ className: "col-size-unfold", tag: "BUTTON", left: 4, clientWidth: 40, top: 4, bottom: 44 });
+  const inFull = surface({ fullscreen: true, boxes: [unfold], unfold });
+  assert.equal(overflowReport(inFull.win, inFull.column, "orchestrator").fullscreen, true);
+  const out = surface({ boxes: [unfold], unfold });
+  assert.equal(overflowReport(out.win, out.column, "orchestrator").fullscreen, false);
+  const open = surface({ width: 348, folded: false, fullscreen: true });
+  assert.equal(overflowReport(open.win, open.column, "orchestrator").fullscreen, true);
 });
 
 test("the report names the surface it is asked for", () => {
@@ -162,12 +177,18 @@ test("the window hears the surface's overflow once, and again when it is drawn o
   watchOverflow(win, column, "orchestrator", (r) => heard.push(r));
   assert.equal(heard.length, 1);
   assert.equal(heard[0].surface, "orchestrator");
-  assert.equal(observed.target, win.document.body);
-  assert.deepEqual(observed.options, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-folded"] });
+  assert.equal(observed.target, win.document.documentElement);
+  assert.deepEqual(observed.options, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-folded", "data-fullscreen"] });
   onMutation();
   assert.equal(heard.length, 1, "nothing changed");
   boxes.push(box({ className: "counters", clientWidth: 48, scrollWidth: 131 }));
   onMutation();
   assert.equal(heard.length, 2);
   assert.equal(heard[1].overflowing.length, 1);
+  // Told it is in full screen, the page is measured again, whether or not a
+  // box moved.
+  win.document.documentElement.dataset.fullscreen = "1";
+  onMutation();
+  assert.equal(heard.length, 3);
+  assert.equal(heard[2].fullscreen, true);
 });

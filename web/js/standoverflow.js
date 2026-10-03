@@ -51,7 +51,12 @@ export function overflowReport(win, column, surface) {
     }
     if (folded && box.right > box.left && box.bottom > box.top && box.right > 0 && box.left < width) shown.push(describe(el));
   }
-  const report = { surface, report: "overflow", folded, width, scrollWidth: doc.documentElement.scrollWidth, overflowing };
+  // The layout measured: the page lays itself out for full screen as soon as
+  // the window says so (data-fullscreen), and reports it before the window logs
+  // its frame in full screen; scripts/standcheck holds the report to a frame of
+  // the same layout by this (T-106).
+  const fullscreen = doc.documentElement.dataset?.fullscreen === "1";
+  const report = { surface, report: "overflow", folded, fullscreen, width, scrollWidth: doc.documentElement.scrollWidth, overflowing };
   if (!folded) return report;
   report.shown = shown;
   report.unfold = null;
@@ -71,8 +76,9 @@ export function overflowReport(win, column, surface) {
 }
 
 // watchOverflow reports the surface's fit once laid out, on a resize, whenever
-// anything in the page is drawn anew or the column folds or unfolds; at most
-// once a frame, and only when the report changed.
+// anything in the page is drawn anew, the column folds or unfolds, or the page
+// is told it is in full screen or out of it; at most once a frame, and only
+// when the report changed.
 export function watchOverflow(win, column, surface, report) {
   let last = "";
   let queued = false;
@@ -91,7 +97,7 @@ export function watchOverflow(win, column, surface, report) {
   };
   win.addEventListener("resize", later);
   if (typeof win.MutationObserver === "function") {
-    new win.MutationObserver(later).observe(win.document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-folded"] });
+    new win.MutationObserver(later).observe(win.document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-folded", "data-fullscreen"] });
   }
   later();
   return later;
