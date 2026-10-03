@@ -37,6 +37,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/usage"
+	"github.com/kroticw/fleetdeck/internal/userenv"
 	"github.com/kroticw/fleetdeck/internal/version"
 	"github.com/kroticw/fleetdeck/web"
 )
@@ -352,6 +353,10 @@ func main() {
 		runVersion(os.Stdout)
 		return
 	}
+
+	// Opened from the Dock or relaunched by an update, the panel has launchd's
+	// PATH; the git, gpg and claude it runs are found on the operator's own.
+	userenv.Start()
 
 	if err := runWith(runOpts{configPath: *configPath, standSocket: *standSocket, standClaude: *standClaude, owner: *ownerPID, port: *port}); err != nil {
 		log.Fatalf("fleetdeck: %v", err)

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/userenv"
 )
 
 // gitTimeout bounds every git invocation made by this package. Without it, a
@@ -150,9 +152,12 @@ func run(dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
 
+	// The operator's PATH, not the one the panel was started with: git runs
+	// their signing program by name, and from the Dock it is not on launchd's.
+	env := append(userenv.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = env
 	cmd.WaitDelay = gitWaitDelay
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
