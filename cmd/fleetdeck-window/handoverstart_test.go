@@ -330,8 +330,8 @@ func TestMainTakesThePanelOverBeforeItMakesTheWindow(t *testing.T) {
 // LaunchServices is told again where the app is only once the window's own
 // check-in is behind it. The check-in is made inside webview.New: measured on
 // a macos-26 runner (the lsprobe workflow of the branch
-// probe/launchservices-staged-registration, runs 37114670018 and
-// 37115024901), a window started by exec had
+// probe/launchservices-staged-registration, runs 37114670018, 37115024901
+// and 37116390160), a window started by exec had
 // its path registered at none of its starts at "started" and at all of them by
 // AppKit's will-finish-launching, which webview.New runs before it returns.
 // The takeover's reregistering waits for the window gate (startHandover), so
