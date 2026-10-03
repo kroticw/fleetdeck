@@ -326,3 +326,57 @@ func TestMainTakesThePanelOverBeforeItMakesTheWindow(t *testing.T) {
 		t.Fatalf("main begins the takeover at %s, after it makes the web view at %s", fset.Position(handover), fset.Position(window))
 	}
 }
+
+// LaunchServices is told again where the app is only once the window's own
+// check-in is behind it. The check-in is made inside webview.New: measured on
+// a macos-26 runner (the lsprobe workflow of the branch
+// probe/launchservices-staged-registration, runs 37114670018 and
+// 37115024901), a window started by exec had
+// its path registered at none of its starts at "started" and at all of them by
+// AppKit's will-finish-launching, which webview.New runs before it returns.
+// The takeover's reregistering waits for the window gate (startHandover), so
+// main opens the gate only after webview.New.
+func TestMainOpensTheWindowGateOnlyAfterTheWebViewIsMade(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body *ast.BlockStmt
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "main" {
+			body = fn.Body
+		}
+	}
+	if body == nil {
+		t.Fatal("no func main in main.go")
+	}
+	var window token.Pos
+	var opens []token.Pos
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		fun, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		x, ok := fun.X.(*ast.Ident)
+		switch {
+		case ok && x.Name == "webview" && fun.Sel.Name == "New" && window == token.NoPos:
+			window = call.Pos()
+		case ok && x.Name == "gate" && fun.Sel.Name == "open":
+			opens = append(opens, call.Pos())
+		}
+		return true
+	})
+	if window == token.NoPos || len(opens) == 0 {
+		t.Fatalf("main.go: webview.New at %v, gate.open at %v; want both in main", fset.Position(window), opens)
+	}
+	for _, open := range opens {
+		if open < window {
+			t.Errorf("main opens the window gate at %s, before it makes the web view at %s", fset.Position(open), fset.Position(window))
+		}
+	}
+}
