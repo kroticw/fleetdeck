@@ -39,7 +39,7 @@ import (
 // something that already happened. Reported as a plain failure, the operator
 // redoes an edit that took effect, and a progress field applied twice moves
 // somewhere nobody asked for.
-var ErrFieldWrittenNotCommitted = errors.New("field written but not committed")
+var ErrFieldWrittenNotCommitted = board.ErrWrittenNotCommitted
 
 // ErrCardWrittenNotCommitted is ErrFieldWrittenNotCommitted for a new card: the
 // card file exists and the commit did not happen. Reported as a failure, the

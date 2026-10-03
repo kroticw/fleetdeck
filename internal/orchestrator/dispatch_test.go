@@ -3,12 +3,14 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 )
 
@@ -387,6 +389,55 @@ func TestSessionNameIsTheCardsNumberAndTitle(t *testing.T) {
 	} {
 		if got := sessionName("en", tc.id, tc.title); got != tc.want {
 			t.Errorf("sessionName(%q, %q) = %q, want %q", tc.id, tc.title, got, tc.want)
+		}
+	}
+}
+
+// A card write whose commit did not happen is a write that happened: the
+// session field is in the file, so the card names the session, and stopping
+// there leaves a running session with no task. The dispatch goes on, and the
+// step says the commit is missing and why.
+func TestADispatchWhoseCommitFailedStillHandsOverTheTask(t *testing.T) {
+	f := newWorker()
+	d, card := dispatcher(t, f)
+	d.SetField = func(path, field, value string, expect *string) error {
+		if err := f.set(path, field, value, expect); err != nil {
+			return err
+		}
+		if err := board.SetField(path, field, value, expect); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: git commit timed out", board.ErrWrittenNotCommitted)
+	}
+
+	res, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("a commit that did not happen must not stop the dispatch: %+v", res.Steps)
+	}
+	if last := f.steps[len(f.steps)-1]; last != "first:abc12345:"+Task("en", card) {
+		t.Fatalf("the task was not delivered, steps: %q", f.steps)
+	}
+	raw, err := os.ReadFile(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"session: abc12345\n", "stage: active\n"} {
+		if !strings.Contains(string(raw), line) {
+			t.Fatalf("the card has no %q:\n%s", line, raw)
+		}
+	}
+	for _, step := range res.Steps {
+		if step.Name != "card" && step.Name != "stage" {
+			continue
+		}
+		if !strings.Contains(step.Note, "not committed: git commit timed out") {
+			t.Fatalf("step %s must say the commit is missing and why: %+v", step.Name, step)
+		}
+		if strings.Contains(step.Note+step.Error, "does not name it") {
+			t.Fatalf("the card names the session, and step %s says it does not: %+v", step.Name, step)
 		}
 	}
 }
