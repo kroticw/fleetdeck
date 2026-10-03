@@ -60,6 +60,10 @@ const (
 	// refusalNoVersion: signed like a release but reporting no release
 	// version, so there is nothing to compare with what is published.
 	refusalNoVersion = "no-version"
+	// refusalNoRevision: built from a checkout, but with no commit written
+	// in (`go build -buildvcs=false`, or outside git), so the tree's newest
+	// commit cannot be told from the one running.
+	refusalNoRevision = "no-revision"
 	// refusalStaged: running from an update's staging directory, which holds
 	// a version being tried or one swapped out, never the installed app.
 	refusalStaged = "staged"
@@ -98,6 +102,9 @@ type config struct {
 	canonical string
 	// dev: this is a dev app (devapp.go).
 	dev bool
+	// revision is the commit this build was made from, empty when the
+	// build has none written in.
+	revision string
 }
 
 // way is how this copy of the app updates itself, or why it cannot.
@@ -142,8 +149,15 @@ func updateWay(cfg config) way {
 	// was to rebuild from a clone the person already had. Tools that have
 	// moved are a refusal at the moment they are needed, with their own
 	// sentence, and TreeSource makes it.
+	//
+	// Comparing commits needs this build's own. Without it every commit the
+	// tree holds looks newer, the button would stand for ever, and pressing
+	// it could build an older app than the one running.
 	if cfg.tree != "" {
-		running := ownRevision()
+		if cfg.revision == "" {
+			return way{Refusal: refusalNoRevision}
+		}
+		running := cfg.revision
 		return way{Running: running, Source: &supervisor.TreeSource{
 			Dir:      cfg.tree,
 			Remote:   updateRemote,

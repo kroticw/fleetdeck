@@ -88,9 +88,12 @@ export function onProgress(state, { step, detail = "", reason = "" }, now) {
     // longer one. Nobody pressed anything, so a version has to show itself.
     // It never interrupts a press -- an update running, the question about
     // unsent text, or an update just done and about to reload the page.
+    // Nor does it take away the words of a press that failed: it only
+    // says whether there is still something to try again with.
     case "available":
     case "none":
       if (busyWithAPress(state)) return state;
+      if (state.phase === "failed" || state.phase === "busy") return { ...state, withdrawn: step === "none" };
       return step === "available" ? { phase: "available", detail } : initialState();
     // What Check for Updates… in the app menu reports. A person asked, so
     // every outcome is said; none of it interrupts a press either.
@@ -295,7 +298,7 @@ export function updateHTML(state, now) {
       inner = button(t("update_button"), false) + status(fill("update_available", { version: state.detail }), "update-available");
       break;
     case "busy":
-      inner = button(t("update_button"), false) + status(t("update_busy"), "update-problem");
+      inner = (state.withdrawn ? "" : button(t("update_button"), false)) + status(t("update_busy"), "update-problem");
       break;
     // Check for Updates…: the releases page is being asked. No button: what
     // there is to install is not known until the answer.
@@ -331,7 +334,7 @@ export function updateHTML(state, now) {
       const text = why
         ? fill("update_failed_because", { why, detail: state.detail })
         : fill("update_failed", { detail: state.detail });
-      inner = button(t("update_button"), false) + status(text, "update-problem");
+      inner = (state.withdrawn ? "" : button(t("update_button"), false)) + status(text, "update-problem");
       break;
     }
     // This build cannot update itself at all. It never finds anything to
