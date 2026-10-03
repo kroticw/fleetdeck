@@ -98,7 +98,7 @@ func planStart(in startInput) (startPlan, error) {
 	}
 	plan.widthsSuite = widthsSuite(in.standSocket, in.dev)
 	plan.title = windowTitle(in.dev)
-	plan.way = config{tree: treeDir, exe: in.exe, version: version.String(), canonical: in.canonical, dev: in.dev}
+	plan.way = config{tree: treeDir, exe: in.exe, version: version.String(), canonical: in.canonical, dev: in.dev, revision: ownRevision()}
 	plan.retiresLeftover = retiresLeftover(in.handover, plan.canonical, in.dev)
 	return plan, nil
 }

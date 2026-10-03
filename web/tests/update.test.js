@@ -194,7 +194,7 @@ test("a build that cannot update says why, and offers no button", () => {
 });
 
 test("every reason a build cannot update has words of its own", () => {
-  for (const reason of ["not-a-bundle", "built-here", "no-version"]) {
+  for (const reason of ["not-a-bundle", "built-here", "no-version", "no-revision", "staged", "dev"]) {
     const html = updateHTML(onProgress(initialState(), { step: "cannot", reason }, 0), 0);
     assert.ok(has(html, reasonKey("update_cannot", reason)), `${reason} has no sentence of its own`);
   }
