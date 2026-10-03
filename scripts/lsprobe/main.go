@@ -42,7 +42,7 @@ const (
 	// copyWatch is how long a copy that is never started is watched, and
 	// copyWatchBeforeStart how long a copy is watched before it is forgotten
 	// and started.
-	copyWatch            = 30 * time.Second
+	copyWatch            = 60 * time.Second
 	copyWatchBeforeStart = 10 * time.Second
 	// forgottenFor is how long a forgotten path must stay unregistered before
 	// it is started, and forgetWithin how long that is waited for.
@@ -52,13 +52,17 @@ const (
 	// activation -- its probe activates it itself ten seconds into w.Run --
 	// and watchAfter how long it is watched after that.
 	activationWithin = 60 * time.Second
-	watchAfter       = 10 * time.Second
+	watchAfter       = 20 * time.Second
 )
 
 type scenario struct {
 	name  string
 	dir   string
 	start bool
+	// move: the bundle is renamed into place from a directory on the same
+	// volume, as the swap moves the installed bundle into the staging
+	// directory, rather than copied there.
+	move bool
 }
 
 func main() {
@@ -80,13 +84,24 @@ func main() {
 	if _, err := os.Stat(canonical); err == nil {
 		log.Fatalf("lsprobe: %s is installed; the window started from the staging directory would open it and go", canonical)
 	}
-	scenarios := []scenario{
-		{name: "copied into a hidden directory in /Applications, not started", dir: "/Applications/.lsprobe-copy"},
-		{name: "copied outside /Applications, not started", dir: filepath.Join(temp, "lsprobe-copy")},
-		{name: "started from the update's staging directory", dir: supervisor.StagingDir(canonical), start: true},
-		{name: "started from another hidden directory in /Applications", dir: "/Applications/.lsprobe-run", start: true},
-		{name: "started outside /Applications", dir: filepath.Join(temp, "lsprobe-run"), start: true},
+	// The bundles never started are placed twice over, before the started ones
+	// and after them: in the first run (37114670018) a copy into a hidden
+	// directory in /Applications was registered about 5 s after it was made in
+	// two scenarios of three, and one alone says too little.
+	unstarted := func(round string) []scenario {
+		return []scenario{
+			{name: "copied into a hidden directory in /Applications, not started" + round, dir: "/Applications/.lsprobe-copy" + round},
+			{name: "copied outside /Applications, not started" + round, dir: filepath.Join(temp, "lsprobe-copy"+round)},
+			{name: "moved into the update's staging directory, as the swap moves a bundle, not started" + round, dir: supervisor.StagingDir(canonical), move: true},
+		}
 	}
+	scenarios := unstarted("")
+	scenarios = append(scenarios,
+		scenario{name: "started from the update's staging directory", dir: supervisor.StagingDir(canonical), start: true},
+		scenario{name: "started from another hidden directory in /Applications", dir: "/Applications/.lsprobe-run", start: true},
+		scenario{name: "started outside /Applications", dir: filepath.Join(temp, "lsprobe-run"), start: true},
+	)
+	scenarios = append(scenarios, unstarted(", again")...)
 	runID := os.Getenv("GITHUB_RUN_ID") + "." + os.Getenv("GITHUB_RUN_ATTEMPT")
 	var sections []string
 	failed := false
@@ -148,7 +163,14 @@ func run(s scenario, i int, app, out, temp, runID string) (result, error) {
 	if was, err := quickLook(bundle); err == nil && was {
 		return res, fmt.Errorf("%s is registered before it is copied", bundle)
 	}
-	if err := command(dittoPath, src, bundle); err != nil {
+	if s.move {
+		if err := os.MkdirAll(s.dir, 0o755); err != nil {
+			return res, err
+		}
+		if err := os.Rename(src, bundle); err != nil {
+			return res, err
+		}
+	} else if err := command(dittoPath, src, bundle); err != nil {
 		return res, err
 	}
 	res.CopyEnd = time.Now().UnixMilli()
