@@ -256,63 +256,91 @@ var sharedPins = []pin{
 	{"owner.go", "the keeper polls a panel it did not start every 2 s", regexp.MustCompile(`takenPanelPoll\s*=\s*2 \* time\.Second\n`)},
 }
 
+// How an old window starts the new window, told nothing of its deadline: a
+// window that knows no such flag, so the new window must manage on its own
+// default.
+var (
+	windowWithoutDeadlinePins = []pin{
+		{"update.go", "the new window is started with --url, --handover and --canonical and nothing else",
+			regexp.MustCompile(`exec\.Command\(filepath\.Join\(staged, "Contents", "MacOS", "fleetdeck-window"\),\s*"--url", url, "--handover", handover, "--canonical", canonical\)`)},
+	}
+	windowWithoutDeadline = func(url, handover, canonical string) []string {
+		return []string{"--url", url, "--handover", handover, "--canonical", canonical}
+	}
+)
+
+// How an old window starts the new window, told its deadline with
+// --handover-timeout.
+var (
+	windowWithDeadlinePins = []pin{
+		{"update.go", "the deadline flag is --handover-timeout", regexp.MustCompile(`handoverTimeoutFlag\s*=\s*"handover-timeout"\n`)},
+		{"update.go", "newWindowArgs takes the URL, the canonical path and the handover, in that order",
+			regexp.MustCompile(`func newWindowArgs\(url, canonical, handover string\) \[\]string \{`)},
+		{"update.go", "the new window is started with --url, --handover, --canonical and --handover-timeout",
+			regexp.MustCompile(`return \[\]string\{\s*"--url", url,\s*"--handover", handover,\s*"--canonical", canonical,\s*"--" \+ handoverTimeoutFlag, handoverTimeout\.String\(\),\s*\}`)},
+		{"update.go", "the new window is started with newWindowArgs",
+			regexp.MustCompile(`exec\.Command\(filepath\.Join\(staged, "Contents", "MacOS", "fleetdeck-window"\),\s*newWindowArgs\(url, canonical, handover\)\.\.\.\)`)},
+	}
+	windowWithDeadline = func(url, handover, canonical string) []string {
+		return []string{"--url", url, "--handover", handover, "--canonical", canonical, "--handover-timeout", handoverTimeout.String()}
+	}
+)
+
+// How an old window's keeper starts its panel, told nothing of its port: the
+// panel listens on server.port.
+var (
+	panelWithoutPortPins = []pin{
+		{"owner.go", "the panel is started with its window's pid and the stand's socket only",
+			regexp.MustCompile(`func panelArgs\(window int, standSocket string\) \[\]string \{`)},
+	}
+	panelWithoutPort = func(window int, standSocket string, _ int) []string {
+		args := []string{"--owner-pid", strconv.Itoa(window)}
+		if standSocket != "" {
+			args = append(args, "--stand-socket", standSocket)
+		}
+		return args
+	}
+)
+
+// How an old window's keeper starts its panel, told the port of the window's
+// URL with --port. --config is a dev app's alone, never the app's.
+var (
+	panelWithPortPins = []pin{
+		{"owner.go", "the panel is started with its port, when the window knows it",
+			regexp.MustCompile(`if port != 0 \{\s*args = append\(args, "--port", strconv\.Itoa\(port\)\)\s*\}`)},
+	}
+	panelWithPort = func(window int, standSocket string, port int) []string {
+		args := []string{"--owner-pid", strconv.Itoa(window)}
+		if port != 0 {
+			args = append(args, "--port", strconv.Itoa(port))
+		}
+		if standSocket != "" {
+			args = append(args, "--stand-socket", standSocket)
+		}
+		return args
+	}
+)
+
+// pinsOf is a profile's pins: what its window and its panel are started with,
+// and what every old window holds.
+func pinsOf(groups ...[]pin) []pin {
+	all := append([]pin(nil), sharedPins...)
+	for _, g := range groups {
+		all = append(all, g...)
+	}
+	return all
+}
+
 // profiles are the old windows this program can play. A release that changes
 // how its window starts the new window or its panel needs one of its own,
 // added with that change: TestThisBranchsWindowHasAProfile holds that.
 var profiles = []windowProfile{
-	{
-		// v0.10.0 and v0.10.1: the new window is told nothing of the old
-		// window's deadline -- they know no such flag, so a new window
-		// started by them must manage on its own default -- and the panel
-		// nothing of its port, which it reads from server.port.
-		name: "v0.10.0",
-		pins: append([]pin{
-			{"update.go", "the new window is started with --url, --handover and --canonical and nothing else",
-				regexp.MustCompile(`exec\.Command\(filepath\.Join\(staged, "Contents", "MacOS", "fleetdeck-window"\),\s*"--url", url, "--handover", handover, "--canonical", canonical\)`)},
-			{"owner.go", "the panel is started with its window's pid and the stand's socket only",
-				regexp.MustCompile(`func panelArgs\(window int, standSocket string\) \[\]string \{`)},
-		}, sharedPins...),
-		newWindowArgs: func(url, handover, canonical string) []string {
-			return []string{"--url", url, "--handover", handover, "--canonical", canonical}
-		},
-		panelArgs: func(window int, standSocket string, _ int) []string {
-			args := []string{"--owner-pid", strconv.Itoa(window)}
-			if standSocket != "" {
-				args = append(args, "--stand-socket", standSocket)
-			}
-			return args
-		},
-	},
-	{
-		// From v0.11.0: the new window is told the old window's deadline
-		// with --handover-timeout, and the panel the port of the window's
-		// URL with --port. --config is a dev app's alone, never the app's.
-		name: "v0.11.0",
-		pins: append([]pin{
-			{"update.go", "the deadline flag is --handover-timeout", regexp.MustCompile(`handoverTimeoutFlag\s*=\s*"handover-timeout"\n`)},
-			{"update.go", "newWindowArgs takes the URL, the canonical path and the handover, in that order",
-				regexp.MustCompile(`func newWindowArgs\(url, canonical, handover string\) \[\]string \{`)},
-			{"update.go", "the new window is started with --url, --handover, --canonical and --handover-timeout",
-				regexp.MustCompile(`return \[\]string\{\s*"--url", url,\s*"--handover", handover,\s*"--canonical", canonical,\s*"--" \+ handoverTimeoutFlag, handoverTimeout\.String\(\),\s*\}`)},
-			{"update.go", "the new window is started with newWindowArgs",
-				regexp.MustCompile(`exec\.Command\(filepath\.Join\(staged, "Contents", "MacOS", "fleetdeck-window"\),\s*newWindowArgs\(url, canonical, handover\)\.\.\.\)`)},
-			{"owner.go", "the panel is started with its port, when the window knows it",
-				regexp.MustCompile(`if port != 0 \{\s*args = append\(args, "--port", strconv\.Itoa\(port\)\)\s*\}`)},
-		}, sharedPins...),
-		newWindowArgs: func(url, handover, canonical string) []string {
-			return []string{"--url", url, "--handover", handover, "--canonical", canonical, "--handover-timeout", handoverTimeout.String()}
-		},
-		panelArgs: func(window int, standSocket string, port int) []string {
-			args := []string{"--owner-pid", strconv.Itoa(window)}
-			if port != 0 {
-				args = append(args, "--port", strconv.Itoa(port))
-			}
-			if standSocket != "" {
-				args = append(args, "--stand-socket", standSocket)
-			}
-			return args
-		},
-	},
+	{name: "v0.10.0", pins: pinsOf(windowWithoutDeadlinePins, panelWithoutPortPins),
+		newWindowArgs: windowWithoutDeadline, panelArgs: panelWithoutPort},
+	{name: "v0.10.1", pins: pinsOf(windowWithDeadlinePins, panelWithoutPortPins),
+		newWindowArgs: windowWithDeadline, panelArgs: panelWithoutPort},
+	{name: "v0.11.0", pins: pinsOf(windowWithDeadlinePins, panelWithPortPins),
+		newWindowArgs: windowWithDeadline, panelArgs: panelWithPort},
 }
 
 // drifted is what of p's pins the tag's source no longer says.

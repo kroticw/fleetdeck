@@ -13,8 +13,9 @@ import (
 // as they stand in cmd/fleetdeck-window of the first tag that starts the new
 // window and its panel that way.
 //
-// v0.10.0 (and v0.10.1): the new window is told nothing of the deadline, the
-// panel nothing of its port.
+// v0.10.0: the new window is told nothing of the deadline, the panel nothing
+// of its port. v0.10.1 tells the new window its deadline as v0.11.0 does, and
+// its panel nothing, as v0.10.0 does.
 const v0100UpdateGo = `
 const (
 	measuredWorstHandover = 812 * time.Millisecond
@@ -110,6 +111,8 @@ func tagSources(profile string) map[string]string {
 	switch profile {
 	case "v0.10.0":
 		return map[string]string{"update.go": v0100UpdateGo, "main.go": tagMainGo, "owner.go": v0100OwnerGo}
+	case "v0.10.1":
+		return map[string]string{"update.go": v0110UpdateGo, "main.go": tagMainGo, "owner.go": v0100OwnerGo}
 	case "v0.11.0":
 		return map[string]string{"update.go": v0110UpdateGo, "main.go": tagMainGo, "owner.go": v0110OwnerGo}
 	}
@@ -117,7 +120,7 @@ func tagSources(profile string) map[string]string {
 }
 
 func TestEachOldWindowIsPlayedByItsOwnProfile(t *testing.T) {
-	for _, name := range []string{"v0.10.0", "v0.11.0"} {
+	for _, name := range []string{"v0.10.0", "v0.10.1", "v0.11.0"} {
 		t.Run(name, func(t *testing.T) {
 			p, err := profileFor(tagSources(name))
 			if err != nil {
@@ -188,6 +191,10 @@ func TestTheProfilesStartWhatTheirWindowsStart(t *testing.T) {
 	cases := map[string]struct{ window, panel string }{
 		"v0.10.0": {
 			"--url http://127.0.0.1:7900/ --handover /h --canonical /Applications/fleetdeck.app",
+			"--owner-pid 42 --stand-socket /stand.sock",
+		},
+		"v0.10.1": {
+			"--url http://127.0.0.1:7900/ --handover /h --canonical /Applications/fleetdeck.app --handover-timeout 2.436s",
 			"--owner-pid 42 --stand-socket /stand.sock",
 		},
 		"v0.11.0": {
