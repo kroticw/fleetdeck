@@ -34,6 +34,12 @@ var (
 	ErrStale = errors.New("the card has moved on since this write was made")
 	// ErrNothingToCommit means Commit found nothing staged for the given file.
 	ErrNothingToCommit = errors.New("nothing to commit")
+	// ErrWrittenNotCommitted is what a card write wraps when the field reached
+	// the card file and only the commit after it did not happen. The edit is
+	// applied; only the git history is missing it. It lives here rather than
+	// with the server because the dispatcher reads it too, and the server
+	// imports the dispatcher.
+	ErrWrittenNotCommitted = errors.New("field written but not committed")
 
 	frontmatterRe = regexp.MustCompile(`(?s)\A---\r?\n(.*?)\r?\n---\r?\n`)
 	linkRe        = regexp.MustCompile(`\[\[([^\[\]\r\n]+?)\]\]`)

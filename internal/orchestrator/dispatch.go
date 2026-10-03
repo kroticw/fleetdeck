@@ -57,7 +57,9 @@ type Dispatcher struct {
 	// message before the session can read it. Nil, and the task goes by Send.
 	SendFirst func(ctx context.Context, short, text string) error
 	// SetField writes one frontmatter field, refusing when the card no longer
-	// holds the value the write was made against (board.SetField).
+	// holds the value the write was made against (board.SetField). An error
+	// wrapping board.ErrWrittenNotCommitted is a field that reached the card
+	// without its commit, and the dispatch goes on past it.
 	SetField func(path, field, value string, expect *string) error
 	// Home is the directory a card's repo field is read from: a worker starts
 	// in Home/<repo>, the checkout its card names, and a card naming none that
@@ -126,19 +128,21 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	// and here the card may have been moved by a hand or by its own agent, and
 	// writing over that is the thing the precondition exists to stop.
 	empty := ""
-	if err := d.SetField(w.Card, "session", short, &empty); err != nil {
+	note, err := written(d.SetField(w.Card, "session", short, &empty))
+	if err != nil {
 		return refuse("card", fmt.Errorf("%s is running, and the card does not name it: %w", short, err))
 	}
-	done("card", "session -> "+short)
+	done("card", "session -> "+short+note)
 
 	// stage is written by the panel rather than left to the agent because the
 	// card was moved into the column by a hand, and the board refuses a started
 	// stage while the session field is empty — which is why this cannot come
 	// first.
-	if err := d.SetField(w.Card, "stage", "active", &card.Stage); err != nil {
+	note, err = written(d.SetField(w.Card, "stage", "active", &card.Stage))
+	if err != nil {
 		return refuse("stage", err)
 	}
-	done("stage", "stage -> active")
+	done("stage", "stage -> active"+note)
 
 	// The refusal carries the task itself: the card names the session and the
 	// session runs, so what is left for a hand to do is send this line into it.
@@ -171,6 +175,19 @@ func Workdir(home, repo string) (string, error) {
 		return "", fmt.Errorf("%w: repo %s is not a directory: %s", ErrNoRepo, rel, dir)
 	}
 	return dir, nil
+}
+
+// written reads a SetField's error the way the server reads it: a field that
+// reached the card and whose commit did not happen is a write that happened.
+// Refused as a failure, the dispatch would stop with the card naming a session
+// that never gets its task. What it returns is the note the step carries then —
+// the commit is missing and why — and the error for any other failure.
+func written(err error) (string, error) {
+	if !errors.Is(err, board.ErrWrittenNotCommitted) {
+		return "", err
+	}
+	why := strings.TrimPrefix(err.Error(), board.ErrWrittenNotCommitted.Error()+": ")
+	return " (written, not committed: " + why + ")", nil
 }
 
 func (d *Dispatcher) wait(v, fallback time.Duration) time.Duration {
