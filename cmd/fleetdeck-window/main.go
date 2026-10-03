@@ -239,6 +239,9 @@ func main() {
 			// Works with an old window of any version, which says nothing of
 			// itself in the handover.
 			OldWindowGone: func() bool { return os.Getppid() != oldWindow },
+			// And the moment it exits is told, so the bundle goes then rather
+			// than at the next try past the close watch.
+			OldWindowQuit: exitOf(oldWindow, func() bool { return os.Getppid() == oldWindow }),
 			Logf:          func(format string, args ...any) { log.Printf("fleetdeck-window: "+format, args...) },
 		}
 		// Every start of the keeper held inside the old window's deadline: the

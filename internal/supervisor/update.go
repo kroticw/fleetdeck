@@ -196,6 +196,10 @@ type Takeover struct {
 	// quits only after that, running out of the bundle swapped out until it
 	// has; so the bundle is removed only once this says so. Nil counts as gone.
 	OldWindowGone func() bool
+	// OldWindowQuit is closed when the old window exits; nil when nothing
+	// tells. Past RetireWait, removal is tried again the moment it closes
+	// rather than at the next RetireEvery.
+	OldWindowQuit <-chan struct{}
 	// RetireWait is how long the wait for the lock and the old window is watched
 	// closely; zero is retireWait. RetireEvery is how often removal is tried
 	// again after that, for as long as this window runs; zero is retireEvery.
@@ -340,6 +344,7 @@ const retireEvery = 10 * time.Minute
 // v0.10.0 (run 34867562033) the staged path was registered again a second after
 // the new window had it forgotten, with the bundle still there. Removing the
 // bundle is the one thing that holds. So past retireWait removal is tried again
+// the moment the old window quits (OldWindowQuit), when that is told, and
 // every retireEvery for as long as this window runs, LaunchServices is told
 // again at each try and once the bundle is gone, and a window that quits first
 // leaves the bundle to the next window's start (RetireLeftover). The handover
@@ -361,6 +366,7 @@ func (t *Takeover) retire(ctx context.Context) {
 		every = retireEvery
 	}
 	deadline := time.Now().Add(wait)
+	quit := t.OldWindowQuit
 	for try, waiting := 1, false; ; {
 		removed, again, why := t.retireOnce()
 		if removed {
@@ -388,6 +394,10 @@ func (t *Takeover) retire(ctx context.Context) {
 			t.logf("the bundle swapped out stays at %s: this window is going, and the next window to start removes it", t.Staged)
 			return
 		case <-time.After(next):
+		case <-quit:
+			// Once: a closed channel is ready for ever, and the tries after
+			// it go back to every.
+			quit = nil
 		}
 	}
 }
