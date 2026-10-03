@@ -13,6 +13,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
+	"github.com/kroticw/fleetdeck/internal/userenv"
 )
 
 // claudePlaces are where a claude is looked for outside PATH and the home
@@ -100,12 +101,15 @@ func sessionStarter(o runOpts, agent config.AgentConfig, extra ...string) func(c
 		return orchestrator.StartWith(slices.Concat(agent.Command, extra))
 	}
 	return func(ctx context.Context, cwd, name string) (string, error) {
+		// First: it waits for the operator's PATH, which claude is then looked
+		// up on and run with.
+		environ := userenv.Environ()
 		home, _ := os.UserHomeDir()
 		bin, err := orchestrator.FindClaude(home, exec.LookPath, claudePlaces)
 		if err != nil {
 			return "", err
 		}
-		return orchestrator.StartWithEnv(slices.Concat([]string{bin}, extra), claudeEnv(os.Environ(), agent.ConfigDir))(ctx, cwd, name)
+		return orchestrator.StartWithEnv(slices.Concat([]string{bin}, extra), claudeEnv(environ, agent.ConfigDir))(ctx, cwd, name)
 	}
 }
 
@@ -155,13 +159,14 @@ func sessionStopper(o runOpts, agent config.AgentConfig) func(ctx context.Contex
 	return func(ctx context.Context, short string) error {
 		argv, env := fixed, []string(nil)
 		if argv == nil {
+			environ := userenv.Environ()
 			home, _ := os.UserHomeDir()
 			bin, err := orchestrator.FindClaude(home, exec.LookPath, claudePlaces)
 			if err != nil {
 				return err
 			}
 			argv = []string{bin}
-			env = claudeEnv(os.Environ(), agent.ConfigDir)
+			env = claudeEnv(environ, agent.ConfigDir)
 		}
 		ctx, cancel := context.WithTimeout(ctx, stopWait)
 		defer cancel()

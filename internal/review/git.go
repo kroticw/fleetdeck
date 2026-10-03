@@ -9,10 +9,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/userenv"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -47,12 +48,14 @@ func (g Git) run(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	full := append([]string{"--no-pager", "-C", g.Dir, "-c", "core.quotepath=off", "-c", "core.fsmonitor=false", "-c", "diff.suppressBlankEmpty=false"}, args...)
+	env := append(userenv.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C")
 	cmd := exec.CommandContext(ctx, "git", full...)
 	// GIT_OPTIONAL_LOCKS=0: the agent commits in this tree while the panel
 	// reads it, and a status that refreshes the index takes index.lock.
 	// LC_ALL=C: IsMissingObject reads git's English stderr messages, and the
-	// operator's shell locale must not translate them.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C")
+	// operator's shell locale must not translate them. The PATH is the
+	// operator's (userenv), as for every git the panel runs.
+	cmd.Env = env
 	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
