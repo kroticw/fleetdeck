@@ -83,7 +83,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			// between cleanups. Wired with the board and not beside it, since
 			// the cleanup's third step writes the board's archive.
 			cfg := collector.Config()
-			if c := fleetCleaner(o, cfg.Agent.Command, boardDir, dc, projectsDir(claudeDirOf(cfg))); c != nil {
+			if c := fleetCleaner(o, cfg.Agent, boardDir, dc, projectsDir(claudeDirOf(cfg))); c != nil {
 				fd.CleanupSession = c.Cleanup
 			}
 		}

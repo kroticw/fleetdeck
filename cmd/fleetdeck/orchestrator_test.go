@@ -57,7 +57,7 @@ func TestAWorkerIsStartedWithTheLaunchFlagsAndTheOrchestratorWithout(t *testing.
 	standBin, recorded := claudeThatRecordsArgs(t, "66666666")
 	o := runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}
 	workers := config.Workers{}
-	start := workerStarter(o, nil, func() config.Workers { return workers })
+	start := workerStarter(o, config.AgentConfig{}, func() config.Workers { return workers })
 
 	workers = config.Workers{Model: "sonnet"}
 	if _, err := start(context.Background(), t.TempDir(), "T-001"); err != nil {
@@ -69,7 +69,7 @@ func TestAWorkerIsStartedWithTheLaunchFlagsAndTheOrchestratorWithout(t *testing.
 		t.Errorf("worker arguments = %q, want %q", got, want)
 	}
 
-	if _, err := sessionStarter(o, nil)(context.Background(), t.TempDir(), "orchestrator"); err != nil {
+	if _, err := sessionStarter(o, config.AgentConfig{})(context.Background(), t.TempDir(), "orchestrator"); err != nil {
 		t.Fatal(err)
 	}
 	args, _ = os.ReadFile(recorded)
@@ -93,7 +93,7 @@ func TestAWorkerWithNoWorkersSectionGetsTheDefaults(t *testing.T) {
 
 // A stand given no claude starts no worker, as it starts no orchestrator.
 func TestAStandWithoutItsOwnClaudeStartsNoWorker(t *testing.T) {
-	if workerStarter(runOpts{standSocket: "/tmp/no.sock"}, nil, func() config.Workers { return config.Workers{} }) != nil {
+	if workerStarter(runOpts{standSocket: "/tmp/no.sock"}, config.AgentConfig{}, func() config.Workers { return config.Workers{} }) != nil {
 		t.Fatal("a stand given no claude can start a worker")
 	}
 }
@@ -110,7 +110,7 @@ func ran(path string) bool {
 func TestAStandWithoutItsOwnClaudeStartsNoSession(t *testing.T) {
 	onPath, ranOnPath := claudeThatRecords(t, "0a1b2c3d")
 	t.Setenv("PATH", filepath.Dir(onPath))
-	if start := sessionStarter(runOpts{standSocket: "/tmp/no.sock"}, nil); start != nil {
+	if start := sessionStarter(runOpts{standSocket: "/tmp/no.sock"}, config.AgentConfig{}); start != nil {
 		_, _ = start(context.Background(), t.TempDir(), "orchestrator")
 		t.Error("a stand given no claude of its own can start sessions")
 	}
@@ -124,7 +124,7 @@ func TestAStandStartsSessionsOnlyWithItsOwnClaude(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(onPath))
 	standBin, ranStand := claudeThatRecords(t, "22222222")
 
-	start := sessionStarter(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, nil)
+	start := sessionStarter(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.AgentConfig{})
 	if start == nil {
 		t.Fatal("a stand with its own claude cannot start sessions")
 	}
@@ -150,7 +150,7 @@ func TestAPanelStartsSessionsWithTheClaudeItFinds(t *testing.T) {
 	t.Cleanup(func() { claudePlaces = saved })
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
-	start := sessionStarter(runOpts{}, nil)
+	start := sessionStarter(runOpts{}, config.AgentConfig{})
 	if start == nil {
 		t.Fatal("a panel cannot start sessions")
 	}

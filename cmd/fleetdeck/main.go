@@ -548,7 +548,7 @@ func serve(parent context.Context, o runOpts) error {
 	// Stopped with the claude sessions are started with; nil on a stand given
 	// none, and then a fleet with running sessions is not deleted.
 	home, _ := os.UserHomeDir()
-	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg.Agent.Command), home)
+	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg.Agent), home)
 	// Every fleet's board, docs, pin and wizard, the first fleet's also in
 	// d's own fields, so a request naming no fleet is served as before. Made
 	// before anything below is started, so there is nothing to stop if it fails.

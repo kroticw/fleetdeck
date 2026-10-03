@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 )
@@ -150,7 +151,7 @@ func TestAStandStopsSessionsOnlyWithItsOwnClaude(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(onPath))
 	standBin, recorded := claudeThatRecordsArgs(t, "")
 
-	stop := sessionStopper(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, nil)
+	stop := sessionStopper(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.AgentConfig{})
 	if stop == nil {
 		t.Fatal("a stand with its own claude cannot stop sessions")
 	}
@@ -174,11 +175,11 @@ func TestAStandWithoutItsOwnClaudeStopsNoSession(t *testing.T) {
 	onPath, ranOnPath := claudeThatRecords(t, "0a1b2c3d")
 	t.Setenv("PATH", filepath.Dir(onPath))
 	o := runOpts{standSocket: "/tmp/no.sock"}
-	if stop := sessionStopper(o, nil); stop != nil {
+	if stop := sessionStopper(o, config.AgentConfig{}); stop != nil {
 		_ = stop(context.Background(), "abc12345")
 		t.Error("a stand given no claude of its own can stop sessions")
 	}
-	if fleetCleaner(o, nil, t.TempDir(), nil, t.TempDir()) != nil {
+	if fleetCleaner(o, config.AgentConfig{}, t.TempDir(), nil, t.TempDir()) != nil {
 		t.Error("a stand given no claude has a cleanup that stops sessions")
 	}
 	if ran(ranOnPath) {
@@ -190,7 +191,7 @@ func TestAStandWithoutItsOwnClaudeStopsNoSession(t *testing.T) {
 // so it has no cleanup.
 func TestAFleetWithoutABoardHasNoCleanup(t *testing.T) {
 	standBin, _ := claudeThatRecordsArgs(t, "")
-	if fleetCleaner(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, nil, "", nil, t.TempDir()) != nil {
+	if fleetCleaner(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.AgentConfig{}, "", nil, t.TempDir()) != nil {
 		t.Error("a fleet with no board has a cleanup")
 	}
 }
@@ -199,7 +200,7 @@ func TestAFleetWithoutABoardHasNoCleanup(t *testing.T) {
 // is stopped through it as written, flags and all.
 func TestAConfiguredCommandStopsSessionsAsWritten(t *testing.T) {
 	bin, recorded := claudeThatRecordsArgs(t, "")
-	if err := sessionStopper(runOpts{}, []string{bin, "--flag"})(context.Background(), "abc12345"); err != nil {
+	if err := sessionStopper(runOpts{}, config.AgentConfig{Command: []string{bin, "--flag"}})(context.Background(), "abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	args, _ := os.ReadFile(recorded)
@@ -215,7 +216,7 @@ func TestAFailedStopSaysWhatClaudeSaid(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'no session abc12345' >&2\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	err := sessionStopper(runOpts{}, []string{bin})(context.Background(), "abc12345")
+	err := sessionStopper(runOpts{}, config.AgentConfig{Command: []string{bin}})(context.Background(), "abc12345")
 	if err == nil || !strings.Contains(err.Error(), "no session abc12345") {
 		t.Errorf("err = %v, want claude's own words", err)
 	}
