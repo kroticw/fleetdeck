@@ -112,6 +112,7 @@ func lsprobeMark(mark string) {
 	lsprobeWrite(look)
 	log.Printf("fleetdeck-window: start probe: %s, registered %v, %d ms into the process", mark, look.Registered, look.SinceStart)
 	go func() {
+		defer panics.in("in the start probe's dump").guard()
 		registered, err := supervisor.LaunchServices{Lsregister: supervisor.LsregisterPath}.Registered(lsprobe.bundle)
 		dump := lsprobeRecord{Kind: "dump", Mark: mark, UnixMs: look.UnixMs, SinceStart: look.SinceStart,
 			EndUnixMs: time.Now().UnixMilli(), Bundle: lsprobe.bundle, Registered: registered}
