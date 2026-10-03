@@ -9,9 +9,13 @@ import (
 	"time"
 )
 
-// What the copies in this program are held to: v0.10.0's own words, as they
-// stand in cmd/fleetdeck-window of the tag.
-const tagUpdateGo = `
+// What the profiles in this program are held to: each old window's own words,
+// as they stand in cmd/fleetdeck-window of the first tag that starts the new
+// window and its panel that way.
+//
+// v0.10.0 (and v0.10.1): the new window is told nothing of the deadline, the
+// panel nothing of its port.
+const v0100UpdateGo = `
 const (
 	measuredWorstHandover = 812 * time.Millisecond
 	handoverMargin        = 3
@@ -27,19 +31,7 @@ func launchNewWindow(url string) func(staged, canonical, handover string) (func(
 }
 `
 
-const tagMainGo = `
-	u := &supervisor.Update{
-		Source:          source,
-		Canonical:       canonical,
-		LockPath:        lockPath,
-		HandoverTimeout: handoverTimeout,
-		Launch:          launchNewWindow(url),
-		Pause:           kept.stop,
-		Resume:          kept.start,
-	}
-`
-
-const tagOwnerGo = `
+const v0100OwnerGo = `
 func panelArgs(window int, standSocket string) []string {
 	args := []string{"--owner-pid", strconv.Itoa(window)}
 	if standSocket != "" {
@@ -53,55 +45,218 @@ const launchdThrottle = 10 * time.Second
 const takenPanelPoll = 2 * time.Second
 `
 
-func tagSources() map[string]string {
-	return map[string]string{"update.go": tagUpdateGo, "main.go": tagMainGo, "owner.go": tagOwnerGo}
-}
+// v0.11.0 to v1.0.0: the new window is told the deadline, the panel its port.
+const v0110UpdateGo = `
+const (
+	measuredWorstHandover = 812 * time.Millisecond
+	handoverMargin        = 3
+	handoverTimeout       = measuredWorstHandover * handoverMargin
+)
 
-func TestTheCopiesMatchTheTag(t *testing.T) {
-	if err := copiedFrom(tagSources()); err != nil {
-		t.Fatalf("v0.10.0's own sources refused: %v", err)
+const handoverTimeoutFlag = "handover-timeout"
+
+func newWindowArgs(url, canonical, handover string) []string {
+	return []string{
+		"--url", url,
+		"--handover", handover,
+		"--canonical", canonical,
+		"--" + handoverTimeoutFlag, handoverTimeout.String(),
 	}
 }
 
-func TestACopyDriftingFromTheTagIsRefused(t *testing.T) {
-	cases := map[string]struct{ file, old, new string }{
-		"the new window told the old window's deadline": {"update.go",
-			`"--canonical", canonical)`, `"--canonical", canonical, "--handover-deadline", "2436ms")`},
-		"another measured handover": {"update.go", "812 * time.Millisecond", "900 * time.Millisecond"},
-		"another margin":            {"update.go", "handoverMargin        = 3", "handoverMargin        = 4"},
-		"the button's update waits on something else": {"main.go",
-			"HandoverTimeout: handoverTimeout", "HandoverTimeout: 5 * time.Second"},
-		"the button's update pauses nothing":     {"main.go", "Pause:           kept.stop", "Pause:           func() {}"},
-		"the panel is started without its owner": {"owner.go", `"--owner-pid", strconv.Itoa(window)`, `"--owner", strconv.Itoa(window)`},
-		"another throttle":                       {"owner.go", "10 * time.Second", "5 * time.Second"},
-		"another poll":                           {"owner.go", "2 * time.Second", "time.Second"},
+func launchNewWindow(url string) func(staged, canonical, handover string) (func(), error) {
+	return func(staged, canonical, handover string) (func(), error) {
+		cmd := exec.Command(filepath.Join(staged, "Contents", "MacOS", "fleetdeck-window"),
+			newWindowArgs(url, canonical, handover)...)
+		cmd.Stdout, cmd.Stderr = log, log
 	}
-	for name, c := range cases {
+}
+`
+
+const v0110OwnerGo = `
+func panelArgs(window int, standSocket string, port int, configPath string) []string {
+	args := []string{"--owner-pid", strconv.Itoa(window)}
+	if port != 0 {
+		args = append(args, "--port", strconv.Itoa(port))
+	}
+	if standSocket != "" {
+		args = append(args, "--stand-socket", standSocket)
+	}
+	if configPath != "" {
+		args = append(args, "--config", configPath)
+	}
+	return args
+}
+
+const launchdThrottle = 10 * time.Second
+
+const takenPanelPoll = 2 * time.Second
+`
+
+// Both start the update from the button the same way.
+const tagMainGo = `
+	u := &supervisor.Update{
+		Source:          source,
+		Canonical:       canonical,
+		LockPath:        lockPath,
+		HandoverTimeout: handoverTimeout,
+		Launch:          launchNewWindow(url),
+		Pause:           kept.stop,
+		Resume:          kept.start,
+	}
+`
+
+func tagSources(profile string) map[string]string {
+	switch profile {
+	case "v0.10.0":
+		return map[string]string{"update.go": v0100UpdateGo, "main.go": tagMainGo, "owner.go": v0100OwnerGo}
+	case "v0.11.0":
+		return map[string]string{"update.go": v0110UpdateGo, "main.go": tagMainGo, "owner.go": v0110OwnerGo}
+	}
+	panic("no sources for " + profile)
+}
+
+func TestEachOldWindowIsPlayedByItsOwnProfile(t *testing.T) {
+	for _, name := range []string{"v0.10.0", "v0.11.0"} {
 		t.Run(name, func(t *testing.T) {
-			sources := tagSources()
-			if !strings.Contains(sources[c.file], c.old) {
-				t.Fatalf("the case does not apply: %q is not in %s", c.old, c.file)
+			p, err := profileFor(tagSources(name))
+			if err != nil {
+				t.Fatalf("%s's own sources refused: %v", name, err)
 			}
-			sources[c.file] = strings.Replace(sources[c.file], c.old, c.new, 1)
-			if err := copiedFrom(sources); err == nil {
-				t.Fatal("a copy that no longer matches the tag was accepted")
+			if p.name != name {
+				t.Fatalf("%s's sources are played as %s", name, p.name)
 			}
 		})
 	}
 }
 
-func TestTheCopiedValuesAreV0100s(t *testing.T) {
+// This branch is the next release's old window: once it is released, the
+// update from it runs against its sources. A change to how it starts the new
+// window or its panel needs a profile of its own, added with that change.
+func TestThisBranchsWindowHasAProfile(t *testing.T) {
+	sources, err := readTagWindow(filepath.Join("..", "..", "cmd", "fleetdeck-window"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := profileFor(sources); err != nil {
+		t.Fatalf("this branch's window, the next release's old window, has no profile: %v", err)
+	}
+}
+
+func TestAnOldWindowNoProfileMatchesIsRefusedWithWhatToDo(t *testing.T) {
+	cases := map[string]struct{ profile, file, old, new string }{
+		"v0.10.0's new window told the old window's deadline": {"v0.10.0", "update.go",
+			`"--canonical", canonical)`, `"--canonical", canonical, "--handover-deadline", "2436ms")`},
+		"another measured handover": {"v0.10.0", "update.go", "812 * time.Millisecond", "900 * time.Millisecond"},
+		"another margin":            {"v0.11.0", "update.go", "handoverMargin        = 3", "handoverMargin        = 4"},
+		"the button's update waits on something else": {"v0.10.0", "main.go",
+			"HandoverTimeout: handoverTimeout", "HandoverTimeout: 5 * time.Second"},
+		"the button's update pauses nothing":     {"v0.11.0", "main.go", "Pause:           kept.stop", "Pause:           func() {}"},
+		"the panel is started without its owner": {"v0.10.0", "owner.go", `"--owner-pid", strconv.Itoa(window)`, `"--owner", strconv.Itoa(window)`},
+		"another throttle":                       {"v0.11.0", "owner.go", "10 * time.Second", "5 * time.Second"},
+		"another poll":                           {"v0.10.0", "owner.go", "2 * time.Second", "time.Second"},
+		"the deadline flag renamed":              {"v0.11.0", "update.go", `"handover-timeout"`, `"handover-deadline"`},
+		"the new window not told the deadline": {"v0.11.0", "update.go",
+			"\t\t\"--\" + handoverTimeoutFlag, handoverTimeout.String(),\n", ""},
+		"the new window's arguments swapped": {"v0.11.0", "update.go",
+			"newWindowArgs(url, canonical, handover)...", "newWindowArgs(url, handover, canonical)..."},
+		"the panel not told its port": {"v0.11.0", "owner.go",
+			`args = append(args, "--port", strconv.Itoa(port))`, `_ = port`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			sources := tagSources(c.profile)
+			if !strings.Contains(sources[c.file], c.old) {
+				t.Fatalf("the case does not apply: %q is not in %s of %s", c.old, c.file, c.profile)
+			}
+			sources[c.file] = strings.Replace(sources[c.file], c.old, c.new, 1)
+			p, err := profileFor(sources)
+			if err == nil {
+				t.Fatalf("a window that matches no profile was played as %s", p.name)
+			}
+			if !strings.Contains(err.Error(), "add a profile") {
+				t.Errorf("the refusal does not say what to do: %v", err)
+			}
+		})
+	}
+}
+
+func TestTheProfilesStartWhatTheirWindowsStart(t *testing.T) {
 	if handoverTimeout != 2436*time.Millisecond {
-		t.Errorf("handoverTimeout is %s, v0.10.0's is 2.436s", handoverTimeout)
+		t.Errorf("handoverTimeout is %s, every old window's is 2.436s", handoverTimeout)
 	}
-	got := strings.Join(newWindowArgs("http://127.0.0.1:7900/", "/h", "/Applications/fleetdeck.app"), " ")
-	want := "--url http://127.0.0.1:7900/ --handover /h --canonical /Applications/fleetdeck.app"
-	if got != want {
-		t.Errorf("the new window is started with %q, v0.10.0 starts it with %q", got, want)
+	cases := map[string]struct{ window, panel string }{
+		"v0.10.0": {
+			"--url http://127.0.0.1:7900/ --handover /h --canonical /Applications/fleetdeck.app",
+			"--owner-pid 42 --stand-socket /stand.sock",
+		},
+		"v0.11.0": {
+			"--url http://127.0.0.1:7900/ --handover /h --canonical /Applications/fleetdeck.app --handover-timeout 2.436s",
+			"--owner-pid 42 --port 7900 --stand-socket /stand.sock",
+		},
 	}
-	got = strings.Join(panelArgs(42, "/stand.sock"), " ")
-	if want := "--owner-pid 42 --stand-socket /stand.sock"; got != want {
-		t.Errorf("the old panel is started with %q, v0.10.0's window starts it with %q", got, want)
+	for name, want := range cases {
+		t.Run(name, func(t *testing.T) {
+			p, err := profileFor(tagSources(name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(p.newWindowArgs("http://127.0.0.1:7900/", "/h", "/Applications/fleetdeck.app"), " "); got != want.window {
+				t.Errorf("the new window is started with %q, %s starts it with %q", got, name, want.window)
+			}
+			if got := strings.Join(p.panelArgs(42, "/stand.sock", 7900), " "); got != want.panel {
+				t.Errorf("the old panel is started with %q, %s's window starts it with %q", got, name, want.panel)
+			}
+		})
+	}
+}
+
+func TestThePanelsPortIsTheURLs(t *testing.T) {
+	if port, err := urlPort("http://127.0.0.1:7820/"); err != nil || port != 7820 {
+		t.Errorf("urlPort: %d, %v, want 7820", port, err)
+	}
+	if _, err := urlPort("http://127.0.0.1/"); err == nil {
+		t.Error("a URL with no port was given one")
+	}
+}
+
+func TestThePreviousReleaseIsTheNewestStableTagBehindHead(t *testing.T) {
+	merged := []string{"v0.9.3", "v0.10.0", "v0.10.1", "v1.0.0", "v1.1.0-rc.1", "v1.0.0-beta", "latest", "v0.13.0"}
+	cases := map[string]struct {
+		merged, atHead []string
+		want           string
+	}{
+		"the newest by number, not by text":      {merged, nil, "v1.0.0"},
+		"the tag on HEAD itself is not previous": {append(merged, "v1.1.0"), []string{"v1.1.0"}, "v1.0.0"},
+		"a pre-release on HEAD changes nothing":  {merged, []string{"v1.1.0-rc.1"}, "v1.0.0"},
+		"after a release, that release":          {append(merged, "v1.1.0"), nil, "v1.1.0"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := previousRelease(c.merged, c.atHead)
+			if err != nil || got != c.want {
+				t.Fatalf("previousRelease: %q, %v, want %q", got, err, c.want)
+			}
+		})
+	}
+}
+
+func TestNoStableTagBehindHeadIsRefusedWithWhy(t *testing.T) {
+	for name, merged := range map[string][]string{
+		"no tags at all":           nil,
+		"only pre-releases":        {"v1.0.0-rc.1", "v0.1.0-beta"},
+		"only the tag on HEAD":     {"v1.0.0"},
+		"tags that are not vX.Y.Z": {"v1.0", "1.0.0", "v1.0.0.1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := previousRelease(merged, []string{"v1.0.0"})
+			if err == nil {
+				t.Fatalf("previousRelease gave %q", got)
+			}
+			if !strings.Contains(err.Error(), "no stable release tag") {
+				t.Errorf("the refusal does not say what is missing: %v", err)
+			}
+		})
 	}
 }
 

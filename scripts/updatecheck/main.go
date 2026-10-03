@@ -23,11 +23,12 @@ import (
 
 const dittoPath = "/usr/bin/ditto"
 
-// oldPanelStartTimeout is how long v0.10.0's panel has to answer when this
-// program first starts it. Not v0.10.0's own 330 ms: on the operator's machine
-// that panel has been up for hours when the button is pressed, and a cold
-// runner's first start is not what is being checked. The handover does not
-// use it -- the keeper is paused before the new window starts.
+// oldPanelStartTimeout is how long the release's panel has to answer when this
+// program first starts it. Not the release's own -- v0.10.0's 330 ms, 3 s
+// since v0.11.0: on the operator's machine that panel has been up for hours
+// when the button is pressed, and a cold runner's first start is not what is
+// being checked. The handover does not use it -- the keeper is paused before
+// the new window starts.
 const oldPanelStartTimeout = 30 * time.Second
 
 type options struct {
@@ -37,6 +38,7 @@ type options struct {
 	wantRevision, wantOld  string
 	tagWindow              string
 	launchServices         bool
+	previousRelease        bool
 	out                    string
 }
 
@@ -64,8 +66,8 @@ const (
 )
 
 // The bundle identifiers asked about: this build's, installed at the canonical
-// path on the runner under the stand identifier, and v0.10.0's, the version
-// swapped out. On a person's machine the two are one identifier.
+// path on the runner under the stand identifier, and the release's, the
+// version swapped out. On a person's machine the two are one identifier.
 const (
 	installedBundleID = supervisor.StandBundleID
 	replacedBundleID  = "dev.fleetdeck.window"
@@ -254,19 +256,23 @@ func checkLaunchServices(o options) error {
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	var o options
-	flag.StringVar(&o.oldArchive, "old-archive", "", "the v0.10.0 release zip, as published")
+	flag.StringVar(&o.oldArchive, "old-archive", "", "the release zip, as published")
 	flag.StringVar(&o.newArchive, "new-archive", "", "this branch's app zip")
 	flag.StringVar(&o.canonical, "canonical", "/Applications/fleetdeck.app", "where the installed app goes; must not exist")
 	flag.StringVar(&o.url, "url", "", "the URL the stand's panel answers on, the port its configuration names")
 	flag.StringVar(&o.wantRevision, "want-revision", "", "the commit this branch's app was built from")
-	flag.StringVar(&o.wantOld, "want-old-version", "v0.10.0", "the version the installed app reports")
-	flag.StringVar(&o.tagWindow, "tag-window", "", "cmd/fleetdeck-window of the v0.10.0 checkout this program was built in")
+	flag.StringVar(&o.wantOld, "want-old-version", "", "the release's tag, the version the installed app reports")
+	flag.StringVar(&o.tagWindow, "tag-window", "", "cmd/fleetdeck-window of the release's checkout this program was built in")
 	flag.BoolVar(&o.launchServices, "launchservices", false, "once an update run of this program has gone: check the bundle swapped out is removed and nothing opens it")
+	flag.BoolVar(&o.previousRelease, "previous-release", false, "print the release a person updates from to HEAD of the git repository here, and nothing else")
 	flag.StringVar(&o.out, "out", "", "a directory to keep the LaunchServices dumps in")
 	flag.Parse()
 	check := run
-	if o.launchServices {
+	switch {
+	case o.launchServices:
 		check = checkLaunchServices
+	case o.previousRelease:
+		check = printPreviousRelease
 	}
 	if err := check(o); err != nil {
 		log.Printf("updatecheck: FAILED: %v", err)
@@ -274,9 +280,35 @@ func main() {
 	}
 }
 
+// printPreviousRelease prints previousRelease of the repository it is run in,
+// which must hold HEAD's history and tags.
+func printPreviousRelease(options) error {
+	tags := func(args ...string) ([]string, error) {
+		out, err := exec.Command("git", append([]string{"tag", "--list", "v*"}, args...)...).Output()
+		if err != nil {
+			return nil, fmt.Errorf("git tag %v: %w", args, err)
+		}
+		return strings.Fields(string(out)), nil
+	}
+	merged, err := tags("--merged", "HEAD")
+	if err != nil {
+		return err
+	}
+	atHead, err := tags("--points-at", "HEAD")
+	if err != nil {
+		return err
+	}
+	tag, err := previousRelease(merged, atHead)
+	if err != nil {
+		return err
+	}
+	fmt.Println(tag)
+	return nil
+}
+
 func run(o options) error {
-	if o.oldArchive == "" || o.newArchive == "" || o.url == "" || o.wantRevision == "" || o.tagWindow == "" {
-		return errors.New("-old-archive, -new-archive, -url, -want-revision and -tag-window are all needed")
+	if o.oldArchive == "" || o.newArchive == "" || o.url == "" || o.wantRevision == "" || o.wantOld == "" || o.tagWindow == "" {
+		return errors.New("-old-archive, -new-archive, -url, -want-revision, -want-old-version and -tag-window are all needed")
 	}
 	// It installs an app into /Applications and starts windows: a runner's
 	// business, never a person's machine.
@@ -291,7 +323,13 @@ func run(o options) error {
 	if err != nil {
 		return err
 	}
-	if err := copiedFrom(sources); err != nil {
+	profile, err := profileFor(sources)
+	if err != nil {
+		return err
+	}
+	log.Printf("updatecheck: %s's window is played as profile %s", o.wantOld, profile.name)
+	port, err := urlPort(o.url)
+	if err != nil {
 		return err
 	}
 	staging := supervisor.StagingDir(o.canonical)
@@ -312,11 +350,11 @@ func run(o options) error {
 		return fmt.Errorf("the installed app reports %q (%v), want %s", v, err, o.wantOld)
 	}
 
-	// v0.10.0's window's keeper, on the installed panel.
+	// The release's window's keeper, on the installed panel.
 	keeper := &supervisor.Keeper{
 		URL:          o.url,
 		Bin:          supervisor.PanelIn(o.canonical),
-		Args:         panelArgs(os.Getpid(), standSocket),
+		Args:         profile.panelArgs(os.Getpid(), standSocket, port),
 		Owner:        os.Getpid(),
 		Env:          os.Environ(),
 		LogPath:      filepath.Join(home, "Library", "Logs", "fleetdeck.log"),
@@ -324,15 +362,15 @@ func run(o options) error {
 		MinUptime:    launchdThrottle,
 		Poll:         takenPanelPoll,
 		OnEvent: func(e supervisor.Event) {
-			log.Printf("updatecheck: v0.10.0's keeper: %s pid %d %v", e.State, e.PID, e.Err)
+			log.Printf("updatecheck: %s's keeper: %s pid %d %v", o.wantOld, e.State, e.PID, e.Err)
 		},
 	}
 	kept := &keeperRun{k: keeper}
 	kept.start()
 	if b, err := waitPanel(o.url, 60*time.Second); err != nil || b.Version != o.wantOld {
-		return fmt.Errorf("v0.10.0's panel did not answer at %s as %s: %+v, %v", o.url, o.wantOld, b, err)
+		return fmt.Errorf("%s's panel did not answer at %s as %s: %+v, %v", o.wantOld, o.url, o.wantOld, b, err)
 	}
-	log.Printf("updatecheck: v0.10.0 is installed at %s and its panel answers at %s", o.canonical, o.url)
+	log.Printf("updatecheck: %s is installed at %s and its panel answers at %s", o.wantOld, o.canonical, o.url)
 
 	// The press, minus the press.
 	lockPath, err := supervisor.LockPath(o.canonical)
@@ -349,7 +387,7 @@ func run(o options) error {
 		Canonical:       o.canonical,
 		LockPath:        lockPath,
 		HandoverTimeout: handoverTimeout,
-		Launch: launchNewWindow(o.url, func() {
+		Launch: launchNewWindow(o.url, profile, func() {
 			mu.Lock()
 			defer mu.Unlock()
 			started = time.Now()
@@ -369,9 +407,9 @@ func run(o options) error {
 	timed := append([]stepAt(nil), steps...)
 	mu.Unlock()
 	windowLog := dump(staging)
-	log.Printf("updatecheck: from the new window's start, against v0.10.0's %s:\n  %s", handoverTimeout, strings.Join(timeline(started, windowLog, timed), "\n  "))
+	log.Printf("updatecheck: from the new window's start, against %s's %s:\n  %s", o.wantOld, handoverTimeout, strings.Join(timeline(started, windowLog, timed), "\n  "))
 	if runErr != nil {
-		return fmt.Errorf("the update from v0.10.0 failed %s after the new window was started, against v0.10.0's %s: %w", took.Round(time.Millisecond), handoverTimeout, runErr)
+		return fmt.Errorf("the update from %s failed %s after the new window was started, against its %s: %w", o.wantOld, took.Round(time.Millisecond), handoverTimeout, runErr)
 	}
 	got := make([]string, 0, len(timed))
 	for _, s := range timed {
@@ -380,7 +418,7 @@ func run(o options) error {
 	if err := handoverInOrder(got); err != nil {
 		return err
 	}
-	log.Printf("updatecheck: pass: handover alive, panel, swapped, done, %s after the new window was started, within v0.10.0's %s", took.Round(time.Millisecond), handoverTimeout)
+	log.Printf("updatecheck: pass: handover alive, panel, swapped, done, %s after the new window was started, within %s's %s", took.Round(time.Millisecond), o.wantOld, handoverTimeout)
 
 	b, err := panelBuild(context.Background(), o.url)
 	if err != nil {
@@ -428,7 +466,7 @@ func install(archive, canonical string) error {
 }
 
 // archiveSource is this branch's app, from a local archive, in place of
-// v0.10.0's ReleaseSource: no download and no Seal.Verify.
+// the release's ReleaseSource: no download and no Seal.Verify.
 type archiveSource struct {
 	archive, revision string
 }
@@ -453,17 +491,18 @@ func (s *archiveSource) Stage(ctx context.Context, dir, _ string, say func(super
 	return final, nil
 }
 
-// launchNewWindow is v0.10.0's (cmd/fleetdeck-window/update.go of the tag),
-// with one thing v0.10.0's has not: onStart marks the moment the new window's
-// process has started, for the timeline.
-func launchNewWindow(url string, onStart func()) func(staged, canonical, handover string) (func(), error) {
+// launchNewWindow is the release's (cmd/fleetdeck-window/update.go of the
+// tag), started with what profile says it is started with, and with one thing
+// the release's has not: onStart marks the moment the new window's process has
+// started, for the timeline.
+func launchNewWindow(url string, profile windowProfile, onStart func()) func(staged, canonical, handover string) (func(), error) {
 	return func(staged, canonical, handover string) (func(), error) {
 		logPath := filepath.Join(filepath.Dir(handover), supervisor.NewWindowLog)
 		out, err := os.Create(logPath)
 		if err != nil {
 			return nil, err
 		}
-		cmd := exec.Command(filepath.Join(staged, "Contents", "MacOS", "fleetdeck-window"), newWindowArgs(url, handover, canonical)...)
+		cmd := exec.Command(filepath.Join(staged, "Contents", "MacOS", "fleetdeck-window"), profile.newWindowArgs(url, handover, canonical)...)
 		cmd.Stdout, cmd.Stderr = out, out
 		if err := cmd.Start(); err != nil {
 			_ = out.Close()
@@ -484,7 +523,7 @@ func launchNewWindow(url string, onStart func()) func(staged, canonical, handove
 	}
 }
 
-// keeperRun is v0.10.0's (cmd/fleetdeck-window/main.go of the tag).
+// keeperRun is the release's (cmd/fleetdeck-window/main.go of the tag).
 type keeperRun struct {
 	k      *supervisor.Keeper
 	mu     sync.Mutex
