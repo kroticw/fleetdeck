@@ -1,0 +1,58 @@
+name: lsprobe
+
+# When LaunchServices registers the path of a window started by exec, as an
+# update starts its new window from /Applications/.fleetdeck-update, and whether
+# a bundle copied into /Applications is registered without being started
+# (T-117, T-118; docs/engineering/window-and-panel.md). It starts windows and
+# writes to /Applications, so it runs here and never on a person's machine.
+#
+# A measurement, not a gate: it runs when the probe itself changes, or by hand,
+# and fails only when a scenario could not be run. What it measured is in the
+# job's summary and in the artifact.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/lsprobe.yaml
+      - scripts/lsprobe/**
+      - cmd/fleetdeck-window/lsprobe_darwin.*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lsprobe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lsprobe:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Show the macOS
+        run: sw_vers
+      # The window built with -tags lsprobe, which looks at LaunchServices at
+      # each mark of its own start; the panel beside it is the ordinary one.
+      - name: Build the probe window
+        run: GOFLAGS=-tags=lsprobe make window-app BINDIR="$RUNNER_TEMP/probe" BUNDLE_ID=dev.fleetdeck.stand
+      - name: Build the probe
+        run: go build -o "$RUNNER_TEMP/lsprobe" ./scripts/lsprobe
+      - name: Measure
+        run: |
+          mkdir -p out
+          "$RUNNER_TEMP/lsprobe" -app "$RUNNER_TEMP/probe/fleetdeck.app" -out "$PWD/out"
+      - name: Stop what is left
+        if: always()
+        run: pkill -f 'fleetdeck.app/Contents/MacOS/' || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: lsprobe
+          path: out
+          if-no-files-found: ignore
+          retention-days: 30
