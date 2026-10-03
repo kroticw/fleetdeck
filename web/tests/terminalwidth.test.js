@@ -18,7 +18,7 @@ import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-import { installDOM, settle } from "./fake-dom.js";
+import { installDOM, settle, fireEvent } from "./fake-dom.js";
 import { fakeTimers, answer, installFit, installObserver, installSocket, frame } from "./terminal-fakes.js";
 import { createLiveTerminal } from "../js/liveterminal.js";
 
@@ -961,4 +961,68 @@ test("the rows a take-back reads count a placed row from 1 and keep the lowest, 
   await drawn(column.terminal);
   await column.timers.tick();
   assert.deepEqual(resizes(column.socket).at(-1), { type: "resize", cols: 70, rows: 20 });
+});
+
+// A take-back asks for less than this terminal's pane where another attacher is
+// smaller, and the daemon records that smaller size as this terminal's. When the
+// smaller attacher leaves, the daemon gives the session that recorded size, and
+// the session stays smaller than the pane. Measured on a disposable session: a
+// 44 × 39 pane stayed at 44 × 24 after a 120 × 24 attacher left.
+test("after a smaller attacher leaves, focusing or typing into the terminal gives the session the pane's size back, once", async () => {
+  for (const [what, wake] of [
+    ["focus", (column) => fireEvent(column.terminal.host, "focusin")],
+    ["typing", (column) => column.terminal.input("x")],
+  ]) {
+    const daemon = fakeDaemon();
+    const column = await attach(daemon, { cols: 44, rows: 39 });
+    const leave = daemon.visit(120, 24);
+    for (let i = 0; i < 4; i++) await round(daemon, column);
+    assert.deepEqual(resizes(column.socket), [{ type: "resize", cols: 44, rows: 24 }], `${what}: taken back to the visitor's rows`);
+    leave();
+    for (let i = 0; i < 4; i++) await round(daemon, column);
+    assert.deepEqual([daemon.cols, daemon.rows], [44, 24], `${what}: the session stays at the size taken back once the visitor left`);
+
+    wake(column);
+    for (let i = 0; i < 4; i++) await round(daemon, column);
+    assert.deepEqual(resizes(column.socket).at(-1), { type: "resize", cols: 44, rows: 39 }, `${what}: the pane's size is sent`);
+    assert.deepEqual([daemon.cols, daemon.rows], [44, 39], what);
+    assert.deepEqual(screen(column.terminal), await freshAttach(44, 39), `${what}: and the screen is a fresh attach's`);
+
+    for (let i = 0; i < 3; i++) {
+      fireEvent(column.terminal.host, "focusin");
+      column.terminal.input("y");
+      await round(daemon, column);
+    }
+    assert.equal(resizes(column.socket).length, 2, `${what}: a session at the pane's size is not sent it again: ${JSON.stringify(resizes(column.socket))}`);
+    column.live.stop();
+  }
+});
+
+test("a smaller attacher still there costs one round per take-back, not a loop", async () => {
+  const daemon = fakeDaemon();
+  const column = await attach(daemon, { cols: 44, rows: 39 });
+  const small = await attach(daemon, { cols: 120, rows: 24 });
+  for (let i = 0; i < 8; i++) await round(daemon, column, small);
+  assert.deepEqual([daemon.cols, daemon.rows], [44, 24]);
+  assert.equal(resizes(column.socket).length, 1);
+
+  for (let i = 0; i < 4; i++) {
+    fireEvent(column.terminal.host, "focusin");
+    column.terminal.input("x");
+    for (let j = 0; j < 4; j++) await round(daemon, column, small);
+  }
+  const said = `this sent ${JSON.stringify(resizes(column.socket))}, the smaller one ${JSON.stringify(resizes(small.socket))}`;
+  assert.equal(resizes(column.socket).length, 2, `one size given back for four focuses: ${said}`);
+  assert.equal(resizes(small.socket).length, 1, `and one take-back by the smaller one: ${said}`);
+  assert.deepEqual([daemon.cols, daemon.rows], [44, 24], said);
+  assert.deepEqual(screen(column.terminal), await freshAttach(44, 24, 44, 39), said);
+  assert.deepEqual(screen(small.terminal), await freshAttach(44, 24, 120, 24), said);
+
+  // The smaller one leaving now gives the session this terminal's recorded size,
+  // which is the pane's.
+  daemon.leave(small.socket);
+  small.live.stop();
+  for (let i = 0; i < 4; i++) await round(daemon, column);
+  assert.deepEqual([daemon.cols, daemon.rows], [44, 39]);
+  assert.equal(resizes(column.socket).length, 2);
 });
