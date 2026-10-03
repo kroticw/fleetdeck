@@ -199,15 +199,32 @@ type stripAfter struct {
 	stripReport
 }
 
-// laidOutFor is whether the report can be of the run r: a page that says which
-// layout it measured, in full screen or out of it, is of a run in that one
-// only. The page lays itself out for full screen when the window tells it, and
-// reports that layout before the window logs its first frame in full screen:
-// run 36977200789 logged the strip's full screen report 60 ms ahead of it, and
-// held to the frame out of full screen before, its unfold control lay under the
-// window's buttons (T-106).
+// laidOutFor is whether the report can be of the run r. Only the orchestrator's
+// page is told of full screen (web/js/hostactions.js), and it says which layout
+// it measured: such a report is of a run in that layout, made during it. The
+// page lays itself out for full screen when the window tells it, and reports
+// that layout before the window logs its first frame in full screen: run
+// 36977200789 logged the strip's full screen report 60 ms ahead of it, and held
+// to the frame out of full screen before, its unfold control lay under the
+// window's buttons (T-106). So a report logged after the frame before r's first
+// is r's when its layout is r's; and since the layout changes at every run, the
+// page reports anew in each, and a report from an earlier run never stands in
+// for a page that did not lay itself out again.
+// saysLayout is whether surface's strip reports say which layout they measured.
+func (l standLog) saysLayout(surface string) bool {
+	for _, s := range l.strips {
+		if s.Surface == surface && s.FullScreen != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (s stripAfter) laidOutFor(r run) bool {
-	return s.FullScreen == nil || *s.FullScreen == r.fullScreen
+	if s.Surface != "orchestrator" || s.FullScreen == nil {
+		return true
+	}
+	return *s.FullScreen == r.fullScreen && s.frame >= r.from-1
 }
 
 // standLog is what the log says, in order: the frames, the header's reports,
@@ -697,7 +714,14 @@ func (l standLog) foldedStripProblems(when string, r run, surface string, panel 
 		}
 	}
 	if s == nil {
-		return []string{fmt.Sprintf("%sno overflow report from the folded %s strip", when, surface)}
+		layout := ""
+		if l.saysLayout(surface) {
+			layout = " laid out in full screen"
+			if !r.fullScreen {
+				layout = " laid out out of full screen"
+			}
+		}
+		return []string{fmt.Sprintf("%sno overflow report from the folded %s strip%s", when, surface, layout)}
 	}
 	if !s.Folded {
 		return []string{fmt.Sprintf("%sthe %s surface says it is not folded, its panel %v wide", when, surface, panel.W)}

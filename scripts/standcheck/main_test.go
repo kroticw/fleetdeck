@@ -765,3 +765,11 @@ func TestAStripOutOfFullScreenWithItsUnfoldControlUnderTheButtonsStillFails(t *t
 	problems := check(foldedTripLog(t, stripIn(t, false, 4)), 2)
 	wantProblem(t, problems, "after full screen 1: ", "unfold control at 12..52 lies under the window's close button")
 }
+
+// A page left in its full screen layout once the window is out of it says so,
+// and its strip is then no report of the window out of full screen: the one
+// from before full screen does not stand in for it.
+func TestAStripLeftInItsFullScreenLayoutAfterFullScreenStillFails(t *testing.T) {
+	problems := check(foldedTripLog(t, stripIn(t, true, 4)), 2)
+	wantProblem(t, problems, "after full screen 1: ", "no overflow report from the folded orchestrator strip laid out out of full screen")
+}
