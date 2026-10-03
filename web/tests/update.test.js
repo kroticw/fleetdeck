@@ -163,6 +163,27 @@ test("what the window finds on its own does not interrupt a press", () => {
   }
 });
 
+// A press that failed says why, and that sentence is the person's to read.
+// The window's own looking can find in the meantime that the version is gone,
+// or that another one is out: that changes whether there is a button to try
+// again with, not what the failure said.
+test("what the window finds on its own does not take a failed press's words away", () => {
+  const running = onPress(initialState(), { unsent: false, now: 0 }).state;
+  const failed = onProgress(running, { step: "failed", reason: "offline", detail: "no route" }, 1);
+  const busy = onProgress(running, { step: "busy" }, 1);
+
+  for (const state of [failed, busy]) {
+    const withdrawn = onProgress(state, { step: "none" }, 2);
+    const words = updateHTML(state, 2).match(/<span class="update-status[^]*?<\/span>/)[0];
+    assert.ok(updateHTML(withdrawn, 2).includes(words), `"none" took the words of ${state.phase} away: ${updateHTML(withdrawn, 2)}`);
+    assert.doesNotMatch(updateHTML(withdrawn, 2), /update-button/, `a button to try again after the version was taken back (${state.phase})`);
+
+    const offered = onProgress(withdrawn, { step: "available", detail: "v0.9.0" }, 3);
+    assert.ok(updateHTML(offered, 3).includes(words), `"available" took the words of ${state.phase} away: ${updateHTML(offered, 3)}`);
+    assert.match(updateHTML(offered, 3), /update-button/, `no button once a version is out again (${state.phase})`);
+  }
+});
+
 test("a failed or refused update keeps its button, so it can be tried again", () => {
   const running = onPress(initialState(), { unsent: false, now: 0 }).state;
   const failed = onProgress(running, { step: "failed", reason: "offline", detail: "no route" }, 1);
