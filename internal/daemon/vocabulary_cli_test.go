@@ -169,7 +169,7 @@ func unescapeJS(s string) string {
 }
 
 // knownNeedsRenderings is every `needs` value the installed CLI can produce, as read out
-// of the 2.1.269 binary, with what this client decides about each one. true means the
+// of the 2.1.269 binary and re-read against 2.1.283, with what this client decides about each one. true means the
 // value matches stalledNeedsPrefixes and lands in the quiet counter; false means it
 // lands in Waiting, the loud one.
 //
@@ -208,6 +208,10 @@ var knownNeedsRenderings = map[string]bool{
 	"choose: allow or deny the computer-use action":      false,
 	"acknowledge: file sync offline notice":              false,
 	"MCP input: open link":                               false,
+	// New in 2.1.283: Enter has to be pressed for the session to go on in auto mode.
+	// It reached Waiting on its own, by the unfamiliar-prefix rule, before it was
+	// recorded here.
+	"acknowledge the classifier billing notice (Enter continues in auto mode)": false,
 
 	// Not renderings at all: the empty initialiser, and a bundled test fixture. Kept so
 	// the extraction does not have to special-case them, and excluded from the
@@ -272,6 +276,55 @@ func TestExtractNeedsRenderings(t *testing.T) {
 			t.Fatalf("%q should not be a known rendering", got[0])
 		}
 	})
+}
+
+// TestRecordedNeedsRenderingsClassifyAsRecorded holds the record to the production
+// classification on every machine, CI included. The drift detector below compares the
+// record with an installed CLI and skips where there is none, so without this a decision
+// recorded here would go unchecked exactly where the code is verified.
+func TestRecordedNeedsRenderingsClassifyAsRecorded(t *testing.T) {
+	for needs, stalled := range knownNeedsRenderings {
+		if needs == "" || needs == "simple:needs" {
+			continue
+		}
+		s := Session{Needs: Says(needs)}
+		wantWaiting := Yes
+		if stalled {
+			wantWaiting = No
+		}
+		if got := s.Waiting(); got != wantWaiting {
+			t.Errorf("Waiting(%q) = %v, want %v", needs, got, wantWaiting)
+		}
+		if got := s.Stalled(); got != stalled {
+			t.Errorf("Stalled(%q) = %v, want %v", needs, got, stalled)
+		}
+	}
+}
+
+// The dialog 2.1.283 added, in the shape its registry carries it: a session stopped
+// there is waiting on a person to press Enter, and has to land in the loud counter.
+func TestClassifierBillingNoticeIsWaiting(t *testing.T) {
+	src := `[UOe.kind]:{waitingFor:"dialog open",needs:"acknowledge the classifier billing notice (Enter continues in auto mode)",` +
+		`notification:{text:"Auto mode has a classifier billing notice to acknowledge",type:"agent_needs_input"},layout:"bottom"}`
+	got, err := extractNeedsRenderings(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	want := "acknowledge the classifier billing notice (Enter continues in auto mode)"
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	stalled, known := knownNeedsRenderings[want]
+	if !known {
+		t.Fatalf("%q is not recorded in knownNeedsRenderings", want)
+	}
+	if stalled {
+		t.Errorf("%q is recorded as stalled: someone has to acknowledge the notice", want)
+	}
+	s := Session{Needs: Says(want)}
+	if s.Waiting() != Yes || s.Stalled() {
+		t.Errorf("Waiting = %v, Stalled = %v, want Yes and false", s.Waiting(), s.Stalled())
+	}
 }
 
 func TestExtractRenderingSwitch(t *testing.T) {
