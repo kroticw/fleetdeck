@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -35,7 +36,8 @@ import (
 // timer set for askEvery, is deliberate -- a Mac's monotonic clock stops while
 // it sleeps, so a six-hour timer on a laptop closed overnight fires hours
 // late. It is also how a network coming back is noticed: a question that got
-// no answer is not written down, so the next look asks again.
+// no answer is not written down, so the next look asks again -- unless the
+// source itself refused it (look).
 const (
 	askEvery  = 6 * time.Hour
 	lookEvery = 10 * time.Minute
@@ -147,6 +149,23 @@ type updateWatch struct {
 	// checkAgainAfter of it a press is shown it again rather than asking.
 	failed   report
 	failedAt time.Time
+
+	// refusals counts the looks in a row whose question reached the source
+	// and came back without an answer, and refusedAt is when the last of
+	// them asked. Held under asking.
+	refusals  int
+	refusedAt time.Time
+}
+
+// pauseAfter is how long a look waits, after the last of refusals questions
+// in a row that the source refused, before asking again: lookEvery after the
+// first, doubling, up to askEvery.
+func pauseAfter(refusals int) time.Duration {
+	pause := lookEvery
+	for i := 1; i < refusals && pause < askEvery; i++ {
+		pause *= 2
+	}
+	return min(pause, askEvery)
 }
 
 // run looks once at once, then once for every tick, until ctx ends.
@@ -166,8 +185,13 @@ func (u *updateWatch) run(ctx context.Context, ticks <-chan time.Time) {
 //
 // A question that gets no answer changes nothing: the page is told neither
 // that there is a version nor that there is none, a version already found
-// stays found, and nothing is written down, so the next look asks again. No
-// network is not an answer, and a person did not ask this question, so a
+// stays found, and nothing is written down. When the question did not leave
+// the machine -- no network -- the next look asks again. When it reached the
+// source and was refused -- a 429 or 5xx, no release, a tag that is not
+// vX.Y.Z, a checkout with commits of its own -- the refusal will most likely
+// stand, so the looks wait pauseAfter before asking again, growing from
+// lookEvery to askEvery, and an answer ends the pause. No network is not an
+// answer, and a person did not ask this question, so a
 // refusal is not something they are owed on screen either -- being told
 // "GitHub could not be reached" every time a laptop opens on a train is
 // noise. Pressing the button, once there is one, shows every refusal.
@@ -179,13 +203,24 @@ func (u *updateWatch) look(ctx context.Context) {
 		u.learn(m.Newest)
 		return
 	}
+	if u.refusals > 0 && !u.refusedAt.After(now) && now.Sub(u.refusedAt) < pauseAfter(u.refusals) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, askTimeout)
 	defer cancel()
 	newest, err := u.source.Check(ctx)
 	if err != nil {
-		log.Printf("fleetdeck-window: looking for a newer version got no answer, asking again within %s: %v", lookEvery, err)
+		var unreachable *supervisor.ReleasesUnreachableError
+		if errors.As(err, &unreachable) {
+			log.Printf("fleetdeck-window: looking for a newer version got no answer, asking again within %s: %v", lookEvery, err)
+			return
+		}
+		u.refusals++
+		u.refusedAt = now
+		log.Printf("fleetdeck-window: looking for a newer version was refused, asking again in %s: %v", pauseAfter(u.refusals), err)
 		return
 	}
+	u.refusals = 0
 	writeMark(u.markPath, mark{Asked: now, Running: u.running, Newest: newest})
 	u.learn(newest)
 }
@@ -231,6 +266,7 @@ func (u *updateWatch) checkNow(ctx context.Context) {
 		u.tell(r)
 		return
 	}
+	u.refusals = 0
 	writeMark(u.markPath, mark{Asked: now, Running: u.running, Newest: newest})
 	u.answer(newest)
 }
