@@ -21,5 +21,13 @@ func startupSteps() func(step string) {
 	}
 	return func(step string) {
 		log.Printf("fleetdeck-window: %s, %d ms after the process started", step, time.Since(started).Milliseconds())
+		if startupProbe != nil {
+			startupProbe(step)
+		}
 	}
 }
+
+// startupProbe is handed each step of the start as it is said. Only a build
+// made to measure the start sets it (lsprobe.go, -tags lsprobe); in any other
+// it stays nil.
+var startupProbe func(step string)
