@@ -217,6 +217,9 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 	// Read before the write, not after: what the operator moved the card away
 	// from, and who is keeping it, are both gone from the file the moment the
 	// write lands (stagebyhand.go).
+	if body.Field == "repo" && d.refuseRepo(w, body.Value) {
+		return
+	}
 	before := cardBefore(path)
 	switch err := d.SetCardField(path, body.Field, body.Value, body.Expect); {
 	case err == nil:
@@ -252,6 +255,28 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// refuseRepo answers 400 with the rule's code when repo names no folder under
+// Home, and says whether it did. Checked here rather than in internal/board,
+// which knows the board and not the home directory: T-132 reached the board
+// with its task in the repo field, and a repo that is no folder is only found
+// out at the dispatch, long after the person who typed it has gone.
+func (d Deps) refuseRepo(w http.ResponseWriter, repo string) bool {
+	if d.Home == "" {
+		return false
+	}
+	_, err := board.RepoDir(d.Home, repo)
+	var rule *board.RuleRefusal
+	switch {
+	case err == nil:
+		return false
+	case errors.As(err, &rule):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": rule.Code})
+	default:
+		fail(w, http.StatusBadRequest, err.Error())
+	}
+	return true
+}
+
 // handleCreateCard starts a card from a title, a zone and, optionally, the
 // repository its worker is started in and a description of the task. The body
 // carries those fields and
@@ -274,6 +299,9 @@ func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 		Attachments []board.Attachment `json:"attachments"`
 	}
 	if !decodeBodyLimit(w, r, &body, maxCardBytes) {
+		return
+	}
+	if d.refuseRepo(w, body.Repo) {
 		return
 	}
 	path, err := d.CreateCard(board.NewCard{Title: body.Title, Zone: body.Zone, Repo: body.Repo, Description: body.Description, Attachments: body.Attachments})

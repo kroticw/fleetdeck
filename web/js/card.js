@@ -61,6 +61,24 @@ function el(tag, className, text) {
   return node;
 }
 
+// repoFromHome is a typed repo as the board writes it (board.NormalizeRepo):
+// "~", "~/" and "$HOME" are the home directory, which is no repo, and "~/" or
+// "$HOME/" in front of a path is dropped. Done here as well as on the board so
+// the field holds what the card will hold, and stops showing the operator's
+// spelling once the card reads back. The rest of the rules are the board's.
+function repoFromHome(value) {
+  let repo = value.trim();
+  for (const home of ["~", "$HOME", "${HOME}"]) {
+    if (repo === home) return "";
+    if (repo.startsWith(`${home}/`)) {
+      repo = repo.slice(home.length + 1);
+      break;
+    }
+  }
+  // "/" stays as it is, for the board to refuse: it is no home.
+  return repo.replace(/\/+$/, "") || repo;
+}
+
 /**
  * renderCard draws the panel for one card into `root` and keeps it up to date
  * until the returned function is called.
@@ -119,6 +137,10 @@ export function renderCard(root, path, onClose, options = {}) {
   // already replaced.
   const writes = new Map();
   let nextToken = 0;
+  // What is being typed into the repo and not yet written, null when nothing
+  // is: a snapshot that draws the card again while the operator types replaces
+  // the field, and the new one is given this instead of the card's value.
+  let repoDraft = null;
   // Signature of what is currently on screen, so an unchanged snapshot redraws
   // nothing.
   let painted = null;
@@ -243,9 +265,11 @@ export function renderCard(root, path, onClose, options = {}) {
     return wrap;
   };
 
-  // The repo is free text, written when the operator leaves the field or
-  // presses Enter (the input's change). An empty or unchanged value writes
-  // nothing: clearing it is not offered, the board has no "no repo" value.
+  // The repo is a folder from home, written when the operator leaves the field
+  // or presses Enter (the input's change). An unchanged value writes nothing.
+  // Empty is the home directory (T-134): a card with no repo is worked in ~,
+  // the field says so, and "~" typed into it is written as that same no repo
+  // — written as ~ it read back as YAML's null, and the field went blank.
   const repoControl = (value) => {
     const wrap = el("label", "card-field");
     wrap.append(el("span", "card-field-name", "repo"));
@@ -254,10 +278,14 @@ export function renderCard(root, path, onClose, options = {}) {
     input.className = "card-repo";
     input.dataset.field = "repo";
     input.value = value;
-    input.placeholder = t("new_card_repo");
+    input.placeholder = t("card_repo_home");
+    input.addEventListener("input", () => {
+      repoDraft = input.value;
+    });
     input.addEventListener("change", () => {
-      const next = input.value.trim();
-      if (next === "" || next === value) {
+      repoDraft = null;
+      const next = repoFromHome(input.value);
+      if (next === value) {
         input.value = value;
         return;
       }
@@ -340,6 +368,7 @@ export function renderCard(root, path, onClose, options = {}) {
     active = CARD_TAB;
     pending.clear();
     outcomes.clear();
+    repoDraft = null;
     painted = null;
     draw(latest);
   };
@@ -481,10 +510,11 @@ export function renderCard(root, path, onClose, options = {}) {
     }
 
     // One line per field that has something to say, in the order the controls
-    // are in, and each names its field: with two writable fields there can be
-    // two answers on screen at once, and an unlabelled message would not say
-    // which edit it is about.
-    for (const field of ["stage", "progress"]) {
+    // are in, and each names its field: with three writable fields there can
+    // be several answers on screen at once, and an unlabelled message would not
+    // say which edit it is about. The repo was left out once, and a repo the
+    // board refused went back to the old value without a word (T-134).
+    for (const field of ["stage", "progress", "repo"]) {
       const outcome = outcomes.get(field);
       if (!outcome) continue;
       if (outcome.kind) {
@@ -606,10 +636,21 @@ export function renderCard(root, path, onClose, options = {}) {
     painted = signature;
 
     root.hidden = false;
+    const typing = repoDraft !== null ? root.querySelector("input[data-field=repo]") : null;
     const [headNode, ...cardNodes] = build(latest, card, known, orphan, stopped, backlinks, documents, broken);
     headHost.replaceChildren(headNode);
     paintTabs();
     pane.replaceChildren(...(open?.doc ? docPane(open.doc, card, cards, known) : cardNodes));
+    const field = typing ? root.querySelector("input[data-field=repo]") : null;
+    if (field) {
+      // The operator is still typing: the new field takes up the draft where
+      // the old one left it.
+      field.value = repoDraft;
+      if (document.activeElement === typing) {
+        field.focus?.();
+        field.setSelectionRange?.(typing.selectionStart, typing.selectionEnd);
+      }
+    }
     // After the panel is in the page, never while it is being built: a node
     // outside the document has no layout, so both widths read zero and every
     // box "fits". Measured there, the mark never appeared at all — and looked

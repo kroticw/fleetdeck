@@ -261,7 +261,6 @@ func TestDispatchRefusesACardThatAlreadyNamesASession(t *testing.T) {
 // and nothing on the panel says so.
 func TestDispatchRefusesACardWithNoRepositoryToWorkIn(t *testing.T) {
 	for _, tc := range []struct{ name, repo, want string }{
-		{"no repo", "", "names no repo"},
 		{"missing directory", "repo: work/gone", "work/gone"},
 		{"a file, not a directory", "repo: work/file", "not a directory"},
 		{"outside home", "repo: ../elsewhere", "inside the home directory"},
@@ -303,6 +302,27 @@ func TestDispatchReadsATildeRepoAsFromHome(t *testing.T) {
 	}
 	if want := "start:" + filepath.Join(d.Home, "work", "proj") + ":T-042 Дотащить доску до перетаскивания"; f.steps[0] != want {
 		t.Fatalf("started as %q, want %q", f.steps[0], want)
+	}
+}
+
+// The operator's rule (T-134): a card with no repo is worked in the home
+// directory. "~" is how the board spells it by hand, and YAML reads a bare ~
+// as null, so the card arrives here with no repo at all either way.
+func TestDispatchStartsACardWithNoRepoInTheHomeDirectory(t *testing.T) {
+	for _, repo := range []string{"", "repo: ~", `repo: ""`, `repo: "~"`, "repo: ~/", "repo: $HOME", "repo: $HOME/"} {
+		t.Run(repo, func(t *testing.T) {
+			f := newWorker()
+			d, card := dispatcher(t, f)
+			if err := os.WriteFile(card, []byte(strings.Replace(workCard, "repo: work/proj", repo, 1)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"}); err != nil {
+				t.Fatal(err)
+			}
+			if want := "start:" + d.Home + ":T-042 Дотащить доску до перетаскивания"; f.steps[0] != want {
+				t.Fatalf("started as %q, want %q", f.steps[0], want)
+			}
+		})
 	}
 }
 

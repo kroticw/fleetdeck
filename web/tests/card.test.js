@@ -172,17 +172,90 @@ test("the repo is shown and a change is written into the card", async () => {
   assert.equal(root.querySelector("input[data-field=repo]").value, "src/fleetdeck");
 });
 
-test("an unchanged or emptied repo writes nothing", async () => {
+test("an unchanged repo writes nothing", async () => {
   const { root } = open(snapshot());
   const calls = stubFetch(answer(204));
   const repo = root.querySelector("input[data-field=repo]");
-  repo.value = "fleetdeck";
-  fireEvent(repo, "change");
-  repo.value = "  ";
+  repo.value = " fleetdeck ";
   fireEvent(repo, "change");
   await settle();
   assert.equal(calls.length, 0);
   assert.equal(root.querySelector("input[data-field=repo]").value, "fleetdeck");
+});
+
+// The operator's rule (T-134): a card with no repo is worked in the home
+// directory, and "~" is that same card. Written as ~ the field read back as
+// YAML's null, and the operator saw what they had just typed disappear. The
+// home directory is written as no repo, and an empty field says it is home.
+test("~ and an emptied repo are written as the home directory, and the field says so", async () => {
+  for (const typed of ["~", "~/", "$HOME", "  "]) {
+    const snap = snapshot();
+    const { root, store, dispose } = open(snap);
+    const calls = stubFetch(answer(204));
+    const repo = root.querySelector("input[data-field=repo]");
+    repo.value = typed;
+    fireEvent(repo, "change");
+    await settle();
+    assert.equal(calls.length, 1, `${JSON.stringify(typed)} wrote nothing`);
+    assert.equal(calls[0].body.value, "", `${JSON.stringify(typed)} was not written as the home directory`);
+
+    // The card reads back with no repo, as the board holds it.
+    snap.cards.find((c) => c.path === FLEET_UI).repo = "";
+    store.push(snap);
+    const shown = root.querySelector("input[data-field=repo]");
+    assert.equal(shown.value, "");
+    assert.equal(shown.placeholder, t("card_repo_home"));
+    assert.equal(root.querySelector(".card-error"), null);
+    dispose();
+  }
+});
+
+test("a repo from ~ is written as a path from home", async () => {
+  const { root } = open(snapshot());
+  const calls = stubFetch(answer(204));
+  const repo = root.querySelector("input[data-field=repo]");
+  repo.value = "~/src/fleetdeck/";
+  fireEvent(repo, "change");
+  await settle();
+  assert.equal(calls[0].body.value, "src/fleetdeck");
+});
+
+// The refusal used to be drawn for stage and progress only, so a repo the
+// board refused went back to the old value without a word.
+test("a refused repo is said in words, by its code", async () => {
+  const { root } = open(snapshot());
+  stubFetch(answer(400, { error: "repo /Users/x/src/gone: stat: no such file or directory", code: "repo_not_a_directory" }));
+  const repo = root.querySelector("input[data-field=repo]");
+  repo.value = "src/gone";
+  fireEvent(repo, "change");
+  await settle();
+  const error = root.querySelector(".card-error");
+  assert.ok(error, "a refused repo was silent");
+  assert.equal(error.textContent, `repo: ${t("card_write_refused")}: ${t("card_refused_repo_not_a_directory")}`);
+  assert.equal(root.querySelector("input[data-field=repo]").value, "fleetdeck");
+});
+
+// A card's agent writes its log while the operator types: the snapshot that
+// carries the log draws the card again, and the field being typed in was
+// replaced by a fresh one holding the card's value.
+test("what is being typed into the repo survives a snapshot that draws the card again", async () => {
+  const snap = snapshot();
+  const { root, store } = open(snap);
+  const calls = stubFetch(answer(204));
+  const repo = root.querySelector("input[data-field=repo]");
+  repo.focus();
+  repo.value = "src/fleet";
+  fireEvent(repo, "input");
+  snap.cards.find((c) => c.path === FLEET_UI).body += "\n- a line from the agent\n";
+  store.push(snap);
+
+  const shown = root.querySelector("input[data-field=repo]");
+  assert.equal(shown.value, "src/fleet", "the typed value was lost");
+  assert.equal(dom.document.activeElement, shown, "the field lost the focus");
+  shown.value = "src/fleetdeck";
+  fireEvent(shown, "change");
+  await settle();
+  assert.equal(calls[0].body.value, "src/fleetdeck");
 });
 
 test("a card that does not parse offers no controls", () => {

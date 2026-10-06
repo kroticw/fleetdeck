@@ -169,6 +169,35 @@ test("new card: a refusal keeps the form open with the title and the server's wo
   assert.equal(form.querySelector("button.newcard-create").disabled, false, "the operator can try again");
 });
 
+// T-132 reached the board with its task in the repo field and an empty task.
+// The description is the task and the repo a folder: each goes where it was
+// typed, and a repo that is no folder is refused in the page's words, with
+// everything typed kept for the operator to move.
+test("new card: the description is the task and never the repo", async () => {
+  const form = open();
+  form.querySelector("input.newcard-title").value = "анализ дискового пространства";
+  form.querySelector("textarea.newcard-desc").value = "диск забит под завязку, нужно провести анализ, чем";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.deepEqual(sent, [
+    { title: "анализ дискового пространства", zone: "unplanned", repo: "", description: "диск забит под завязку, нужно провести анализ, чем" },
+  ]);
+});
+
+test("new card: a repo that is no folder is refused in the page's words, and what was typed stays", async () => {
+  const { t } = await import("../js/i18n.js");
+  answer = Object.assign(new Error("repo /Users/x/диск забит: stat: no such file or directory"), { code: "repo_not_a_directory" });
+  const form = open();
+  form.querySelector("input.newcard-title").value = "анализ дискового пространства";
+  form.querySelector("input.newcard-repo").value = "диск забит под завязку, нужно провести анализ, чем";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(form.hidden, false);
+  assert.equal(form.querySelector("div.newcard-error").textContent, `repo: ${t("card_refused_repo_not_a_directory")}`);
+  assert.equal(form.querySelector("input.newcard-repo").value, "диск забит под завязку, нужно провести анализ, чем");
+  assert.equal(form.querySelector("input.newcard-title").value, "анализ дискового пространства");
+});
+
 // The card exists; creating it again would make a second one. So the form
 // closes as on success, and the missing commit is said where it stays visible.
 test("new card: a card created without its commit closes the form and says the commit is missing", async () => {
