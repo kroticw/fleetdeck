@@ -68,6 +68,10 @@ func SetField(path, field, value string, expect *string) error {
 			return err
 		}
 		normalized = repo
+		if repo == "" {
+			// Quoted: a bare ~ or an empty value is YAML's null.
+			normalized = `""`
+		}
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownField, field)
 	}
@@ -123,18 +127,54 @@ func fieldValue(field string, fm frontmatter) string {
 	}
 }
 
+// homeSpellings are the ways a person writes the home directory itself, alone
+// or in front of a path from it.
+var homeSpellings = []string{"~", "$HOME", "${HOME}"}
+
 // NormalizeRepo is a card's repo field as it is written: a path from the home
-// directory, with a "~/" in front read as the same path and dropped. A path
-// that is empty, absolute, climbs out of home or spans lines is refused.
+// directory, with a "~/" or "$HOME/" in front read as the same path and
+// dropped. The home directory itself is "": a card with no repo is worked in
+// home (T-134), and "~", "~/" and "$HOME" are that same card. A path that is
+// absolute, climbs out of home, names another user's home or spans lines is
+// refused.
 func NormalizeRepo(value string) (string, error) {
-	repo := strings.TrimPrefix(strings.TrimSpace(value), "~/")
+	repo := strings.TrimSpace(value)
+	for _, home := range homeSpellings {
+		if repo == home {
+			return "", nil
+		}
+		if rest, ok := strings.CutPrefix(repo, home+"/"); ok {
+			repo = rest
+			break
+		}
+	}
 	switch {
 	case repo == "":
-		return "", errors.New("repo is empty")
-	case !filepath.IsLocal(repo) || strings.IndexFunc(repo, unicode.IsControl) >= 0:
-		return "", fmt.Errorf("repo %q must be a path inside the home directory, e.g. src/fleetdeck", value)
+		return "", nil
+	case strings.HasPrefix(repo, "~") || strings.HasPrefix(repo, "$") ||
+		!filepath.IsLocal(repo) || strings.IndexFunc(repo, unicode.IsControl) >= 0:
+		return "", &RuleRefusal{codeRepoOutsideHome, fmt.Sprintf("repo %q must be a path inside the home directory, e.g. src/fleetdeck", value)}
 	}
 	return filepath.Clean(repo), nil
+}
+
+// RepoDir is the directory a card's repo names: NormalizeRepo's path under
+// home, and home itself for a card with no repo. Anything but a directory
+// there is refused — a repo is the folder a worker starts in, not free text.
+func RepoDir(home, value string) (string, error) {
+	rel, err := NormalizeRepo(value)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, rel)
+	info, err := os.Stat(dir)
+	switch {
+	case err != nil:
+		return "", &RuleRefusal{codeRepoNotADirectory, fmt.Sprintf("repo %s: %v", dir, err)}
+	case !info.IsDir():
+		return "", &RuleRefusal{codeRepoNotADirectory, fmt.Sprintf("repo %s is not a directory: %s", rel, dir)}
+	}
+	return dir, nil
 }
 
 // normalize is the caller's expected value in the form fieldValue reports:
@@ -238,7 +278,8 @@ func substituteField(raw []byte, field, value string) ([]byte, error) {
 	return out, nil
 }
 
-// RuleRefusal is a write refused by one of the board's cross-field rules.
+// RuleRefusal is a write refused by one of the board's rules: a cross-field
+// rule, or a repo that is no folder under home.
 // Code names the rule, one code per rule whatever the stage or value it was
 // tripped by, so the interface can say the rule in its own language and
 // point at the way out; the words are for logs and for a page with no
@@ -255,9 +296,11 @@ func (e *RuleRefusal) Error() string { return e.msg }
 const (
 	codeSessionRequired   = "session_required"
 	codeDoneHoldsProgress = "done_holds_progress_100"
+	codeRepoOutsideHome   = "repo_outside_home"
+	codeRepoNotADirectory = "repo_not_a_directory"
 )
 
-var ruleCodes = []string{codeSessionRequired, codeDoneHoldsProgress}
+var ruleCodes = []string{codeSessionRequired, codeDoneHoldsProgress, codeRepoOutsideHome, codeRepoNotADirectory}
 
 // checkCrossFieldRules keeps a card in a state the board's own validator
 // accepts. The rule is one-directional: progress 100 with a stage other than

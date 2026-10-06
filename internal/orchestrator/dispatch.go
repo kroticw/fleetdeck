@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -156,23 +154,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 }
 
 // Workdir is the checkout a card's repo field names under home
-// (board.NormalizeRepo). It must be a directory; anything else is ErrNoRepo
-// with the reason.
+// (board.RepoDir), and home itself for a card with no repo: the operator's
+// rule is that work with no repo is done in ~ (T-134). It must be a
+// directory; anything else is ErrNoRepo with the reason.
 func Workdir(home, repo string) (string, error) {
-	if strings.TrimSpace(repo) == "" {
-		return "", fmt.Errorf("%w: set repo on the card, a path from the home directory, e.g. src/fleetdeck", ErrNoRepo)
-	}
-	rel, err := board.NormalizeRepo(repo)
+	dir, err := board.RepoDir(home, repo)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrNoRepo, err)
-	}
-	dir := filepath.Join(home, rel)
-	info, err := os.Stat(dir)
-	switch {
-	case err != nil:
-		return "", fmt.Errorf("%w: repo %s: %w", ErrNoRepo, rel, err)
-	case !info.IsDir():
-		return "", fmt.Errorf("%w: repo %s is not a directory: %s", ErrNoRepo, rel, dir)
 	}
 	return dir, nil
 }

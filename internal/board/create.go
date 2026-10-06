@@ -80,14 +80,15 @@ type NewCard struct {
 // created exclusively, and no existing card is ever overwritten. It returns the
 // path of the new card.
 func CreateCard(boardDir string, card NewCard, day time.Time) (string, error) {
-	title, zone, repo := strings.TrimSpace(card.Title), card.Zone, card.Repo
+	title, zone := strings.TrimSpace(card.Title), card.Zone
+	repo, err := NormalizeRepo(card.Repo)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidCard, err)
+	}
+	// A card with no repo is worked in home, and so is one whose repo is "~".
 	repoLine := ""
-	if strings.TrimSpace(repo) != "" {
-		r, err := NormalizeRepo(repo)
-		if err != nil {
-			return "", fmt.Errorf("%w: %w", ErrInvalidCard, err)
-		}
-		repoLine = "repo: " + r + "\n"
+	if repo != "" {
+		repoLine = "repo: " + repo + "\n"
 	}
 	switch {
 	case !validZones[zone]:

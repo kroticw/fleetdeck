@@ -128,6 +128,14 @@ const en = {
   card_refused_session_required:
     "the card has no session, and without one only the stage new is accepted. To start a session, drag the card into the active column on the board.",
   card_refused_done_holds_progress_100: "at the stage done progress stays 100. Change the stage first, then progress.",
+  // The repo rules (board.NormalizeRepo, board.RepoDir): a folder from ~, or
+  // empty for ~ itself.
+  card_refused_repo_outside_home:
+    "repo is a folder from the home directory, e.g. src/fleetdeck, or empty to work in ~ itself.",
+  card_refused_repo_not_a_directory:
+    "there is no such folder in the home directory. Give a folder from ~, e.g. src/fleetdeck, or leave repo empty to work in ~ itself.",
+  // What an empty repo field on a card says: a card with no repo is worked in ~.
+  card_repo_home: "~ (home directory)",
   backlinks: "linked from",
   // A card's documents (web/js/card.js) and, the other way, the cards a
   // document belongs to (web/js/doccards.js).
@@ -596,6 +604,11 @@ const ru = {
   card_refused_session_required:
     "у карточки нет сессии, а без неё принимается только стадия new. Чтобы поднять сессию, перетащите карточку в колонку active на доске.",
   card_refused_done_holds_progress_100: "на стадии done progress остаётся 100. Сначала смените стадию, потом progress.",
+  card_refused_repo_outside_home:
+    "repo — это папка от домашнего каталога, например src/fleetdeck, или пусто, чтобы работать в самом ~.",
+  card_refused_repo_not_a_directory:
+    "такой папки в домашнем каталоге нет. Укажите папку от ~, например src/fleetdeck, или оставьте repo пустым, чтобы работать в самом ~.",
+  card_repo_home: "~ (домашний каталог)",
   backlinks: "ссылаются сюда",
   card_docs: "документы",
   card_doc_missing: "не открывается: нет ни карточки, ни документа с таким именем, или документов с ним несколько",
