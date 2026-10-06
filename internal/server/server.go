@@ -155,6 +155,12 @@ type Deps struct {
 	// board is.
 	BoardDir string
 
+	// Home is the directory a card's repo is a path from (board.RepoDir). A
+	// repo written through the panel must name a folder there, or be empty
+	// for home itself; anything else is refused with a code the page has
+	// words for. Empty, the repo is not checked against the disk.
+	Home string
+
 	// DocsRoots are the directories the documentation section reads from, and the
 	// only directories a document request may resolve into. Like BoardDir, this is
 	// not a capability the panel simply lacks when it is empty: a document path

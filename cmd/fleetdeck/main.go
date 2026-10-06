@@ -997,6 +997,7 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 			return createCard(cfg.BoardPath, card, time.Now())
 		}
 	}
+	home, _ := os.UserHomeDir()
 	return server.Deps{
 		Snapshot: p.snapshot,
 		// Resuming reads the job store and the transcripts on every press
@@ -1041,6 +1042,8 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// browser and internal/board will rewrite a frontmatter line in any file
 		// that has one.
 		BoardDir: cfg.BoardPath,
+		// Where a card's repo is looked for, as the dispatcher looks for it.
+		Home: home,
 
 		// The other end of the docs.paths configuration key: the directories the
 		// operator listed are what the documentation section reads, and the only

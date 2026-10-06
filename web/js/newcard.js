@@ -4,8 +4,8 @@
 // card is written further by the agent or the person who takes the task on,
 // and the panel only has to be able to start one. Without this, a person with
 // no editor open on the board had no way to put a first card on it. The
-// repository is asked here because a worker is started in it and a card
-// without one is not handed over (T-061).
+// repository is asked here because a worker is started in it; a card without
+// one is worked in the home directory (T-134).
 //
 // The button that opens this is drawn in the board's new column (board.js) and
 // the form is not: the board is redrawn whole from every snapshot, and a form
@@ -21,7 +21,7 @@
 
 import { createCard, pickDirectory } from "./api.js";
 import { get } from "./store.js";
-import { t } from "./i18n.js";
+import { t, reasonText } from "./i18n.js";
 
 // The board's vocabulary of zones, in the order the operator's board lists them.
 const ZONES = ["urgent", "unplanned", "planned", "niceToHave"];
@@ -225,8 +225,11 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
         note.hidden = false;
       }
     } catch (err) {
-      // What was typed stays: the operator fixes it, not retypes it.
-      error.textContent = String(err?.message ?? err);
+      // What was typed stays: the operator fixes it, not retypes it. A repo
+      // the board refused is said by its code, in the page's words: it is the
+      // one field here whose rule the server's English does not explain.
+      const rule = String(err?.code ?? "").startsWith("repo_") ? reasonText("card_refused", err.code) : "";
+      error.textContent = rule ? `repo: ${rule}` : String(err?.message ?? err);
     } finally {
       busy = false;
       createButton.disabled = false;
