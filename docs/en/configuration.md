@@ -158,7 +158,7 @@ The two installations are told apart by their daemons, and a daemon's runtime di
 
 ## Worker sessions
 
-A card dropped into the board's `active` column without a session is handed to a worker session the panel starts (see [getting-started](getting-started.md)). The worker starts in the repository the card's `repo` field names, a path from your home directory such as `src/fleetdeck`; a card with no `repo`, or one naming a directory that is not there, is refused before anything starts.
+A card dropped into the board's `active` column without a session is handed to a worker session the panel starts (see [getting-started](getting-started.md)). The worker starts in the repository the card's `repo` field names, a path from your home directory such as `src/fleetdeck`; a card with no `repo`, or with `repo: ~`, is worked in the home directory itself. A card naming a directory that is not there is refused before anything starts.
 
 **By default a worker runs without the sandbox, in auto mode, on `opus`.** It is started with `--model opus --permission-mode auto --settings '{"sandbox":{"enabled":false}}'`, so it works unattended: it does not stop at the first edit to ask, and its Bash commands are not confined by Claude Code's sandbox. That is the default the panel was built for, and it is a real grant of trust: a worker can run any command your user can, in the repository its card names. Set the `workers` section to change it, for every fleet alike:
 
