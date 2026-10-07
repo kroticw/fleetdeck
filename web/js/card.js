@@ -146,9 +146,18 @@ export function renderCard(root, path, onClose, options = {}) {
   let painted = null;
   // The same for the row of tabs, which the authors' states also move.
   let paintedTabs = null;
-  // The documentation list, fetched once per opened panel and null until it
-  // arrives. A card's documents are the links in it that name a document there.
+  // The documentation list, null until it arrives. A card's documents are the
+  // links in it that name a document there.
   let docs = null;
+  // The documentation roots' revision the list and the bodies below were read
+  // at, as the snapshot carries it (T-138). The list was once fetched only when
+  // the sheet opened, so a report an agent wrote and linked while the card was
+  // open had no tab until the card was opened anew. Undefined until a snapshot
+  // names one; a server that names none leaves the list as it was first read.
+  let docsRevision;
+  // A list request in flight, and whether the revision moved while it was.
+  let listing = false;
+  let relist = false;
   let disposed = false;
   // The open tab: the card itself, or one of its documents by path (T-091).
   // Back to the card whenever the panel moves to another card.
@@ -337,9 +346,12 @@ export function renderCard(root, path, onClose, options = {}) {
     pane.scrollTop = 0;
   };
 
-  const load = (docPath) => {
-    if (bodies.has(docPath)) return;
-    bodies.set(docPath, { loading: true });
+  // again reads a body that is already held, keeping it on screen until the
+  // new one arrives: a document rewritten under its open tab is replaced, not
+  // blanked to a loading line first.
+  const load = (docPath, again = false) => {
+    if (bodies.has(docPath) && !again) return;
+    if (!again) bodies.set(docPath, { loading: true });
     Promise.resolve()
       .then(() => fetchBody(docPath))
       .then(
@@ -558,6 +570,14 @@ export function renderCard(root, path, onClose, options = {}) {
 
   const draw = (snap, focusField) => {
     latest = snap ?? null;
+    const revision = latest?.docsRevision;
+    if (revision !== undefined && revision !== docsRevision) {
+      // The first revision seen is the one the list fetched on opening answers
+      // for; any later one means a document appeared, went or changed.
+      const moved = docsRevision !== undefined;
+      docsRevision = revision;
+      if (moved) docsMoved();
+    }
     const cards = latest?.cards ?? [];
     const card = cards.find((c) => c.path === current) ?? null;
     for (const [field, value] of pending) {
@@ -740,23 +760,48 @@ export function renderCard(root, path, onClose, options = {}) {
   // (snapshot, connected), and draw's second parameter is a field name.
   const unsubscribe = subscribe((snap) => draw(snap));
 
-  (async () => {
-    let list = null;
-    try {
-      const answer = await listDocs();
-      list = Array.isArray(answer) ? answer : null;
-    } catch {
-      // No documentation roots, or none readable: the card is drawn exactly as
-      // it was before documents could be linked, its document links shown as
-      // links that do not work. The documentation section is where the
-      // server's reason is said. The list stays unknown rather than empty: an
-      // empty list would call every document link the card has broken.
-      list = null;
+  // One request at a time: a revision that moves while the list is on its way
+  // asks once more when it lands, so the last list drawn is never older than
+  // the last revision seen.
+  async function fetchDocs() {
+    if (listing) {
+      relist = true;
+      return;
     }
-    if (disposed) return;
-    docs = list;
-    draw(latest);
-  })();
+    listing = true;
+    do {
+      relist = false;
+      let list = null;
+      try {
+        const answer = await listDocs();
+        list = Array.isArray(answer) ? answer : null;
+      } catch {
+        // No documentation roots, or none readable: the card is drawn exactly as
+        // it was before documents could be linked, its document links shown as
+        // links that do not work. The documentation section is where the
+        // server's reason is said. The list stays unknown rather than empty: an
+        // empty list would call every document link the card has broken.
+        list = null;
+      }
+      if (disposed) return;
+      docs = list;
+      draw(latest);
+    } while (relist);
+    listing = false;
+  }
+
+  // The revision says something under the roots changed, not what: every body
+  // held may be stale. The open tab's is read again in place; the rest are
+  // dropped and read when their tab is next picked.
+  function docsMoved() {
+    for (const docPath of [...bodies.keys()]) {
+      if (docPath === active) load(docPath, true);
+      else bodies.delete(docPath);
+    }
+    fetchDocs();
+  }
+
+  fetchDocs();
 
   return () => {
     disposed = true;
