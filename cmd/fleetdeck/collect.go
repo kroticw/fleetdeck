@@ -18,6 +18,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/fleet"
 	"github.com/kroticw/fleetdeck/internal/jobs"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
+	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
@@ -580,6 +581,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 			}
 		}
 		fb.BriefPath, fb.BriefMissing, fb.BriefForeign = briefState(f)
+		fb.DocsRevision = server.DocsRevision(f.DocsPaths)
 		snap.Boards = append(snap.Boards, fb)
 		cards = append(cards, fb.Cards...)
 	}
@@ -587,6 +589,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	snap.OrchestratorBriefPath = snap.Boards[0].BriefPath
 	snap.OrchestratorBriefMissing = snap.Boards[0].BriefMissing
 	snap.OrchestratorBriefForeign = snap.Boards[0].BriefForeign
+	snap.DocsRevision = snap.Boards[0].DocsRevision
 
 	// The daemon's list is the live sessions and only those. Everything the
 	// panel knows about a stopped session comes from Claude Code's job store

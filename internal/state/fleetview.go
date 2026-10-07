@@ -62,6 +62,7 @@ func ForFleet(whole Snapshot, name string) (Snapshot, error) {
 	view.OrchestratorBriefPath = own.BriefPath
 	view.OrchestratorBriefMissing = own.BriefMissing
 	view.OrchestratorBriefForeign = own.BriefForeign
+	view.DocsRevision = own.DocsRevision
 	// Both card lists are computed from the whole snapshot's own views, not
 	// from daemonSessions: the lifecycle of a session is carried by the view
 	// (see SessionView.Lifecycle), and a daemon.Session alone cannot say
