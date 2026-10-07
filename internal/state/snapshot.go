@@ -191,6 +191,12 @@ type Snapshot struct {
 	StoppedCards []string `json:"stoppedCards,omitempty"`
 	DaemonError  string   `json:"daemonError,omitempty"`
 	BoardError   string   `json:"boardError,omitempty"`
+	// DocsRevision moves whenever a document under the fleet's documentation
+	// directories appears, goes or is rewritten (server.DocsRevision). An open
+	// card lists its documents when it opens, and asks again when this moves,
+	// so a report written and linked while the card is open gets its tab
+	// (T-138). Empty, and left out, when the fleet has no such directories.
+	DocsRevision string `json:"docsRevision,omitempty"`
 	// JobsError is set when Claude Code's job store could not be read, which
 	// is what stopped and dead sessions are known from. The live sessions in
 	// this snapshot are unaffected and are still shown: a source that failed
@@ -287,6 +293,9 @@ type FleetBoard struct {
 	BriefPath    string
 	BriefMissing bool
 	BriefForeign bool
+	// DocsRevision is this fleet's answer to the snapshot field of the same
+	// name, from its own documentation directories.
+	DocsRevision string
 }
 
 // Link attaches each session to the card that names it. A card names a

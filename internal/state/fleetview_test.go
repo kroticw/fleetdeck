@@ -185,6 +185,20 @@ func TestForFleetKeepsWhatTheCycleMeasured(t *testing.T) {
 	}
 }
 
+func TestForFleetCarriesThatFleetsDocsRevision(t *testing.T) {
+	whole := wholeTwoFleets()
+	whole.DocsRevision = "a-docs"
+	whole.Boards[0].DocsRevision = "a-docs"
+	whole.Boards[1].DocsRevision = "b-docs"
+	view, err := ForFleet(whole, "B")
+	if err != nil {
+		t.Fatalf("ForFleet(B): %v", err)
+	}
+	if view.DocsRevision != "b-docs" {
+		t.Fatalf("B's view carries docs revision %q: an open card of B would miss B's new documents", view.DocsRevision)
+	}
+}
+
 func TestForFleetWithNoNameIsTheFirstFleet(t *testing.T) {
 	view, err := ForFleet(wholeTwoFleets(), "")
 	if err != nil {

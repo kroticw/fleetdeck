@@ -86,6 +86,29 @@ func TestCollectReportsDaemonFailureAndKeepsBoard(t *testing.T) {
 	}
 }
 
+func TestCollectStampsTheDocsRevision(t *testing.T) {
+	docs := t.TempDir()
+	if err := os.WriteFile(filepath.Join(docs, "a.md"), []byte("# a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.BoardPath = t.TempDir()
+	cfg.DocsPaths = []string{docs}
+	cfg.UsageEnabled = false
+	c := NewCollector(cfg, deadDaemon(t), nil, t.TempDir())
+
+	before := c.Collect(context.Background())
+	if before.DocsRevision == "" || before.Boards[0].DocsRevision != before.DocsRevision {
+		t.Fatalf("docs revision %q, the fleet's %q", before.DocsRevision, before.Boards[0].DocsRevision)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "b.md"), []byte("# b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if after := c.Collect(context.Background()); after.DocsRevision == before.DocsRevision {
+		t.Fatal("a document written between two cycles must move the snapshot's docs revision")
+	}
+}
+
 func TestCollectReportsEmptyBoardAndKeepsGoing(t *testing.T) {
 	cfg := config.Default()
 	cfg.BoardPath = t.TempDir()

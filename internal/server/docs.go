@@ -1,7 +1,10 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -65,10 +68,51 @@ func (d Deps) handleDocsList(w http.ResponseWriter, r *http.Request) {
 	// Never nil: an empty documentation set has to reach the browser as [] and
 	// not as null, which is not something the panel can map over.
 	out := make([]Doc, 0)
+	unreadable := walkDocs(d.DocsRoots, func(realRoot, resolved, rel string) {
+		out = append(out, Doc{Path: resolved, Title: rel, Root: realRoot, Session: board.DocSession(resolved)})
+	})
+
+	if len(unreadable) == len(d.DocsRoots) {
+		fail(w, http.StatusNotFound, "no configured documentation root could be read: "+strings.Join(unreadable, ", "))
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// DocsRevision names the state of the documents under roots: it moves when a
+// document the list would show appears, goes, or is rewritten, and stays put
+// otherwise. It is empty when there are no roots.
+//
+// The panel lists the documents when a card opens, and an agent writes its
+// report while the card is open (T-138); the snapshot carries this so the card
+// asks for the list again when it moves. It is computed on every collect cycle
+// rather than by watching the roots: a root is a whole tree, fsnotify does not
+// watch recursively, and on macOS its kqueue backend holds a descriptor for
+// every file in every watched directory. Walking the same files the list walks
+// costs a stat each, and reads none of them.
+func DocsRevision(roots []string) string {
+	if len(roots) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	walkDocs(roots, func(_, resolved, _ string) {
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(h, "%s\x00%d\x00%d\n", resolved, info.Size(), info.ModTime().UnixNano())
+	})
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// walkDocs calls visit for every document the list shows, each once, and
+// returns the roots that could not be read at all. Shared by the list and its
+// revision, so that the two can never disagree on what a document is.
+func walkDocs(roots []string, visit func(realRoot, resolved, rel string)) []string {
 	seen := make(map[string]bool)
 	var unreadable []string
 
-	for _, root := range d.DocsRoots {
+	for _, root := range roots {
 		realRoot, err := filepath.EvalSymlinks(root)
 		if err != nil {
 			unreadable = append(unreadable, root)
@@ -94,18 +138,13 @@ func (d Deps) handleDocsList(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 			seen[resolved] = true
-			out = append(out, Doc{Path: resolved, Title: rel, Root: realRoot, Session: board.DocSession(resolved)})
+			visit(realRoot, resolved, rel)
 			return nil
 		}); err != nil {
 			unreadable = append(unreadable, root)
 		}
 	}
-
-	if len(unreadable) == len(d.DocsRoots) {
-		fail(w, http.StatusNotFound, "no configured documentation root could be read: "+strings.Join(unreadable, ", "))
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
+	return unreadable
 }
 
 // handleDocsContent returns one document, by the path the list handed out.

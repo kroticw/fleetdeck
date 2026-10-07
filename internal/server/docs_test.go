@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // docsDeps returns a Deps whose documentation roots are the ones given. Every
@@ -378,5 +379,54 @@ func TestDocsRoutesAreReadOnly(t *testing.T) {
 	New(docsDeps(t, dir)).ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("the documentation routes read only, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// T-138: the panel reads the documentation list once per open card, so the
+// snapshot carries a revision of the roots and a card asks again when it moves.
+func TestDocsRevisionMovesWhenADocumentAppearsOrChanges(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.md"), "# a")
+	before := DocsRevision([]string{dir})
+	if before == "" {
+		t.Fatal("a readable root with a document must have a revision")
+	}
+	if again := DocsRevision([]string{dir}); again != before {
+		t.Fatalf("nothing changed and the revision moved: %q, then %q", before, again)
+	}
+
+	path := filepath.Join(dir, "reports", "b.md")
+	writeFile(t, path, "# b")
+	added := DocsRevision([]string{dir})
+	if added == before {
+		t.Fatal("a document written under a subdirectory must move the revision")
+	}
+
+	stat, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "# b, rewritten")
+	if err := os.Chtimes(path, stat.ModTime(), stat.ModTime().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if DocsRevision([]string{dir}) == added {
+		t.Fatal("a document rewritten must move the revision")
+	}
+}
+
+func TestDocsRevisionIgnoresWhatTheListDoesNotShow(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.md"), "# a")
+	before := DocsRevision([]string{dir})
+	writeFile(t, filepath.Join(dir, "picture.png"), "x")
+	if DocsRevision([]string{dir}) != before {
+		t.Fatal("a file the list never shows must not make every open card ask for the list again")
+	}
+}
+
+func TestDocsRevisionOfNoRootsIsEmpty(t *testing.T) {
+	if got := DocsRevision(nil); got != "" {
+		t.Fatalf("no roots, no revision: got %q", got)
 	}
 }

@@ -1524,3 +1524,61 @@ test("the card's fields, meta, body and backlinks sit in the pane, its head abov
   assert.equal(pane.querySelector(".card-head"), null, "the head stays above the tabs");
   assert.ok(root.querySelector(".card-tabs"), "the sheet has a row of tabs");
 });
+
+// T-138: the documentation list is fetched when the sheet opens, and an agent
+// writes its report afterwards -- the document and the link to it both arrive
+// while the card is open. The snapshot carries the documentation roots'
+// revision; a new one asks for the list again, so the tab appears without the
+// card being opened anew.
+test("a document written while the card is open gets its tab when the docs revision moves", async () => {
+  let listed = [];
+  let asked = 0;
+  const first = snapshot();
+  first.docsRevision = "r1";
+  const { root, store } = open(first, FLEET_UI, {
+    listDocs: async () => {
+      asked += 1;
+      return listed;
+    },
+  });
+  await settle();
+  assert.deepEqual([...root.querySelectorAll(".card-tab")].map((b) => b.dataset.key), ["card"]);
+
+  listed = DOCS;
+  const next = withDocuments(snapshot());
+  next.docsRevision = "r2";
+  store.push(next);
+  await settle();
+
+  assert.deepEqual(
+    [...root.querySelectorAll(".card-tab")].map((b) => b.dataset.key),
+    ["card", "/board/docs/reports/2026-09-12-report.md", "/board/docs/reports/2026-09-13-design.md"],
+  );
+  assert.equal(asked, 2);
+
+  store.push(next);
+  await settle();
+  assert.equal(asked, 2, "an unchanged revision asks for nothing");
+});
+
+test("a document rewritten while its tab is open is read again when the docs revision moves", async () => {
+  let text = "# Report\n\nFirst draft.\n";
+  const first = withDocuments(snapshot());
+  first.docsRevision = "r1";
+  const { root, store } = open(first, FLEET_UI, {
+    listDocs: async () => DOCS,
+    fetchDoc: async () => text,
+  });
+  await settle();
+  fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+  await settle();
+  assert.match(root.querySelector(".card-doc-body").innerHTML, /First draft/);
+
+  text = "# Report\n\nFinal.\n";
+  const next = withDocuments(snapshot());
+  next.docsRevision = "r2";
+  store.push(next);
+  await settle();
+
+  assert.match(root.querySelector(".card-doc-body").innerHTML, /Final/);
+});
