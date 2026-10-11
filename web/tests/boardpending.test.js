@@ -306,3 +306,34 @@ test("board pending: a placeholder is no column of its own and opens nothing", a
   fireEvent(ghost, "click");
   assert.deepEqual(opened, []);
 });
+
+// --- motion (T-159, PR2) ---
+//
+// flip.js follows a node by its key from one drawing to the next. On the
+// board a card is its path and its group is its column; a placeholder is
+// keyed by its own number, so two cards of one title being created are two.
+
+test("board motion: a card is followed by its path, in its column", () => {
+  const { flipKeys } = boardModule;
+  const column = dom.element("div");
+  column.className = "kcol";
+  column.dataset.stage = "review";
+  const card = dom.element("article");
+  card.className = "kcard";
+  card.dataset.path = CARD;
+  column.appendChild(card);
+  assert.equal(flipKeys.keyOf(card), CARD);
+  assert.equal(flipKeys.groupOf(card), "review");
+});
+
+test("board motion: placeholders are told apart by their own number", async () => {
+  socket.push(snap("active"));
+  handle.creating("same title", "planned");
+  handle.creating("same title", "planned");
+  const numbers = [...board.innerHTML.matchAll(/data-ghost="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(numbers.length, 2);
+  assert.notEqual(numbers[0], numbers[1]);
+  const ghost = dom.element("article");
+  ghost.dataset.ghost = numbers[0];
+  assert.equal(boardModule.flipKeys.keyOf(ghost), `ghost:${numbers[0]}`);
+});

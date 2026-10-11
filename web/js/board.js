@@ -3,6 +3,7 @@ import { t } from "./i18n.js";
 import { markScrollable, watchSelf } from "./scrollable.js";
 // The card's number, drawn the same way here and in the session list.
 import { cardNumberHTML } from "./cardnumber.js";
+import { capture, play, reducedMotion, viewportOf } from "./flip.js";
 
 const STAGES = ["new", "active", "review", "blocked", "done"];
 
@@ -107,7 +108,7 @@ function statusHTML(c) {
 function ghostHTML(g) {
   const text = g.slow ? t("card_slow") : t("card_creating");
   return `
-    <article class="kcard kcard-ghost kcard-pending${g.slow ? " kcard-slow" : ""} ${zoneClass(g.zone)}">
+    <article class="kcard kcard-ghost kcard-pending${g.slow ? " kcard-slow" : ""} ${zoneClass(g.zone)}" data-ghost="${g.id}">
       <div class="ktitle">${escapeHTML(g.title)}</div>
       <div class="kstatus" role="status">${escapeHTML(text)}</div>
     </article>`;
@@ -267,6 +268,18 @@ export function pendingView(snap, pending, now = Date.now(), failed = new Map())
   return { ...snap, cards };
 }
 
+// flipKeys is how flip.js follows the board's cards from one drawing to the
+// next: a card by its path, a placeholder by its own number, each in its
+// column.
+export const flipKeys = {
+  keyOf: (n) => n.dataset?.path || (n.dataset?.ghost ? `ghost:${n.dataset.ghost}` : ""),
+  groupOf: (n) => n.closest?.(".kcol")?.dataset.stage ?? "",
+};
+
+function intersect(a, b) {
+  return { left: Math.max(a.left, b.left), top: Math.max(a.top, b.top), right: Math.min(a.right, b.right), bottom: Math.min(a.bottom, b.bottom) };
+}
+
 // The stages the board refuses a card with no session (internal/board,
 // checkCrossFieldRules). Active is not among them: a drop there offers to
 // start one (boardmove.js).
@@ -301,6 +314,7 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // read: what pendingView and render draw on top of the snapshot.
   const failed = new Map();
   const ghosts = [];
+  let ghostCount = 0;
   // The card being dragged, while one is. render reads the same state off
   // root.dataset and skips the frame; this holds what the drop needs to know.
   let dragging = null;
@@ -320,7 +334,15 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
       if (landed || (g.createdAt !== undefined && now - g.createdAt > SETTLE_MS)) ghosts.splice(ghosts.indexOf(g), 1);
       else g.slow = g.createdAt === undefined && now - g.since > SLOW_MS;
     }
+    // A drawing a drag holds back moves nothing: render keeps the nodes.
+    if (root.dataset?.dragging) return;
+    const cards = () => [...root.querySelectorAll(".kcard")];
+    // A card is seen through its column, which scrolls in the window, and
+    // through the board, which scrolls in a browser tab.
+    const clipOf = (n) => intersect(root.getBoundingClientRect(), n.closest(".kcol").getBoundingClientRect());
+    const before = capture(cards(), { ...flipKeys, clipOf });
     render(root, ghosts.length ? { ...view, creating: ghosts } : view);
+    play(before, cards(), { ...flipKeys, viewport: viewportOf(), clipOf, reduced: reducedMotion() });
   };
   // Drawn again when a mark runs out, for a board no snapshot reaches in the
   // meantime: a dropped socket must not leave "slow" unsaid or a refusal up
@@ -479,7 +501,8 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // failed, which takes it off (the form reopens with what was typed).
   return {
     creating(title, zone) {
-      const ghost = { title, zone, since: Date.now() };
+      ghostCount += 1;
+      const ghost = { id: ghostCount, title, zone, since: Date.now() };
       ghosts.push(ghost);
       later(SLOW_MS);
       draw();
