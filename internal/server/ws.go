@@ -70,17 +70,40 @@ func (d Deps) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	ticker := time.NewTicker(d.pushInterval())
 	defer ticker.Stop()
+	var updates <-chan struct{}
+	if d.Updates != nil {
+		var stop func()
+		updates, stop = d.Updates.Subscribe()
+		defer stop()
+	}
 	for {
 		if !d.push(ctx, conn, r) {
 			return
 		}
+		last := time.Now()
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-updates:
+			// At once, but never closer than pushGap to the last push: a write,
+			// its refresh and its commit are a burst, and the page redraws once.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(pushGap - time.Since(last)):
+			}
+			select {
+			case <-updates:
+			default:
+			}
 		}
 	}
 }
+
+// pushGap is the least time between two pushes on one socket that an update,
+// rather than the tick, brings about.
+const pushGap = 100 * time.Millisecond
 
 // readOnly drains the client's side of a socket that is not supposed to have one.
 // Somebody has to read: without a reader the library never sees a ping, a pong or

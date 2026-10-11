@@ -123,17 +123,44 @@ func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
 	if err != nil {
 		return view, err
 	}
-	start := d.StartWork
+	start, boardDir := d.StartWork, d.BoardDir
 	if d.Fleet != nil {
 		f, err := d.Fleet(name)
 		if err != nil {
 			return view, nil // a fleet the snapshot accepted and the configuration does not: nothing to start
 		}
-		start = f.StartWork
+		start, boardDir = f.StartWork, f.BoardDir
 	}
 	view.CanStartWork = start != nil
 	view.Starting = d.startsIn(view)
+	if d.CommitState != nil {
+		if q := d.CommitState(boardDir); q != (board.CommitState{}) {
+			view.BoardCommits = &q
+		}
+	}
 	return view, nil
+}
+
+// handleRetryCommits tries the failed commits of the fleet's board again: the
+// operator pressing Retry, there to answer a PIN prompt.
+func (d Deps) handleRetryCommits(w http.ResponseWriter, r *http.Request) {
+	d, ok := d.forFleet(w, r)
+	if !ok {
+		return
+	}
+	if d.RetryCommits == nil || d.BoardDir == "" {
+		unavailable(w, "a board commit queue")
+		return
+	}
+	d.RetryCommits(d.BoardDir)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// changed tells the panel a write happened.
+func (d Deps) changed() {
+	if d.Changed != nil {
+		d.Changed()
+	}
 }
 
 // startsIn is the starts under way for the cards view shows.
@@ -236,6 +263,7 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 	before := cardBefore(path)
 	switch err := d.SetCardField(path, body.Field, body.Value, body.Expect); {
 	case err == nil:
+		d.changed()
 		d.answerCardWrite(w, d.stageByHand(r, before, body.Field, body.Value, body.Lang), true, "")
 	case errors.Is(err, board.ErrStale):
 		// Nothing was written and nothing about the request was wrong: the card
@@ -255,6 +283,7 @@ func (d Deps) handlePatchCard(w http.ResponseWriter, r *http.Request) {
 		// on a progress field would apply it twice. So the outcome goes out as a
 		// success carrying the part that did not happen and why, for the panel to
 		// show as it likes.
+		d.changed()
 		d.answerCardWrite(w, d.stageByHand(r, before, body.Field, body.Value, body.Lang), false, err.Error())
 	default:
 		var rule *board.RuleRefusal
@@ -319,9 +348,14 @@ func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	}
 	path, err := d.CreateCard(board.NewCard{Title: body.Title, Zone: body.Zone, Repo: body.Repo, Description: body.Description, Attachments: body.Attachments})
 	switch {
+	case err == nil && d.QueuedCommits:
+		d.changed()
+		writeJSON(w, http.StatusCreated, map[string]any{"path": path, "committed": false, "queued": true})
 	case err == nil:
+		d.changed()
 		writeJSON(w, http.StatusCreated, map[string]any{"path": path, "committed": true})
 	case errors.Is(err, ErrCardWrittenNotCommitted):
+		d.changed()
 		// Created, deliberately: the card is on the board, and a failure here
 		// would invite the operator to make a second one.
 		writeJSON(w, http.StatusCreated, map[string]any{"path": path, "committed": false, "reason": err.Error()})

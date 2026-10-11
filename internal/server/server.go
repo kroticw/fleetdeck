@@ -115,6 +115,23 @@ type Deps struct {
 	// own board, under a name made from the title.
 	CreateCard func(card board.NewCard) (string, error)
 
+	// QueuedCommits says SetCardField and CreateCard answer once the file is
+	// written and leave its commit to the board's queue (T-161): a created card
+	// is then answered as queued, not as committed. CommitState is that queue
+	// for a board directory, served in every snapshot of its fleet, and
+	// RetryCommits tries its failed commits again (POST
+	// /api/board/commits/retry). Nil for a panel without a queue.
+	QueuedCommits bool
+	CommitState   func(boardDir string) board.CommitState
+	RetryCommits  func(boardDir string)
+
+	// Changed is told after every write that happened, so the snapshot is
+	// refreshed at once rather than when the board watcher's burst window
+	// closes. Updates wakes every open socket to push the snapshot now (see
+	// Notifier). Either may be nil.
+	Changed func()
+	Updates *Notifier
+
 	// PickDirectory shows the operator a folder dialog with prompt and answers
 	// the chosen folder as a card's repo, "" when the dialog was cancelled.
 	// ChooseFolder on macOS; nil elsewhere, where the route answers 503.
@@ -319,6 +336,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/resume", d.handleResume)
 	mux.HandleFunc("PATCH /api/cards", d.handlePatchCard)
 	mux.HandleFunc("POST /api/cards", d.handleCreateCard)
+	mux.HandleFunc("POST /api/board/commits/retry", d.handleRetryCommits)
 	mux.HandleFunc("GET /api/review", d.handleReview)
 	mux.HandleFunc("GET /api/review/lines", d.handleReviewLines)
 	mux.HandleFunc("POST /api/review/comments", d.handleReviewAdd)
