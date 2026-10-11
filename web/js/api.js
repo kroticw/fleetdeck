@@ -125,10 +125,12 @@ export async function setCardField(path, field, value, expect) {
 // createCard starts a card on the board from a title, a zone, the repository
 // its worker starts in and a description of the task — the fields the route
 // takes, and nothing else. An empty repo is a card without one, an empty
-// description a card with only its title. It answers {path, committed, reason}: 201
-// both when the card was committed and when it reached the board without its
-// commit, because the card exists either way and creating it again would make a
-// second one. A thrown error means no card was made.
+// description a card with only its title. It answers {path, committed, queued,
+// reason}: 201 both when the card was committed and when it reached the board
+// without its commit, because the card exists either way and creating it again
+// would make a second one. queued is a card written whose commit the board's
+// queue makes afterwards (T-161): nothing is missing yet. A thrown error means
+// no card was made.
 export async function createCard(title, zone, repo = "", description = "", attachments = []) {
   const card = { title: String(title), zone: String(zone), repo: String(repo), description: String(description) };
   // Only when there are any: {name, data} with data in base64.
@@ -146,8 +148,20 @@ export async function createCard(title, zone, repo = "", description = "", attac
   return {
     path: String(body?.path ?? ""),
     committed: body?.committed === true,
+    queued: body?.queued === true,
     reason: String(body?.reason ?? ""),
   };
+}
+
+// retryCommits tries the board's failed commits again (POST
+// /api/board/commits/retry): the operator pressing Retry, there to answer the
+// PIN prompt a commit may raise. The guard wants a JSON body on every POST, so
+// an empty object goes. 204 is done; a thrown error carries the server's words.
+export async function retryCommits() {
+  const response = await fetch(inFleet("/api/board/commits/retry"), { method: "POST", headers: JSON_HEADERS, body: "{}" });
+  if (response.status !== 204) {
+    throw await refusal(response);
+  }
 }
 
 // pickDirectory asks the panel for the Finder's folder dialog, prompt as its

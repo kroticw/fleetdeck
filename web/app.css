@@ -3103,6 +3103,35 @@ button.review-line-add:hover {
   display: none;
 }
 
+/* The board's commits that failed after their writes answered (T-161): where
+   the new card form's note sits, under the tab row, in the colour of a thing
+   that needs a look and is not broken. Its button tries them again. */
+.commit-note {
+  position: absolute;
+  top: 100%;
+  right: var(--gap-lg);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(70%, 640px);
+  color: var(--attn);
+  font-size: var(--fs-xs);
+  background: var(--surface-raised);
+  padding: 2px 4px 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.commit-note[hidden] {
+  display: none;
+}
+
+.commit-note-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .newcard-note {
   position: absolute;
   top: 100%;

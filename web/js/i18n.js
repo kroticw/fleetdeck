@@ -87,6 +87,9 @@ const en = {
   card_move_failed: "not moved",
   session_starting: "Starting",
   session_starting_slow: "taking longer than usual…",
+  // The board's commits that failed after their writes were answered (T-161).
+  commits_failed: "Board writes not committed",
+  commits_retry: "Retry",
   gone_badge: "Gone",
   gone_no_cwd: "its working directory no longer exists",
   last_state: "last state",
@@ -594,6 +597,8 @@ const ru = {
   card_move_failed: "не перенесена",
   session_starting: "Запускается",
   session_starting_slow: "дольше обычного…",
+  commits_failed: "Записи доски не закоммичены",
+  commits_retry: "Повторить",
   gone_badge: "Не поднять",
   gone_no_cwd: "рабочего каталога больше нет",
   last_state: "последнее состояние",

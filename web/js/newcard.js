@@ -232,7 +232,7 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
       const files = await Promise.all(typed.files.map(async (file) => ({ name: file.name, data: await base64(file) })));
       const result = await create(text, typed.zone, where, typed.description.trim(), files);
       shown?.created(result.path);
-      if (!result.committed) {
+      if (!result.committed && !result.queued) {
         note.textContent = `${t("new_card_not_committed")}: ${result.reason}`;
         note.hidden = false;
       }

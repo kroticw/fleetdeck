@@ -8,6 +8,7 @@ import { createReader } from "./reader.js";
 import { createReviewPanel } from "./review.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
+import { renderCommitNote } from "./commitnote.js";
 import { createBoardMove } from "./boardmove.js";
 import { probeColumnScroll, watchBoardScroll, watchCardSheetOnStand, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
@@ -295,6 +296,8 @@ if (regions.has("center")) {
   // #board, which every snapshot replaces whole.
   newCard = createNewCard(document.getElementById("tabs"), { creating: board?.creating });
   boardMove = createBoardMove(document.getElementById("tabs"));
+  // The board's commits that failed after their writes answered (T-161).
+  renderCommitNote(document.getElementById("tabs"));
   // A stand's frame with the form open (web/js/host.js, open).
   if (host?.open?.includes("newcard")) newCard.open();
 }

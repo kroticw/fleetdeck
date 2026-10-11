@@ -173,6 +173,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/terminalfont.js":   true,
 		"js/fontcontrols.js":   true,
 		"js/newcard.js":        true,
+		"js/commitnote.js":     true,
 		"js/boardmove.js":      true,
 		"js/flip.js":           true,
 		"js/dialog.js":         true,

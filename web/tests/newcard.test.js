@@ -533,3 +533,14 @@ test("new card: a refused card is taken off the board and the form comes back as
   assert.equal(form.querySelector("textarea.newcard-desc").value, "the task");
   assert.match(form.querySelector("div.newcard-error").textContent, /unknown zone/);
 });
+
+// A card whose commit the board's queue makes afterwards (T-161) is missing
+// nothing yet: a failed commit is said by the board's own note, not here.
+test("new card: a card with its commit queued says nothing about a missing commit", async () => {
+  answer = { path: "/b/cards/x.md", committed: false, queued: true, reason: "" };
+  const form = open();
+  form.querySelector("input.newcard-title").value = "Queued";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(host.querySelector("span.newcard-note").hidden, true);
+});

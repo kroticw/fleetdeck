@@ -322,7 +322,7 @@ test("a new card is a POST of its title, zone, repo and description, and nothing
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers["Content-Type"], "application/json");
   assert.deepEqual(JSON.parse(calls[0].init.body), { title: "A task", zone: "planned", repo: "src/fleetdeck", description: "what and why" });
-  assert.deepEqual(result, { path: "/b/cards/2026-09-11-a-task.md", committed: true, reason: "" });
+  assert.deepEqual(result, { path: "/b/cards/2026-09-11-a-task.md", committed: true, queued: false, reason: "" });
 });
 
 test("a new card that reached the board but not its history says so", async () => {
@@ -404,4 +404,34 @@ test("a round is resent in the tab's fleet, naming the round", async () => {
   } finally {
     delete globalThis.location;
   }
+});
+
+// --- the board's commit queue (T-161) ---
+
+test("a card whose commit is queued is answered as queued, not as missing its commit", async () => {
+  stubFetch(answer({ status: 201, body: { path: "/b/cards/T-002.md", committed: false, queued: true } }));
+  const got = await createCard("x", "planned");
+  assert.equal(got.queued, true);
+  assert.equal(got.committed, false);
+});
+
+test("a card answered without the word is not taken for queued", async () => {
+  stubFetch(answer({ status: 201, body: { path: "/b/cards/T-002.md", committed: false, reason: "no git" } }));
+  assert.equal((await createCard("x", "planned")).queued, false);
+});
+
+test("retrying the board's commits is a POST with an empty JSON body, and 204 is done", async () => {
+  const { retryCommits } = await import("../js/api.js");
+  stubFetch(answer({ status: 204 }));
+  await retryCommits();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/api\/board\/commits\/retry/);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.body, "{}");
+});
+
+test("a refused retry throws with the server's words", async () => {
+  const { retryCommits } = await import("../js/api.js");
+  stubFetch(answer({ status: 503, body: { error: "this panel has no board commit queue" } }));
+  await assert.rejects(retryCommits(), /no board commit queue/);
 });
