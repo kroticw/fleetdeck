@@ -434,3 +434,102 @@ test("new card: a refused dialog says why in the form", async () => {
   assert.match(form.querySelector("div.newcard-error").textContent, /macOS only/);
   assert.equal(form.querySelector("button.newcard-pick").disabled, false);
 });
+
+// --- the card shown before the server answers ---
+//
+// A card is a signed commit, about 0.4 s, and the board reads it up to a
+// second after that (T-159). The form used to sit there with a dead button for
+// the first part and close onto an empty column for the second. It closes at
+// once now, and the board draws the card as being created until it is read.
+
+function creatingRecorder() {
+  const told = [];
+  return {
+    told,
+    creating(title, zone) {
+      told.push({ title, zone });
+      return {
+        created: (path) => told.push({ created: path }),
+        failed: () => told.push({ failed: true }),
+      };
+    },
+  };
+}
+
+function withBoard(recorder) {
+  host = dom.element("nav");
+  dom.document.body.appendChild(host);
+  card = createNewCard(host, { create: fakeCreate, pick: fakePick, cards: () => boardCards, creating: recorder.creating });
+}
+
+test("new card: the form closes the moment Create is pressed, and the board is told", async () => {
+  const recorder = creatingRecorder();
+  withBoard(recorder);
+  let release;
+  answer = new Promise((resolve) => (release = resolve));
+  const form = open();
+  form.querySelector("input.newcard-title").value = "On its way";
+  form.querySelector("select.newcard-zone").value = "urgent";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(form.hidden, true, "the form waits for the server with a dead button");
+  assert.deepEqual(recorder.told, [{ title: "On its way", zone: "urgent" }]);
+
+  release({ path: "/b/cards/T-002.md", committed: true, reason: "" });
+  await settle();
+  assert.deepEqual(recorder.told.at(-1), { created: "/b/cards/T-002.md" });
+});
+
+test("new card: the next card can be started while one is on its way", async () => {
+  withBoard(creatingRecorder());
+  answer = new Promise(() => {});
+  const form = open();
+  form.querySelector("input.newcard-title").value = "First";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  open();
+  assert.equal(form.querySelector("input.newcard-title").value, "", "the card on its way is still in the form");
+});
+
+// The board's commits are one at a time, so the next card waits for the one
+// on its way — but Create works, and nothing typed is dropped.
+test("new card: a card created while one is on its way is sent once that one has answered", async () => {
+  const recorder = creatingRecorder();
+  withBoard(recorder);
+  let release;
+  answer = new Promise((resolve) => (release = resolve));
+  const form = open();
+  form.querySelector("input.newcard-title").value = "First";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  open();
+  assert.equal(form.querySelector("button.newcard-create").disabled, false, "the form opens with a dead button");
+  form.querySelector("input.newcard-title").value = "Second";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(form.hidden, true);
+  assert.deepEqual(sent.map((c) => c.title), ["First"], "two commits on the board at once");
+  assert.deepEqual(recorder.told.map((x) => x.title).filter(Boolean), ["First", "Second"], "the second card is not drawn as on its way");
+
+  answer = { path: "/b/cards/T-003.md", committed: true, reason: "" };
+  release({ path: "/b/cards/T-002.md", committed: true, reason: "" });
+  await settle();
+  await settle();
+  assert.deepEqual(sent.map((c) => c.title), ["First", "Second"]);
+});
+
+test("new card: a refused card is taken off the board and the form comes back as it was", async () => {
+  const recorder = creatingRecorder();
+  withBoard(recorder);
+  answer = new Error('invalid card: unknown zone "someday"');
+  const form = open();
+  form.querySelector("input.newcard-title").value = "Kept";
+  form.querySelector("textarea.newcard-desc").value = "the task";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.deepEqual(recorder.told.at(-1), { failed: true });
+  assert.equal(form.hidden, false, "the refusal has nowhere to be read");
+  assert.equal(form.querySelector("input.newcard-title").value, "Kept");
+  assert.equal(form.querySelector("textarea.newcard-desc").value, "the task");
+  assert.match(form.querySelector("div.newcard-error").textContent, /unknown zone/);
+});

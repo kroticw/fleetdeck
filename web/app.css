@@ -1147,6 +1147,39 @@ main {
   color: var(--text);
 }
 
+/* A session being started for a card (T-159): the daemon lists nothing until
+   claude --bg is up, and the start takes seconds. The ring turns while it
+   does, and stands still, whole, for a person who asked for less motion
+   (the reduced-motion block by .kcol). */
+.sbadge-starting {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--accent-strong);
+}
+
+.sspin {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: sspin 0.8s linear infinite;
+}
+
+@keyframes sspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sstarting-slow {
+  font-size: var(--fs-2xs);
+  color: var(--attn);
+}
+
 /* A session whose source never said whether anyone is waiting. Quiet on purpose:
  * nothing here is asking for a person, so it must not carry the weight of the
  * waiting badge -- but it must not be absent either, because an absent badge is
@@ -2592,6 +2625,19 @@ button.review-line-add:hover {
   .kcol {
     transition: none;
   }
+
+  /* What waits (T-159) stands still, and still says it waits: the bar along
+     a card being written stays drawn, the ring of a start stays whole. */
+  .kcard-pending::after {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+
+  .sspin {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.6;
+  }
 }
 
 .kcol h5 {
@@ -2855,6 +2901,65 @@ button.review-line-add:hover {
 .kcard-dragging {
   opacity: 0.4;
 }
+
+/* A card the board draws ahead of the panel's answer (T-159): moved, created,
+   or having a session started for it. The write is a signed commit and a start
+   takes seconds, and the card used to wait in the column it was dropped out of.
+   Dashed edges say it is not written yet; the bar along its foot runs while it
+   waits, and stands still under reduced motion (the block by .kcol). A
+   refused move is back in its column with a word in --danger. */
+.kcard-pending {
+  position: relative;
+  border-top-style: dashed;
+  border-right-style: dashed;
+  border-bottom-style: dashed;
+}
+
+.kcard-pending::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 40% 100%;
+  animation: kpending 1.2s linear infinite;
+}
+
+@keyframes kpending {
+  from {
+    background-position: -70% 0;
+  }
+  to {
+    background-position: 170% 0;
+  }
+}
+
+.kstatus {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+.kcard-slow .kstatus {
+  color: var(--attn);
+}
+
+.kcard-ghost .ktitle {
+  color: var(--text-muted);
+}
+
+.kcard-failed {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.kstatus-failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 
 /* A window over the board, centred by margin: auto between four zero edges,
    about 60% of the room each way and never more than the room less a margin. */

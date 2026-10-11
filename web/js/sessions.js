@@ -154,7 +154,37 @@ function unknownBadge(s) {
   return `<span class="sbadge sbadge-unknown" title="${escapeHtml(t("waiting_unknown_hint"))}">${escapeHtml(t("waiting_unknown"))}</span>`;
 }
 
-export function rowHtml(s, stalledNow) {
+// How long a start may take before its row says it is taking longer than
+// usual. A start from the board is 1.5 to 3.3 seconds when nothing is wrong
+// (T-159, measured over the board's own history).
+export const STARTING_SLOW_MS = 5000;
+
+// startingBadge is the ring and the word a start is drawn with, on a row of
+// its own or on the session's once the daemon lists it.
+function startingBadge() {
+  return `<span class="sbadge sbadge-starting" role="status"><i class="sspin" aria-hidden="true"></i>${escapeHtml(t("session_starting"))}</span>`;
+}
+
+function startingSlowHtml(starting) {
+  return starting?.slow ? `<div class="sstarting-slow">${escapeHtml(t("session_starting_slow"))}</div>` : "";
+}
+
+// startingRowHtml is a start the daemon lists nothing for yet: the card it is
+// for, by number and title, and the ring. No data-short — there is no session
+// behind it to open.
+export function startingRowHtml(start, card, slow) {
+  const name = card ? [card.id, card.title].filter(Boolean).join(" ") : String(start.card).split("/").pop();
+  return `
+    <article class="srow srow-starting">
+      <div class="srow-head">
+        <span class="sname">${escapeHtml(name)}</span>
+        ${startingBadge()}
+      </div>
+      ${startingSlowHtml({ slow })}
+    </article>`;
+}
+
+export function rowHtml(s, stalledNow, starting) {
   const waiting = isWaiting(s);
   const stalled = Boolean(stalledNow);
   // A source that never said whether anyone is waiting. This gets a marker of its
@@ -178,9 +208,12 @@ export function rowHtml(s, stalledNow) {
   // has owed for sixteen minutes. A stall in words never gets here: words make waiting
   // "no", not unknown.
   const leftUnanswered = unknown && isLeftUnanswered(s);
+  // A question outranks a start: it needs a person, and a start does not.
   const badge = waiting
     ? `<span class="sbadge sbadge-waiting">${escapeHtml(t("waiting"))}</span>`
-    : leftUnanswered
+    : starting
+      ? startingBadge()
+      : leftUnanswered
       ? unknownBadge(s)
       : stalled
         ? `<span class="sbadge sbadge-stalled">${escapeHtml(t("stalled"))}</span>`
@@ -263,6 +296,7 @@ export function rowHtml(s, stalledNow) {
         <span class="ssilent">${escapeHtml(silentLabel(s.silentFor))}</span>
         ${costHtml}
       </div>
+      ${startingSlowHtml(starting)}
       ${reasonHtml}
       ${incomingHtml}
       ${contextBarHtml(s.context)}
@@ -659,14 +693,27 @@ export function renderSessions(
     const running = sessions.filter(isLive);
     const gone = [...sessions, ...unclaimed].filter((s) => !isLive(s));
 
+    // The sessions the panel is starting for cards (snapshot.starting). One the
+    // daemon already lists, linked to its card, is said on that session's row;
+    // the rest are rows of their own at the top, until the daemon lists them.
+    const startOf = new Map((snap.starting ?? []).map((start) => [
+      start.card,
+      { slow: now() - Date.parse(start.since) > STARTING_SLOW_MS },
+    ]));
+    const listedCards = new Set(all.filter(isLive).map((s) => s.cardPath).filter(Boolean));
+    const startsHtml = (snap.starting ?? [])
+      .filter((start) => !listedCards.has(start.card))
+      .map((start) => startingRowHtml(start, (snap.cards ?? []).find((c) => c.path === start.card), startOf.get(start.card).slow))
+      .join("");
+
     // "Every session there is, is the orchestrator" and "there are no
     // sessions" are different facts, and a person reading an empty column
     // needs to know which one they are looking at.
-    const emptyHtml = running.length === 0 && gone.length === 0
+    const emptyHtml = running.length === 0 && gone.length === 0 && !startsHtml
       ? `<div class="sempty">${escapeHtml(scope.length === 0 ? t("no_sessions") : t("only_orchestrator"))}</div>`
       : "";
     if (sessions.length === 0 && unclaimed.length === 0 && others.length === 0) {
-      setBody(HEAD + emptyHtml, foldedStripHtml([], new Set()));
+      setBody(HEAD + emptyHtml + startsHtml, foldedStripHtml([], new Set()));
       return;
     }
 
@@ -694,7 +741,7 @@ export function renderSessions(
     // would then receive the row's numeric index -- truthy for every row
     // but the first, badging almost the whole list as Stalled regardless of
     // stalledNow. The arrow below is required, not stylistic.
-    const rows = (list) => list.map((s) => rowHtml(s, stalledNow.has(s.short))).join("");
+    const rows = (list) => list.map((s) => rowHtml(s, stalledNow.has(s.short), s.cardPath ? startOf.get(s.cardPath) : undefined)).join("");
     const unclaimedHtml = orderedUnclaimed.length
       ? `<div class="fleet-group-head">${escapeHtml(t("fleet_none"))}</div>${rows(orderedUnclaimed)}`
       : "";
@@ -727,12 +774,14 @@ export function renderSessions(
     // on a strip whose open form does not list them, and not the other fleets'
     // summary lines either, which are not sessions at all.
     setBody(
-      HEAD + errorHtml + emptyHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""),
+      HEAD + errorHtml + emptyHtml + startsHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""),
       foldedStripHtml([...sessions, ...unclaimed], stalledNow),
     );
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
+      // A start's own row has no session behind it yet, and opens nothing.
+      if (!el.dataset.short) continue;
       el.addEventListener("click", () => onSelect(el.dataset.short));
     }
     for (const el of root.querySelectorAll(".scard")) {

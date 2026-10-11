@@ -254,10 +254,11 @@ if (regions.has("build")) renderBuildBanner(document.getElementById("build-banne
 // reaches them through a closure rather than by value.
 let newCard = null;
 let boardMove = null;
+let board = null;
 if (regions.has("center")) {
-  renderBoard(document.getElementById("board"), cardPanel.open, {
+  board = renderBoard(document.getElementById("board"), cardPanel.open, {
     onAddCard: () => newCard?.open(),
-    onMove: (move) => boardMove?.(move) ?? null,
+    onMove: (move, hooks) => boardMove?.(move, hooks) ?? null,
   });
 }
 if (regions.has("orchestrator")) {
@@ -292,7 +293,7 @@ if (regions.has("center")) {
   // After the tabs, not before: createSections replaces the row's children.
   // The form and the move dialogs both hang off the tab row rather than off
   // #board, which every snapshot replaces whole.
-  newCard = createNewCard(document.getElementById("tabs"));
+  newCard = createNewCard(document.getElementById("tabs"), { creating: board?.creating });
   boardMove = createBoardMove(document.getElementById("tabs"));
   // A stand's frame with the form open (web/js/host.js, open).
   if (host?.open?.includes("newcard")) newCard.open();

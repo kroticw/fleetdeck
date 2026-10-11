@@ -73,12 +73,43 @@ function cardHTML(c, orphanPaths, stoppedPaths) {
   // data-stage is what a drop writes against: the stage this card was drawn
   // in, so the write can be refused if the card has moved since (the expect
   // of PATCH /api/cards). data-session says whether an agent is holding it,
-  // which the drop asks about before writing over that agent's work.
+  // which the drop asks about before writing over that agent's work. A card
+  // still being written is not draggable: its stage on the server is not yet
+  // the one it is drawn in, and a second drop would be refused against it.
   return `
-    <article class="kcard ${zoneClass(c.zone)}${mark}" data-path="${path}" data-stage="${escapeHTML(c.stage ?? "")}"${c.session ? ` data-session="${escapeHTML(c.session)}"` : ""} draggable="true">
+    <article class="kcard ${zoneClass(c.zone)}${mark}${stateClass(c)}" data-path="${path}" data-stage="${escapeHTML(c.stage ?? "")}"${c.session ? ` data-session="${escapeHTML(c.session)}"` : ""} draggable="${c.pending ? "false" : "true"}">
       <div class="ktitle">${title}</div>
       <div class="kmeta">${cardNumberHTML(c.id)}${sessionHTML}</div>
+      ${statusHTML(c)}
       <div class="kprog"><i data-progress="${clampProgress(c.progress)}"></i></div>
+    </article>`;
+}
+
+// stateClass and statusHTML draw what the board knows about a card that the
+// snapshot does not: a move it has asked for and not had answered (pending,
+// slow), or one that was refused (failed). pendingView puts the flags on.
+function stateClass(c) {
+  if (c.failed) return " kcard-failed";
+  if (!c.pending) return "";
+  return c.slow ? " kcard-pending kcard-slow" : " kcard-pending";
+}
+
+function statusHTML(c) {
+  if (c.failed) return `<div class="kstatus kstatus-failed" role="status">${escapeHTML(t("card_move_failed"))}</div>`;
+  if (!c.pending) return "";
+  const text = c.slow ? t("card_slow") : c.pending === "start" ? t("card_starting") : t("card_saving");
+  return `<div class="kstatus" role="status">${escapeHTML(text)}</div>`;
+}
+
+// ghostHTML is a card the operator has just created and the board has not
+// read yet: its title, marked as being created, in the column it will land in.
+// No data-path, so nothing opens or drags it: there is no file behind it yet.
+function ghostHTML(g) {
+  const text = g.slow ? t("card_slow") : t("card_creating");
+  return `
+    <article class="kcard kcard-ghost kcard-pending${g.slow ? " kcard-slow" : ""} ${zoneClass(g.zone)}">
+      <div class="ktitle">${escapeHTML(g.title)}</div>
+      <div class="kstatus" role="status">${escapeHTML(text)}</div>
     </article>`;
 }
 
@@ -89,13 +120,13 @@ function cardHTML(c, orphanPaths, stoppedPaths) {
 // column would promise a card that lands in new anyway.
 const ADD_STAGE = "new";
 
-export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new Set()) {
+export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new Set(), ghosts = []) {
   // An empty column is a real drop target, not dead space -- it must never
   // become unreachable -- but it has nothing that needs reading, so it has
   // no reason to claim the same width as a column carrying thirty cards.
   // .kcol-empty (app.css) is what actually shrinks it; this only says which
   // columns qualify.
-  const empty = cards.length === 0;
+  const empty = cards.length === 0 && ghosts.length === 0;
   // A row of its own under the head, as wide as the column: a square beside
   // the count was missed by eye and by pointer.
   const add =
@@ -106,6 +137,7 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
     <div class="kcol${empty ? " kcol-empty" : ""}" data-stage="${escapeHTML(stage)}">
       <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span></h5>
       ${add}
+      ${ghosts.map(ghostHTML).join("")}
       ${cards.map((c) => cardHTML(c, orphanPaths, stoppedPaths)).join("")}
     </div>`;
 }
@@ -142,7 +174,10 @@ export function render(root, snap) {
   const known = STAGES.map((stage) => cards.filter((c) => c.stage === stage));
   const other = cards.filter((c) => !STAGES.includes(c.stage));
 
-  const columns = STAGES.map((stage, i) => columnHTML(stage, stage, known[i], orphanPaths, stoppedPaths)).join("");
+  const ghosts = snap?.creating ?? [];
+  const columns = STAGES.map((stage, i) =>
+    columnHTML(stage, stage, known[i], orphanPaths, stoppedPaths, stage === ADD_STAGE ? ghosts : []),
+  ).join("");
   const otherColumn = columnHTML("other", "other", other, orphanPaths, stoppedPaths);
 
   // In the fleetdeck window a column scrolls on its own (web/app.css), and the
@@ -172,33 +207,62 @@ export function render(root, snap) {
   markScrollable(root);
 }
 
-// pendingView is the snapshot as the board should draw it while a move it has
-// asked for has not come back yet.
+// How long a write may go unanswered before the card says the panel is slow,
+// how long a move the server has answered is drawn without the snapshot
+// agreeing, and how long a refused move says so on its card. A write is about
+// 0.4 s on a signed board (T-159); three seconds is past any normal one.
+export const SLOW_MS = 3000;
+export const SETTLE_MS = 10000;
+export const FAILED_MS = 5000;
+
+// pendingView is the snapshot as the board should draw it while moves it has
+// asked for have not come back yet.
 //
-// A card dropped into another column is written by a PATCH, and the board only
-// learns the result from the next snapshot — up to a second later. Drawn from
-// the snapshot alone the card would jump back to the column it came from and
-// then forward again, which reads as the drop having failed. So the asked-for
-// stage is drawn instead, until the snapshot agrees.
+// A card dropped into another column is drawn there from the moment the move
+// begins — once every question about it is answered — rather than when the
+// write answers: the write is a signed commit, and the card used to sit in the
+// column it was dropped out of for as long as it took. pending maps a card's
+// path to {stage, kind, since, answeredAt}: kind is "move" or "start", and
+// answeredAt is set once the server has said yes.
 //
-// pending is pruned here rather than by a timer: an entry the snapshot has
-// caught up with, and one whose card is no longer on the board at all, are
-// both over.
-export function pendingView(snap, pending) {
-  if (!snap || pending.size === 0) return snap;
+// Until then the card is marked as being written (pending, slow), whatever
+// the snapshot says: the file is written before its commit, so the snapshot
+// can carry the new stage while the write may still be refused. Once answered,
+// the entry is kept until the snapshot agrees, as it was before, or until
+// SETTLE_MS has passed without it agreeing: a card is not left for ever in a
+// column the board never wrote. An unanswered write is never let go by the
+// clock — the server bounds its own waits.
+//
+// failed maps a path to {until, to}: when its refusal stops being drawn on the
+// card, and the stage the refused move asked for. A card the snapshot shows in
+// that stage did move — a start that got part of the way answers a refusal
+// with the card already active — and is not called unmoved. Entries the
+// snapshot no longer has a card for, and ones out of time, are pruned here
+// rather than by timers.
+export function pendingView(snap, pending, now = Date.now(), failed = new Map()) {
+  if (!snap || (pending.size === 0 && failed.size === 0)) return snap;
   const seen = new Set();
   const cards = (snap.cards ?? []).map((c) => {
     seen.add(c.path);
+    const refusal = failed.get(c.path);
+    if (refusal !== undefined && (now >= refusal.until || c.stage === refusal.to)) failed.delete(c.path);
+    else if (refusal !== undefined) return { ...c, failed: true };
     const want = pending.get(c.path);
     if (want === undefined) return c;
-    if (c.stage === want) {
-      pending.delete(c.path);
-      return c;
+    if (want.answeredAt !== undefined) {
+      if (c.stage === want.stage || now - want.answeredAt > SETTLE_MS) {
+        pending.delete(c.path);
+        return c;
+      }
+      return { ...c, stage: want.stage };
     }
-    return { ...c, stage: want };
+    return { ...c, stage: want.stage, pending: want.kind, slow: now - want.since > SLOW_MS };
   });
   for (const path of [...pending.keys()]) {
     if (!seen.has(path)) pending.delete(path);
+  }
+  for (const path of [...failed.keys()]) {
+    if (!seen.has(path)) failed.delete(path);
   }
   return { ...snap, cards };
 }
@@ -233,6 +297,10 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // now, and the moves it has asked for and not seen come back.
   let latest = null;
   const pending = new Map();
+  // Refused moves still said on their cards, and cards created and not yet
+  // read: what pendingView and render draw on top of the snapshot.
+  const failed = new Map();
+  const ghosts = [];
   // The card being dragged, while one is. render reads the same state off
   // root.dataset and skips the frame; this holds what the drop needs to know.
   let dragging = null;
@@ -242,7 +310,23 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
     else delete root.dataset.dragging;
   };
 
-  const draw = () => render(root, pendingView(latest, pending));
+  const draw = () => {
+    const now = Date.now();
+    const view = pendingView(latest, pending, now, failed);
+    for (const g of [...ghosts]) {
+      // Gone once the board carries its card, or once that has failed to
+      // happen for SETTLE_MS after the server said it was written.
+      const landed = g.path && (latest?.cards ?? []).some((c) => c.path === g.path);
+      if (landed || (g.createdAt !== undefined && now - g.createdAt > SETTLE_MS)) ghosts.splice(ghosts.indexOf(g), 1);
+      else g.slow = g.createdAt === undefined && now - g.since > SLOW_MS;
+    }
+    render(root, ghosts.length ? { ...view, creating: ghosts } : view);
+  };
+  // Drawn again when a mark runs out, for a board no snapshot reaches in the
+  // meantime: a dropped socket must not leave "slow" unsaid or a refusal up
+  // for ever. unref, where there is one, keeps a timer from holding a test
+  // process open.
+  const later = (ms) => setTimeout(draw, ms + 50)?.unref?.();
 
   // The columns are lit by hand rather than drawn lit: render skips every
   // frame while a card is in the air, and a drop can leave the board undrawn
@@ -274,13 +358,13 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
       return;
     }
     const card = ev.target.closest(".kcard");
-    if (!card || !root.contains(card)) return;
+    if (!card || !root.contains(card) || !card.dataset.path) return;
     onOpenCard(card.dataset.path);
   });
 
   root.addEventListener("dragstart", (ev) => {
     const card = ev.target.closest(".kcard");
-    if (!card || !onMove) return;
+    if (!card || !onMove || !card.dataset.path) return;
     hold({
       path: card.dataset.path,
       from: card.dataset.stage,
@@ -329,15 +413,41 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
     ev.preventDefault();
     const to = column.dataset.stage;
     if (to && to !== move.from) {
-      Promise.resolve(onMove({ ...move, to }))
+      // begin is onMove saying nothing is left to ask: the card is drawn in
+      // its new column from here, marked as being written. A move that was
+      // begun and did not happen goes back with a word on the card; one the
+      // operator declined in a dialog was never begun and says nothing.
+      let begun = false;
+      const begin = (kind) => {
+        begun = true;
+        // A drop again while an earlier refusal is still said: this move is
+        // the one to draw.
+        failed.delete(move.path);
+        pending.set(move.path, { stage: to, kind, since: Date.now() });
+        later(SLOW_MS);
+        draw();
+      };
+      const refused = () => {
+        if (!begun) return;
+        pending.delete(move.path);
+        failed.set(move.path, { until: Date.now() + FAILED_MS, to });
+        later(FAILED_MS);
+      };
+      Promise.resolve(onMove({ ...move, to }, { begin }))
         .then((drawn) => {
-          if (drawn) pending.set(move.path, drawn);
+          if (!drawn) return refused();
+          const asked = pending.get(move.path) ?? { kind: "move", since: Date.now() };
+          pending.set(move.path, { ...asked, stage: drawn, answeredAt: Date.now() });
+          later(SETTLE_MS);
         })
         // A move that threw rather than answering leaves the card where it
         // was, and the board still has to be drawn: without this the gesture
         // ends with the board frozen on the frame the drag started from, which
         // reads as the panel having stopped.
-        .catch((err) => console.error("the card was not moved", err))
+        .catch((err) => {
+          console.error("the card was not moved", err);
+          refused();
+        })
         .then(draw);
       return;
     }
@@ -362,4 +472,30 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
     latest = snap;
     draw();
   });
+
+  // creating is the new card form saying a card is on its way: it is drawn
+  // in the new column at once, and the handle says how the write went —
+  // created with the card's path, which the snapshot is then watched for, or
+  // failed, which takes it off (the form reopens with what was typed).
+  return {
+    creating(title, zone) {
+      const ghost = { title, zone, since: Date.now() };
+      ghosts.push(ghost);
+      later(SLOW_MS);
+      draw();
+      return {
+        created(path) {
+          ghost.path = path;
+          ghost.createdAt = Date.now();
+          later(SETTLE_MS);
+          draw();
+        },
+        failed() {
+          const at = ghosts.indexOf(ghost);
+          if (at >= 0) ghosts.splice(at, 1);
+          draw();
+        },
+      };
+    },
+  };
 }

@@ -222,24 +222,24 @@ test("board: a snapshot arriving while a card is being typed does not take the t
 
 test("board: a move the panel has asked for is drawn until the snapshot agrees", () => {
   const { pendingView } = boardModule;
-  const pending = new Map([["/b/c.md", "active"]]);
+  const pending = new Map([["/b/c.md", { stage: "active", kind: "move", since: 0, answeredAt: 0 }]]);
   const stale = { cards: [{ path: "/b/c.md", stage: "new" }] };
-  assert.equal(pendingView(stale, pending).cards[0].stage, "active", "the card would jump back for a second");
+  assert.equal(pendingView(stale, pending, 0).cards[0].stage, "active", "the card would jump back for a second");
   assert.equal(stale.cards[0].stage, "new", "the snapshot itself must not be rewritten");
   assert.equal(pending.size, 1);
 });
 
 test("board: a move the snapshot has caught up with is forgotten", () => {
   const { pendingView } = boardModule;
-  const pending = new Map([["/b/c.md", "active"]]);
+  const pending = new Map([["/b/c.md", { stage: "active", kind: "move", since: 0, answeredAt: 0 }]]);
   const fresh = { cards: [{ path: "/b/c.md", stage: "active" }] };
-  assert.equal(pendingView(fresh, pending).cards[0].stage, "active");
+  assert.equal(pendingView(fresh, pending, 0).cards[0].stage, "active");
   assert.equal(pending.size, 0, "an entry the snapshot agrees with is over");
 });
 
 test("board: a move of a card that has left the board is forgotten too", () => {
   const { pendingView } = boardModule;
-  const pending = new Map([["/b/gone.md", "done"]]);
+  const pending = new Map([["/b/gone.md", { stage: "done", kind: "move", since: 0, answeredAt: 0 }]]);
   pendingView({ cards: [{ path: "/b/c.md", stage: "new" }] }, pending);
   assert.equal(pending.size, 0, "an archived card would keep its entry for ever");
 });

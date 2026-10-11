@@ -136,7 +136,11 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
     return null;
   };
 
-  return async function onMove({ path, from, to, session, live }) {
+  // begin, from the board, is told the move is going ahead the moment nothing
+  // is left to ask: the card is drawn in its new column from then on rather
+  // than once the write has answered. Never before a question is answered —
+  // a card drawn as moved would answer it for the operator.
+  return async function onMove({ path, from, to, session, live }, { begin } = {}) {
     // A card with no session dropped into active is offered one, because the
     // board will not take the stage without it. The session is started, its
     // short id written into the card and the task sent, in that order and by
@@ -148,6 +152,7 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
       startText.textContent = canStart ? t("start_session_ask") : t("start_session_none");
       startGo.disabled = !canStart;
       if (!(await ask(startDialog))) return null;
+      begin?.("start");
       try {
         const result = await start(path);
         // A dispatch that got part of the way answers a success status with
@@ -172,6 +177,7 @@ export function createBoardMove(host, { patch = setCardField, start = startWork,
       if (!(await ask(heldDialog))) return null;
     }
 
+    begin?.("move");
     try {
       report(await patch(path, "stage", to, from));
       return to;

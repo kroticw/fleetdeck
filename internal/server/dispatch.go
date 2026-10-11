@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
@@ -58,6 +59,17 @@ func (d Deps) handleDispatch(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), dispatchTimeout)
 	defer cancel()
+	// Said in every snapshot until this answers: the session list draws the
+	// start from it while the daemon has nothing to list yet. By the path the
+	// page sent, which it read off the snapshot, rather than the resolved one:
+	// a board reached through a symlink would otherwise never match its card.
+	if d.starts != nil {
+		named := card
+		if filepath.IsAbs(body.Card) {
+			named = filepath.Clean(body.Card)
+		}
+		defer d.starts.begin(named)()
+	}
 	res, err := d.StartWork(ctx, orchestrator.Work{Card: card, Lang: body.Lang})
 	switch {
 	case errors.Is(err, orchestrator.ErrBadRequest):

@@ -801,3 +801,20 @@ test("a diff's files off screen are skipped by the renderer", () => {
   assert.ok(body, "web/app.css has a .review-file rule");
   assert.match(body, /content-visibility:\s*auto/);
 });
+
+// What the panel draws while it waits (T-159) moves: the bar along a card
+// being written and the ring of a session being started. For a person who
+// asked the system for less motion both stand still, and still say they wait.
+test("what waits moves, and stands still under reduced motion", () => {
+  const plain = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const selector of [".kcard-pending::after", ".sspin"]) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&");
+    const own = plain.match(new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+    assert.ok(own, `web/app.css has a ${selector} rule`);
+    assert.match(own, /animation:\s*\S/, `${selector} does not move at all`);
+    const reduced = [...plain.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{((?:[^{}]*\{[^}]*\})*)\s*\}/g)].map((m) => m[1]).join("\n");
+    const still = reduced.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+    assert.ok(still, `${selector} keeps moving under reduced motion`);
+    assert.match(still, /animation:\s*none/);
+  }
+});

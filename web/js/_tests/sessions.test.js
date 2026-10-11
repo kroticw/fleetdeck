@@ -700,3 +700,57 @@ test("several fleets: another fleet's line switches through the switcher the col
   assert.deepEqual(went, ["A"]);
   dom.restore();
 });
+
+// --- a session being started (T-159) ---
+//
+// A start takes seconds, and the daemon lists nothing until claude --bg is up:
+// the column used to show nothing at all while the operator waited. The panel
+// says which starts are under way (snapshot.starting), and the column draws
+// each as a row with a turning ring — on the session's own row once the daemon
+// lists it, so the start is never two rows at once.
+
+const STARTING_CARD = { path: "/b/cards/T-195.md", id: "T-195", title: "a card being started", stage: "active" };
+
+test("a start the daemon lists nothing for yet is a row of its own, with the ring", async () => {
+  const since = new Date(Date.now()).toISOString();
+  const { root, dom } = await list({ sessions: [{ short: "aa11", name: "a task" }], cards: [STARTING_CARD], starting: [{ card: STARTING_CARD.path, since }] });
+  const html = root.innerHTML;
+  const row = html.match(/<article class="srow srow-starting"[\s\S]*?<\/article>/)?.[0] ?? "";
+  assert.ok(row, "the start has no row");
+  assert.ok(html.indexOf(row) < html.indexOf('data-short="aa11"'), "the start is not at the top of the list");
+  assert.match(row, /T-195/, "the row does not say which card is being started");
+  assert.match(row, /a card being started/);
+  assert.match(row, /class="sbadge sbadge-starting" role="status"/);
+  assert.match(row, /class="sspin"/);
+  assert.doesNotMatch(row, /data-short=/, "a row with no session behind it opens nothing");
+  dom.restore();
+});
+
+test("a start the daemon already lists is said on the session's own row, not twice", async () => {
+  const since = new Date(Date.now()).toISOString();
+  const { root, dom } = await list({
+    sessions: [{ short: "bb22", name: "the new session", cardPath: STARTING_CARD.path, cardId: "T-195" }],
+    cards: [STARTING_CARD],
+    starting: [{ card: STARTING_CARD.path, since }],
+  });
+  const html = root.innerHTML;
+  assert.doesNotMatch(html, /srow-starting/, "the start is drawn twice");
+  const row = html.match(/<article class="srow[^"]*" data-short="bb22"[\s\S]*?<\/article>/)?.[0] ?? "";
+  assert.match(row, /sbadge-starting/);
+  dom.restore();
+});
+
+test("a start that takes long says so", async () => {
+  const since = new Date(1_000_000).toISOString();
+  const { root, dom } = await list({ sessions: [], cards: [STARTING_CARD], starting: [{ card: STARTING_CARD.path, since }] }, { now: () => 1_000_000 + 6000 });
+  assert.match(root.innerHTML, /class="sstarting-slow"/);
+  dom.restore();
+});
+
+test("a column with nothing but a start shows the start, not an empty fleet", async () => {
+  const since = new Date(Date.now()).toISOString();
+  const { root, dom } = await list({ sessions: [], cards: [STARTING_CARD], starting: [{ card: STARTING_CARD.path, since }] });
+  assert.match(root.innerHTML, /srow-starting/);
+  assert.doesNotMatch(root.innerHTML, /class="sempty"/);
+  dom.restore();
+});
