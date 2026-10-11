@@ -62,9 +62,10 @@ let formCount = 0;
  * createNewCard appends the "new card" form and its note to host, and hands
  * back the two ways it is opened. `create` is the write, `pick` the folder
  * dialog and `cards` the board's cards: api and store unless a test replaces
- * them.
+ * them. `creating` is the board's (renderBoard's creating): told a card is on
+ * its way the moment Create is pressed, and how the write went.
  */
-export function createNewCard(host, { create = createCard, pick = pickDirectory, cards = () => get()?.cards ?? [] } = {}) {
+export function createNewCard(host, { create = createCard, pick = pickDirectory, cards = () => get()?.cards ?? [], creating } = {}) {
   const form = el("div", "newcard");
   form.hidden = true;
   form.setAttribute("role", "dialog");
@@ -210,24 +211,41 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
     busy = true;
     createButton.disabled = true;
     error.textContent = "";
+    // The form closes at once and the board draws the card as being created
+    // (T-159): the write is a signed commit, and the form used to sit there
+    // with a dead button for it. What was typed is taken out of the form, so
+    // the next card starts empty, and put back if this one is refused. The
+    // repo stays, as it always has: the next card is usually for it too.
+    const typed = { title: title.value, description: description.value, zone: zone.value, files: attached };
+    const where = repo.value.trim();
+    title.value = "";
+    description.value = "";
+    attached = [];
+    renderFiles();
+    repo.value = where;
+    close();
+    const shown = creating?.(text, typed.zone);
     try {
-      const where = repo.value.trim();
-      const files = await Promise.all(attached.map(async (file) => ({ name: file.name, data: await base64(file) })));
-      const result = await create(text, zone.value, where, description.value.trim(), files);
-      title.value = "";
-      description.value = "";
-      attached = [];
-      renderFiles();
-      repo.value = where;
-      close();
+      const files = await Promise.all(typed.files.map(async (file) => ({ name: file.name, data: await base64(file) })));
+      const result = await create(text, typed.zone, where, typed.description.trim(), files);
+      shown?.created(result.path);
       if (!result.committed) {
         note.textContent = `${t("new_card_not_committed")}: ${result.reason}`;
         note.hidden = false;
       }
     } catch (err) {
-      // What was typed stays: the operator fixes it, not retypes it. A repo
-      // the board refused is said by its code, in the page's words: it is the
-      // one field here whose rule the server's English does not explain.
+      shown?.failed();
+      // What was typed comes back: the operator fixes it, not retypes it.
+      // shortcut: a card typed into the reopened form meanwhile is replaced;
+      // keep both if that is ever reported.
+      title.value = typed.title;
+      description.value = typed.description;
+      zone.value = typed.zone;
+      attached = typed.files;
+      renderFiles();
+      open();
+      // A repo the board refused is said by its code, in the page's words: it
+      // is the one field here whose rule the server's English does not explain.
       const rule = String(err?.code ?? "").startsWith("repo_") ? reasonText("card_refused", err.code) : "";
       error.textContent = rule ? `repo: ${rule}` : String(err?.message ?? err);
     } finally {

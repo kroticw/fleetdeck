@@ -255,3 +255,68 @@ test("board move: every button in its windows is a .btn, and each go is the acce
     assert.ok(String(host.querySelector(`button.${go}`).className).split(" ").includes("btn-primary"), go);
   }
 });
+
+// --- the move drawn before the server answers ---
+//
+// A write takes the better part of half a second and a start several seconds,
+// and the card used to sit in the column it was dropped out of until they
+// answered. The board is told the move has begun as soon as nothing is left to
+// ask, and no sooner: a card drawn in its new column while the operator is
+// still being asked whether to move it would answer the question for them.
+
+function beginRecorder() {
+  const begun = [];
+  return {
+    begun,
+    hooks: {
+      begin: (kind) => begun.push({ kind, patched: patched.length, started: started.length }),
+    },
+  };
+}
+
+test("board move: a plain move is begun before its write", async () => {
+  const { begun, hooks } = beginRecorder();
+  await move({ path: "/b/c.md", from: "new", to: "blocked", session: "", live: false }, hooks);
+  assert.deepEqual(begun, [{ kind: "move", patched: 0, started: 0 }]);
+  assert.equal(patched.length, 1);
+});
+
+test("board move: a held card is begun only once the operator says go", async () => {
+  const { begun, hooks } = beginRecorder();
+  const pending = move({ path: "/b/c.md", from: "active", to: "review", session: "abc12345", live: true }, hooks);
+  await settle();
+  assert.deepEqual(begun, [], "the question is still open");
+  press("bmove-held-go");
+  await pending;
+  assert.deepEqual(begun, [{ kind: "move", patched: 0, started: 0 }]);
+});
+
+test("board move: a move the operator declines is never begun", async () => {
+  const { begun, hooks } = beginRecorder();
+  const held = move({ path: "/b/c.md", from: "active", to: "blocked", session: "abc12345", live: true }, hooks);
+  await settle();
+  press("bmove-held-cancel");
+  await held;
+  const accepted = move({ path: "/b/c.md", from: "review", to: "done", session: "abc12345", live: true }, hooks);
+  await settle();
+  press("bmove-done-cancel");
+  await accepted;
+  const offered = move({ path: "/b/c.md", from: "new", to: "active", session: "", live: false }, hooks);
+  await settle();
+  press("bmove-start-cancel");
+  await offered;
+  assert.deepEqual(begun, []);
+});
+
+test("board move: a start is begun as a start, before the dispatch", async () => {
+  const { begun, hooks } = beginRecorder();
+  const pending = move({ path: "/b/c.md", from: "new", to: "active", session: "", live: false }, hooks);
+  await settle();
+  press("bmove-start-go");
+  await pending;
+  assert.deepEqual(begun, [{ kind: "start", patched: 0, started: 0 }]);
+});
+
+test("board move: a move with no board hooks still moves", async () => {
+  assert.equal(await move({ path: "/b/c.md", from: "new", to: "blocked", session: "", live: false }), "blocked");
+});

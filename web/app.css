@@ -2856,6 +2856,70 @@ button.review-line-add:hover {
   opacity: 0.4;
 }
 
+/* A card the board draws ahead of the panel's answer (T-159): moved, created,
+   or having a session started for it. The write is a signed commit and a start
+   takes seconds, and the card used to wait in the column it was dropped out of.
+   Dashed edges say it is not written yet; the bar along its foot runs while it
+   waits. A refused move is back in its column with a word in --danger. */
+.kcard-pending {
+  position: relative;
+  border-top-style: dashed;
+  border-right-style: dashed;
+  border-bottom-style: dashed;
+}
+
+.kcard-pending::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 40% 100%;
+  animation: kpending 1.2s linear infinite;
+}
+
+@keyframes kpending {
+  from {
+    background-position: -70% 0;
+  }
+  to {
+    background-position: 170% 0;
+  }
+}
+
+.kstatus {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+.kcard-slow .kstatus {
+  color: var(--attn);
+}
+
+.kcard-ghost .ktitle {
+  color: var(--text-muted);
+}
+
+.kcard-failed {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.kstatus-failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kcard-pending::after {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+}
+
 /* A window over the board, centred by margin: auto between four zero edges,
    about 60% of the room each way and never more than the room less a margin. */
 .newcard {
