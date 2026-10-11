@@ -1175,10 +1175,6 @@ main {
   }
 }
 
-.srow-starting {
-  border-style: dashed;
-}
-
 .sstarting-slow {
   font-size: var(--fs-2xs);
   color: var(--attn);
