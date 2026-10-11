@@ -32,6 +32,7 @@ import { isLive, isResumable } from "./lifecycle.js";
 import { sessionMarks } from "./initials.js";
 import { isWaiting, isWaitingUnknown, isLeftUnanswered } from "./needs.js";
 import { cardNumberHTML } from "./cardnumber.js";
+import { capture, play, reducedMotion, viewportOf } from "./flip.js";
 
 // The text explaining *why* a session isn't moving. Where needs has words, they
 // are the words that matter. Where it has none -- a flags-only Stalled session,
@@ -175,7 +176,7 @@ function startingSlowHtml(starting) {
 export function startingRowHtml(start, card, slow) {
   const name = card ? [card.id, card.title].filter(Boolean).join(" ") : String(start.card).split("/").pop();
   return `
-    <article class="srow srow-starting">
+    <article class="srow srow-starting" data-start="${escapeHtml(start.card)}">
       <div class="srow-head">
         <span class="sname">${escapeHtml(name)}</span>
         ${startingBadge()}
@@ -183,6 +184,14 @@ export function startingRowHtml(start, card, slow) {
       ${startingSlowHtml({ slow })}
     </article>`;
 }
+
+// sessionFlipKeys is how flip.js follows the list's rows from one drawing to
+// the next: a session by its short id, a start by its card. One group for the
+// whole list: a session that rose to the top changed its place in it.
+export const sessionFlipKeys = {
+  keyOf: (n) => n.dataset?.short || (n.dataset?.start ? `start:${n.dataset.start}` : ""),
+  groupOf: () => "sessions",
+};
 
 export function rowHtml(s, stalledNow, starting) {
   const waiting = isWaiting(s);
@@ -635,7 +644,12 @@ export function renderSessions(
   // "are we folded right now" here would put a second answer to that question
   // next to the one the stylesheet already has.
   const setBody = (bodyHtml, foldedHtml = "") => {
+    // The column scrolls on its own: a row is seen through it.
+    const flip = { ...sessionFlipKeys, clipOf: () => root.getBoundingClientRect() };
+    const rows = () => [...root.querySelectorAll(".srow")];
+    const before = capture(rows(), flip);
     root.innerHTML = sizeControlsHtml() + foldedHtml + bodyHtml;
+    play(before, rows(), { ...flip, viewport: viewportOf(), reduced: reducedMotion() });
     root.querySelector(".col-size-unfold")?.addEventListener("click", () => resize.width.unfold());
     root.querySelector(".col-size-fold")?.addEventListener("click", () => resize.width.fold());
     for (const mark of root.querySelectorAll(".sfold-mark")) {

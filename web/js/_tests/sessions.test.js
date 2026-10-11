@@ -754,3 +754,20 @@ test("a column with nothing but a start shows the start, not an empty fleet", as
   assert.doesNotMatch(root.innerHTML, /class="sempty"/);
   dom.restore();
 });
+
+// --- motion (T-159, PR2) ---
+//
+// flip.js follows a row by its key from one drawing to the next: a session by
+// its short id, a start by its card, all in one list — a session rising to
+// the top is a change of place, and so is a start appearing above the rest.
+
+test("a session row is followed by its short id, a start's row by its card", async () => {
+  const { sessionFlipKeys } = await import("../sessions.js");
+  const since = new Date(Date.now()).toISOString();
+  const { root, dom } = await list({ sessions: [], cards: [STARTING_CARD], starting: [{ card: STARTING_CARD.path, since }] });
+  assert.match(root.innerHTML, new RegExp(`class="srow srow-starting" data-start="${STARTING_CARD.path}"`));
+  assert.equal(sessionFlipKeys.keyOf({ dataset: { short: "aa11" } }), "aa11");
+  assert.equal(sessionFlipKeys.keyOf({ dataset: { start: STARTING_CARD.path } }), `start:${STARTING_CARD.path}`);
+  assert.equal(sessionFlipKeys.groupOf({ dataset: { short: "aa11" } }), sessionFlipKeys.groupOf({ dataset: { start: "x" } }));
+  dom.restore();
+});
