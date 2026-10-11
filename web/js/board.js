@@ -233,17 +233,20 @@ export const FAILED_MS = 5000;
 // column the board never wrote. An unanswered write is never let go by the
 // clock — the server bounds its own waits.
 //
-// failed maps a path to the time its refusal stops being drawn on the card.
-// Entries the snapshot no longer has a card for, and ones out of time, are
-// pruned here rather than by timers.
+// failed maps a path to {until, to}: when its refusal stops being drawn on the
+// card, and the stage the refused move asked for. A card the snapshot shows in
+// that stage did move — a start that got part of the way answers a refusal
+// with the card already active — and is not called unmoved. Entries the
+// snapshot no longer has a card for, and ones out of time, are pruned here
+// rather than by timers.
 export function pendingView(snap, pending, now = Date.now(), failed = new Map()) {
   if (!snap || (pending.size === 0 && failed.size === 0)) return snap;
   const seen = new Set();
   const cards = (snap.cards ?? []).map((c) => {
     seen.add(c.path);
-    const until = failed.get(c.path);
-    if (until !== undefined && now >= until) failed.delete(c.path);
-    else if (until !== undefined) return { ...c, failed: true };
+    const refusal = failed.get(c.path);
+    if (refusal !== undefined && (now >= refusal.until || c.stage === refusal.to)) failed.delete(c.path);
+    else if (refusal !== undefined) return { ...c, failed: true };
     const want = pending.get(c.path);
     if (want === undefined) return c;
     if (want.answeredAt !== undefined) {
@@ -417,6 +420,9 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
       let begun = false;
       const begin = (kind) => {
         begun = true;
+        // A drop again while an earlier refusal is still said: this move is
+        // the one to draw.
+        failed.delete(move.path);
         pending.set(move.path, { stage: to, kind, since: Date.now() });
         later(SLOW_MS);
         draw();
@@ -424,7 +430,7 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
       const refused = () => {
         if (!begun) return;
         pending.delete(move.path);
-        failed.set(move.path, Date.now() + FAILED_MS);
+        failed.set(move.path, { until: Date.now() + FAILED_MS, to });
         later(FAILED_MS);
       };
       Promise.resolve(onMove({ ...move, to }, { begin }))

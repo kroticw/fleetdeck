@@ -491,6 +491,33 @@ test("new card: the next card can be started while one is on its way", async () 
   assert.equal(form.querySelector("input.newcard-title").value, "", "the card on its way is still in the form");
 });
 
+// The board's commits are one at a time, so the next card waits for the one
+// on its way — but Create works, and nothing typed is dropped.
+test("new card: a card created while one is on its way is sent once that one has answered", async () => {
+  const recorder = creatingRecorder();
+  withBoard(recorder);
+  let release;
+  answer = new Promise((resolve) => (release = resolve));
+  const form = open();
+  form.querySelector("input.newcard-title").value = "First";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  open();
+  assert.equal(form.querySelector("button.newcard-create").disabled, false, "the form opens with a dead button");
+  form.querySelector("input.newcard-title").value = "Second";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(form.hidden, true);
+  assert.deepEqual(sent.map((c) => c.title), ["First"], "two commits on the board at once");
+  assert.deepEqual(recorder.told.map((x) => x.title).filter(Boolean), ["First", "Second"], "the second card is not drawn as on its way");
+
+  answer = { path: "/b/cards/T-003.md", committed: true, reason: "" };
+  release({ path: "/b/cards/T-002.md", committed: true, reason: "" });
+  await settle();
+  await settle();
+  assert.deepEqual(sent.map((c) => c.title), ["First", "Second"]);
+});
+
 test("new card: a refused card is taken off the board and the form comes back as it was", async () => {
   const recorder = creatingRecorder();
   withBoard(recorder);

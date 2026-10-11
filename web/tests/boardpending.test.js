@@ -195,6 +195,40 @@ test("board pending: a move that threw goes back too", async () => {
   assert.match(cardMarkup(CARD), /\bkcard-failed\b/);
 });
 
+test("board pending: a card dropped again right after a refusal is drawn as moving, not as refused", async () => {
+  socket.push(snap("new"));
+  answer = (hooks) => {
+    hooks.begin("move");
+    return Promise.resolve(null);
+  };
+  drop("new", "blocked", "aa11");
+  await settle();
+  answer = (hooks) => {
+    hooks.begin("move");
+    return new Promise(() => {});
+  };
+  drop("new", "blocked", "aa11");
+  assert.equal(columnOf(CARD), "blocked", "the second drop is hidden under the first one's refusal");
+  assert.match(cardMarkup(CARD), /\bkcard-pending\b/);
+  assert.doesNotMatch(cardMarkup(CARD), /kcard-failed/);
+});
+
+// A start that got part of the way answers ok false with the card already
+// active and naming its session: the dialog says which step failed, and the
+// card, which did move, is not called unmoved.
+test("board pending: a refusal is not said on a card the snapshot shows where it was asked to go", async () => {
+  socket.push(snap("new"));
+  answer = (hooks) => {
+    hooks.begin("start");
+    return Promise.resolve(null);
+  };
+  drop("new", "active");
+  await settle();
+  socket.push(snap("active"));
+  assert.equal(columnOf(CARD), "active");
+  assert.doesNotMatch(cardMarkup(CARD), /kcard-failed/);
+});
+
 test("board pending: a move the operator declined is no failure", async () => {
   socket.push(snap("new"));
   answer = () => Promise.resolve(null);

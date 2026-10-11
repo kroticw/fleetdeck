@@ -172,7 +172,9 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
 
   host.append(form, note);
 
-  let busy = false;
+  // The cards on their way, sent one at a time: the board takes one commit at
+  // a time, and two at once would leave the second uncommitted.
+  let queue = Promise.resolve();
   // What had the focus when the form opened, to give it back when it closes:
   // the button that opened it is drawn inside the board and replaced by the
   // next snapshot, so it cannot be focused again by name.
@@ -201,15 +203,12 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
     title.focus();
   };
 
-  const submit = async () => {
-    if (busy) return;
+  const submit = () => {
     const text = title.value.trim();
     if (text === "") {
       error.textContent = t("new_card_title_required");
       return;
     }
-    busy = true;
-    createButton.disabled = true;
     error.textContent = "";
     // The form closes at once and the board draws the card as being created
     // (T-159): the write is a signed commit, and the form used to sit there
@@ -225,6 +224,10 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
     repo.value = where;
     close();
     const shown = creating?.(text, typed.zone);
+    queue = queue.then(() => send(text, typed, where, shown));
+  };
+
+  const send = async (text, typed, where, shown) => {
     try {
       const files = await Promise.all(typed.files.map(async (file) => ({ name: file.name, data: await base64(file) })));
       const result = await create(text, typed.zone, where, typed.description.trim(), files);
@@ -248,9 +251,6 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
       // is the one field here whose rule the server's English does not explain.
       const rule = String(err?.code ?? "").startsWith("repo_") ? reasonText("card_refused", err.code) : "";
       error.textContent = rule ? `repo: ${rule}` : String(err?.message ?? err);
-    } finally {
-      busy = false;
-      createButton.disabled = false;
     }
   };
 
