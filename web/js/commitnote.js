@@ -36,10 +36,12 @@ export function renderCommitNote(host, { retry = retryCommits } = {}) {
   note.append(text, button);
   host.append(note);
 
-  // A refusal of the retry itself, shown until the next snapshot that has
-  // something new to say.
+  // A refusal of the retry itself, shown while the queue still says what it
+  // said when the retry was refused; its next word replaces it.
   let refused = "";
+  let refusedOver = "";
   let last = null;
+  const said = (snap) => `${snap?.boardCommits?.failed ?? 0}\u0000${snap?.boardCommits?.error ?? ""}`;
 
   const draw = () => {
     const failed = last?.boardCommits?.failed ?? 0;
@@ -57,6 +59,7 @@ export function renderCommitNote(host, { retry = retryCommits } = {}) {
       await retry();
     } catch (err) {
       refused = String(err?.message ?? err);
+      refusedOver = said(last);
     } finally {
       button.disabled = false;
       draw();
@@ -65,6 +68,7 @@ export function renderCommitNote(host, { retry = retryCommits } = {}) {
 
   subscribe((snap) => {
     last = snap;
+    if (refused && said(snap) !== refusedOver) refused = "";
     draw();
   });
 }

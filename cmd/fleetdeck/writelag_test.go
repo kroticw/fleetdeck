@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -220,5 +221,41 @@ func TestWithoutAQueueAWriteIsCommittedBeforeItAnswers(t *testing.T) {
 	}
 	if got := git(t, dir, "log", "-1", "--format=%s"); got != "chore(board): set stage to review" {
 		t.Fatalf("subject %q", got)
+	}
+}
+
+// Every write asks for a fresh snapshot, and a collect can take hundreds of
+// milliseconds. Ten writes during one collect are one more collect after it,
+// not ten.
+func TestWritesDuringARefreshAreOneMoreRefresh(t *testing.T) {
+	release := make(chan struct{})
+	var runs atomic.Int32
+	// One cycle at a time, as panel.refresh holds cycleMu.
+	var cycle sync.Mutex
+	refresh := func(context.Context) {
+		cycle.Lock()
+		defer cycle.Unlock()
+		if runs.Add(1) == 1 {
+			<-release
+		}
+	}
+	kick := soon(context.Background(), refresh)
+	kick()
+	for runs.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	for range 10 {
+		kick()
+		time.Sleep(2 * time.Millisecond)
+	}
+	close(release)
+	time.Sleep(200 * time.Millisecond)
+	if got := runs.Load(); got != 2 {
+		t.Fatalf("%d refreshes, want the one running and one more", got)
+	}
+	kick()
+	time.Sleep(100 * time.Millisecond)
+	if got := runs.Load(); got != 3 {
+		t.Fatalf("a write after the refreshes settled was %d refreshes, want one", got-2)
 	}
 }

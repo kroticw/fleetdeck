@@ -5,7 +5,6 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 
 	"github.com/kroticw/fleetdeck/internal/board"
 )
@@ -98,17 +97,34 @@ func cardInBoard(path string) (boardDir, rel string) {
 	return dir, filepath.Base(path)
 }
 
-// soon runs refresh in the background, with at most one run waiting: a burst
-// of writes is a refresh or two, not one each.
+// soon runs refresh in the background, one run at a time: asked again while a
+// run is going, it runs once more after it, however many times it was asked.
+// A burst of writes is a refresh or two, not one each — a collect can take
+// hundreds of milliseconds, and each waiting run would be a whole one.
 func soon(ctx context.Context, refresh func(context.Context)) func() {
-	var waiting atomic.Bool
+	var mu sync.Mutex
+	running, again := false, false
 	return func() {
-		if !waiting.CompareAndSwap(false, true) {
+		mu.Lock()
+		if running {
+			again = true
+			mu.Unlock()
 			return
 		}
+		running = true
+		mu.Unlock()
 		go func() {
-			waiting.Store(false)
-			refresh(ctx)
+			for {
+				refresh(ctx)
+				mu.Lock()
+				if !again {
+					running = false
+					mu.Unlock()
+					return
+				}
+				again = false
+				mu.Unlock()
+			}
 		}()
 	}
 }

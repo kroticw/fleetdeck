@@ -95,3 +95,14 @@ test("commit note: a retry the panel refused says why", async () => {
   assert.match(note().querySelector("span.commit-note-text").textContent, /no board commit queue/);
   assert.equal(note().querySelector("button.commit-retry").disabled, false, "the operator cannot try again");
 });
+
+test("commit note: a refused retry gives way to the queue's next word", async () => {
+  retryAnswer = new Error("this panel has no board commit queue");
+  socket.push({ cards: [], boardCommits: { failed: 1, error: "no PIN" } });
+  fireEvent(note().querySelector("button.commit-retry"), "click");
+  await settle();
+  socket.push({ cards: [], boardCommits: { failed: 2, error: "index.lock held" } });
+  const text = note().querySelector("span.commit-note-text").textContent;
+  assert.match(text, /index\.lock held/, "an old refusal hides what the queue says now");
+  assert.doesNotMatch(text, /no board commit queue/);
+});

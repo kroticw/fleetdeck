@@ -579,9 +579,18 @@ func serve(parent context.Context, o runOpts) error {
 	updates := server.NewNotifier()
 	p.published = updates.Notify
 	queuesCtx, stopQueues := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopQueues()
 	boardQueues = newCommitQueues(queuesCtx, updates.Notify)
-	defer func() { boardQueues = nil }()
+	// However serve ends — a shutdown or a server that failed — what is queued
+	// gets queueDrain to be committed first.
+	//
+	// shortcut: a handler still running after a shutdown that timed out can
+	// queue a commit after the drain, which is then never made (the file stays
+	// written); the process exits right after, so it is left at that.
+	defer func() {
+		drainQueues()
+		stopQueues()
+		boardQueues = nil
+	}()
 	d.QueuedCommits, d.CommitState, d.RetryCommits = true, boardQueues.state, boardQueues.retry
 	d.Updates, d.Changed = updates, soon(ctx, p.refresh)
 	d.CreateFleet = fleetMaker(o.configPath, live.add)
@@ -638,9 +647,7 @@ func serve(parent context.Context, o runOpts) error {
 	stop()
 	wg.Wait()
 	live.wait()
-	err = shutdown(srv, quiet)
-	drainQueues()
-	return err
+	return shutdown(srv, quiet)
 }
 
 // queueDrain is how long a panel shutting down waits for its board commits.

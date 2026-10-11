@@ -3,6 +3,9 @@ package board
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -62,15 +65,26 @@ type commitJob struct {
 }
 
 func (j commitJob) message() string {
-	if j.card != "" {
-		return "chore(board): add card " + j.card
-	}
 	parts := make([]string, len(j.fields))
 	for i, f := range j.fields {
 		parts[i] = f.name + " to " + f.value
 	}
-	return "chore(board): set " + strings.Join(parts, ", ")
+	set := "set " + strings.Join(parts, ", ")
+	switch {
+	case j.card == "":
+		return "chore(board): " + set
+	case len(j.fields) == 0:
+		return "chore(board): add card " + j.card
+	default:
+		// A card written to before its start was committed: the commit reads the
+		// file with the write in it.
+		return "chore(board): add card " + j.card + ", " + set
+	}
 }
+
+// file is the card a job is about, relative to the board: a start's own file
+// comes first among its paths.
+func (j commitJob) file() string { return j.paths[0] }
 
 // NewCommitter is the queue for the board at dir. logf is where debt is said
 // (nowhere when nil), and changed is told whenever State changes.
@@ -213,42 +227,34 @@ func (c *Committer) drain() {
 // place of the first of them, each field at the last value written to it, in
 // the order it was first written. Not only writes in a row: the first commit
 // of a file takes everything written to it so far, and its message must say
-// all of it. A card's start is its own commit, and later writes to the card
-// are not folded into it.
+// all of it. A card's start takes the writes to the card that follow it; a
+// start is never taken into anything.
 func coalesce(jobs []commitJob) []commitJob {
 	var out []commitJob
 	first := map[string]int{}
 	for _, j := range jobs {
-		key := strings.Join(j.paths, "\x00")
-		if i, ok := first[key]; ok && j.card == "" {
+		if i, ok := first[j.file()]; ok && j.card == "" {
 			out[i].fields = mergeFields(out[i].fields, j.fields)
 			continue
 		}
 		j.fields = append([]commitField(nil), j.fields...)
-		if j.card == "" {
-			first[key] = len(out)
-		}
+		first[j.file()] = len(out)
 		out = append(out, j)
 	}
 	return out
 }
 
 // absorb takes into j every queued write to the same card, and returns what is
-// left of the queue and how many it took. A card's start takes nothing, and is
-// never taken.
+// left of the queue and how many it took. A start is never taken.
 //
 // shortcut: a write landing between this and git reading the file is
 // committed under the earlier message, and its own commit finds nothing; the
 // window is the few milliseconds before git commit starts.
 func absorb(j commitJob, queue []commitJob) (commitJob, []commitJob, int) {
-	if j.card != "" {
-		return j, queue, 0
-	}
-	key := strings.Join(j.paths, "\x00")
 	rest := queue[:0:0]
 	taken := 0
 	for _, q := range queue {
-		if q.card == "" && strings.Join(q.paths, "\x00") == key {
+		if q.card == "" && q.file() == j.file() {
 			j.fields = mergeFields(j.fields, q.fields)
 			taken++
 			continue
@@ -283,6 +289,12 @@ var lockWaits = []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, 
 const gather = 30 * time.Millisecond
 
 func commitPatiently(dir, message string, paths ...string) error {
+	// A card gone before its commit came — archived and committed by the
+	// orchestrator, or deleted — has nothing to record: git would fail on it
+	// at every try, or record its deletion under this message.
+	if _, err := os.Stat(filepath.Join(dir, paths[0])); errors.Is(err, fs.ErrNotExist) {
+		return ErrNothingToCommit
+	}
 	err := commitPaths(dir, message, paths...)
 	for _, wait := range lockWaits {
 		if err == nil || !strings.Contains(err.Error(), "index.lock") {

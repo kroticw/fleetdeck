@@ -132,6 +132,53 @@ func TestWritesToOneCardWaitingTogetherAreOneCommitWhateverIsBetween(t *testing.
 	}
 }
 
+// A card started and written to a moment later is one commit: the start's
+// commit reads the file with the write in it, and says so.
+func TestACardWrittenRightAfterItsStartIsOneCommitThatSaysBoth(t *testing.T) {
+	dir, _ := boardRepo(t)
+	fresh := filepath.Join(dir, "cards", "T-002.md")
+	if err := os.WriteFile(fresh, []byte(sample+"\nstarted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCommitter(dir, nil, nil)
+	c.AddCard("T-002.md", "cards/T-002.md")
+	c.SetField("cards/T-002.md", "stage", "active")
+	start(t, c)
+	settled(t, c)
+	if got := subjects(t, dir); got[0] != "chore(board): add card T-002.md, set stage to active" || len(got) != 2 {
+		t.Fatalf("history %q", got)
+	}
+}
+
+// A card that is gone by the time its commit comes — archived and committed by
+// the orchestrator, or deleted — is nothing to commit, not debt: its commit
+// can never succeed, and a deletion must not be recorded under "set stage".
+func TestACardGoneBeforeItsCommitIsNeitherCommittedNorDebt(t *testing.T) {
+	for name, commitTheRemoval := range map[string]bool{"removal committed": true, "removal not committed": false} {
+		t.Run(name, func(t *testing.T) {
+			dir, card := boardRepo(t)
+			c := NewCommitter(dir, nil, nil)
+			edit(t, card, "\nmoved\n")
+			c.SetField("cards/T-001.md", "stage", "review")
+			if err := os.Remove(card); err != nil {
+				t.Fatal(err)
+			}
+			if commitTheRemoval {
+				gitOut(t, dir, "commit", "--quiet", "--all", "--message", "orchestrator archives the card")
+			}
+			before := len(subjects(t, dir))
+			start(t, c)
+			settled(t, c)
+			if st := c.State(); st.Failed != 0 {
+				t.Fatalf("a gone card is debt: %+v", st)
+			}
+			if got := len(subjects(t, dir)); got != before {
+				t.Fatalf("%d commits made for a card that is gone", got-before)
+			}
+		})
+	}
+}
+
 // An agent or the orchestrator commits the board with its own git. Holding the
 // index lock is a moment's business: the commit waits for it rather than
 // failing.
