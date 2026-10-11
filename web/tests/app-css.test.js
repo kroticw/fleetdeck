@@ -812,9 +812,15 @@ test("what waits moves, and stands still under reduced motion", () => {
     const own = plain.match(new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`))?.[1];
     assert.ok(own, `web/app.css has a ${selector} rule`);
     assert.match(own, /animation:\s*\S/, `${selector} does not move at all`);
-    const reduced = [...plain.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{((?:[^{}]*\{[^}]*\})*)\s*\}/g)].map((m) => m[1]).join("\n");
-    const still = reduced.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+    const blocks = [...plain.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{((?:[^{}]*\{[^}]*\})*)\s*\}/g)];
+    const block = blocks.find((m) => new RegExp(`${escaped}\\s*\\{`).test(m[1]));
+    const still = block?.[1].match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
     assert.ok(still, `${selector} keeps moving under reduced motion`);
     assert.match(still, /animation:\s*none/);
+    // Same specificity, so the later rule wins: an override above the rule it
+    // overrides is no override at all — the bar ran on for a person who asked
+    // for less motion, and only a browser showed it.
+    const ownAt = plain.search(new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{`));
+    assert.ok(block.index > ownAt, `the reduced-motion rule for ${selector} comes before the rule it overrides`);
   }
 });

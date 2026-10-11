@@ -2626,13 +2626,8 @@ button.review-line-add:hover {
     transition: none;
   }
 
-  /* What waits (T-159) stands still, and still says it waits: the bar along
-     a card being written stays drawn, the ring of a start stays whole. */
-  .kcard-pending::after {
-    animation: none;
-    background: color-mix(in srgb, var(--accent) 50%, transparent);
-  }
-
+  /* A start's ring (T-159) stands still, and stays whole: it still says the
+     start is under way. */
   .sspin {
     animation: none;
     border-right-color: currentColor;
@@ -2906,7 +2901,7 @@ button.review-line-add:hover {
    or having a session started for it. The write is a signed commit and a start
    takes seconds, and the card used to wait in the column it was dropped out of.
    Dashed edges say it is not written yet; the bar along its foot runs while it
-   waits, and stands still under reduced motion (the block by .kcol). A
+   waits, and stands still under reduced motion (below). A
    refused move is back in its column with a word in --danger. */
 .kcard-pending {
   position: relative;
@@ -2934,6 +2929,16 @@ button.review-line-add:hover {
   }
   to {
     background-position: 170% 0;
+  }
+}
+
+/* After the rule it overrides, not in the block by .kcol above it: the two
+   have the same specificity, and the later one wins. The bar stays drawn,
+   still saying the card waits. */
+@media (prefers-reduced-motion: reduce) {
+  .kcard-pending::after {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 50%, transparent);
   }
 }
 
