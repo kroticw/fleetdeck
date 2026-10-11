@@ -88,6 +88,10 @@ type panel struct {
 	cycleMu sync.Mutex
 	snapMu  sync.RWMutex
 	snap    state.Snapshot
+
+	// published is told after every snapshot published, so open sockets push
+	// it at once (server.Notifier). Nil tells nobody.
+	published func()
 }
 
 func newPanel(collect func(context.Context) state.Snapshot, b banner, cfg config.NotifyConfig, onNotifyFail func(error)) *panel {
@@ -122,6 +126,9 @@ func (p *panel) refresh(ctx context.Context) {
 	prev := p.snap
 	p.snap = next
 	p.snapMu.Unlock()
+	if p.published != nil {
+		p.published()
+	}
 
 	fire, cleared := state.Diff(prev, next, p.notifyCfg.SilenceAfter)
 	deliver(ctx, p.banners, p.notifyCfg, fire, cleared, p.onNotifyFail)
@@ -189,9 +196,17 @@ func watchBoard(ctx context.Context, boardDir string, onChange func()) {
 //     says the commit is missing. Reported as a plain failure this is the one that
 //     does damage: the operator redoes an edit that already took effect, and a
 //     progress field applied twice moves somewhere nobody asked for.
+//
+// With the panel's commit queues running (boardQueues), the commit is queued
+// instead and the write answers as soon as the field is in the file (T-161).
 func setCardField(path, field, value string, expect *string) error {
 	if err := board.SetField(path, field, value, expect); err != nil {
 		return err
+	}
+	if boardQueues != nil {
+		boardDir, rel := cardInBoard(path)
+		boardQueues.of(boardDir).SetField(rel, field, value)
+		return nil
 	}
 	msg := fmt.Sprintf("chore(board): set %s to %s", field, value)
 	err := board.Commit(filepath.Dir(path), filepath.Base(path), msg)
@@ -214,6 +229,14 @@ func createCard(boardDir string, card board.NewCard, now time.Time) (string, err
 	path, err := board.CreateCard(boardDir, card, now)
 	if err != nil {
 		return "", err
+	}
+	if boardQueues != nil {
+		paths, err := board.CardPaths(boardDir, path)
+		if err != nil {
+			return path, fmt.Errorf("%w: %w", server.ErrCardWrittenNotCommitted, err)
+		}
+		boardQueues.of(boardDir).AddCard(filepath.Base(path), paths...)
+		return path, nil
 	}
 	msg := "chore(board): add card " + filepath.Base(path)
 	if err := board.CommitCard(boardDir, path, msg); err != nil {
@@ -549,6 +572,18 @@ func serve(parent context.Context, o runOpts) error {
 
 	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
 	d := deps(p, dc, collector, cfg, o.configPath)
+
+	// A write answers once its file is written, its commit queued (T-161), and
+	// every socket hears of it at once rather than at its next tick. The queues
+	// outlive ctx by the few seconds shutdown gives them to finish.
+	updates := server.NewNotifier()
+	p.published = updates.Notify
+	queuesCtx, stopQueues := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopQueues()
+	boardQueues = newCommitQueues(queuesCtx, updates.Notify)
+	defer func() { boardQueues = nil }()
+	d.QueuedCommits, d.CommitState, d.RetryCommits = true, boardQueues.state, boardQueues.retry
+	d.Updates, d.Changed = updates, soon(ctx, p.refresh)
 	d.CreateFleet = fleetMaker(o.configPath, live.add)
 	// Stopped with the claude sessions are started with; nil on a stand given
 	// none, and then a fleet with running sessions is not deleted.
@@ -603,7 +638,22 @@ func serve(parent context.Context, o runOpts) error {
 	stop()
 	wg.Wait()
 	live.wait()
-	return shutdown(srv, quiet)
+	err = shutdown(srv, quiet)
+	drainQueues()
+	return err
+}
+
+// queueDrain is how long a panel shutting down waits for its board commits.
+const queueDrain = 5 * time.Second
+
+// drainQueues gives the board's queued commits queueDrain to be made.
+func drainQueues() {
+	if boardQueues == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), queueDrain)
+	defer cancel()
+	boardQueues.wait(ctx)
 }
 
 // servingLine is the log line a panel starts serving with. It names the binary

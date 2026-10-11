@@ -43,9 +43,19 @@ func Commit(dir, file, message string) error {
 // CommitCard commits a card the panel started, and its attachments directory
 // when it has one, in one commit from the board's own directory.
 func CommitCard(boardDir, cardPath, message string) error {
-	rel, err := filepath.Rel(boardDir, cardPath)
+	paths, err := CardPaths(boardDir, cardPath)
 	if err != nil {
 		return fmt.Errorf("commit %s: %w", cardPath, err)
+	}
+	return commitPaths(boardDir, message, paths...)
+}
+
+// CardPaths is what a card's start is committed as, relative to boardDir: the
+// card, and its attachments directory when it has one.
+func CardPaths(boardDir, cardPath string) ([]string, error) {
+	rel, err := filepath.Rel(boardDir, cardPath)
+	if err != nil {
+		return nil, err
 	}
 	paths := []string{rel}
 	if c, err := ParseCard(cardPath); err == nil && c.ID != "" {
@@ -53,7 +63,7 @@ func CommitCard(boardDir, cardPath, message string) error {
 			paths = append(paths, filepath.Join("attachments", c.ID))
 		}
 	}
-	return commitPaths(boardDir, message, paths...)
+	return paths, nil
 }
 
 // commitPaths is Commit for several pathspecs at once, a directory among them.

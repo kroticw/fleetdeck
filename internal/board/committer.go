@@ -134,6 +134,13 @@ func (c *Committer) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-c.wake:
+			// A dispatch writes a card's session and its stage a moment apart:
+			// a short wait makes them one batch, and one commit.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(gather):
+			}
 			c.drain()
 		}
 	}
@@ -172,6 +179,13 @@ func (c *Committer) drain() {
 		var failed []commitJob
 		var lastErr string
 		for _, j := range batch {
+			// Writes to this card made since the batch was taken are in the file
+			// the commit is about to read: their fields go into its message.
+			c.mu.Lock()
+			absorbed := 0
+			j, c.queue, absorbed = absorb(j, c.queue)
+			c.inflight += absorbed
+			c.mu.Unlock()
 			err := c.commit(c.dir, j.message(), j.paths...)
 			// Nothing to commit: another commit — the orchestrator's, tidying the
 			// fleet — took the file first, or it already held what was written.
@@ -181,7 +195,7 @@ func (c *Committer) drain() {
 				c.logf("board commit failed, left uncommitted: %s (%s): %v", strings.Join(j.paths, ", "), j.message(), err)
 			}
 			c.mu.Lock()
-			c.inflight--
+			c.inflight -= 1 + absorbed
 			c.mu.Unlock()
 			c.changed()
 		}
@@ -219,6 +233,31 @@ func coalesce(jobs []commitJob) []commitJob {
 	return out
 }
 
+// absorb takes into j every queued write to the same card, and returns what is
+// left of the queue and how many it took. A card's start takes nothing, and is
+// never taken.
+//
+// shortcut: a write landing between this and git reading the file is
+// committed under the earlier message, and its own commit finds nothing; the
+// window is the few milliseconds before git commit starts.
+func absorb(j commitJob, queue []commitJob) (commitJob, []commitJob, int) {
+	if j.card != "" {
+		return j, queue, 0
+	}
+	key := strings.Join(j.paths, "\x00")
+	rest := queue[:0:0]
+	taken := 0
+	for _, q := range queue {
+		if q.card == "" && strings.Join(q.paths, "\x00") == key {
+			j.fields = mergeFields(j.fields, q.fields)
+			taken++
+			continue
+		}
+		rest = append(rest, q)
+	}
+	return j, rest, taken
+}
+
 func mergeFields(into, more []commitField) []commitField {
 	for _, f := range more {
 		found := false
@@ -238,6 +277,10 @@ func mergeFields(into, more []commitField) []commitField {
 // the board's index lock — an agent's or the orchestrator's commit — before it
 // is debt. A var only so a test can shorten it.
 var lockWaits = []time.Duration{200 * time.Millisecond, 500 * time.Millisecond, time.Second}
+
+// gather is how long the queue waits, once woken, for the writes that come
+// with the first: a dispatch's session and stage, a stage and its progress.
+const gather = 30 * time.Millisecond
 
 func commitPatiently(dir, message string, paths ...string) error {
 	err := commitPaths(dir, message, paths...)

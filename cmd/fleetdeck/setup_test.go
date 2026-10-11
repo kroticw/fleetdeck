@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -158,9 +159,15 @@ func TestAPanelWithNoConfigurationIsSetUpFromItsPage(t *testing.T) {
 	}
 
 	code, body = c.do(http.MethodPost, "/api/cards", `{"title":"Первая карточка","zone":"planned"}`)
-	if code != http.StatusCreated || !strings.Contains(body, `"committed":true`) {
+	// Answered as soon as the card is written; its commit follows from the
+	// board's queue (T-161), and is waited for below.
+	if code != http.StatusCreated || !strings.Contains(body, `"queued":true`) {
 		t.Fatalf("a card started on the new board: %d %s", code, body)
 	}
+	until(t, "the card in the board's history", func() (bool, string) {
+		out, err := exec.Command("git", "-C", filepath.Join(root, "board"), "log", "--format=%s").CombinedOutput()
+		return err == nil && strings.Contains(string(out), "chore(board): add card T-001"), string(out)
+	})
 	until(t, "the card on the board", func() (bool, string) {
 		_, body := c.do(http.MethodGet, "/api/snapshot", "")
 		var s state.Snapshot
