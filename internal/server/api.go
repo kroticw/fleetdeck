@@ -132,7 +132,20 @@ func (d Deps) fleetView(r *http.Request) (state.Snapshot, error) {
 		start = f.StartWork
 	}
 	view.CanStartWork = start != nil
+	view.Starting = d.startsIn(view)
 	return view, nil
+}
+
+// startsIn is the starts under way for the cards view shows.
+func (d Deps) startsIn(view state.Snapshot) []state.Start {
+	if d.starts == nil {
+		return nil
+	}
+	paths := make([]string, len(view.Cards))
+	for i, c := range view.Cards {
+		paths[i] = c.Path
+	}
+	return d.starts.of(paths)
 }
 
 // handleResume brings a stopped session back.

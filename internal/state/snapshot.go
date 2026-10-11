@@ -279,6 +279,20 @@ type Snapshot struct {
 	// starts no sessions: the page then offers no start rather than one that
 	// fails.
 	CanStartWork bool `json:"canStartWork,omitempty"`
+
+	// Starting is every session this panel is starting for a card of this
+	// fleet right now (POST /api/sessions), from the moment the dispatch began
+	// until it answered. The daemon lists a session only once claude --bg is
+	// up, so this is the one source the session list can draw a start from.
+	// Stamped by internal/server, never by the Collector.
+	Starting []Start `json:"starting,omitempty"`
+}
+
+// Start is one session being started for a card: the card it is for and when
+// the start began.
+type Start struct {
+	Card  string    `json:"card"`
+	Since time.Time `json:"since"`
 }
 
 // FleetBoard is one fleet's board as a collect cycle read it.

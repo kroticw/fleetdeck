@@ -285,6 +285,10 @@ type Deps struct {
 	// tests, which cannot afford to wait whole seconds to observe a cadence; zero
 	// means the one second the panel actually uses.
 	interval time.Duration
+
+	// starts is the sessions being started right now (POST /api/sessions),
+	// which every snapshot this panel serves carries. Made by New.
+	starts *starts
 }
 
 // New builds the router. Routing uses net/http's own pattern matching (Go 1.22+),
@@ -306,6 +310,8 @@ func New(d Deps) http.Handler {
 			return snap
 		}
 	}
+
+	d.starts = newStarts()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", d.handleSnapshot)
