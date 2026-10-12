@@ -44,6 +44,9 @@ type Committer struct {
 	lastErr  string
 	retry    bool
 	inflight int
+	// retrying is how many of the commits in flight are debt being tried
+	// again: still unpaid, and said as failed until they succeed.
+	retrying int
 	busy     bool
 	wake     chan struct{}
 }
@@ -137,7 +140,7 @@ func (c *Committer) poke() {
 func (c *Committer) State() CommitState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return CommitState{Queued: len(c.queue) + c.inflight, Failed: len(c.debt), Error: c.lastErr}
+	return CommitState{Queued: len(c.queue) + c.inflight - c.retrying, Failed: len(c.debt) + c.retrying, Error: c.lastErr}
 }
 
 // Run makes the commits until ctx is done. A panel shutting down waits for the
@@ -184,15 +187,16 @@ func (c *Committer) drain() {
 			c.mu.Unlock()
 			return
 		}
-		// Debt first: it was written first.
+		// Debt first: it was written first. Coalescing keeps the order of first
+		// writes, so the debt's own commits are the batch's first ones.
+		owed := len(coalesce(c.debt))
 		batch := coalesce(append(c.debt, c.queue...))
 		c.debt, c.queue, c.retry = nil, nil, false
-		c.inflight, c.busy = len(batch), true
+		c.inflight, c.retrying, c.busy = len(batch), owed, true
 		c.mu.Unlock()
 
-		var failed []commitJob
 		var lastErr string
-		for _, j := range batch {
+		for i, j := range batch {
 			// Writes to this card made since the batch was taken are in the file
 			// the commit is about to read: their fields go into its message.
 			c.mu.Lock()
@@ -203,19 +207,26 @@ func (c *Committer) drain() {
 			err := c.commit(c.dir, j.message(), j.paths...)
 			// Nothing to commit: another commit — the orchestrator's, tidying the
 			// fleet — took the file first, or it already held what was written.
-			if err != nil && !errors.Is(err, ErrNothingToCommit) {
-				failed = append(failed, j)
+			failed := err != nil && !errors.Is(err, ErrNothingToCommit)
+			if failed {
 				lastErr = err.Error()
 				c.logf("board commit failed, left uncommitted: %s (%s): %v", strings.Join(j.paths, ", "), j.message(), err)
 			}
+			// Back into the debt at once, in the same step it leaves the flight:
+			// the failures said never dip while a retry runs.
 			c.mu.Lock()
+			if failed {
+				c.debt = append(c.debt, j)
+			}
 			c.inflight -= 1 + absorbed
+			if i < owed {
+				c.retrying--
+			}
 			c.mu.Unlock()
 			c.changed()
 		}
 
 		c.mu.Lock()
-		c.debt = failed
 		c.lastErr = lastErr
 		c.busy = false
 		c.mu.Unlock()

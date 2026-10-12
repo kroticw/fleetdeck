@@ -295,6 +295,48 @@ func TestDebtIsTriedAgainAtTheNextWriteFirstAndNeverByItself(t *testing.T) {
 	}
 }
 
+// While failed commits are being tried again they are still unpaid: the board's
+// note must not vanish for the length of a retry and come back when it fails.
+func TestDebtBeingTriedAgainIsStillSaid(t *testing.T) {
+	gate := make(chan struct{})
+	var calls int
+	var mu sync.Mutex
+	c := NewCommitter("/board", nil, nil)
+	c.commit = func(string, string, ...string) error {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			return errors.New("no PIN")
+		}
+		<-gate
+		return errors.New("still no PIN")
+	}
+	start(t, c)
+	c.SetField("cards/T-001.md", "stage", "review")
+	settled(t, c)
+	c.Retry()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := calls
+		mu.Unlock()
+		if n == 2 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if st := c.State(); st.Failed != 1 || st.Error != "no PIN" {
+		t.Fatalf("mid-retry the queue says %+v, want the failure still said", st)
+	}
+	close(gate)
+	settled(t, c)
+	if st := c.State(); st.Failed != 1 || st.Error != "still no PIN" {
+		t.Fatalf("after a retry that failed: %+v", st)
+	}
+}
+
 func TestDebtIsTriedAgainWhenAsked(t *testing.T) {
 	f := &fakeCommits{fails: 1}
 	c := NewCommitter("/board", nil, nil)
