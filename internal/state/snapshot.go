@@ -286,6 +286,11 @@ type Snapshot struct {
 	// up, so this is the one source the session list can draw a start from.
 	// Stamped by internal/server, never by the Collector.
 	Starting []Start `json:"starting,omitempty"`
+
+	// BoardCommits is this fleet's board commit queue (board.Committer) when
+	// it has something to say: commits still to be made, or ones that failed
+	// and wait to be tried again. Stamped by internal/server, nil when quiet.
+	BoardCommits *board.CommitState `json:"boardCommits,omitempty"`
 }
 
 // Start is one session being started for a card: the card it is for and when

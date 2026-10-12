@@ -824,3 +824,21 @@ test("what waits moves, and stands still under reduced motion", () => {
     assert.ok(block.index > ownAt, `the reduced-motion rule for ${selector} comes before the rule it overrides`);
   }
 });
+
+// The board's failed-commit note (T-161) is a row in the centre column's flow,
+// above the board: nothing about it may take it out of the flow and over the
+// columns' heads, its button keeps a margin from the edge, and a long reason
+// is cut with an ellipsis rather than pushing the button out.
+test("the failed-commit note is a row of its own above the board, never drawn over it", () => {
+  const plain = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (selector) => plain.match(new RegExp(`(?:^|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}\\s*\\{([^}]*)\\}`))?.[1];
+  const note = rule(".commit-note");
+  assert.ok(note, "web/app.css has a .commit-note rule");
+  assert.doesNotMatch(note, /position:\s*(absolute|fixed)/, "the note is taken out of the flow");
+  assert.match(note, /flex:\s*none/, "the note gives way to the board instead of keeping its height");
+  assert.match(note, /margin:\s*\S/);
+  const text = rule(".commit-note-text");
+  assert.match(text, /text-overflow:\s*ellipsis/);
+  assert.match(text, /min-width:\s*0/);
+  assert.doesNotMatch(plain, /#tabs[^{]*\.commit-note/, "the note is styled as part of the tab row");
+});
