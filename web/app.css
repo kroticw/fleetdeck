@@ -3103,33 +3103,40 @@ button.review-line-add:hover {
   display: none;
 }
 
-/* The board's commits that failed after their writes answered (T-161): where
-   the new card form's note sits, under the tab row, in the colour of a thing
-   that needs a look and is not broken. Its button tries them again. */
+/* The board's commits that failed after their writes answered (T-161): a row
+   of the centre column of its own, between the tab row and the board, in the
+   column's flow. While it shows the board moves down; nothing is drawn over
+   the columns' heads. A long reason is cut with an ellipsis, the whole of it
+   in the title, and the button keeps its margin from the edge. Hidden with the
+   board when the documentation section is shown. */
 .commit-note {
-  position: absolute;
-  top: 100%;
-  right: var(--gap-lg);
-  z-index: 1;
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  max-width: min(70%, 640px);
+  gap: var(--gap);
+  margin: var(--gap) var(--gap) 0;
+  padding: 4px 6px 4px 10px;
   color: var(--attn);
   font-size: var(--fs-xs);
-  background: var(--surface-raised);
-  padding: 2px 4px 2px 8px;
+  background: color-mix(in srgb, var(--attn) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--attn) 35%, var(--border));
   border-radius: var(--radius-sm);
 }
 
-.commit-note[hidden] {
+.commit-note:has(+ #board[hidden]) {
   display: none;
 }
 
 .commit-note-text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.commit-retry {
+  flex: none;
 }
 
 .newcard-note {

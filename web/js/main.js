@@ -296,8 +296,9 @@ if (regions.has("center")) {
   // #board, which every snapshot replaces whole.
   newCard = createNewCard(document.getElementById("tabs"), { creating: board?.creating });
   boardMove = createBoardMove(document.getElementById("tabs"));
-  // The board's commits that failed after their writes answered (T-161).
-  renderCommitNote(document.getElementById("tabs"));
+  // The board's commits that failed after their writes answered (T-161): a row
+  // of the centre column above the board.
+  renderCommitNote(document.getElementById("center"), { before: document.getElementById("board") });
   // A stand's frame with the form open (web/js/host.js, open).
   if (host?.open?.includes("newcard")) newCard.open();
 }

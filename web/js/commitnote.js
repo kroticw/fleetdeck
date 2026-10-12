@@ -8,8 +8,10 @@
 // tries them again with the operator there to answer a PIN prompt. Commits on
 // their way are no news, and say nothing.
 //
-// It hangs off the tab row, as the new card form's note does, rather than off
-// #board, which every snapshot replaces whole.
+// It is a row of the centre column of its own, right above #board — not inside
+// it, which every snapshot replaces whole, and not hung over it from the tab
+// row, where it covered the columns' heads: while it shows, the board moves
+// down (the operator's call, 12.10).
 
 import { retryCommits } from "./api.js";
 import { subscribe } from "./store.js";
@@ -23,10 +25,11 @@ function el(tag, className, text) {
 }
 
 /**
- * renderCommitNote appends the note to host and keeps it to the snapshot.
- * retry is the API call unless a test replaces it.
+ * renderCommitNote puts the note into host, right before `before` (the board),
+ * and keeps it to the snapshot. retry is the API call unless a test replaces
+ * it.
  */
-export function renderCommitNote(host, { retry = retryCommits } = {}) {
+export function renderCommitNote(host, { before = null, retry = retryCommits } = {}) {
   const note = el("div", "commit-note");
   note.hidden = true;
   note.setAttribute("role", "status");
@@ -34,7 +37,8 @@ export function renderCommitNote(host, { retry = retryCommits } = {}) {
   const button = el("button", "btn btn-sm commit-retry", t("commits_retry"));
   button.setAttribute("type", "button");
   note.append(text, button);
-  host.append(note);
+  if (before) host.insertBefore(note, before);
+  else host.append(note);
 
   // A refusal of the retry itself, shown while the queue still says what it
   // said when the retry was refused; its next word replaces it.

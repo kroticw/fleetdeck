@@ -34,10 +34,16 @@ let host;
 let retried;
 let retryAnswer;
 let t;
+let tabs;
+let board;
 
 beforeEach(async () => {
   dom = installDOM();
-  host = dom.element("nav");
+  // The centre column as index.html lays it out: the tab row, then the board.
+  host = dom.element("section");
+  tabs = dom.element("nav");
+  board = dom.element("div");
+  host.append(tabs, board);
   dom.document.body.appendChild(host);
   retried = 0;
   retryAnswer = undefined;
@@ -46,6 +52,7 @@ beforeEach(async () => {
   store.connect();
   const { renderCommitNote } = await import("../js/commitnote.js");
   renderCommitNote(host, {
+    before: board,
     retry: async () => {
       retried += 1;
       if (retryAnswer instanceof Error) throw retryAnswer;
@@ -58,6 +65,18 @@ afterEach(() => {
 });
 
 const note = () => host.querySelector("div.commit-note");
+
+// The note is a row of its own between the tab row and the board, in the flow
+// of the column: the board moves down while it shows, and nothing is drawn
+// over the columns' heads (the operator's call, 12.10). Not in the tab row,
+// where it hung over the board.
+test("commit note: it is a row of the column above the board, not part of the tab row", () => {
+  const children = host.children;
+  const at = children.indexOf(note());
+  assert.ok(at >= 0, "the note is not a row of the column");
+  assert.equal(children[at + 1], board, "the note is not right above the board");
+  assert.equal(tabs.querySelector("div.commit-note"), null);
+});
 
 test("commit note: nothing is said while the board's commits keep up", () => {
   socket.push({ cards: [] });
