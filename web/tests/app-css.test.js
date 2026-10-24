@@ -827,8 +827,8 @@ test("what waits moves, and stands still under reduced motion", () => {
 
 // The board's failed-commit note (T-161) is a row in the centre column's flow,
 // above the board: nothing about it may take it out of the flow and over the
-// columns' heads, its button keeps a margin from the edge, and a long reason
-// is cut with an ellipsis rather than pushing the button out.
+// columns' heads, its buttons keep a margin from the edge, and a long reason
+// wraps whole rather than being cut (T-178: cut, it could not be read).
 test("the failed-commit note is a row of its own above the board, never drawn over it", () => {
   const plain = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const rule = (selector) => plain.match(new RegExp(`(?:^|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}\\s*\\{([^}]*)\\}`))?.[1];
@@ -837,8 +837,19 @@ test("the failed-commit note is a row of its own above the board, never drawn ov
   assert.doesNotMatch(note, /position:\s*(absolute|fixed)/, "the note is taken out of the flow");
   assert.match(note, /flex:\s*none/, "the note gives way to the board instead of keeping its height");
   assert.match(note, /margin:\s*\S/);
-  const text = rule(".commit-note-text");
-  assert.match(text, /text-overflow:\s*ellipsis/);
-  assert.match(text, /min-width:\s*0/);
+  const body = rule(".commit-note-body");
+  assert.match(body, /min-width:\s*0/);
+  assert.match(body, /overflow-wrap:\s*anywhere/, "a path with no spaces in it runs past the note");
+  assert.doesNotMatch(plain, /\.commit-note[^{]*\{[^}]*(text-overflow:\s*ellipsis|white-space:\s*nowrap)/, "the reason is cut");
   assert.doesNotMatch(plain, /#tabs[^{]*\.commit-note/, "the note is styled as part of the tab row");
+});
+
+// In the window the board's web view runs under the toolbar and both panels:
+// the note at the column's top was drawn under the capsules (T-178). There it
+// stands in the room the columns have, below the toolbar.
+test("in the window the failed-commit note stands below the toolbar, between the panels", () => {
+  const plain = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const note = plain.match(/:root\[data-surface="board"\] \.commit-note\s*\{([^}]*)\}/)?.[1];
+  assert.ok(note, "the board surface does not place the note");
+  assert.match(note, /margin:\s*var\(--host-inset-top[^;]*--host-inset-content-right[^;]*--host-inset-left/);
 });

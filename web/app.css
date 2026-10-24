@@ -3106,13 +3106,16 @@ button.review-line-add:hover {
 /* The board's commits that failed after their writes answered (T-161): a row
    of the centre column of its own, between the tab row and the board, in the
    column's flow. While it shows the board moves down; nothing is drawn over
-   the columns' heads. A long reason is cut with an ellipsis, the whole of it
-   in the title, and the button keeps its margin from the edge. Hidden with the
+   the columns' heads. The reason is said whole, wrapped, however long git's
+   words are (T-178): cut with an ellipsis it could not be read. A reason
+   longer than half the window scrolls inside the note. Hidden with the
    board when the documentation section is shown. */
 .commit-note {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  max-height: 50vh;
+  overflow-y: auto;
   gap: var(--gap);
   margin: var(--gap) var(--gap) 0;
   padding: 4px 6px 4px 10px;
@@ -3127,15 +3130,24 @@ button.review-line-add:hover {
   display: none;
 }
 
-.commit-note-text {
+.commit-note-body {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding-top: 3px;
+  overflow-wrap: anywhere;
 }
 
-.commit-retry {
+.commit-note-hint {
+  margin: 4px 0 0;
+  color: var(--text);
+}
+
+.commit-note-hint code {
+  user-select: all;
+}
+
+.commit-retry,
+.commit-close {
   flex: none;
 }
 
@@ -4980,6 +4992,18 @@ body.is-resizing {
   border: none;
   border-radius: var(--radius-lg);
   box-shadow: var(--island-shadow);
+}
+
+/* The board's web view runs under the window's toolbar and both panels, so the
+   commit note at the column's top was drawn under the capsules, where it could
+   be neither read nor closed (T-178). It takes the open room the columns have,
+   below the toolbar, and the board's own top inset is then the note's. */
+:root[data-surface="board"] .commit-note {
+  margin: var(--host-inset-top, 64px) calc(var(--host-inset-content-right, 356px) + var(--gap-lg)) 0 var(--host-inset-left, 394px);
+}
+
+:root[data-surface="board"] .commit-note:not([hidden]) + #board {
+  padding-top: var(--gap-lg);
 }
 
 :root[data-surface="board"] #tabs .tab {

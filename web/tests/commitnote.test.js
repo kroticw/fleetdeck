@@ -125,3 +125,50 @@ test("commit note: a refused retry gives way to the queue's next word", async ()
   assert.match(text, /index\.lock held/, "an old refusal hides what the queue says now");
   assert.doesNotMatch(text, /no board commit queue/);
 });
+
+// The whole reason, never cut: the window's 24.10 note ran past its edge with
+// an ellipsis and its reason was not to be read (T-178).
+test("commit note: the reason is said whole, not in a title only", () => {
+  const long = "stage cards/T-177.md: fatal: Unable to create '/b/.git/index.lock': File exists. Another git process seems to be running in this repository, or the lock file may be stale: exit status 128";
+  socket.push({ cards: [], boardCommits: { failed: 1, error: long } });
+  assert.match(note().querySelector("span.commit-note-text").textContent, /exit status 128$/);
+});
+
+test("commit note: the cross closes it, and the same failure said again does not bring it back", () => {
+  const failure = { cards: [], boardCommits: { failed: 1, error: "no PIN" } };
+  socket.push(failure);
+  const close = note().querySelector("button.commit-close");
+  assert.ok(close, "the note has no cross");
+  assert.equal(close.getAttribute("aria-label"), t("commits_close"));
+  fireEvent(close, "click");
+  assert.equal(note().hidden, true);
+  socket.push(failure);
+  socket.push(failure);
+  assert.equal(note().hidden, true, "a failure already closed came back with the next snapshot");
+  assert.equal(host.querySelectorAll("div.commit-note").length, 1, "a repeated failure made a second note");
+});
+
+test("commit note: a new failure after the cross is said again", () => {
+  socket.push({ cards: [], boardCommits: { failed: 1, error: "no PIN" } });
+  fireEvent(note().querySelector("button.commit-close"), "click");
+  socket.push({ cards: [], boardCommits: { failed: 2, error: "no PIN" } });
+  assert.equal(note().hidden, false, "a second failed write stays unsaid");
+});
+
+// A lock left by a git that is gone refuses every write until it is removed,
+// and only the operator removes it: the note says how, and does nothing to it.
+test("commit note: a left-over index.lock comes with how to remove it by hand", () => {
+  const hint = () => note().querySelector(".commit-note-hint");
+  socket.push({ cards: [], boardCommits: { failed: 1, error: "no PIN" } });
+  assert.equal(hint().hidden, true, "a hint about a lock nobody reported");
+  socket.push({
+    cards: [],
+    boardCommits: {
+      failed: 1,
+      error: "stage cards/a.md: fatal: Unable to create '/Users/op/board/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository",
+    },
+  });
+  assert.equal(hint().hidden, false);
+  assert.match(hint().textContent, new RegExp(t("commits_lock_hint").slice(0, 20)));
+  assert.equal(hint().querySelector("code").textContent, "rm '/Users/op/board/.git/index.lock'");
+});
