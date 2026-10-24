@@ -90,6 +90,9 @@ const en = {
   // The board's commits that failed after their writes were answered (T-161).
   commits_failed: "Board writes not committed",
   commits_retry: "Retry",
+  commits_close: "Close",
+  // T-178: the panel never removes the lock itself; this says how to.
+  commits_lock_hint: "The board's git lock was left behind. If no git process is running (pgrep -l git shows none), the lock is stale: remove it by hand, then Retry:",
   gone_badge: "Gone",
   gone_no_cwd: "its working directory no longer exists",
   last_state: "last state",
@@ -599,6 +602,8 @@ const ru = {
   session_starting_slow: "дольше обычного…",
   commits_failed: "Записи доски не закоммичены",
   commits_retry: "Повторить",
+  commits_close: "Закрыть",
+  commits_lock_hint: "В доске остался lock git. Если процесса git нет (pgrep -l git ничего не показывает), lock устарел: удалите его руками и нажмите «Повторить»:",
   gone_badge: "Не поднять",
   gone_no_cwd: "рабочего каталога больше нет",
   last_state: "последнее состояние",
