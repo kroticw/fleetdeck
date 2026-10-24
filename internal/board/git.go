@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/userenv"
@@ -168,6 +169,10 @@ func run(dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = env
+	// SIGTERM, not the default SIGKILL: git removes its index.lock on SIGTERM,
+	// and a killed one leaves it behind to refuse every later write (T-178).
+	// WaitDelay still kills it if it does not exit.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = gitWaitDelay
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf

@@ -272,6 +272,41 @@ func TestRunEnforcesGitTimeout(t *testing.T) {
 	}
 }
 
+// A commit the deadline cuts short must not leave .git/index.lock behind: a
+// lock with no git process holding it refuses every later write to the board
+// until somebody removes it by hand (T-178). The signing program here hangs
+// the way pinentry with nobody at the screen does.
+func TestCommitTimeoutLeavesNoIndexLock(t *testing.T) {
+	originalTimeout, originalWaitDelay := gitTimeout, gitWaitDelay
+	gitTimeout, gitWaitDelay = time.Second, 500*time.Millisecond
+	t.Cleanup(func() { gitTimeout, gitWaitDelay = originalTimeout, originalWaitDelay })
+
+	dir := initRepo(t)
+	signer := filepath.Join(t.TempDir(), "gpg")
+	if err := os.WriteFile(signer, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"config", "commit.gpgsign", "true"},
+		{"config", "gpg.program", signer},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	writeCard(t, dir, "a.md", sample)
+
+	err := Commit(dir, "a.md", "test: commit that times out")
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected the commit to time out, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".git", "index.lock")); statErr == nil {
+		t.Fatal(`a timed-out commit left .git/index.lock behind: every later board write fails with "File exists"`)
+	}
+}
+
 // TestCommitUnderRealGitConfiguration commits in a repository that inherits this
 // machine's actual global git configuration, rather than the synthetic repo the
 // other tests build with signing switched off. Commit signing is enabled globally
