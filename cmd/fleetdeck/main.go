@@ -571,6 +571,7 @@ func serve(parent context.Context, o runOpts) error {
 	dc := daemonClient(o.standSocket, claudeDir)
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir(claudeDir))
+	collector.codexState = codexStateDir(o.configPath)
 
 	p := newPanel(
 		collector.Collect,
@@ -1064,6 +1065,12 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		}
 	}
 	home, _ := os.UserHomeDir()
+	claudeResume := resumeSession(resumeDeps{
+		jobStore: jobStoreDir,
+		projects: projectsDir(claudeDirOf(cfg)),
+		listed:   func(lctx context.Context) ([]daemon.Session, error) { return dc.ListSessions(lctx) },
+		resume:   func(rctx context.Context, spec daemon.ResumeSpec) error { return dc.Resume(rctx, spec) },
+	})
 	return server.Deps{
 		Snapshot: p.snapshot,
 		// Resuming reads the job store and the transcripts on every press
@@ -1071,15 +1078,22 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// was drawn from a reading that may be hours old, and a working
 		// directory deleted since then is exactly the case this must not
 		// dispatch into. See resume.go.
-		ResumeSession: resumeSession(resumeDeps{
-			jobStore: jobStoreDir,
-			projects: projectsDir(claudeDirOf(cfg)),
-			listed:   func(lctx context.Context) ([]daemon.Session, error) { return dc.ListSessions(lctx) },
-			resume:   func(rctx context.Context, spec daemon.ResumeSpec) error { return dc.Resume(rctx, spec) },
-		}),
+		ResumeSession: func(id string) error {
+			if isCodexKey(id) {
+				return codexResume(runOpts{configPath: configPath}, cfg.BoardPath, id)
+			}
+			return claudeResume(id)
+		},
 		// Returned through a local, not directly: a nil *daemon.Attachment put straight
 		// into the interface would be a non-nil Terminal holding nothing.
 		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {
+			if isCodexKey(session) {
+				t, err := codexAttach(actx, codexStateDir(configPath), session, cols, rows)
+				if err != nil {
+					return nil, err
+				}
+				return t, nil
+			}
 			a, err := dc.Attach(actx, session, cols, rows)
 			if err != nil {
 				return nil, err
@@ -1089,6 +1103,9 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// Asked of the daemon itself, never of p.snapshot: the bridge asks the moment
 		// a stream ends, and the snapshot can be a whole poll behind that moment.
 		SessionListed: func(lctx context.Context, session string) (bool, error) {
+			if isCodexKey(session) {
+				return codexListed(lctx, codexStateDir(configPath), session), nil
+			}
 			sessions, err := dc.ListSessions(lctx)
 			if err != nil {
 				return false, err

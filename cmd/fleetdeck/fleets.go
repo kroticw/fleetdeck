@@ -64,7 +64,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			// The ordinary send, not the first-message one: what goes through
 			// here is addressed to a session that has been working for a while
 			// (server.Deps.SendToSession).
-			SendToSession: dc.SendText,
+			SendToSession: codexAwareSend(codexStateDir(o.configPath), dc.SendText),
 			ReviewWorkdir: reviewWorkdir(jobStoreDir),
 		}
 		// Left nil without a board, as deps leaves the first fleet's: the route

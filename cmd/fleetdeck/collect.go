@@ -138,6 +138,9 @@ type Collector struct {
 
 	// now is time.Now everywhere but in tests, which cannot wait out reportTTL.
 	now func() time.Time
+
+	// codexState is the Codex runtimes' state directory; empty lists none.
+	codexState string
 }
 
 // NewCollector builds a collector over the sources the panel was wired with. Any of
@@ -604,6 +607,9 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		}
 	}
 	entries := mergeStopped(sessions, records)
+	if cfg.Codex.Enabled && c.codexState != "" {
+		entries = append(entries, codexRows(ctx, c.codexState)...)
+	}
 	listed := make([]daemon.Session, len(entries))
 	for i, e := range entries {
 		listed[i] = e.session

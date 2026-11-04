@@ -51,6 +51,7 @@ func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client, workers fu
 		SendFirst: dc.SendFirst,
 		SetField:  setCardField,
 		Home:      home,
+		Codex:     codexSessions(o, cfg),
 	}
 }
 
@@ -144,6 +145,10 @@ const stopWait = 10 * time.Second
 // nothing: the claude on PATH reaches the operator's real daemon, and a
 // stand's done card would put out a session of the operator's own.
 func sessionStopper(o runOpts, agent config.AgentConfig) func(ctx context.Context, short string) error {
+	return codexAwareStop(codexStateDir(o.configPath), claudeStopper(o, agent))
+}
+
+func claudeStopper(o runOpts, agent config.AgentConfig) func(ctx context.Context, short string) error {
 	// Nil is a claude looked up at each stop, as sessionStarter looks one up
 	// at each start.
 	var fixed []string
