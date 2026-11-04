@@ -93,6 +93,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	if card.Session != "" {
 		return Result{}, fmt.Errorf("%w: %s", ErrCardTaken, card.Session)
 	}
+	if card.Executor != "claude" {
+		return Result{}, fmt.Errorf("%w: executor %s is not configured", ErrCannotStart, card.Executor)
+	}
 	cwd, err := Workdir(d.Home, card.Repo)
 	if err != nil {
 		return Result{}, err

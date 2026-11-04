@@ -27,6 +27,18 @@ created: 2026-09-23
 # Дотащить доску до перетаскивания
 `
 
+func TestDispatchRefusesUnsupportedCodexBeforeStartingClaude(t *testing.T) {
+	f := newWorker()
+	d, path := dispatcher(t, f)
+	if err := os.WriteFile(path, []byte(strings.Replace(workCard, "stage: new", "stage: new\nexecutor: codex", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := d.Dispatch(context.Background(), Work{Card: path})
+	if !errors.Is(err, ErrCannotStart) || len(f.steps) != 0 {
+		t.Fatalf("err=%v steps=%v", err, f.steps)
+	}
+}
+
 // fakeWorker records what a dispatch did, in the order it did it.
 type fakeWorker struct {
 	steps   []string

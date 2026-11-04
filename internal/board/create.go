@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
 const (
@@ -58,6 +60,7 @@ var translit = map[rune]string{
 // may be empty.
 type NewCard struct {
 	Title, Zone, Repo, Description string
+	Executor                       string
 	Attachments                    []Attachment
 }
 
@@ -80,6 +83,10 @@ type NewCard struct {
 // created exclusively, and no existing card is ever overwritten. It returns the
 // path of the new card.
 func CreateCard(boardDir string, card NewCard, day time.Time) (string, error) {
+	provider, err := executor.ParseID(card.Executor)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidCard, err)
+	}
 	title, zone := strings.TrimSpace(card.Title), card.Zone
 	repo, err := NormalizeRepo(card.Repo)
 	if err != nil {
@@ -135,7 +142,7 @@ func CreateCard(boardDir string, card NewCard, day time.Time) (string, error) {
 		attachDir := AttachmentsDir(boardDir, id)
 		files, err := writeAttachments(attachDir, id, card.Attachments)
 		if err == nil {
-			content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\nsession: \"\"\n%screated: %s\n---\n\n# %s\n%s%s", id, zone, repoLine, date, title, task, files)
+			content := fmt.Sprintf("---\nid: %s\nzone: %s\nstage: new\nprogress: 0\nsession: \"\"\nexecutor: %s\n%screated: %s\n---\n\n# %s\n%s%s", id, zone, provider, repoLine, date, title, task, files)
 			var placed bool
 			placed, err = placeCard(cardsDir, path, content)
 			if err == nil && placed {

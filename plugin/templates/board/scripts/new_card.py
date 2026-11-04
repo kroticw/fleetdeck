@@ -47,6 +47,7 @@ zone: {zone}
 stage: new
 progress: 0
 session: ""
+executor: {executor}
 {repo_line}created: {created}
 ---
 
@@ -124,9 +125,12 @@ def create_card(
     zone: str,
     created: str,
     repo: str = "",
+    executor: str = "claude",
     start: int | None = None,
 ) -> Path:
     """Создать карточку, захватив свободный номер. Возвращает путь к файлу."""
+    if executor not in ("claude", "codex"):
+        raise ValueError(f"Unknown executor: {executor}")
     number = claim_number(board, start if start is not None else next_number(board))
     card_id = ID_FORMAT.format(number)
     path = board / "cards" / f"{card_id}-{created}-{slug}.md"
@@ -134,6 +138,7 @@ def create_card(
         TEMPLATE.format(
             card_id=card_id,
             zone=zone,
+            executor=executor,
             repo_line=f"repo: {repo}\n" if repo else "",
             created=created,
             title=title,
@@ -150,6 +155,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--slug", required=True, help="slug для имени файла, латиницей")
     parser.add_argument("--zone", required=True, choices=ZONES, help="зона доски")
     parser.add_argument("--repo", default="", help="путь репозитория от домашнего каталога")
+    parser.add_argument("--executor", choices=("claude", "codex"), default="claude", help="исполнитель карточки")
     parser.add_argument("--created", default=date.today().isoformat(), help="дата YYYY-MM-DD")
     parser.add_argument(
         "--board",
@@ -165,6 +171,7 @@ def main(argv: list[str]) -> int:
         zone=args.zone,
         created=args.created,
         repo=args.repo,
+        executor=args.executor,
     )
     print(path)
     return 0
