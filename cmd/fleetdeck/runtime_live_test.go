@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/codexruntime"
+	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
 const liveProbeMarker = "disposable Fleetdeck integration probe\n"
@@ -73,7 +74,47 @@ func TestRuntimeLiveCleanStart(t *testing.T) {
 		screen.Write(ev.Data)
 	}
 	_ = stream.Close()
-	if err := client.Call(ctx, "shutdown", nil, nil); err != nil {
+	// The API paths the panel relies on, on a thread with no turns yet.
+	var history codexruntime.History
+	if err := client.Call(ctx, "history", map[string]int{"limit": 5}, &history); err != nil || len(history.Entries) != 0 {
+		t.Fatalf("history %+v %v", history, err)
+	}
+	var pending []codexruntime.PendingRequest
+	if err := client.Call(ctx, "requests", nil, &pending); err != nil || len(pending) != 0 {
+		t.Fatalf("requests %+v %v", pending, err)
+	}
+	var said executor.Said
+	if err := client.Call(ctx, "lastWords", nil, &said); err != nil || !said.NoFinalAnswer {
+		t.Fatalf("last words %+v %v", said, err)
+	}
+	if status.Activity != "idle" || status.NeedsHuman != executor.No {
+		t.Fatalf("an unused thread must read idle with no one needed: %+v", status)
+	}
+	if err := client.Call(ctx, "stop", nil, nil); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	store, err := codexruntime.OpenStore(spec.StateDir)
+	if err != nil {
 		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		record, err := store.Read(string(key))
+		if err == nil && record.Lifecycle == "stopped" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("record after stop: %+v %v", record, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Resume rejoins the same native thread under the same key.
+	resumed, err := codexruntime.Resume(ctx, spec, key)
+	if err != nil || resumed.Record.ThreadID != status.ThreadID {
+		t.Fatalf("resume: %+v %v", resumed.Record, err)
+	}
+	if err := resumed.Call(ctx, "stop", nil, nil); err != nil {
+		t.Fatalf("stop after resume: %v", err)
 	}
 }
