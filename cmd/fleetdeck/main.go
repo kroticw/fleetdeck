@@ -335,6 +335,15 @@ func main() {
 		return
 	}
 
+	// `fleetdeck runtime` owns one Codex session; it must never reach the
+	// panel's flags, configuration checks or HTTP port.
+	if len(os.Args) > 1 && os.Args[1] == "runtime" {
+		if err := runtimeCommand(os.Args[2:]); err != nil {
+			log.Fatalf("fleetdeck runtime: %v", err)
+		}
+		return
+	}
+
 	// `fleetdeck version` is read here for the same reason, and answered by the same
 	// function as the --version flag below.
 	if len(os.Args) > 1 && os.Args[1] == "version" {
