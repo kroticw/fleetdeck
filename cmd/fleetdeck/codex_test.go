@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/server"
 
 	"github.com/kroticw/fleetdeck/internal/codexruntime"
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -137,5 +142,49 @@ func TestCodexKeysNeverReachClaude(t *testing.T) {
 	}
 	if codexAwareStop(state, nil) != nil {
 		t.Fatal("a panel that stops nothing started stopping")
+	}
+}
+
+func TestCodexResumeKeepsAStandOffTheOperatorsCodex(t *testing.T) {
+	cfg := config.Config{BoardPath: "/board", Codex: config.CodexConfig{Enabled: true}}
+	err := codexResume(runOpts{configPath: filepath.Join(t.TempDir(), "config.yaml"), standSocket: "/stand/daemon.sock"}, cfg, "codex:"+runtimeTestThread)
+	if !errors.Is(err, server.ErrSessionNotResumable) {
+		t.Fatalf("a stand without its own Codex home resumed: %v", err)
+	}
+}
+
+// A starting runtime's lock is free until the runtime takes it; the panel
+// must not take it in that gap, so a starting record is never probed.
+func TestCodexRowsNeverProbeAStartingRuntimesLock(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "fdrows-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	store, err := codexruntime.OpenStore(filepath.Join(dir, "runtime"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	save := func(key, lifecycle string) {
+		owner, err := store.Acquire(executor.Key(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := codexRecord(lifecycle)
+		r.Key, r.Version, r.Nonce, r.CreatedAt = executor.Key(key), codexruntime.ProtocolVersion, strings.Repeat("n", 32), time.Now()
+		if err := owner.Save(r); err != nil {
+			t.Fatal(err)
+		}
+		_ = owner.Close()
+	}
+	save("codex:"+runtimeTestThread, "starting")
+	save("codex:02a1a6d4-90a4-70f3-9130-a59ec873d0ba", "live")
+	rows := map[string]string{}
+	for _, row := range codexRows(context.Background(), filepath.Join(dir, "runtime")) {
+		rows[row.session.Short] = row.lifecycle
+	}
+	if rows["codex:"+runtimeTestThread] != state.LifecycleLive || rows["codex:02a1a6d4-90a4-70f3-9130-a59ec873d0ba"] != state.LifecycleStopped {
+		t.Fatalf("rows %v", rows)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,7 +41,7 @@ func isCodexKey(id string) bool { return strings.HasPrefix(id, "codex:") }
 // is off, or on a stand without a Codex home of its own, which would
 // otherwise reach the operator's real Codex.
 func codexSessions(o runOpts, cfg config.Config) *orchestrator.CodexSessions {
-	if !cfg.Codex.Enabled || (o.standSocket != "" && cfg.Codex.Home == "") {
+	if !codexAllowed(o, cfg) {
 		return nil
 	}
 	stateDir := codexStateDir(o.configPath)
@@ -104,7 +105,11 @@ func codexAwareStop(stateDir string, claude func(ctx context.Context, short stri
 }
 
 // codexResume brings back a Codex key's runtime; its thread is resumed.
-func codexResume(o runOpts, board, key string) error {
+func codexResume(o runOpts, cfg config.Config, key string) error {
+	if !codexAllowed(o, cfg) {
+		return fmt.Errorf("%w: Codex is not enabled for this panel", server.ErrSessionNotResumable)
+	}
+	board := cfg.BoardPath
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	stateDir := codexStateDir(o.configPath)
@@ -123,6 +128,11 @@ func codexResume(o runOpts, board, key string) error {
 func codexListed(ctx context.Context, stateDir, key string) bool {
 	_, err := codexruntime.Connect(ctx, stateDir, executor.Key(key))
 	return err == nil
+}
+
+// codexAllowed is whether this panel may start or resume Codex at all.
+func codexAllowed(o runOpts, cfg config.Config) bool {
+	return cfg.Codex.Enabled && (o.standSocket == "" || cfg.Codex.Home != "")
 }
 
 func codexStartSpec(o runOpts, stateDir, board string) (codexruntime.StartSpec, error) {
@@ -156,28 +166,38 @@ func codexRows(ctx context.Context, stateDir string) []listedSession {
 		_ = store.Close()
 		return nil
 	}
-	var rows []listedSession
-	for _, r := range records {
-		var status *codexruntime.Status
-		held := true
-		if r.Lifecycle == "live" || r.Lifecycle == "starting" || r.Lifecycle == "stopping" {
-			askCtx, cancel := context.WithTimeout(ctx, time.Second)
-			if c, err := codexruntime.Connect(askCtx, stateDir, r.Key); err == nil {
-				var s codexruntime.Status
-				if c.Call(askCtx, "status", nil, &s) == nil {
-					status = &s
-				}
+	// Asked in parallel under one deadline: a wedged runtime must not hold
+	// up the snapshot for the rest.
+	askCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	statuses := make([]*codexruntime.Status, len(records))
+	var wg sync.WaitGroup
+	for i, r := range records {
+		if r.Lifecycle != "live" && r.Lifecycle != "starting" && r.Lifecycle != "stopping" {
+			continue
+		}
+		wg.Go(func() {
+			var s codexruntime.Status
+			if codexCall(askCtx, stateDir, string(r.Key), "status", nil, &s) == nil {
+				statuses[i] = &s
 			}
-			cancel()
-			// A free key lock is a runtime that is gone, whatever its record says.
-			if status == nil {
-				if owner, err := store.Acquire(r.Key); err == nil {
-					held = false
-					_ = owner.Close()
-				}
+		})
+	}
+	wg.Wait()
+	rows := make([]listedSession, 0, len(records))
+	for i, r := range records {
+		held := true
+		// A free lock is a runtime that is gone, whatever its record says.
+		// Never probed for a starting record: the lock is free between the
+		// panel's release and the runtime's own take, and probing then would
+		// make the runtime lose its key.
+		if statuses[i] == nil && (r.Lifecycle == "live" || r.Lifecycle == "stopping") {
+			if owner, err := store.Acquire(r.Key); err == nil {
+				held = false
+				_ = owner.Close()
 			}
 		}
-		rows = append(rows, codexRow(r, status, held))
+		rows = append(rows, codexRow(r, statuses[i], held))
 	}
 	_ = store.Close()
 	return rows

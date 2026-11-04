@@ -584,7 +584,7 @@ func serve(parent context.Context, o runOpts) error {
 	)
 
 	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
-	d := deps(p, dc, collector, cfg, o.configPath)
+	d := deps(p, dc, collector, cfg, o)
 
 	// A write answers once its file is written, its commit queued (T-161), and
 	// every socket hears of it at once rather than at its next tick. The queues
@@ -1058,7 +1058,8 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
-func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
+func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, o runOpts) server.Deps {
+	configPath := o.configPath
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
 	var create func(board.NewCard) (string, error)
@@ -1087,7 +1088,7 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// dispatch into. See resume.go.
 		ResumeSession: func(id string) error {
 			if isCodexKey(id) {
-				return codexResume(runOpts{configPath: configPath}, cfg.BoardPath, id)
+				return codexResume(o, collector.Config(), id)
 			}
 			return claudeResume(id)
 		},

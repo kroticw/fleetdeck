@@ -182,7 +182,7 @@ func TestAStandWithoutItsOwnClaudeStopsNoSession(t *testing.T) {
 		_ = stop(context.Background(), "abc12345")
 		t.Error("a stand given no claude of its own can stop sessions")
 	}
-	if fleetCleaner(o, config.AgentConfig{}, t.TempDir(), nil, t.TempDir()) != nil {
+	if fleetCleaner(o, config.Config{}, t.TempDir(), nil, t.TempDir()) != nil {
 		t.Error("a stand given no claude has a cleanup that stops sessions")
 	}
 	if ran(ranOnPath) {
@@ -194,7 +194,7 @@ func TestAStandWithoutItsOwnClaudeStopsNoSession(t *testing.T) {
 // so it has no cleanup.
 func TestAFleetWithoutABoardHasNoCleanup(t *testing.T) {
 	standBin, _ := claudeThatRecordsArgs(t, "")
-	if fleetCleaner(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.AgentConfig{}, "", nil, t.TempDir()) != nil {
+	if fleetCleaner(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.Config{}, "", nil, t.TempDir()) != nil {
 		t.Error("a fleet with no board has a cleanup")
 	}
 }

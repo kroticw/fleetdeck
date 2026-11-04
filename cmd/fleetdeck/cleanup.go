@@ -46,8 +46,8 @@ type cleanupDeps struct {
 // not: a fleet with no board has nowhere to record the session it would put
 // out, and a panel that stops no sessions (sessionStopper) has nothing to put
 // it out with. Nil leaves a card moved into done with its session running.
-func fleetCleaner(o runOpts, agent config.AgentConfig, boardDir string, dc *daemon.Client, projects string) *orchestrator.Cleaner {
-	stop := sessionStopper(o, agent)
+func fleetCleaner(o runOpts, cfg config.Config, boardDir string, dc *daemon.Client, projects string) *orchestrator.Cleaner {
+	stop := sessionStopper(o, cfg.Agent)
 	if boardDir == "" || stop == nil {
 		return nil
 	}
@@ -75,6 +75,15 @@ func fleetCleaner(o runOpts, agent config.AgentConfig, boardDir string, dc *daem
 		codexWords: func(ctx context.Context, key string) (executor.Said, error) {
 			var said executor.Said
 			err := codexCall(ctx, stateDir, key, "lastWords", nil, &said)
+			if err == nil {
+				return said, nil
+			}
+			// The history outlives the runtime: one that ended is brought
+			// back to read it, and the cleanup then stops it as usual.
+			if rerr := codexResume(o, cfg, key); rerr != nil {
+				return said, fmt.Errorf("%w; bringing it back to read its history failed: %w", err, rerr)
+			}
+			err = codexCall(ctx, stateDir, key, "lastWords", nil, &said)
 			return said, err
 		},
 	})
