@@ -304,5 +304,5 @@ var protocolErrors = map[string]error{
 	"too_large": ErrFrameTooLarge, "unavailable": executor.ErrUnavailable,
 	"unsupported": executor.ErrUnsupported, "conflict": executor.ErrConflict,
 	"starting": executor.ErrStarting, "delivery_unknown": executor.ErrDeliveryUnknown,
-	"not_resumable": executor.ErrNotResumable,
+	"not_resumable": executor.ErrNotResumable, "work_survived": ErrWorkSurvived,
 }

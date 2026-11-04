@@ -195,6 +195,22 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 				return nil, ErrInvalidFrame
 			}
 			return deliver(ctx, native, state, req.OperationID, req.Text)
+		case "interrupt":
+			active, err := activeTurns(ctx, native, record.ThreadID)
+			for _, turn := range active {
+				if err == nil {
+					err = native.call(ctx, "turn/interrupt", map[string]string{"threadId": record.ThreadID, "turnId": turn}, nil)
+				}
+			}
+			return struct{}{}, err
+		case "stop":
+			// Work is proven stopped before the TUI closes; on failure the
+			// session keeps running and the caller sees why.
+			if err := stopWork(ctx, native, record.ThreadID); err != nil {
+				return nil, err
+			}
+			shutdownOnce.Do(func() { close(shutdown) })
+			return struct{}{}, nil
 		case "shutdown":
 			shutdownOnce.Do(func() { close(shutdown) })
 			return struct{}{}, nil

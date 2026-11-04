@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -42,6 +43,9 @@ func newFakeNative(t *testing.T) *fakeNative {
 			status := f.status
 			f.mu.Unlock()
 			result := map[string]any{}
+			if m.Method == "thread/turns/list" || m.Method == "thread/backgroundTerminals/list" {
+				result["data"] = []any{}
+			}
 			if m.Method == "thread/start" || m.Method == "thread/resume" || m.Method == "thread/read" {
 				result["thread"] = map[string]any{"id": nativeThread, "status": map[string]string{"type": status}}
 			}
@@ -217,14 +221,19 @@ func TestServiceRegistersThreadBeforeTerminalAndServesViews(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitStream(t, s, "SIZE=80x24")
-	if err := client.Call(context.Background(), "shutdown", nil, nil); err != nil {
+	if err := client.Call(context.Background(), "stop", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := awaitServed(t, served); err != nil {
 		t.Fatal(err)
 	}
 	if record := f.record(t); record.Lifecycle != "stopped" || record.ThreadID != nativeThread {
-		t.Fatalf("shutdown record: %+v", record)
+		t.Fatalf("stop record: %+v", record)
+	}
+	for _, method := range []string{"thread/turns/list", "thread/backgroundTerminals/clean", "thread/backgroundTerminals/list"} {
+		if !slices.Contains(f.native.seen(), method) {
+			t.Fatalf("stop skipped %s: %v", method, f.native.seen())
+		}
 	}
 }
 
