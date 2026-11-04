@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -33,6 +34,21 @@ func (v Verdict) MarshalJSON() ([]byte, error) {
 	default:
 		return []byte(`"unknown"`), nil
 	}
+}
+
+// UnmarshalJSON reads what MarshalJSON writes; anything else is unknown.
+func (v *Verdict) UnmarshalJSON(raw []byte) error {
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return err
+	}
+	switch Verdict(s) {
+	case No, Yes:
+		*v = Verdict(s)
+	default:
+		*v = Unknown
+	}
+	return nil
 }
 
 // Metric records what was actually reported and when, without inventing zeroes.

@@ -67,3 +67,20 @@ func TestUnobservedMetricsAreAbsent(t *testing.T) {
 		t.Fatalf("unknown reported as known: %s", raw)
 	}
 }
+
+func TestVerdictSurvivesAJSONRoundTrip(t *testing.T) {
+	for _, v := range []Verdict{Unknown, No, Yes} {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back Verdict
+		if err := json.Unmarshal(raw, &back); err != nil || back != v {
+			t.Fatalf("%q came back as %q (%v)", v, back, err)
+		}
+	}
+	var odd Verdict
+	if err := json.Unmarshal([]byte(`"maybe"`), &odd); err != nil || odd != Unknown {
+		t.Fatalf("unrecognized verdict must read as unknown, got %q %v", odd, err)
+	}
+}
