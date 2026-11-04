@@ -197,6 +197,14 @@ func TestServiceRegistersThreadBeforeTerminalAndServesViews(t *testing.T) {
 	if err := client.Call(context.Background(), "requests.respond", Answer{Token: "stale", Decision: "accept"}, nil); !errors.Is(err, executor.ErrConflict) {
 		t.Fatalf("stale answer: %v", err)
 	}
+	var receipt executor.Receipt
+	send := map[string]string{"operationId": testOperation, "text": "do the task"}
+	if err := client.Call(context.Background(), "send", send, &receipt); err != nil || receipt.State != executor.Accepted {
+		t.Fatalf("send %+v %v", receipt, err)
+	}
+	if op := f.record(t).Operations[testOperation]; op.Phase != string(executor.Accepted) {
+		t.Fatalf("send was not journaled: %+v", op)
+	}
 	var status Status
 	if err := client.Call(context.Background(), "status", nil, &status); err != nil {
 		t.Fatal(err)

@@ -59,6 +59,7 @@ type Operation struct {
 	TurnID    string                 `json:"turnId,omitempty"`
 	MessageID string                 `json:"messageId,omitempty"`
 	Receipt   executor.DeliveryState `json:"receipt,omitempty"`
+	UpdatedAt time.Time              `json:"updatedAt,omitempty"`
 }
 
 type Store struct {

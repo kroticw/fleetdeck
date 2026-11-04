@@ -111,17 +111,21 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 	if err := owner.Save(record); err != nil {
 		return err
 	}
+	state := &runtimeState{owner: owner, record: record}
 	// Every exit leaves a final lifecycle: stopped when the native thread can
 	// be resumed, dead when none was registered.
 	final := ""
 	defer func() {
-		record.Lifecycle = final
-		if record.ThreadID == "" {
-			record.Lifecycle = "dead"
-		} else if final == "" {
-			record.Lifecycle = "stopped"
-		}
-		if saveErr := owner.Save(record); err == nil {
+		saveErr := state.update(func(r *Record) error {
+			r.Lifecycle = final
+			if r.ThreadID == "" {
+				r.Lifecycle = "dead"
+			} else if final == "" {
+				r.Lifecycle = "stopped"
+			}
+			return nil
+		})
+		if err == nil {
 			err = saveErr
 		}
 	}()
@@ -136,9 +140,10 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 		return fmt.Errorf("connect to Codex app-server: %w", err)
 	}
 	defer native.Close()
-	if err := registerThread(ctx, native, owner, &record, spec.Thread); err != nil {
+	if err := registerThread(ctx, native, state, spec.Thread); err != nil {
 		return err
 	}
+	record = state.snapshot()
 
 	argv, env, err := spec.Launch(record.ThreadID)
 	if err != nil {
@@ -149,21 +154,17 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 		return err
 	}
 	defer term.Close()
-	record.Lifecycle = "live"
-	if err := owner.Save(record); err != nil {
+	if err := state.update(func(r *Record) error { r.Lifecycle = "live"; return nil }); err != nil {
 		return err
 	}
 
-	var mu sync.Mutex
-	lifecycle := record.Lifecycle
 	shutdown := make(chan struct{})
 	var shutdownOnce sync.Once
 	handle := func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
 		case "status":
-			mu.Lock()
-			defer mu.Unlock()
-			return Status{Lifecycle: lifecycle, ThreadID: record.ThreadID, Native: !isDone(native.done), Terminal: !isDone(term.done)}, nil
+			current := state.snapshot()
+			return Status{Lifecycle: current.Lifecycle, ThreadID: current.ThreadID, Native: !isDone(native.done), Terminal: !isDone(term.done)}, nil
 		case "terminal.attach":
 			var req struct {
 				Offset *uint64 `json:"offset"`
@@ -185,13 +186,22 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 				return nil, ErrInvalidFrame
 			}
 			return struct{}{}, respondRequest(ctx, native, a)
+		case "send":
+			var req struct {
+				OperationID string `json:"operationId"`
+				Text        string `json:"text"`
+			}
+			if json.Unmarshal(params, &req) != nil {
+				return nil, ErrInvalidFrame
+			}
+			return deliver(ctx, native, state, req.OperationID, req.Text)
 		case "shutdown":
 			shutdownOnce.Do(func() { close(shutdown) })
 			return struct{}{}, nil
 		}
 		return nil, executor.ErrUnsupported
 	}
-	identity := record
+	identity := state.snapshot()
 	serveCtx, stopServing := context.WithCancel(ctx)
 	defer stopServing()
 	go func() {
@@ -211,9 +221,6 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 	}
 	term.Close()
 	final = settledLifecycle(native, record.ThreadID)
-	mu.Lock()
-	lifecycle = final
-	mu.Unlock()
 	return nil
 }
 
@@ -243,7 +250,8 @@ func settledLifecycle(native *nativeControl, thread string) string {
 // registerThread creates and names a new thread, saving its ID before the
 // name or any TUI can use it, or rejoins the saved one. Ownership is taken
 // before resume so that its replayed requests are kept.
-func registerThread(ctx context.Context, native *nativeControl, owner *Owner, record *Record, extra map[string]any) error {
+func registerThread(ctx context.Context, native *nativeControl, state *runtimeState, extra map[string]any) error {
+	record := state.snapshot()
 	if record.ThreadID != "" {
 		native.own(record.ThreadID)
 		return native.call(ctx, "thread/resume", map[string]any{"threadId": record.ThreadID, "excludeTurns": true}, nil)
@@ -266,7 +274,7 @@ func registerThread(ctx context.Context, native *nativeControl, owner *Owner, re
 		return fmt.Errorf("codex returned an invalid thread ID: %w", err)
 	}
 	record.ThreadID = started.Thread.ID
-	if err := owner.Save(*record); err != nil {
+	if err := state.update(func(r *Record) error { r.ThreadID = record.ThreadID; return nil }); err != nil {
 		return err
 	}
 	native.own(record.ThreadID)
