@@ -11,7 +11,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/executor"
@@ -199,8 +198,7 @@ func (c Client) Call(ctx context.Context, method string, params, result any) err
 	if err != nil {
 		return err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0o077 != 0 || stat.Uid != uint32(os.Getuid()) {
+	if !privateSocket(info) {
 		return ErrPrivateState
 	}
 	encoded, err := json.Marshal(params)

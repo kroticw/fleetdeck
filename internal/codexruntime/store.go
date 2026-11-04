@@ -102,6 +102,14 @@ func privateFile(info os.FileInfo, dir bool) bool {
 	return ok && stat.Uid == uint32(os.Getuid())
 }
 
+func privateSocket(info os.FileInfo) bool {
+	if info == nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0o077 != 0 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Uid == uint32(os.Getuid())
+}
+
 func recordName(raw string) (executor.Key, string, error) {
 	id, key, err := executor.ParseKey(raw)
 	if err != nil || id != executor.Codex {
