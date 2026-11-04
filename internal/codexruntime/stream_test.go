@@ -22,16 +22,20 @@ func streamClient(t *testing.T, p *terminal) Client {
 		if err := json.Unmarshal(params, &req); err != nil {
 			return nil, err
 		}
-		return p.attachStream(ctx, req.Offset)
+		// A typed nil in `any` would pass as a streamer.
+		attached, err := p.attachStream(ctx, req.Offset)
+		if err != nil {
+			return nil, err
+		}
+		return attached, nil
 	}
 	return Client{Socket: protocolListener(t, record, handle), Record: record}
 }
 
 func attachStream(t *testing.T, c Client, offset *uint64) *TerminalStream {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	s, err := c.AttachTerminal(ctx, offset)
+	// The view lives as long as this context; the test ends it with Close.
+	s, err := c.AttachTerminal(context.Background(), offset)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +175,32 @@ func TestTerminalStreamReportsProcessExit(t *testing.T) {
 			t.Fatal(err)
 		}
 		if ev.End == "exited" {
+			return
+		}
+	}
+}
+
+func TestTerminalStreamEndsWithItsContext(t *testing.T) {
+	p := testPTY(t)
+	c := streamClient(t, p)
+	ctx, cancel := context.WithCancel(context.Background())
+	s, err := c.AttachTerminal(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	observer := attachStream(t, c, nil)
+	cancel()
+	if _, err := s.Next(time.Now().Add(time.Second)); err == nil {
+		t.Fatal("stream outlived its context")
+	}
+	// The canceled view released its lease to the observer.
+	for {
+		ev, err := observer.Next(time.Now().Add(3 * time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Writable != nil && *ev.Writable {
 			return
 		}
 	}

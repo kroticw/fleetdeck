@@ -298,3 +298,17 @@ func TestServiceDoesNotCallBusyNativeWorkStopped(t *testing.T) {
 		t.Fatalf("busy native thread recorded as %s", record.Lifecycle)
 	}
 }
+
+func TestServiceSurvivesARejectedAttach(t *testing.T) {
+	f := newServiceFixture(t, "")
+	served := f.run(t)
+	client := f.awaitLive(t, served)
+	beyond := uint64(1) << 40
+	if _, err := client.AttachTerminal(context.Background(), &beyond); err == nil {
+		t.Fatal("attach beyond the output succeeded")
+	}
+	var status Status
+	if err := client.Call(context.Background(), "status", nil, &status); err != nil || status.Lifecycle != "live" {
+		t.Fatalf("runtime did not survive a rejected attach: %+v %v", status, err)
+	}
+}

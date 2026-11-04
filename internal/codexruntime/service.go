@@ -171,7 +171,12 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 			if len(params) > 0 && json.Unmarshal(params, &req) != nil {
 				return nil, ErrInvalidFrame
 			}
-			return term.attachStream(ctx, req.Offset)
+			// A typed nil in `any` would pass as a streamer.
+			attached, err := term.attachStream(ctx, req.Offset)
+			if err != nil {
+				return nil, err
+			}
+			return attached, nil
 		case "shutdown":
 			shutdownOnce.Do(func() { close(shutdown) })
 			return struct{}{}, nil
