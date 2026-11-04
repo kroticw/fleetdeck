@@ -14,18 +14,11 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
-// Terminal is one held, two-way view of a session's terminal: what
-// daemon.Attachment provides. It is an interface here only so the bridge below can
-// be tested without a daemon.
-type Terminal interface {
-	Read(p []byte) (int, error)
-	Write(p []byte) (int, error)
-	Resize(ctx context.Context, cols, rows int) error
-	Writable() bool
-	Close() error
-}
+// Terminal is the executor-independent held view used by the browser bridge.
+type Terminal = executor.Terminal
 
 // The bounds a geometry is checked against, at connect and on every resize. The
 // daemon's own ceiling was not established by measurement; these are simply larger
