@@ -28,6 +28,7 @@ import { fetchSessionCards } from "./api.js";
 import { subscribe as subscribeToStore } from "./store.js";
 import { t } from "./i18n.js";
 import { createLiveTerminal } from "./liveterminal.js";
+import { createRequests } from "./requests.js";
 import { FONT_KEYS } from "./terminalfont.js";
 import { buildFontControls } from "./fontcontrols.js";
 
@@ -249,10 +250,24 @@ export function renderSession(
     }
   };
 
+  // A Codex session's approvals and questions sit under its terminal. Asked
+  // again while the session says it waits, at most every few seconds: the
+  // request in front of the operator can be replaced by the next one.
+  let requests = null;
+  let requestsAt = 0;
+  const refreshRequests = () => {
+    const waits = (latest?.sessions ?? []).find((s) => s.short === short)?.needs;
+    const now = Date.now();
+    if (!requests || (!waits && requests.node.hidden) || now - requestsAt < 3000) return;
+    requestsAt = now;
+    void requests.refresh();
+  };
+
   let lastKey = null;
   const onSnapshot = (snapshot) => {
     latest = snapshot ?? null;
     refreshName();
+    refreshRequests();
     const key = historyKey(latest, short);
     // A failed history is asked for again with the next snapshot, which is
     // what retries it: a board that was briefly unreadable recovers without the
@@ -339,6 +354,10 @@ export function renderSession(
     // Code session's turn (see onKey in web/js/card.js).
     host.dataset.terminal = "";
     body.appendChild(host);
+    if (short.startsWith("codex:")) {
+      requests = createRequests(body, short);
+      void requests.refresh();
+    }
 
     errorLine = el("div", "s-error");
     errorLine.hidden = true;

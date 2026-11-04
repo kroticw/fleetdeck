@@ -5488,3 +5488,36 @@ body.is-resizing {
   backdrop-filter: none;
   box-shadow: var(--sheet-shadow), inset 0 0 0 1px var(--border-strong);
 }
+
+/* A Codex session's pending approvals and questions, under its terminal.
+ * The command is shown verbatim because it is what the operator approves. */
+
+.session-panel .s-requests {
+  border-top: 1px solid var(--border);
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-panel .s-request-command {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.session-panel .s-request-detail {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.session-panel .s-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.session-panel .s-request-error {
+  color: var(--danger);
+}

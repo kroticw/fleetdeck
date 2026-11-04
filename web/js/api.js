@@ -219,6 +219,18 @@ async function post(url, body) {
   }
 }
 
+// sessionRequests is what a Codex session waits on (internal/server
+// handleSessionRequests); respondRequest answers one by its token.
+export async function sessionRequests(id) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/requests`);
+  if (!response.ok) throw await refusal(response);
+  return (await readJSON(response)) ?? [];
+}
+
+export function respondRequest(id, answer) {
+  return post(`/api/sessions/${encodeURIComponent(id)}/requests/respond`, answer);
+}
+
 // resumeSession brings a stopped session back, under its own short id and with
 // its history, and resolves only once it is actually up.
 //
