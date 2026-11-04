@@ -1,0 +1,278 @@
+package codexruntime
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/kroticw/fleetdeck/internal/executor"
+)
+
+// fakeNative answers the bootstrap methods and records their order.
+type fakeNative struct {
+	mu      sync.Mutex
+	methods []string
+	socket  string
+}
+
+func newFakeNative(t *testing.T) *fakeNative {
+	t.Helper()
+	f := &fakeNative{}
+	f.socket = nativeServer(t, func(ctx context.Context, conn *websocket.Conn) {
+		for {
+			// The runtime closing its connection ends the fake, not the test.
+			_, raw, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			var m nativeMessage
+			if json.Unmarshal(raw, &m) != nil || m.Method == "" {
+				t.Errorf("unexpected native frame %s", raw)
+				return
+			}
+			f.mu.Lock()
+			f.methods = append(f.methods, m.Method)
+			f.mu.Unlock()
+			result := map[string]any{}
+			if m.Method == "thread/start" || m.Method == "thread/resume" {
+				result["thread"] = map[string]any{"id": nativeThread}
+			}
+			nativeWrite(ctx, t, conn, map[string]any{"id": m.ID, "result": result})
+		}
+	})
+	return f
+}
+
+func (f *fakeNative) seen() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.methods...)
+}
+
+type serviceFixture struct {
+	dir      string
+	spec     ServiceSpec
+	launched chan string
+	native   *fakeNative
+}
+
+func newServiceFixture(t *testing.T, threadID string) *serviceFixture {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "fleetdeck-svc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	state := filepath.Join(dir, "state")
+	store, err := OpenStore(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	owner, err := store.Acquire(testRuntimeKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := runtimeRecord()
+	record.CWD, record.Board, record.Card = dir, dir, filepath.Join(dir, "cards", "T-001-task.md")
+	record.ThreadID = threadID
+	if err := owner.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEETDECK_RUNTIME_PTY_TEST", "1")
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &serviceFixture{dir: state, launched: make(chan string, 1), native: newFakeNative(t)}
+	f.spec = ServiceSpec{
+		StateDir: state, Key: testRuntimeKey, NativeSocket: f.native.socket, Cols: 80, Rows: 24,
+		Launch: func(thread string) ([]string, []string, error) {
+			f.launched <- thread
+			return []string{binary, "-test.run=^TestPTYChild$"}, os.Environ(), nil
+		},
+	}
+	return f
+}
+
+func (f *serviceFixture) run(t *testing.T) <-chan error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() { served <- Serve(ctx, f.spec); close(finished) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Error("service did not stop with its context")
+		}
+	})
+	return served
+}
+
+func (f *serviceFixture) awaitLive(t *testing.T, served <-chan error) Client {
+	t.Helper()
+	store, err := OpenStore(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	deadline := time.After(5 * time.Second)
+	for {
+		record, err := store.Read(string(testRuntimeKey))
+		if err == nil && record.Lifecycle == "live" {
+			socket, err := SocketPath(f.dir, testRuntimeKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return Client{Socket: socket, Record: record}
+		}
+		select {
+		case err := <-served:
+			t.Fatalf("service ended before live: %v", err)
+		case <-deadline:
+			t.Fatalf("service never became live: %+v %v", record, err)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func (f *serviceFixture) record(t *testing.T) Record {
+	t.Helper()
+	store, err := OpenStore(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	record, err := store.Read(string(testRuntimeKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func awaitServed(t *testing.T, served <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-served:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("service did not end")
+		return nil
+	}
+}
+
+func TestServiceRegistersThreadBeforeTerminalAndServesViews(t *testing.T) {
+	f := newServiceFixture(t, "")
+	served := f.run(t)
+	client := f.awaitLive(t, served)
+	if got := <-f.launched; got != nativeThread {
+		t.Fatalf("TUI resumed %q", got)
+	}
+	record := f.record(t)
+	if record.ThreadID != nativeThread || record.PID != os.Getpid() || record.Nonce == runtimeRecord().Nonce {
+		t.Fatalf("record does not identify this runtime and thread: %+v", record)
+	}
+	if seen := f.native.seen(); len(seen) < 2 || seen[0] != "thread/start" || seen[1] != "thread/name/set" {
+		t.Fatalf("native bootstrap order: %v", seen)
+	}
+	var status Status
+	if err := client.Call(context.Background(), "status", nil, &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Lifecycle != "live" || status.ThreadID != nativeThread || !status.Native || !status.Terminal {
+		t.Fatalf("status: %+v", status)
+	}
+	s := attachStream(t, client, nil)
+	if err := s.Input([]byte("size\n")); err != nil {
+		t.Fatal(err)
+	}
+	awaitStream(t, s, "SIZE=80x24")
+	if err := client.Call(context.Background(), "shutdown", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := awaitServed(t, served); err != nil {
+		t.Fatal(err)
+	}
+	if record := f.record(t); record.Lifecycle != "stopped" || record.ThreadID != nativeThread {
+		t.Fatalf("shutdown record: %+v", record)
+	}
+}
+
+func TestServiceResumesSavedThreadWithoutStartingAnother(t *testing.T) {
+	f := newServiceFixture(t, nativeThread)
+	served := f.run(t)
+	f.awaitLive(t, served)
+	for _, method := range f.native.seen() {
+		if method == "thread/start" {
+			t.Fatal("resume created a second native thread")
+		}
+	}
+	if seen := f.native.seen(); len(seen) == 0 || seen[0] != "thread/resume" {
+		t.Fatalf("native resume: %v", seen)
+	}
+}
+
+func TestServiceRefusesAKeyAnotherProcessOwns(t *testing.T) {
+	f := newServiceFixture(t, "")
+	store, err := OpenStore(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	owner, err := store.Acquire(testRuntimeKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	if err := awaitServed(t, f.run(t)); !errors.Is(err, executor.ErrConflict) {
+		t.Fatalf("second owner: %v", err)
+	}
+	if len(f.native.seen()) != 0 {
+		t.Fatal("a refused runtime touched the native thread")
+	}
+}
+
+func TestServiceRecordsTerminalExitAsStopped(t *testing.T) {
+	f := newServiceFixture(t, "")
+	served := f.run(t)
+	client := f.awaitLive(t, served)
+	s := attachStream(t, client, nil)
+	if err := s.Input([]byte("finish\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := awaitServed(t, served); err != nil {
+		t.Fatal(err)
+	}
+	if record := f.record(t); record.Lifecycle != "stopped" {
+		t.Fatalf("exit record: %+v", record)
+	}
+}
+
+func TestServiceWithoutNativeControlRecordsNoThread(t *testing.T) {
+	f := newServiceFixture(t, "")
+	f.spec.NativeSocket = filepath.Join(f.dir, "missing.sock")
+	if err := awaitServed(t, f.run(t)); err == nil {
+		t.Fatal("service started without native control")
+	}
+	if record := f.record(t); record.Lifecycle != "dead" || record.ThreadID != "" {
+		t.Fatalf("failed bootstrap record: %+v", record)
+	}
+	select {
+	case <-f.launched:
+		t.Fatal("TUI launched without a registered thread")
+	default:
+	}
+}
