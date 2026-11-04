@@ -27,6 +27,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/codexruntime"
+	"github.com/kroticw/fleetdeck/internal/executor"
+
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -1099,6 +1102,20 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 				return nil, err
 			}
 			return a, nil
+		},
+		SessionRequests: func(rctx context.Context, session string) ([]codexruntime.PendingRequest, error) {
+			if !isCodexKey(session) {
+				return nil, executor.ErrUnsupported
+			}
+			var list []codexruntime.PendingRequest
+			err := codexCall(rctx, codexStateDir(configPath), session, "requests", nil, &list)
+			return list, err
+		},
+		RespondRequest: func(rctx context.Context, session string, answer codexruntime.Answer) error {
+			if !isCodexKey(session) {
+				return executor.ErrUnsupported
+			}
+			return codexCall(rctx, codexStateDir(configPath), session, "requests.respond", answer, nil)
 		},
 		// Asked of the daemon itself, never of p.snapshot: the bridge asks the moment
 		// a stream ends, and the snapshot can be a whole poll behind that moment.

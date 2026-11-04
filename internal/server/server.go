@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/codexruntime"
+
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
@@ -237,6 +239,11 @@ type Deps struct {
 	// changed. Nil serves the page as embedded and the snapshot without it.
 	Build *buildinfo.Fingerprint
 
+	// SessionRequests lists what a Codex session waits on, and RespondRequest
+	// answers one. Nil on a panel without Codex.
+	SessionRequests func(ctx context.Context, session string) ([]codexruntime.PendingRequest, error)
+	RespondRequest  func(ctx context.Context, session string, answer codexruntime.Answer) error
+
 	// Attach opens a held, two-way terminal on a session at the given geometry —
 	// daemon.Client.Attach. It backs GET /api/sessions/{id}/pty. ctx bounds opening
 	// only; the terminal lives until it is closed. Nil leaves the route answering 503.
@@ -358,6 +365,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/orchestrator", d.handleOrchestratorPreview)
 	mux.HandleFunc("POST /api/orchestrator", d.handleAppoint)
 	mux.HandleFunc("GET /ws", d.handleWS)
+	mux.HandleFunc("GET /api/sessions/{id}/requests", d.handleSessionRequests)
+	mux.HandleFunc("POST /api/sessions/{id}/requests/respond", d.handleRespondRequest)
 	mux.HandleFunc("GET /api/sessions/{id}/pty", d.handlePTY)
 	mux.HandleFunc("GET /api/terminal-token", d.handleTerminalToken)
 	mux.Handle("GET /", staticHandler(d.Build))
