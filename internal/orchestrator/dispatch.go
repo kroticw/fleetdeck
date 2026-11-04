@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
 var (
@@ -64,11 +66,26 @@ type Dispatcher struct {
 	// exists is refused rather than started somewhere else (Workdir).
 	Home string
 
+	// Codex starts and tasks the sessions of cards whose executor is codex.
+	// Nil refuses those cards rather than starting Claude for them.
+	Codex *CodexSessions
+
 	// Poll, StartWait and SendWait mean what the Appointer's do. Zero is the
 	// default.
 	Poll, StartWait, SendWait time.Duration
 
 	busy sync.Mutex
+}
+
+// CodexSessions is how a fleet starts Codex sessions for cards.
+type CodexSessions struct {
+	// Start returns once the session's runtime is live, with the key that
+	// names it on the card. A key returned with an error is a session that
+	// may still come up.
+	Start func(ctx context.Context, cwd, cardPath, name string) (string, error)
+	// Send delivers text once under operationID; only an accepted receipt
+	// confirms the task arrived.
+	Send func(ctx context.Context, key, operationID, text string) (executor.Receipt, error)
 }
 
 // Dispatch hands one card to a session. An error means the request was refused
@@ -77,11 +94,8 @@ type Dispatcher struct {
 // fails ends it, and a session already started is named in the Result whatever
 // happened after — it is running, and nothing on the board points at it.
 func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
-	switch {
-	case w.Card == "":
+	if w.Card == "" {
 		return Result{}, fmt.Errorf("%w: a dispatch must name the card it hands over", ErrBadRequest)
-	case d.Start == nil:
-		return Result{}, ErrCannotStart
 	}
 	card, err := board.ParseCard(w.Card)
 	if err != nil {
@@ -93,8 +107,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	if card.Session != "" {
 		return Result{}, fmt.Errorf("%w: %s", ErrCardTaken, card.Session)
 	}
-	if card.Executor != "claude" {
+	codex := card.Executor == string(executor.Codex)
+	switch {
+	case codex && d.Codex == nil, !codex && card.Executor != string(executor.Claude):
 		return Result{}, fmt.Errorf("%w: executor %s is not configured", ErrCannotStart, card.Executor)
+	case !codex && d.Start == nil:
+		return Result{}, ErrCannotStart
 	}
 	cwd, err := Workdir(d.Home, card.Repo)
 	if err != nil {
@@ -115,13 +133,24 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	}
 
 	lang := Lang(w.Lang)
-	short, err := d.Start(ctx, cwd, sessionName(lang, card.ID, card.Title))
-	if err != nil {
-		return refuse("session", err)
-	}
-	res.Session = short
-	if err := waitListed(ctx, d.List, short, d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
-		return refuse("session", err)
+	name := sessionName(lang, card.ID, card.Title)
+	var short string
+	if codex {
+		// Codex's Start already waits for its runtime to be live.
+		short, err = d.Codex.Start(ctx, cwd, w.Card, name)
+		res.Session = short
+		if err != nil {
+			return refuse("session", err)
+		}
+	} else {
+		short, err = d.Start(ctx, cwd, name)
+		if err != nil {
+			return refuse("session", err)
+		}
+		res.Session = short
+		if err := waitListed(ctx, d.List, short, d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
+			return refuse("session", err)
+		}
 	}
 	done("session", fmt.Sprintf("started %s in %s", short, cwd))
 
@@ -148,11 +177,34 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	// The refusal carries the task itself: the card names the session and the
 	// session runs, so what is left for a hand to do is send this line into it.
 	task := Task(lang, w.Card)
+	if codex {
+		return d.codexTask(ctx, res, short, task)
+	}
 	if err := deliver(ctx, firstSend(d.Send, d.SendFirst), short, task, d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
 		return refuse("task", fmt.Errorf("%w — %s is running and the card names it; send the task by hand: %s", err, short, task))
 	}
 	done("task", "delivered to "+short)
 	res.OK = true
+	return res, nil
+}
+
+// codexTask sends the task once. Only an accepted receipt is delivery; an
+// unconfirmed one is never sent again, since a second copy is a second task.
+func (d *Dispatcher) codexTask(ctx context.Context, res Result, key, task string) (Result, error) {
+	op := rand.Text()
+	receipt, err := d.Codex.Send(ctx, key, op, task)
+	switch {
+	case err == nil && receipt.State == executor.Accepted:
+		res.Steps = append(res.Steps, Step{Name: "task", Note: "delivered to " + key})
+		res.OK = true
+	case receipt.State == executor.DeliveryUnknown || receipt.State == executor.Queued || errors.Is(err, executor.ErrDeliveryUnknown):
+		res.Steps = append(res.Steps, Step{Name: "task", Error: fmt.Sprintf("delivery to %s is not confirmed (operation %s); check the session before sending the task again: %s", key, op, task)})
+	default:
+		if err == nil {
+			err = errors.New("codex rejected the task")
+		}
+		res.Steps = append(res.Steps, Step{Name: "task", Error: fmt.Sprintf("%v — %s is running and the card names it; send the task by hand: %s", err, key, task)})
+	}
 	return res, nil
 }
 
