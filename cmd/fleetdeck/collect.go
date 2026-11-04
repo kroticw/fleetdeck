@@ -607,6 +607,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		}
 	}
 	entries := mergeStopped(sessions, records)
+	snap.CodexEnabled, snap.DefaultExecutor = cfg.Codex.Enabled, string(cfg.DefaultExecutor)
 	if cfg.Codex.Enabled && c.codexState != "" {
 		entries = append(entries, codexRows(ctx, c.codexState)...)
 	}

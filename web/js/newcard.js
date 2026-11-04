@@ -65,7 +65,13 @@ let formCount = 0;
  * them. `creating` is the board's (renderBoard's creating): told a card is on
  * its way the moment Create is pressed, and how the write went.
  */
-export function createNewCard(host, { create = createCard, pick = pickDirectory, cards = () => get()?.cards ?? [], creating } = {}) {
+export function createNewCard(host, {
+  create = createCard,
+  pick = pickDirectory,
+  cards = () => get()?.cards ?? [],
+  executors = () => ({ codex: get()?.codexEnabled === true, default: get()?.defaultExecutor || "claude" }),
+  creating,
+} = {}) {
   const form = el("div", "newcard");
   form.hidden = true;
   form.setAttribute("role", "dialog");
@@ -110,8 +116,19 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
   const pickButton = el("button", "newcard-pick btn", t("new_card_pick"));
   pickButton.setAttribute("type", "button");
 
+  // Who works the card. Offered only when Codex is set up; an unoffered
+  // choice sends nothing and the board's default (Claude) applies.
+  const executor = el("select", "newcard-executor");
+  executor.setAttribute("aria-label", t("new_card_executor"));
+  for (const name of ["claude", "codex"]) {
+    const option = el("option", "", t(`executor_${name}`));
+    option.value = name;
+    executor.appendChild(option);
+  }
+  executor.hidden = true;
+
   const repoRow = el("div", "newcard-repo-row");
-  repoRow.append(zoneLabel, repo, repos, pickButton);
+  repoRow.append(zoneLabel, executor, repo, repos, pickButton);
 
   const createButton = el("button", "newcard-create btn btn-primary", t("new_card_create"));
   createButton.setAttribute("type", "button");
@@ -187,8 +204,11 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
     opener = null;
   };
 
-  const open = () => {
+  const open = (keepExecutor = false) => {
     opener = document.activeElement ?? null;
+    const offer = executors();
+    executor.hidden = !offer.codex;
+    if (!keepExecutor) executor.value = offer.default === "codex" && offer.codex ? "codex" : "claude";
     repos.replaceChildren(
       ...boardRepos(cards()).map((name) => {
         const option = el("option");
@@ -215,7 +235,7 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
     // with a dead button for it. What was typed is taken out of the form, so
     // the next card starts empty, and put back if this one is refused. The
     // repo stays, as it always has: the next card is usually for it too.
-    const typed = { title: title.value, description: description.value, zone: zone.value, files: attached };
+    const typed = { title: title.value, description: description.value, zone: zone.value, files: attached, executor: executor.hidden ? "" : executor.value };
     const where = repo.value.trim();
     title.value = "";
     description.value = "";
@@ -230,7 +250,7 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
   const send = async (text, typed, where, shown) => {
     try {
       const files = await Promise.all(typed.files.map(async (file) => ({ name: file.name, data: await base64(file) })));
-      const result = await create(text, typed.zone, where, typed.description.trim(), files);
+      const result = await create(text, typed.zone, where, typed.description.trim(), files, typed.executor);
       shown?.created(result.path);
       if (!result.committed && !result.queued) {
         note.textContent = `${t("new_card_not_committed")}: ${result.reason}`;
@@ -246,7 +266,8 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
       zone.value = typed.zone;
       attached = typed.files;
       renderFiles();
-      open();
+      open(true);
+      if (typed.executor) executor.value = typed.executor;
       // A repo the board refused is said by its code, in the page's words: it
       // is the one field here whose rule the server's English does not explain.
       const rule = String(err?.code ?? "").startsWith("repo_") ? reasonText("card_refused", err.code) : "";
@@ -325,5 +346,6 @@ export function createNewCard(host, { create = createCard, pick = pickDirectory,
 
   // open for the board's button, and toggle for the fleetdeck window's new
   // card capsule, where a second press closes the form the first opened.
-  return { open, toggle };
+  // Wrapped: a click handler would pass its event as keepExecutor.
+  return { open: () => open(), toggle };
 }

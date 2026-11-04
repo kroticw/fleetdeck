@@ -14,8 +14,8 @@ let sent;
 let answer;
 let card;
 
-async function fakeCreate(title, zone, repo, description, attachments = []) {
-  sent.push({ title, zone, repo, description, ...(attachments.length ? { attachments } : {}) });
+async function fakeCreate(title, zone, repo, description, attachments = [], executor = "") {
+  sent.push({ title, zone, repo, description, ...(attachments.length ? { attachments } : {}), ...(executor ? { executor } : {}) });
   if (answer instanceof Error) throw answer;
   return answer;
 }
@@ -543,4 +543,36 @@ test("new card: a card with its commit queued says nothing about a missing commi
   fireEvent(form.querySelector("button.newcard-create"), "click");
   await settle();
   assert.equal(host.querySelector("span.newcard-note").hidden, true);
+});
+
+test("new card: without Codex there is no executor choice and none is sent", async () => {
+  const form = open();
+  assert.equal(form.querySelector("select.newcard-executor")?.hidden ?? true, true);
+  form.querySelector("input.newcard-title").value = "Task";
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(sent[0].executor, undefined);
+});
+
+test("new card: with Codex the executor is chosen, defaults from the configuration and survives a refusal", async () => {
+  const other = dom.element("nav");
+  dom.document.body.appendChild(other);
+  const made = createNewCard(other, { create: fakeCreate, executors: () => ({ codex: true, default: "codex" }) });
+  made.open();
+  const form = other.querySelector("div.newcard");
+  const choice = form.querySelector("select.newcard-executor");
+  assert.equal(choice.hidden, false);
+  assert.equal(choice.value, "codex");
+  assert.deepEqual([...choice.querySelectorAll("option")].map((o) => o.value), ["claude", "codex"]);
+  form.querySelector("input.newcard-title").value = "Task";
+  answer = new Error("refused");
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(sent[0].executor, "codex");
+  assert.equal(choice.value, "codex");
+  choice.value = "claude";
+  answer = { path: "/b/cards/y.md", committed: true, reason: "" };
+  fireEvent(form.querySelector("button.newcard-create"), "click");
+  await settle();
+  assert.equal(sent[1].executor, "claude");
 });

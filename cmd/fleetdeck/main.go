@@ -1064,6 +1064,10 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 	var create func(board.NewCard) (string, error)
 	if cfg.BoardPath != "" {
 		create = func(card board.NewCard) (string, error) {
+			// default_executor applies to new cards only; one chosen in the form wins.
+			if card.Executor == "" {
+				card.Executor = string(collector.Config().DefaultExecutor)
+			}
 			return createCard(cfg.BoardPath, card, time.Now())
 		}
 	}
