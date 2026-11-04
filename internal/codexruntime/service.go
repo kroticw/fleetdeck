@@ -113,10 +113,13 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 	}
 	// Every exit leaves a final lifecycle: stopped when the native thread can
 	// be resumed, dead when none was registered.
+	final := ""
 	defer func() {
-		record.Lifecycle = "stopped"
+		record.Lifecycle = final
 		if record.ThreadID == "" {
 			record.Lifecycle = "dead"
+		} else if final == "" {
+			record.Lifecycle = "stopped"
 		}
 		if saveErr := owner.Save(record); err == nil {
 			err = saveErr
@@ -193,10 +196,35 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 	case <-shutdown:
 	case <-term.done:
 	}
+	term.Close()
+	final = settledLifecycle(native, record.ThreadID)
 	mu.Lock()
-	lifecycle = "stopped"
+	lifecycle = final
 	mu.Unlock()
 	return nil
+}
+
+// settledLifecycle is what ending the TUI leaves behind. Closing the TUI
+// does not stop native work, so only an idle thread counts as stopped; a
+// busy or unobservable one is unknown until stop/resume reconciles it.
+func settledLifecycle(native *nativeControl, thread string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var state struct {
+		Thread struct {
+			Status struct {
+				Type string `json:"type"`
+			} `json:"status"`
+		} `json:"thread"`
+	}
+	if native.call(ctx, "thread/read", map[string]any{"threadId": thread, "includeTurns": false}, &state) != nil {
+		return "unknown"
+	}
+	switch state.Thread.Status.Type {
+	case "idle", "notLoaded":
+		return "stopped"
+	}
+	return "unknown"
 }
 
 // registerThread creates and names a new thread, saving its ID before the

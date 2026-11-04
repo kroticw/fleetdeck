@@ -19,11 +19,12 @@ type fakeNative struct {
 	mu      sync.Mutex
 	methods []string
 	socket  string
+	status  string
 }
 
 func newFakeNative(t *testing.T) *fakeNative {
 	t.Helper()
-	f := &fakeNative{}
+	f := &fakeNative{status: "idle"}
 	f.socket = nativeServer(t, func(ctx context.Context, conn *websocket.Conn) {
 		for {
 			// The runtime closing its connection ends the fake, not the test.
@@ -38,10 +39,11 @@ func newFakeNative(t *testing.T) *fakeNative {
 			}
 			f.mu.Lock()
 			f.methods = append(f.methods, m.Method)
+			status := f.status
 			f.mu.Unlock()
 			result := map[string]any{}
-			if m.Method == "thread/start" || m.Method == "thread/resume" {
-				result["thread"] = map[string]any{"id": nativeThread}
+			if m.Method == "thread/start" || m.Method == "thread/resume" || m.Method == "thread/read" {
+				result["thread"] = map[string]any{"id": nativeThread, "status": map[string]string{"type": status}}
 			}
 			nativeWrite(ctx, t, conn, map[string]any{"id": m.ID, "result": result})
 		}
@@ -274,5 +276,25 @@ func TestServiceWithoutNativeControlRecordsNoThread(t *testing.T) {
 	case <-f.launched:
 		t.Fatal("TUI launched without a registered thread")
 	default:
+	}
+}
+
+func TestServiceDoesNotCallBusyNativeWorkStopped(t *testing.T) {
+	f := newServiceFixture(t, "")
+	f.native.mu.Lock()
+	f.native.status = "active"
+	f.native.mu.Unlock()
+	served := f.run(t)
+	client := f.awaitLive(t, served)
+	s := attachStream(t, client, nil)
+	// The TUI exits, but Codex keeps working natively.
+	if err := s.Input([]byte("finish\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := awaitServed(t, served); err != nil {
+		t.Fatal(err)
+	}
+	if record := f.record(t); record.Lifecycle != "unknown" {
+		t.Fatalf("busy native thread recorded as %s", record.Lifecycle)
 	}
 }
