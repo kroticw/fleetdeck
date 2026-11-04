@@ -190,6 +190,13 @@ func TestServiceRegistersThreadBeforeTerminalAndServesViews(t *testing.T) {
 	if seen := f.native.seen(); len(seen) < 2 || seen[0] != "thread/start" || seen[1] != "thread/name/set" {
 		t.Fatalf("native bootstrap order: %v", seen)
 	}
+	var pending []PendingRequest
+	if err := client.Call(context.Background(), "requests", nil, &pending); err != nil || len(pending) != 0 {
+		t.Fatalf("requests %v %v", pending, err)
+	}
+	if err := client.Call(context.Background(), "requests.respond", Answer{Token: "stale", Decision: "accept"}, nil); !errors.Is(err, executor.ErrConflict) {
+		t.Fatalf("stale answer: %v", err)
+	}
 	var status Status
 	if err := client.Call(context.Background(), "status", nil, &status); err != nil {
 		t.Fatal(err)

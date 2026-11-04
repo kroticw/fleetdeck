@@ -1,6 +1,7 @@
 package codexruntime
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +45,7 @@ func (e *nativeRPCError) Is(target error) bool {
 type nativePending struct {
 	message nativeMessage
 	sending bool
+	seq     uint64
 }
 
 // nativeControl owns one persistent connection. onMessage runs on its reader
@@ -58,6 +61,7 @@ type nativeControl struct {
 	ownerMu   sync.Mutex
 	prefix    string
 	next      uint64
+	arrivals  uint64
 	thread    string
 	calls     map[string]chan nativeMessage
 	requests  map[string]nativePending
@@ -305,7 +309,8 @@ func (c *nativeControl) dispatch(m nativeMessage) bool {
 			return false
 		}
 		m.Token = rand.Text()
-		c.requests[m.Token] = nativePending{message: m}
+		c.arrivals++
+		c.requests[m.Token] = nativePending{message: m, seq: c.arrivals}
 	}
 	if m.Method == "serverRequest/resolved" {
 		var resolved struct {
@@ -325,6 +330,24 @@ func (c *nativeControl) dispatch(m nativeMessage) bool {
 		c.onMessage(m)
 	}
 	return true
+}
+
+// pending lists the owned thread's unanswered requests in arrival order.
+func (c *nativeControl) pending() []nativeMessage {
+	c.ownerMu.Lock()
+	defer c.ownerMu.Unlock()
+	list := make([]nativePending, 0, len(c.requests))
+	for _, p := range c.requests {
+		if !p.sending {
+			list = append(list, p)
+		}
+	}
+	slices.SortFunc(list, func(a, b nativePending) int { return cmp.Compare(a.seq, b.seq) })
+	out := make([]nativeMessage, len(list))
+	for i, p := range list {
+		out[i] = p.message
+	}
+	return out
 }
 
 // respond writes one answer, without claiming the server has acted on it.

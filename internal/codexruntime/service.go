@@ -177,6 +177,14 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 				return nil, err
 			}
 			return attached, nil
+		case "requests":
+			return pendingRequests(native), nil
+		case "requests.respond":
+			var a Answer
+			if json.Unmarshal(params, &a) != nil {
+				return nil, ErrInvalidFrame
+			}
+			return struct{}{}, respondRequest(ctx, native, a)
 		case "shutdown":
 			shutdownOnce.Do(func() { close(shutdown) })
 			return struct{}{}, nil
