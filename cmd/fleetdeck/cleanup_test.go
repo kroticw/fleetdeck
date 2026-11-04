@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/executor"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -219,5 +222,39 @@ func TestAFailedStopSaysWhatClaudeSaid(t *testing.T) {
 	err := sessionStopper(runOpts{}, config.AgentConfig{Command: []string{bin}})(context.Background(), "abc12345")
 	if err == nil || !strings.Contains(err.Error(), "no session abc12345") {
 		t.Errorf("err = %v, want claude's own words", err)
+	}
+}
+
+// An accepted Codex card is cleaned up like Claude's, through its runtime:
+// its final answer is archived, and only then is it stopped.
+func TestTheCleanupOfACodexCardArchivesItsLastWordsThenStopsIt(t *testing.T) {
+	key := "codex:" + runtimeTestThread
+	s := standFor(t, "")
+	s.deps.list = func(context.Context) ([]daemon.Session, error) { return []daemon.Session{{Short: key}}, nil }
+	s.deps.codexWords = func(_ context.Context, k string) (executor.Said, error) {
+		if k != key {
+			t.Fatalf("words asked of %s", k)
+		}
+		return executor.Said{Words: "PR draft ready"}, nil
+	}
+	res, err := newCleaner(s.deps).Cleanup(context.Background(), orchestrator.Accepted{Session: key, Card: s.card})
+	if err != nil || !res.OK {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if !strings.Contains(s.archive(t), "PR draft ready") || len(s.stopped) != 1 || s.stopped[0] != key {
+		t.Fatalf("archive=%q stopped=%v", s.archive(t), s.stopped)
+	}
+}
+
+func TestACodexCardWhoseWordsCannotBeReadKeepsRunning(t *testing.T) {
+	key := "codex:" + runtimeTestThread
+	s := standFor(t, "")
+	s.deps.list = func(context.Context) ([]daemon.Session, error) { return []daemon.Session{{Short: key}}, nil }
+	s.deps.codexWords = func(context.Context, string) (executor.Said, error) {
+		return executor.Said{}, errors.New("runtime unavailable")
+	}
+	res, _ := newCleaner(s.deps).Cleanup(context.Background(), orchestrator.Accepted{Session: key, Card: s.card})
+	if res.OK || len(s.stopped) != 0 {
+		t.Fatalf("res=%+v stopped=%v", res, s.stopped)
 	}
 }
