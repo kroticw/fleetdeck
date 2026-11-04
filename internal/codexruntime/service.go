@@ -221,6 +221,17 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 				return nil, ErrInvalidFrame
 			}
 			return deliver(ctx, native, state, req.OperationID, req.Text)
+		case "history":
+			var req struct {
+				Cursor string `json:"cursor"`
+				Limit  int    `json:"limit"`
+			}
+			if len(params) > 0 && json.Unmarshal(params, &req) != nil {
+				return nil, ErrInvalidFrame
+			}
+			return readHistory(ctx, native, record.ThreadID, req.Cursor, req.Limit)
+		case "lastWords":
+			return lastWords(ctx, native, record.ThreadID)
 		case "interrupt":
 			active, err := activeTurns(ctx, native, record.ThreadID)
 			for _, turn := range active {

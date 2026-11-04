@@ -246,6 +246,10 @@ func TestServiceRegistersThreadBeforeTerminalAndServesViews(t *testing.T) {
 	if op := f.record(t).Operations[testOperation]; op.Phase != string(executor.Accepted) {
 		t.Fatalf("send was not journaled: %+v", op)
 	}
+	var history History
+	if err := client.Call(context.Background(), "history", map[string]int{"limit": 5}, &history); err != nil || len(history.Entries) != 0 {
+		t.Fatalf("history %+v %v", history, err)
+	}
 	var status Status
 	if err := client.Call(context.Background(), "status", nil, &status); err != nil {
 		t.Fatal(err)
