@@ -190,3 +190,23 @@ func TestStartSettlesTheRecordOfARuntimeThatNeverServed(t *testing.T) {
 		t.Fatalf("placeholder left behind: %+v %v", record, err)
 	}
 }
+
+func TestResumeWaitsForAStoppingRuntimeToReleaseItsKey(t *testing.T) {
+	spec := spawnFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	key, client, err := Start(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopRuntime(t, spec.StateDir, key)
+	if err := client.Call(ctx, "shutdown", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Straight after the stop: the record may already be final while the
+	// exiting runtime still holds the lock.
+	again, err := Resume(ctx, spec, key)
+	if err != nil || again.Record.PID == client.Record.PID {
+		t.Fatalf("resume after stop: %+v %v", again.Record, err)
+	}
+}

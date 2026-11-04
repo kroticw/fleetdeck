@@ -160,7 +160,7 @@ func codexRows(ctx context.Context, stateDir string) []listedSession {
 	for _, r := range records {
 		var status *codexruntime.Status
 		held := true
-		if r.Lifecycle == "live" || r.Lifecycle == "starting" {
+		if r.Lifecycle == "live" || r.Lifecycle == "starting" || r.Lifecycle == "stopping" {
 			askCtx, cancel := context.WithTimeout(ctx, time.Second)
 			if c, err := codexruntime.Connect(askCtx, stateDir, r.Key); err == nil {
 				var s codexruntime.Status
@@ -186,7 +186,7 @@ func codexRows(ctx context.Context, stateDir string) []listedSession {
 func codexRow(r codexruntime.Record, status *codexruntime.Status, held bool) listedSession {
 	s := daemon.Session{Short: string(r.Key), PID: r.PID, CWD: r.CWD, Name: strings.TrimSuffix(filepath.Base(r.Card), ".md")}
 	switch r.Lifecycle {
-	case "live", "starting":
+	case "live", "starting", "stopping":
 		if !held {
 			return listedSession{session: s, lifecycle: state.LifecycleStopped, lastState: "unknown"}
 		}

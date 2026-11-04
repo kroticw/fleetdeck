@@ -33,6 +33,7 @@ func TestCodexRowsSayOnlyWhatTheRuntimeReported(t *testing.T) {
 		{"asks", "live", &codexruntime.Status{Activity: "working", NeedsHuman: executor.Yes}, true, state.LifecycleLive, "working", ptr(codexNeeds), ""},
 		{"unobserved", "live", &codexruntime.Status{Activity: "unknown"}, true, state.LifecycleLive, "", nil, ""},
 		{"silent owner", "live", nil, true, state.LifecycleLive, "", nil, ""},
+		{"on its way out", "stopping", nil, true, state.LifecycleLive, "", nil, ""},
 		{"crashed", "live", nil, false, state.LifecycleStopped, "", nil, "unknown"},
 		{"stopped", "stopped", nil, false, state.LifecycleStopped, "", nil, "idle"},
 		{"tui closed, work unknown", "unknown", nil, false, state.LifecycleStopped, "", nil, "unknown"},

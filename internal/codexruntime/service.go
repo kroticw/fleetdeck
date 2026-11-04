@@ -171,6 +171,12 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 
 	shutdown := make(chan struct{})
 	var shutdownOnce sync.Once
+	// Recorded before answering, so nobody joins a runtime on its way out.
+	beginShutdown := func() error {
+		err := state.update(func(r *Record) error { r.Lifecycle = "stopping"; return nil })
+		shutdownOnce.Do(func() { close(shutdown) })
+		return err
+	}
 	handle := func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
 		case "status":
@@ -246,11 +252,9 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 			if err := stopWork(ctx, native, record.ThreadID); err != nil {
 				return nil, err
 			}
-			shutdownOnce.Do(func() { close(shutdown) })
-			return struct{}{}, nil
+			return struct{}{}, beginShutdown()
 		case "shutdown":
-			shutdownOnce.Do(func() { close(shutdown) })
-			return struct{}{}, nil
+			return struct{}{}, beginShutdown()
 		}
 		return nil, executor.ErrUnsupported
 	}

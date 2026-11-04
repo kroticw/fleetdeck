@@ -196,7 +196,7 @@ func validRecord(r Record, key executor.Key) error {
 		return ErrInvalidRecord
 	}
 	switch r.Lifecycle {
-	case "starting", "live", "stopped", "dead", "unknown":
+	case "starting", "live", "stopping", "stopped", "dead", "unknown":
 	default:
 		return ErrInvalidRecord
 	}

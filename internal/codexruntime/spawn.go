@@ -113,10 +113,12 @@ func launch(ctx context.Context, spec StartSpec, key executor.Key, prepare func(
 		return Client{}, err
 	}
 	defer func() { _ = store.Close() }()
-	owner, err := store.Acquire(key)
+	owner, err := acquireSettled(ctx, store, key)
 	if errors.Is(err, executor.ErrConflict) {
-		if c, err := Connect(ctx, spec.StateDir, key); err == nil {
-			return c, nil
+		if record, rerr := store.Read(string(key)); rerr == nil && record.Lifecycle == "live" {
+			if c, err := Connect(ctx, spec.StateDir, key); err == nil {
+				return c, nil
+			}
 		}
 		return Client{}, executor.ErrStarting
 	}
@@ -225,4 +227,29 @@ func newRuntimeKey() (executor.Key, error) {
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	return executor.Key(fmt.Sprintf("codex:%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])), nil
+}
+
+// keyRelease bounds the wait for a runtime that has written its final record
+// and is still exiting with the key lock held.
+const keyRelease = 5 * time.Second
+
+// acquireSettled takes the key lock, waiting briefly while the record already
+// says the runtime ended: that holder is exiting, not serving.
+func acquireSettled(ctx context.Context, store *Store, key executor.Key) (*Owner, error) {
+	deadline := time.Now().Add(keyRelease)
+	for {
+		owner, err := store.Acquire(key)
+		if !errors.Is(err, executor.ErrConflict) {
+			return owner, err
+		}
+		record, rerr := store.Read(string(key))
+		if rerr != nil || !slices.Contains([]string{"stopping", "stopped", "dead", "unknown"}, record.Lifecycle) || time.Now().After(deadline) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
