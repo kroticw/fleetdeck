@@ -245,3 +245,22 @@ func TestStoreLockExcludesAnotherProcessAndReleases(t *testing.T) {
 		t.Fatalf("closed owner saved: %v", err)
 	}
 }
+
+func TestStoreListsValidRecordsOnly(t *testing.T) {
+	s := testStore(t)
+	owner, err := s.Acquire(testRuntimeKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	if err := owner.Save(runtimeRecord()); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := s.openPrivate("not-a-key.json", os.O_CREATE|os.O_WRONLY); err == nil {
+		_ = f.Close()
+	}
+	records, err := s.List()
+	if err != nil || len(records) != 1 || records[0].Key != testRuntimeKey {
+		t.Fatalf("records %+v %v", records, err)
+	}
+}

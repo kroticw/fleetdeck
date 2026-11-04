@@ -159,6 +159,31 @@ func (s *Store) Read(raw string) (Record, error) {
 	return record, nil
 }
 
+// List reads every valid record. A record that cannot be read is skipped:
+// it names no session the panel could act on.
+func (s *Store) List() ([]Record, error) {
+	dir, err := s.root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	var records []Record
+	for _, e := range entries {
+		name, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if r, err := s.Read("codex:" + name); err == nil {
+			records = append(records, r)
+		}
+	}
+	return records, nil
+}
+
 func validRecord(r Record, key executor.Key) error {
 	if r.Version != ProtocolVersion {
 		return ErrIncompatible
