@@ -85,3 +85,26 @@ test("requests: a kind the panel cannot answer points to the terminal and offers
   assert.equal(r.node.querySelectorAll("button").length, 0);
   assert.match(r.node.textContent, /permissions/);
 });
+
+test("requests: several questions are sent together once each has an answer", async () => {
+  pending = [{ token: "q2", kind: "userInput", questions: [
+    { id: "a", header: "A", question: "First?", options: ["x", "y"] },
+    { id: "b", header: "B", question: "Second?", options: ["z"] },
+  ] }];
+  const r = make();
+  await r.refresh();
+  fireEvent(r.node.querySelector('button[data-option="y"]'), "click");
+  await settle();
+  assert.equal(answers.length, 0);
+  fireEvent(r.node.querySelector('button[data-option="z"]'), "click");
+  await settle();
+  assert.deepEqual(answers, [{ id: "codex:x", token: "q2", answers: { a: ["y"], b: ["z"] } }]);
+});
+
+test("requests: a question without options points to the terminal", async () => {
+  pending = [{ token: "q3", kind: "userInput", questions: [{ id: "free", header: "Name", question: "Type a name" }] }];
+  const r = make();
+  await r.refresh();
+  assert.equal(r.node.querySelectorAll("button").length, 0);
+  assert.match(r.node.textContent, /terminal/);
+});

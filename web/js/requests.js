@@ -63,16 +63,30 @@ export function createRequests(host, sessionId, { list = sessionRequests, respon
         actions.appendChild(button(t(`request_${decision}`), { decision }, { token: r.token, decision }));
       }
       row.appendChild(actions);
-    } else if (r.kind === "userInput") {
-      for (const q of r.questions ?? []) {
+    } else if (r.kind === "userInput" && (r.questions ?? []).every((q) => (q.options ?? []).length > 0)) {
+      // One choice per question; the answer goes once every question has one.
+      const chosen = {};
+      for (const q of r.questions) {
         row.appendChild(el("div", "s-request-title", q.header || t("request_question")));
         row.appendChild(el("div", "s-request-detail", q.question));
         const actions = el("div", "s-request-actions");
-        for (const option of q.options ?? []) {
-          actions.appendChild(button(option, { option }, { token: r.token, answers: { [q.id]: [option] } }));
+        for (const option of q.options) {
+          const b = el("button", "btn btn-sm s-request-answer", option);
+          b.type = "button";
+          b.dataset.option = option;
+          b.addEventListener("click", () => {
+            chosen[q.id] = [option];
+            for (const other of actions.querySelectorAll("button")) other.classList.toggle("is-chosen", other === b);
+            if (r.questions.every((each) => chosen[each.id])) void answer({ token: r.token, answers: chosen });
+          });
+          actions.appendChild(b);
         }
         row.appendChild(actions);
       }
+    } else if (r.kind === "userInput") {
+      // Free text the panel does not take: answered where Codex asked it.
+      for (const q of r.questions ?? []) row.appendChild(el("div", "s-request-detail", `${q.header || t("request_question")}: ${q.question}`));
+      row.appendChild(el("div", "s-request-detail", t("request_in_terminal")));
     } else {
       row.appendChild(el("div", "s-request-detail", `${t("request_in_terminal")}: ${r.method}`));
     }
