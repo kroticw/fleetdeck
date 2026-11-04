@@ -120,10 +120,12 @@ func serveConn(ctx context.Context, conn net.Conn, record Record, handle handler
 	if err := conn.SetDeadline(deadline(ctx, handshakeTimeout)); err != nil {
 		return err
 	}
+	reader := bufio.NewReader(conn)
 	var req request
-	if err := readFrame(bufio.NewReader(conn), &req); err != nil {
+	if err := readFrame(reader, &req); err != nil {
 		return err
 	}
+	var result any
 	expected := identityOf(record)
 	res := response{Version: ProtocolVersion, ID: req.ID}
 	switch {
@@ -142,7 +144,6 @@ func serveConn(ctx context.Context, conn net.Conn, record Record, handle handler
 		if err := conn.SetDeadline(deadline(callCtx, rpcTimeout)); err != nil {
 			return err
 		}
-		var result any
 		var err error
 		if req.Method == "hello" {
 			result = struct {
@@ -163,14 +164,30 @@ func serveConn(ctx context.Context, conn net.Conn, record Record, handle handler
 			}
 		}
 	}
+	st, streaming := result.(streamer)
+	if streaming && res.Error != nil {
+		_ = st.Close()
+		streaming = false
+	}
 	if err := writeFrame(conn, res); err != nil {
+		if streaming {
+			_ = st.Close()
+		}
 		if !errors.Is(err, ErrFrameTooLarge) {
 			return err
 		}
 		res.Result, res.Error = nil, &wireError{Code: "too_large"}
 		return writeFrame(conn, res)
 	}
-	return nil
+	if !streaming {
+		return nil
+	}
+	// The stream outlives the RPC deadline; it ends with either side.
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = st.Close()
+		return err
+	}
+	return st.stream(ctx, conn, reader)
 }
 
 // Client addresses one saved runtime identity. It never signals a PID or
@@ -181,71 +198,88 @@ type Client struct {
 }
 
 func (c Client) Call(ctx context.Context, method string, params, result any) error {
-	if err := ctx.Err(); err != nil {
+	conn, _, err := c.open(ctx, method, params, result)
+	if err != nil {
 		return err
 	}
+	return conn.Close()
+}
+
+// open performs one verified request and returns its connection, still
+// bound to ctx, for a method whose reply is followed by a stream.
+func (c Client) open(ctx context.Context, method string, params, result any) (net.Conn, *bufio.Reader, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if !filepath.IsAbs(c.Socket) {
-		return ErrPrivateState
+		return nil, nil, ErrPrivateState
 	}
 	parent, err := os.Lstat(filepath.Dir(c.Socket))
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if !privateFile(parent, true) {
-		return ErrPrivateState
+		return nil, nil, ErrPrivateState
 	}
 	info, err := os.Lstat(c.Socket)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if !privateSocket(info) {
-		return ErrPrivateState
+		return nil, nil, ErrPrivateState
 	}
 	encoded, err := json.Marshal(params)
 	if err != nil {
-		return ErrInvalidFrame
+		return nil, nil, ErrInvalidFrame
 	}
 	req := request{Version: ProtocolVersion, ID: rand.Text(), Identity: identityOf(c.Record), Method: method, Params: encoded}
 	// Encode and bound the request before making any connection.
 	if raw, err := json.Marshal(req); err != nil || len(raw)+1 > maxFrameSize {
-		return ErrFrameTooLarge
+		return nil, nil, ErrFrameTooLarge
 	}
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", c.Socket)
 	if err != nil {
-		return executor.ErrUnavailable
+		return nil, nil, executor.ErrUnavailable
 	}
-	defer func() { _ = conn.Close() }()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = conn.Close()
+		}
+	}()
 	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stopCancel()
 	if err := conn.SetDeadline(deadline(ctx, rpcTimeout)); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := writeFrame(conn, req); err != nil {
-		return ErrReplyUnknown
+		return nil, nil, ErrReplyUnknown
 	}
+	reader := bufio.NewReader(conn)
 	var res response
-	if err := readFrame(bufio.NewReader(conn), &res); err != nil {
-		return ErrReplyUnknown
+	if err := readFrame(reader, &res); err != nil {
+		return nil, nil, ErrReplyUnknown
 	}
 	if res.ID != req.ID {
-		return ErrIdentity
+		return nil, nil, ErrIdentity
 	}
 	if res.Error != nil && (res.Error.Code == "identity" || res.Error.Code == "incompatible") {
-		return errorFromCode(res.Error.Code)
+		return nil, nil, errorFromCode(res.Error.Code)
 	}
 	if res.Identity == nil || !req.Identity.matches(*res.Identity) {
-		return ErrIdentity
+		return nil, nil, ErrIdentity
 	}
 	if res.Error != nil {
-		return errorFromCode(res.Error.Code)
+		return nil, nil, errorFromCode(res.Error.Code)
 	}
 	if !compatibleVersion(res.Version) {
-		return ErrIncompatible
+		return nil, nil, ErrIncompatible
 	}
 	if result != nil && json.Unmarshal(res.Result, result) != nil {
-		return ErrInvalidFrame
+		return nil, nil, ErrInvalidFrame
 	}
-	return nil
+	ok = true
+	return conn, reader, nil
 }
 
 func errorCode(err error) string {
