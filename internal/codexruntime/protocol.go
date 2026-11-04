@@ -205,8 +205,9 @@ func (c Client) Call(ctx context.Context, method string, params, result any) err
 	return conn.Close()
 }
 
-// open performs one verified request and returns its connection, still
-// bound to ctx, for a method whose reply is followed by a stream.
+// open performs one verified request and returns its connection for a
+// method whose reply is followed by a stream. ctx bounds only the request;
+// the caller binds the connection's lifetime.
 func (c Client) open(ctx context.Context, method string, params, result any) (net.Conn, *bufio.Reader, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

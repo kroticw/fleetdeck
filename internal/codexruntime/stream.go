@@ -175,6 +175,7 @@ type TerminalStream struct {
 	r        *bufio.Reader
 	wmu      sync.Mutex
 	offset   uint64
+	stop     func() bool
 }
 
 // AttachTerminal opens a view at offset, or at the start of retained output
@@ -189,7 +190,9 @@ func (c Client) AttachTerminal(ctx context.Context, offset *uint64) (*TerminalSt
 		_ = conn.Close()
 		return nil, err
 	}
-	return &TerminalStream{Writable: result.Writable, Reset: result.Reset, conn: conn, r: r, offset: result.Offset}, nil
+	// The view lives as long as ctx, so a forgotten Close still releases its lease.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	return &TerminalStream{Writable: result.Writable, Reset: result.Reset, conn: conn, r: r, offset: result.Offset, stop: stop}, nil
 }
 
 // Next waits until deadline for the next frame.
@@ -228,4 +231,7 @@ func (s *TerminalStream) send(f streamFrame) error {
 	return writeFrame(s.conn, f)
 }
 
-func (s *TerminalStream) Close() error { return s.conn.Close() }
+func (s *TerminalStream) Close() error {
+	s.stop()
+	return s.conn.Close()
+}
