@@ -49,7 +49,7 @@ func startTerminal(ctx context.Context, argv []string, cwd string, cols, rows, l
 		return nil, errors.New("invalid terminal executable, directory, geometry or buffer limit")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir, cmd.Env = cwd, terminalEnv(os.Environ())
+	cmd.Dir, cmd.Env = cwd, TerminalEnvironment(os.Environ())
 	master, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
 		return nil, fmt.Errorf("start Codex terminal: %w", err)
@@ -282,7 +282,9 @@ func (v *terminalView) Close() error {
 
 func validGeometry(cols, rows int) bool { return cols >= 1 && cols <= 500 && rows >= 1 && rows <= 200 }
 
-func terminalEnv(base []string) []string {
+// TerminalEnvironment preserves user configuration but removes the parent's
+// task identity and selects the terminal type provided by Fleetdeck's xterm.
+func TerminalEnvironment(base []string) []string {
 	env := make([]string, 0, len(base)+1)
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")

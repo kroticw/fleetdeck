@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
 	"gopkg.in/yaml.v3"
 
 	"github.com/kroticw/fleetdeck/internal/fleet"
@@ -132,6 +133,10 @@ type Config struct {
 	Agent AgentConfig
 	// Workers is how the panel starts the worker sessions it hands cards to.
 	Workers Workers
+	// DefaultExecutor applies only when creating a new card. Legacy cards
+	// without an executor field remain Claude regardless of this setting.
+	DefaultExecutor executor.ID
+	Codex           CodexConfig
 
 	// Name names the fleet the top-level board, docs and orchestrator keys
 	// describe. Empty means the folder above its board (fleet.DefaultName).
@@ -303,9 +308,13 @@ type file struct {
 	// Name and Fleets came after every key above and are omitted when unused,
 	// so a file that does not use them is written exactly as before they
 	// existed (pinned by TestSaveOutputOfASingleFleetConfigIsPinned).
-	Name    string      `yaml:"name,omitempty"`
-	Fleets  []fleetFile `yaml:"fleets,omitempty"`
-	Workers Workers     `yaml:"workers,omitempty"`
+	Name            string      `yaml:"name,omitempty"`
+	Fleets          []fleetFile `yaml:"fleets,omitempty"`
+	Workers         Workers     `yaml:"workers,omitempty"`
+	DefaultExecutor executor.ID `yaml:"default_executor,omitempty"`
+	Executors       struct {
+		Codex CodexConfig `yaml:"codex,omitempty"`
+	} `yaml:"executors,omitempty"`
 }
 
 // Workers is how the panel starts a worker session for a card, for every
@@ -324,6 +333,7 @@ var PermissionModes = []string{"acceptEdits", "auto", "bypassPermissions", "manu
 // Default returns the configuration used when no file exists.
 func Default() Config {
 	return Config{
+		DefaultExecutor: executor.Claude,
 		Notify: NotifyConfig{
 			Waiting: true, Failed: true, Silent: true, CardBlocked: true,
 			SilenceAfter: 30 * time.Minute,
@@ -367,6 +377,10 @@ func configToFile(c Config) file {
 	f.Agent.ConfigDir = c.Agent.ConfigDir
 	f.Name = c.Name
 	f.Workers = c.Workers
+	if c.DefaultExecutor != executor.Claude {
+		f.DefaultExecutor = c.DefaultExecutor
+	}
+	f.Executors.Codex = c.Codex
 	for _, fl := range c.Fleets {
 		var ff fleetFile
 		ff.Name = fl.Name
@@ -380,7 +394,13 @@ func configToFile(c Config) file {
 
 // fileToConfig converts file format to a Config.
 func fileToConfig(f file) Config {
+	selected := f.DefaultExecutor
+	if selected == "" {
+		selected = executor.Claude
+	}
 	return Config{
+		DefaultExecutor:     selected,
+		Codex:               f.Executors.Codex,
 		BoardPath:           f.Board.Path,
 		DocsPaths:           f.Docs.Paths,
 		OrchestratorSession: f.Orchestrator.Session,
@@ -562,6 +582,9 @@ func describeYAMLError(err error) error {
 // has one defined meaning (see NotifyConfig.SilenceAfter) rather than two competing
 // ones, so there is nothing for validate to refuse.
 func validate(c Config) error {
+	if err := validateExecutors(c); err != nil {
+		return err
+	}
 	if m := c.Workers.PermissionMode; m != "" && !slices.Contains(PermissionModes, m) {
 		return fmt.Errorf("workers.permission_mode %q is not one of %s", m, strings.Join(PermissionModes, ", "))
 	}

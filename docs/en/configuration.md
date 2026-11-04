@@ -27,6 +27,14 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 | `workers.model` | string | unset (`opus`) | not validated; a model the CLI does not know fails each start, and the start says what the CLI said. See [Worker sessions](#worker-sessions) |
 | `workers.permission_mode` | string | unset (`auto`) | not one of the CLI's modes: `workers.permission_mode "%s" is not one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan` |
 | `workers.sandbox` | boolean | `false` (the worker runs **without** the sandbox) | not validated (must be a boolean) |
+| `default_executor` | string | `claude` | `claude` or `codex`; selecting Codex requires it to be enabled; affects new cards only |
+| `executors.codex.enabled` | boolean | `false` | enables Codex launches |
+| `executors.codex.command` | list of strings | unset (resolved Codex executable) | first element must be an absolute executable path; arguments must be non-empty; never interpreted by a shell |
+| `executors.codex.home` | absolute path | unset (existing `CODEX_HOME` or Codex default) | relative paths are rejected; Fleetdeck does not create a new authentication home |
+| `executors.codex.profile` | string | unset (Codex default) | passed as `--profile`; must be a single-line value |
+| `executors.codex.model` | string | unset (Codex default) | passed as `--model`; never inherited from `workers.model` |
+| `executors.codex.sandbox` | string | unset (Codex default) | `read-only`, `workspace-write`, or `danger-full-access` |
+| `executors.codex.approval_policy` | string | unset (Codex default) | `on-request` or `never`, as supported by the ordinary TUI |
 | `name` | string | the folder above `board.path`, `main` when that says nothing | empty, spaces around it or a control character: `the top-level fleet: name ...`; the name of another fleet: see [Several fleets](#several-fleets) |
 | `fleets` | list of fleets | unset (empty) | see [Several fleets](#several-fleets) |
 | `fleets[].name` | string | none: required | empty, spaces around it or a control character: `fleets[N]: name ...`; the name of another fleet: `fleets[1]: name "clining" is already the name of fleets[0]` |
