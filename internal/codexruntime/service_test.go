@@ -15,27 +15,62 @@ import (
 	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
-// fakeNative answers the bootstrap methods and records their order.
+// fakeNative answers the bootstrap methods and records their order. push
+// sends a notification on the current connection; drop closes it, and the
+// next connection is served afresh.
 type fakeNative struct {
 	mu      sync.Mutex
 	methods []string
 	socket  string
 	status  string
+	conns   int
+	push    chan any
+	drop    chan struct{}
 }
 
 func newFakeNative(t *testing.T) *fakeNative {
 	t.Helper()
-	f := &fakeNative{status: "idle"}
+	f := &fakeNative{status: "idle", push: make(chan any, 8), drop: make(chan struct{}, 1)}
 	f.socket = nativeServer(t, func(ctx context.Context, conn *websocket.Conn) {
-		for {
-			// The runtime closing its connection ends the fake, not the test.
-			_, raw, err := conn.Read(ctx)
-			if err != nil {
-				return
+		f.mu.Lock()
+		f.conns++
+		f.mu.Unlock()
+		incoming := make(chan nativeMessage)
+		go func() {
+			defer close(incoming)
+			for {
+				// The runtime closing its connection ends the fake, not the test.
+				_, raw, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				var m nativeMessage
+				if json.Unmarshal(raw, &m) != nil || m.Method == "" {
+					t.Errorf("unexpected native frame %s", raw)
+					return
+				}
+				incoming <- m
 			}
+		}()
+		write := func(v any) bool {
+			raw, _ := json.Marshal(v)
+			return conn.Write(ctx, websocket.MessageText, raw) == nil
+		}
+		for {
 			var m nativeMessage
-			if json.Unmarshal(raw, &m) != nil || m.Method == "" {
-				t.Errorf("unexpected native frame %s", raw)
+			var ok bool
+			select {
+			case m, ok = <-incoming:
+				if !ok {
+					return
+				}
+			case v := <-f.push:
+				if !write(v) {
+					return
+				}
+				continue
+			case <-f.drop:
+				_ = conn.CloseNow()
 				return
 			}
 			f.mu.Lock()
@@ -49,7 +84,9 @@ func newFakeNative(t *testing.T) *fakeNative {
 			if m.Method == "thread/start" || m.Method == "thread/resume" || m.Method == "thread/read" {
 				result["thread"] = map[string]any{"id": nativeThread, "status": map[string]string{"type": status}}
 			}
-			nativeWrite(ctx, t, conn, map[string]any{"id": m.ID, "result": result})
+			if !write(map[string]any{"id": m.ID, "result": result}) {
+				return
+			}
 		}
 	})
 	return f
@@ -334,5 +371,48 @@ func TestServiceSurvivesARejectedAttach(t *testing.T) {
 	var status Status
 	if err := client.Call(context.Background(), "status", nil, &status); err != nil || status.Lifecycle != "live" {
 		t.Fatalf("runtime did not survive a rejected attach: %+v %v", status, err)
+	}
+}
+
+func awaitStatus(t *testing.T, client Client, ok func(Status) bool) Status {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var status Status
+		err := client.Call(context.Background(), "status", nil, &status)
+		if err == nil && ok(status) {
+			return status
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status never matched: %+v %v", status, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestServiceObservesThreadAndReconnectsToNative(t *testing.T) {
+	f := newServiceFixture(t, "")
+	served := f.run(t)
+	client := f.awaitLive(t, served)
+	awaitStatus(t, client, func(s Status) bool {
+		return s.Activity == "idle" && s.NeedsHuman == executor.No && !s.ObservedAt.IsZero()
+	})
+	f.native.push <- map[string]any{"method": "thread/status/changed", "params": map[string]any{"threadId": nativeThread, "status": map[string]any{"type": "active", "activeFlags": []string{"waitingOnApproval"}}}}
+	awaitStatus(t, client, func(s Status) bool { return s.Activity == "working" && s.NeedsHuman == executor.Yes })
+	// Another thread's (e.g. a subagent's) idle event does not touch ours.
+	f.native.push <- map[string]any{"method": "thread/status/changed", "params": map[string]any{"threadId": foreignThread, "status": map[string]any{"type": "idle"}}}
+	f.native.drop <- struct{}{}
+	lost := awaitStatus(t, client, func(s Status) bool { return !s.Native })
+	if lost.NeedsHuman != executor.Unknown || lost.Activity != "unknown" {
+		t.Fatalf("a lost observation must be unknown: %+v", lost)
+	}
+	back := awaitStatus(t, client, func(s Status) bool { return s.Native })
+	if back.Activity != "idle" || back.NeedsHuman != executor.No {
+		t.Fatalf("reconnect did not reconcile: %+v", back)
+	}
+	f.native.mu.Lock()
+	defer f.native.mu.Unlock()
+	if f.native.conns < 2 || !slices.Contains(f.native.methods[1:], "thread/resume") {
+		t.Fatalf("reconnect did not resume the thread: conns=%d %v", f.native.conns, f.native.methods)
 	}
 }

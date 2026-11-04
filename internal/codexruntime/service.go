@@ -46,6 +46,11 @@ type Status struct {
 	ThreadID  string `json:"threadId"`
 	Native    bool   `json:"native"`
 	Terminal  bool   `json:"terminal"`
+	// Activity is working, idle, error or unknown, as last observed at
+	// ObservedAt; a lost connection makes it and NeedsHuman unknown.
+	Activity   string           `json:"activity"`
+	NeedsHuman executor.Verdict `json:"needsHuman"`
+	ObservedAt time.Time        `json:"observedAt"`
 }
 
 // SocketPath is the runtime's private IPC endpoint inside stateDir.
@@ -135,15 +140,21 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 			return fmt.Errorf("start Codex app-server: %w", err)
 		}
 	}
-	native, err := openNativeControl(ctx, spec.NativeSocket, nil)
+	obs := &observer{}
+	native, err := openNativeControl(ctx, spec.NativeSocket, obs.handle)
 	if err != nil {
 		return fmt.Errorf("connect to Codex app-server: %w", err)
 	}
-	defer native.Close()
+	link := &nativeLink{current: native, socket: spec.NativeSocket, obs: obs}
+	defer link.Close()
 	if err := registerThread(ctx, native, state, spec.Thread); err != nil {
 		return err
 	}
 	record = state.snapshot()
+	link.thread = record.ThreadID
+	if err := link.reconcile(ctx, native); err != nil {
+		return err
+	}
 
 	argv, env, err := spec.Launch(record.ThreadID)
 	if err != nil {
@@ -164,7 +175,15 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 		switch method {
 		case "status":
 			current := state.snapshot()
-			return Status{Lifecycle: current.Lifecycle, ThreadID: current.ThreadID, Native: !isDone(native.done), Terminal: !isDone(term.done)}, nil
+			native, nerr := link.get()
+			pending := 0
+			if nerr == nil {
+				pending = len(native.pending())
+			} else {
+				obs.lost()
+			}
+			activity, needs, at := obs.view(pending)
+			return Status{Lifecycle: current.Lifecycle, ThreadID: current.ThreadID, Native: nerr == nil, Terminal: !isDone(term.done), Activity: activity, NeedsHuman: needs, ObservedAt: at}, nil
 		case "terminal.attach":
 			var req struct {
 				Offset *uint64 `json:"offset"`
@@ -178,6 +197,13 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 				return nil, err
 			}
 			return attached, nil
+		}
+		// Everything below needs the native connection.
+		native, err := link.get()
+		if err != nil {
+			return nil, err
+		}
+		switch method {
 		case "requests":
 			return pendingRequests(native), nil
 		case "requests.respond":
@@ -220,6 +246,7 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 	identity := state.snapshot()
 	serveCtx, stopServing := context.WithCancel(ctx)
 	defer stopServing()
+	go link.maintain(serveCtx)
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -236,7 +263,10 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 	case <-term.done:
 	}
 	term.Close()
-	final = settledLifecycle(native, record.ThreadID)
+	final = "unknown"
+	if native, err := link.get(); err == nil {
+		final = settledLifecycle(native, record.ThreadID)
+	}
 	return nil
 }
 
