@@ -44,6 +44,21 @@ func TestPTYChild(_ *testing.T) {
 			_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", 128*1024)+"FLOOD_DONE\n")
 		case "env":
 			_, _ = fmt.Fprintf(os.Stdout, "ENV=%s|%s|%s\n", os.Getenv("TERM"), os.Getenv("CODEX_THREAD_ID"), os.Getenv("CODEX_INTERNAL_ORIGINATOR_OVERRIDE"))
+		case "tui":
+			// A synchronized-output frame on start and after every resize,
+			// the way a full-screen TUI clears and redraws on SIGWINCH.
+			frame := func() {
+				size, _ := unix.IoctlGetWinsize(0, unix.TIOCGWINSZ)
+				_, _ = fmt.Fprintf(os.Stdout, "\x1b[?2026h\x1b[2J\x1b[HFRAME=%dx%d\x1b[?2026l", size.Col, size.Row)
+			}
+			winch := make(chan os.Signal, 1)
+			signal.Notify(winch, syscall.SIGWINCH)
+			go func() {
+				for range winch {
+					frame()
+				}
+			}()
+			frame()
 		case "quit":
 			os.Exit(0)
 		case "finish":
@@ -133,7 +148,7 @@ func testPTY(t *testing.T) *terminal {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
-	p, err := startTerminal(ctx, []string{binary, "-test.run=^TestPTYChild$"}, t.TempDir(), 80, 24, 4096)
+	p, err := startTerminal(ctx, []string{binary, "-test.run=^TestPTYChild$"}, os.Environ(), t.TempDir(), 80, 24, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,4 +294,50 @@ func TestPTYStartsWithIndependentTerminalIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitPTY(t, p, "ENV=xterm-256color||")
+}
+
+func TestPTYRepaintAfterOverflowStartsAtACompleteFrame(t *testing.T) {
+	p := testPTY(t)
+	v := p.attach(0)
+	defer func() { _ = v.Close() }()
+	if _, err := v.Write([]byte("tui\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitPTY(t, p, "FRAME=80x24")
+	if _, err := v.Write([]byte("flood\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitPTY(t, p, "FLOOD_DONE")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	from, err := p.repaint(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, total, _, _ := p.output(0)
+	oldest := total - uint64(len(all))
+	if from < oldest+uint64(len(frameEnd)) || string(all[from-oldest-uint64(len(frameEnd)):from-oldest]) != frameEnd {
+		t.Fatal("replay does not start right after a complete frame")
+	}
+	// The redraw at the restored geometry arrives after the boundary, so a
+	// blank screen replayed from there ends with the current full frame.
+	deadline := time.After(3 * time.Second)
+	for {
+		data, _, lost, changed := p.output(from)
+		if lost {
+			t.Fatal("repaint boundary fell out of the buffer")
+		}
+		if strings.HasSuffix(string(data), "FRAME=80x24"+frameEnd) && strings.Contains(string(data), "\x1b[2J") {
+			break
+		}
+		select {
+		case <-changed:
+		case <-deadline:
+			t.Fatalf("no full redraw after the boundary: %q", data)
+		}
+	}
+	if _, err := v.Write([]byte("size\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitPTY(t, p, "SIZE=80x24")
 }

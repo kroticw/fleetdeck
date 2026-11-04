@@ -2,6 +2,7 @@
 package codexruntime
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -36,12 +37,14 @@ type terminal struct {
 	leaseMu        sync.Mutex
 	views          map[uint64]*terminalView
 	next, writer   uint64
+	cols, rows     int
 	closing        bool
 	done, readDone chan struct{}
 	closeOnce      sync.Once
 }
 
-func startTerminal(ctx context.Context, argv []string, cwd string, cols, rows, limit int) (*terminal, error) {
+// startTerminal runs argv with env, minus the parent's task identity.
+func startTerminal(ctx context.Context, argv, env []string, cwd string, cols, rows, limit int) (*terminal, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -49,7 +52,7 @@ func startTerminal(ctx context.Context, argv []string, cwd string, cols, rows, l
 		return nil, errors.New("invalid terminal executable, directory, geometry or buffer limit")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir, cmd.Env = cwd, TerminalEnvironment(os.Environ())
+	cmd.Dir, cmd.Env = cwd, TerminalEnvironment(env)
 	master, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
 		return nil, fmt.Errorf("start Codex terminal: %w", err)
@@ -71,7 +74,7 @@ func startTerminal(ctx context.Context, argv []string, cwd string, cols, rows, l
 	}
 	_ = master.Close()
 	master = os.NewFile(uintptr(fd), "codex-pty")
-	t := &terminal{master: master, cmd: cmd, limit: limit, changed: make(chan struct{}), views: make(map[uint64]*terminalView), done: make(chan struct{}), readDone: make(chan struct{})}
+	t := &terminal{master: master, cmd: cmd, limit: limit, cols: cols, rows: rows, changed: make(chan struct{}), views: make(map[uint64]*terminalView), done: make(chan struct{}), readDone: make(chan struct{})}
 	go t.read()
 	go func() {
 		_ = cmd.Wait()
@@ -258,7 +261,87 @@ func (v *terminalView) Resize(ctx context.Context, cols, rows int) error {
 	if !v.ownsLease() {
 		return ErrNoLease
 	}
-	return pty.Setsize(t.master, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	if err := pty.Setsize(t.master, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}); err != nil {
+		return err
+	}
+	t.cols, t.rows = cols, rows
+	return nil
+}
+
+// frameEnd closes a synchronized-output frame. Only the byte after a
+// complete frame is a safe replay start; an arbitrary ANSI tail is not.
+const frameEnd = "\x1b[?2026l"
+
+// lastFrameEnd is the offset just past the newest complete frame at or after
+// from, or false when the retained output has none.
+func (t *terminal) lastFrameEnd(from uint64) (uint64, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	oldest := t.total - uint64(len(t.tail))
+	if from < oldest {
+		from = oldest
+	}
+	i := bytes.LastIndex(t.tail[from-oldest:], []byte(frameEnd))
+	if i < 0 {
+		return 0, false
+	}
+	return from + uint64(i+len(frameEnd)), true
+}
+
+// repaint returns an offset from which a blank screen reproduces the current
+// one: it nudges the geometry, takes the frame boundary that precedes the
+// redraw at the restored size, and lets the TUI clear and draw in full.
+func (t *terminal) repaint(ctx context.Context) (uint64, error) {
+	t.leaseMu.Lock()
+	defer t.leaseMu.Unlock()
+	if t.closing {
+		return 0, ErrReplayLost
+	}
+	cols, rows := t.cols, t.rows
+	nudged := cols - 1
+	if nudged < 1 {
+		nudged = cols + 1
+	}
+	_, mark, _, _ := t.output(0)
+	if err := pty.Setsize(t.master, &pty.Winsize{Cols: uint16(nudged), Rows: uint16(rows)}); err != nil {
+		return 0, err
+	}
+	boundary, found := uint64(0), false
+	wait, cancel := context.WithTimeout(ctx, time.Second)
+	for !found {
+		_, _, _, changed := t.output(mark)
+		if boundary, found = t.lastFrameEnd(mark); found {
+			break
+		}
+		select {
+		case <-changed:
+		case <-t.done:
+		case <-wait.Done():
+		}
+		if wait.Err() != nil || isDone(t.done) {
+			// No redraw: a frame retained from before the nudge still
+			// precedes the restore's full redraw.
+			boundary, found = t.lastFrameEnd(0)
+			break
+		}
+	}
+	cancel()
+	if err := pty.Setsize(t.master, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}); err != nil {
+		return 0, err
+	}
+	if !found {
+		return 0, ErrReplayLost
+	}
+	return boundary, nil
+}
+
+func isDone(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 func (v *terminalView) Close() error {
