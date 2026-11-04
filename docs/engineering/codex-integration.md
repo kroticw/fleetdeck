@@ -19,7 +19,23 @@ The first normal CLI launch automatically started its managed local daemon. The 
 - With the resumed TUI still attached, another API `turn/start` appeared in that same terminal, streamed its answer and completed. This establishes a working API/TUI connection for a persisted thread, not approval routing or exclusive ownership.
 - Closing an ordinary TUI printed that running work continues and provided a resume command. TUI exit must therefore not be implemented as agent stop.
 
-The empty-thread bootstrap remains a design question. A harmless initialization turn is permitted by the design's setup-before-task rule, but it costs an inference and does not replace verification of other registration paths. No card task may be sent before its link is saved.
+A subsequent experiment found a non-inference bootstrap: `thread/name/set` after `thread/start` created the rollout, and ordinary `codex resume` opened the still-unused thread successfully. This provides a candidate deterministic registration path without hooks or a setup turn. It still needs two-launch and recovery tests before adoption. No card task may be sent before its link is saved.
+
+## Approval ownership and recovery
+
+A disposable API-started turn requested approval for a harmless command while ordinary TUI was connected. The originating API connection received `item/commandExecution/requestApproval` with request ID `0`; zero is a valid request ID. The TUI showed the command as running, but no approval dialog was observed. `thread/read` reported `activeFlags: ["waitingOnApproval"]`.
+
+Disconnecting the originating API client did not by itself complete or cancel that turn. A fresh API connection calling `thread/resume` received a replay of the pending approval. The probe cancelled it rather than approving an unexpected command representation; the turn became `interrupted`. No session-wide or persistent permission was granted.
+
+The runtime must therefore retain and service server requests for API-issued turns. Terminal attachment alone is insufficient evidence that the user can answer them. Pending requests need their own Fleetdeck interaction and reconnection logic; cancellation and replay are verified, successful approval and user-input routing remain unverified. Correlation must use the native thread/turn/item/approval identities, not assume that a connection-local JSON-RPC ID is globally unique.
+
+## Synthetic PTY probe
+
+`terminalProbe` starts an explicit absolute executable with a controlling PTY and continuously drains output to a bounded memory tail. The tail reports overflow and is explicitly not a terminal screen snapshot. No live Codex invocation or terminal capture runs in ordinary tests.
+
+The probe uses `github.com/creack/pty v1.1.24` (MIT) for portable PTY creation and resizing instead of adding handwritten Darwin ioctl code with unsafe pointers. The module/version and primary package documentation were checked; `go mod verify` passed. This experimental dependency is not a commitment to reuse the probe as the product runtime.
+
+Tests verify child-observed initial geometry and resize, output exceeding the buffer limit without a consumer, quiet Close after resize, and absence of inherited master descriptors in a second child. Independent review found that plain `Dup` loses close-on-exec; a subprocess test reproduced the leak, and atomic `F_DUPFD_CLOEXEC` fixes it. The master is rewrapped after setting nonblocking mode so Go registers a poll descriptor and quiet reads can be interrupted. Live screen replay and panel-process survival are still outstanding.
 
 ## Read-only control probe
 
