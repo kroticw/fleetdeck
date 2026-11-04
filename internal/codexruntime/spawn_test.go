@@ -171,3 +171,22 @@ func TestResumeRefusesAnUnknownKey(t *testing.T) {
 		t.Fatalf("unknown key: %v", err)
 	}
 }
+
+func TestStartSettlesTheRecordOfARuntimeThatNeverServed(t *testing.T) {
+	spec := spawnFixture(t)
+	spec.Command = []string{"/usr/bin/false"}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	key, _, err := Start(ctx, spec)
+	if !errors.Is(err, ErrRuntimeEnded) {
+		t.Fatalf("runtime that never ran: %v", err)
+	}
+	store, err := OpenStore(spec.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	if record, err := store.Read(string(key)); err != nil || record.Lifecycle != "dead" {
+		t.Fatalf("placeholder left behind: %+v %v", record, err)
+	}
+}

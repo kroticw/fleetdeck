@@ -158,7 +158,31 @@ func launch(ctx context.Context, spec StartSpec, key executor.Key, prepare func(
 	if wait == 0 {
 		wait = defaultStartWait
 	}
-	return awaitRuntime(ctx, store, spec.StateDir, key, cmd.Process.Pid, exited, wait)
+	client, err := awaitRuntime(ctx, store, spec.StateDir, key, cmd.Process.Pid, exited, wait)
+	if errors.Is(err, ErrRuntimeEnded) {
+		settlePlaceholder(store, key, record.Nonce)
+	}
+	return client, err
+}
+
+// settlePlaceholder finalizes the intent record of a runtime that exited
+// before publishing its own identity, so it does not claim "starting"
+// forever. A record a runtime has taken over is left to that runtime.
+func settlePlaceholder(store *Store, key executor.Key, nonce string) {
+	owner, err := store.Acquire(key)
+	if err != nil {
+		return
+	}
+	defer func() { _ = owner.Close() }()
+	record, err := store.Read(string(key))
+	if err != nil || record.Nonce != nonce || record.Lifecycle != "starting" {
+		return
+	}
+	record.Lifecycle = "dead"
+	if record.ThreadID != "" {
+		record.Lifecycle = "stopped"
+	}
+	_ = owner.Save(record)
 }
 
 func awaitRuntime(ctx context.Context, store *Store, stateDir string, key executor.Key, pid int, exited <-chan struct{}, wait time.Duration) (Client, error) {
