@@ -305,4 +305,5 @@ var protocolErrors = map[string]error{
 	"unsupported": executor.ErrUnsupported, "conflict": executor.ErrConflict,
 	"starting": executor.ErrStarting, "delivery_unknown": executor.ErrDeliveryUnknown,
 	"not_resumable": executor.ErrNotResumable, "work_survived": ErrWorkSurvived,
+	"reply_unknown": ErrReplyUnknown,
 }

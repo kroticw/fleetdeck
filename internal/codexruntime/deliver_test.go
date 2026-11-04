@@ -3,8 +3,10 @@ package codexruntime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -51,6 +53,11 @@ func deliverNative(t *testing.T, reply map[string]any, delivered []string, start
 			case "thread/turns/list":
 				items := []map[string]string{}
 				for _, id := range delivered {
+					// "client:<op>" stores the op only as clientId, beside its own item ID.
+					if op, ok := strings.CutPrefix(id, "client:"); ok {
+						items = append(items, map[string]string{"id": "item-own", "clientId": op, "type": "userMessage"})
+						continue
+					}
 					items = append(items, map[string]string{"id": id, "type": "userMessage"})
 				}
 				nativeWrite(ctx, t, conn, map[string]any{"id": m.ID, "result": map[string]any{"data": []map[string]any{{"id": "turn-r", "status": "completed", "items": items}}, "nextCursor": nil}})
@@ -165,5 +172,49 @@ func TestDeliverValidatesOperationAndText(t *testing.T) {
 	}
 	if starts.Load() != 0 {
 		t.Fatal("invalid delivery reached Codex")
+	}
+}
+
+func TestDeliverConcurrentSameOperationStartsOneTurn(t *testing.T) {
+	var starts atomic.Int32
+	native := deliverNative(t, map[string]any{"result": map[string]any{"turn": map[string]string{"id": "turn-9"}}}, nil, &starts)
+	state := deliverState(t)
+	done := make(chan executor.Receipt, 4)
+	for range 4 {
+		go func() {
+			r, _ := deliver(context.Background(), native, state, testOperation, "x")
+			done <- r
+		}()
+	}
+	for range 4 {
+		<-done
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("one operation started %d turns", starts.Load())
+	}
+}
+
+func TestDeliverRecoversByClientIDAndNeverDowngradesAcceptance(t *testing.T) {
+	var starts atomic.Int32
+	state := deliverState(t)
+	if _, err := deliver(context.Background(), deliverNative(t, nil, nil, &starts), state, testOperation, "x"); err != nil {
+		t.Fatal(err)
+	}
+	clientOnly := deliverNative(t, nil, []string{"client:" + testOperation}, &starts)
+	receipt, err := deliver(context.Background(), clientOnly, state, testOperation, "x")
+	if err != nil || receipt.State != executor.Accepted {
+		t.Fatalf("clientId recovery: %+v %v", receipt, err)
+	}
+	if receipt, _ := settle(state, testOperation, executor.DeliveryUnknown, ""); receipt.State != executor.Accepted {
+		t.Fatalf("accepted operation downgraded to %s", receipt.State)
+	}
+}
+
+func TestUncertainOutcomesKeepTheirMeaningOverIPC(t *testing.T) {
+	if code := errorCode(fmt.Errorf("%w: journal", executor.ErrDeliveryUnknown)); code != "delivery_unknown" {
+		t.Fatalf("delivery: %s", code)
+	}
+	if code := errorCode(ErrReplyUnknown); code != "reply_unknown" {
+		t.Fatalf("reply: %s", code)
 	}
 }

@@ -3,6 +3,7 @@ package codexruntime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"regexp"
 	"sync"
@@ -12,14 +13,22 @@ import (
 )
 
 const (
-	maxSendText   = 64 << 10
-	maxOperations = 128
+	maxSendText = 64 << 10
+	// shortcut: the journal keeps 1024 operations; an ID pruned after that
+	// many newer sends is treated as new. Add tombstones if callers ever
+	// retry IDs that old.
+	maxOperations = 1024
+	// An unresolved operation this old may be dropped to make room, so
+	// unknowns never block every later send.
+	staleOperation = time.Hour
 	// shortcut: recovery scans the newest pages only; a lost ack found
 	// deeper than this stays unknown. Widen if long sessions need it.
 	recoveryPages = 5
 )
 
 var operationID = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
+
+var errAlreadyJournaled = errors.New("operation already journaled")
 
 // runtimeState serializes changes to the saved record between the service
 // loop and concurrent IPC handlers. A change is kept only once saved.
@@ -71,16 +80,25 @@ func deliver(ctx context.Context, native *nativeControl, state *runtimeState, op
 		}
 		return settle(state, op, executor.Accepted, turn)
 	}
+	var raced *Operation
 	err := state.update(func(r *Record) error {
 		if r.Operations == nil {
 			r.Operations = map[string]Operation{}
 		}
-		if !prune(r.Operations) {
+		// A concurrent send of the same ID journaled first and owns it.
+		if prev, ok := r.Operations[op]; ok {
+			raced = &prev
+			return errAlreadyJournaled
+		}
+		if !prune(r.Operations, time.Now()) {
 			return executor.ErrConflict
 		}
 		r.Operations[op] = Operation{Kind: "send", Phase: string(executor.Queued), MessageID: op, Receipt: executor.Queued, UpdatedAt: time.Now().UTC()}
 		return nil
 	})
+	if raced != nil {
+		return receiptOf(op, *raced), nil
+	}
 	if err != nil {
 		return executor.Receipt{}, err
 	}
@@ -107,6 +125,10 @@ func settle(state *runtimeState, op string, phase executor.DeliveryState, turn s
 	var settled Operation
 	err := state.update(func(r *Record) error {
 		settled = r.Operations[op]
+		// A reconcile may already have proven acceptance; never undo it.
+		if settled.Phase == string(executor.Accepted) {
+			return nil
+		}
 		settled.Phase, settled.Receipt, settled.UpdatedAt = string(phase), phase, time.Now().UTC()
 		if turn != "" {
 			settled.TurnID = turn
@@ -115,8 +137,9 @@ func settle(state *runtimeState, op string, phase executor.DeliveryState, turn s
 		return nil
 	})
 	if err != nil {
-		// The phase reached Codex but not the journal: the caller cannot rely on it.
-		return executor.Receipt{OperationID: op, State: executor.DeliveryUnknown}, err
+		// The phase reached Codex but not the journal: the caller cannot rely
+		// on it and must not resend under a new ID.
+		return executor.Receipt{OperationID: op, State: executor.DeliveryUnknown}, fmt.Errorf("%w: %w", executor.ErrDeliveryUnknown, err)
 	}
 	return receiptOf(op, settled), nil
 }
@@ -129,13 +152,14 @@ func receiptOf(op string, o Operation) executor.Receipt {
 	return r
 }
 
-// prune drops the oldest settled operations above the limit. Queued and
-// unknown ones are kept: they still need reconciliation.
-func prune(ops map[string]Operation) bool {
+// prune drops the oldest settled operations above the limit. Unresolved
+// ones are kept while recent: they still need reconciliation.
+func prune(ops map[string]Operation, now time.Time) bool {
 	for len(ops) >= maxOperations {
 		oldest := ""
 		for id, o := range ops {
-			if o.Phase != string(executor.Accepted) && o.Phase != string(executor.Failed) {
+			settled := o.Phase == string(executor.Accepted) || o.Phase == string(executor.Failed)
+			if !settled && now.Sub(o.UpdatedAt) < staleOperation {
 				continue
 			}
 			if oldest == "" || o.UpdatedAt.Before(ops[oldest].UpdatedAt) {
@@ -163,8 +187,9 @@ func findDelivered(ctx context.Context, native *nativeControl, thread, op string
 			Data []struct {
 				ID    string `json:"id"`
 				Items []struct {
-					ID   string `json:"id"`
-					Type string `json:"type"`
+					ID       string `json:"id"`
+					ClientID string `json:"clientId"`
+					Type     string `json:"type"`
 				} `json:"items"`
 			} `json:"data"`
 			NextCursor *string `json:"nextCursor"`
@@ -174,7 +199,7 @@ func findDelivered(ctx context.Context, native *nativeControl, thread, op string
 		}
 		for _, turn := range page.Data {
 			for _, item := range turn.Items {
-				if item.Type == "userMessage" && item.ID == op {
+				if item.Type == "userMessage" && (item.ClientID == op || item.ID == op) {
 					return turn.ID, true
 				}
 			}
