@@ -2,14 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
-	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
 var (
@@ -42,18 +42,10 @@ type Work struct {
 // Every reach outside is a function, as the Appointer's are, and for the same
 // reason: which runtime is behind them is the fleet's business.
 type Dispatcher struct {
-	// Start starts a background session in cwd and under name, with no
-	// prompt, and returns its short id. Nil is a panel that starts no
-	// sessions.
-	Start func(ctx context.Context, cwd, name string) (string, error)
-	// List is this fleet's session list, and Send delivers one message into a
-	// session as a turn of its own.
-	List func(ctx context.Context) ([]daemon.Session, error)
-	Send func(ctx context.Context, short, text string) error
-	// SendFirst is what the Appointer's is: the send for the first message
-	// into a session just started, on a fleet whose Send acknowledges a
-	// message before the session can read it. Nil, and the task goes by Send.
-	SendFirst func(ctx context.Context, short, text string) error
+	// Executors start and task the sessions; a card's executor field picks
+	// one. An executor that cannot start or send refuses its cards rather
+	// than another executor starting them.
+	Executors *executor.Registry
 	// SetField writes one frontmatter field, refusing when the card no longer
 	// holds the value the write was made against (board.SetField). An error
 	// wrapping board.ErrWrittenNotCommitted is a field that reached the card
@@ -64,10 +56,6 @@ type Dispatcher struct {
 	// exists is refused rather than started somewhere else (Workdir).
 	Home string
 
-	// Poll, StartWait and SendWait mean what the Appointer's do. Zero is the
-	// default.
-	Poll, StartWait, SendWait time.Duration
-
 	busy sync.Mutex
 }
 
@@ -77,11 +65,8 @@ type Dispatcher struct {
 // fails ends it, and a session already started is named in the Result whatever
 // happened after — it is running, and nothing on the board points at it.
 func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
-	switch {
-	case w.Card == "":
+	if w.Card == "" {
 		return Result{}, fmt.Errorf("%w: a dispatch must name the card it hands over", ErrBadRequest)
-	case d.Start == nil:
-		return Result{}, ErrCannotStart
 	}
 	card, err := board.ParseCard(w.Card)
 	if err != nil {
@@ -92,6 +77,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	}
 	if card.Session != "" {
 		return Result{}, fmt.Errorf("%w: %s", ErrCardTaken, card.Session)
+	}
+	var adapter executor.Adapter
+	if d.Executors != nil {
+		adapter, err = d.Executors.ForID(executor.ID(card.Executor))
+	}
+	if d.Executors == nil || err != nil || adapter.Start == nil || adapter.Send == nil {
+		return Result{}, fmt.Errorf("%w: executor %s is not configured", ErrCannotStart, card.Executor)
 	}
 	cwd, err := Workdir(d.Home, card.Repo)
 	if err != nil {
@@ -112,12 +104,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	}
 
 	lang := Lang(w.Lang)
-	short, err := d.Start(ctx, cwd, sessionName(lang, card.ID, card.Title))
-	if err != nil {
-		return refuse("session", err)
-	}
+	name := sessionName(lang, card.ID, card.Title)
+	// Start returns once the session is up; a key returned with an error is
+	// a session that may still come up, and is named in the Result.
+	session, err := adapter.Start(ctx, executor.StartRequest{Card: w.Card, CWD: cwd, Name: name})
+	short := string(session.Key)
 	res.Session = short
-	if err := waitListed(ctx, d.List, short, d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
+	if err != nil {
 		return refuse("session", err)
 	}
 	done("session", fmt.Sprintf("started %s in %s", short, cwd))
@@ -145,11 +138,26 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	// The refusal carries the task itself: the card names the session and the
 	// session runs, so what is left for a hand to do is send this line into it.
 	task := Task(lang, w.Card)
-	if err := deliver(ctx, firstSend(d.Send, d.SendFirst), short, task, d.wait(d.StartWait, defaultStartWait), d.wait(d.Poll, defaultPoll)); err != nil {
-		return refuse("task", fmt.Errorf("%w — %s is running and the card names it; send the task by hand: %s", err, short, task))
+	return d.task(ctx, res, adapter, short, task)
+}
+
+// task sends the task once. Only an accepted receipt is delivery; an
+// unconfirmed one is never sent again, since a second copy is a second task.
+func (d *Dispatcher) task(ctx context.Context, res Result, adapter executor.Adapter, key, task string) (Result, error) {
+	op := rand.Text()
+	receipt, err := adapter.Send(ctx, executor.Key(key), executor.Message{OperationID: op, Text: task, First: true})
+	switch {
+	case err == nil && receipt.State == executor.Accepted:
+		res.Steps = append(res.Steps, Step{Name: "task", Note: "delivered to " + key})
+		res.OK = true
+	case receipt.State == executor.DeliveryUnknown || receipt.State == executor.Queued || errors.Is(err, executor.ErrDeliveryUnknown):
+		res.Steps = append(res.Steps, Step{Name: "task", Error: fmt.Sprintf("delivery to %s is not confirmed (operation %s); check the session before sending the task again: %s", key, op, task)})
+	default:
+		if err == nil {
+			err = errors.New("the session rejected the task")
+		}
+		res.Steps = append(res.Steps, Step{Name: "task", Error: fmt.Sprintf("%v — %s is running and the card names it; send the task by hand: %s", err, key, task)})
 	}
-	done("task", "delivered to "+short)
-	res.OK = true
 	return res, nil
 }
 
@@ -176,13 +184,6 @@ func written(err error) (string, error) {
 	}
 	why := strings.TrimPrefix(err.Error(), board.ErrWrittenNotCommitted.Error()+": ")
 	return " (written, not committed: " + why + ")", nil
-}
-
-func (d *Dispatcher) wait(v, fallback time.Duration) time.Duration {
-	if v > 0 {
-		return v
-	}
-	return fallback
 }
 
 // Task is what a worker session is sent, in lang: one line naming its card,

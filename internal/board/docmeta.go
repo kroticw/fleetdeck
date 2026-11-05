@@ -3,8 +3,8 @@ package board
 import (
 	"io"
 	"os"
-	"regexp"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
 	"gopkg.in/yaml.v3"
 )
 
@@ -12,11 +12,7 @@ import (
 // documents is built for every card the panel opens, so the whole file is not.
 const docHead = 8 << 10
 
-// shortIDRe is the form of a session's short id: the one the board validator
-// holds a card's and a document's session to (validate_cards.py, SESSION_RE).
-var shortIDRe = regexp.MustCompile(`^[0-9a-fA-F]{6,12}$`)
-
-// DocSession is the short id of the session that wrote the document at path,
+// DocSession is the session key of the author of the document at path,
 // from the document's own frontmatter (docs/en/board-convention.md, "Documents
 // a card links to"), or "" when the document names none or names it wrongly.
 // A wrong value is dropped rather than passed on: the panel would open a
@@ -38,8 +34,12 @@ func DocSession(path string) string {
 	var fm struct {
 		Session string `yaml:"session"`
 	}
-	if yaml.Unmarshal(m[1], &fm) != nil || !shortIDRe.MatchString(fm.Session) {
+	if yaml.Unmarshal(m[1], &fm) != nil {
 		return ""
 	}
-	return fm.Session
+	_, key, err := executor.ParseKey(fm.Session)
+	if err != nil {
+		return ""
+	}
+	return string(key)
 }

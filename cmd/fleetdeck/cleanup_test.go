@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/executor"
 
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -151,7 +154,7 @@ func TestAStandStopsSessionsOnlyWithItsOwnClaude(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(onPath))
 	standBin, recorded := claudeThatRecordsArgs(t, "")
 
-	stop := sessionStopper(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.AgentConfig{})
+	stop := sessionStopper(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.Config{})
 	if stop == nil {
 		t.Fatal("a stand with its own claude cannot stop sessions")
 	}
@@ -175,11 +178,11 @@ func TestAStandWithoutItsOwnClaudeStopsNoSession(t *testing.T) {
 	onPath, ranOnPath := claudeThatRecords(t, "0a1b2c3d")
 	t.Setenv("PATH", filepath.Dir(onPath))
 	o := runOpts{standSocket: "/tmp/no.sock"}
-	if stop := sessionStopper(o, config.AgentConfig{}); stop != nil {
+	if stop := sessionStopper(o, config.Config{}); stop != nil {
 		_ = stop(context.Background(), "abc12345")
 		t.Error("a stand given no claude of its own can stop sessions")
 	}
-	if fleetCleaner(o, config.AgentConfig{}, t.TempDir(), nil, t.TempDir()) != nil {
+	if fleetCleaner(o, config.Config{}, t.TempDir(), nil, t.TempDir()) != nil {
 		t.Error("a stand given no claude has a cleanup that stops sessions")
 	}
 	if ran(ranOnPath) {
@@ -191,7 +194,7 @@ func TestAStandWithoutItsOwnClaudeStopsNoSession(t *testing.T) {
 // so it has no cleanup.
 func TestAFleetWithoutABoardHasNoCleanup(t *testing.T) {
 	standBin, _ := claudeThatRecordsArgs(t, "")
-	if fleetCleaner(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.AgentConfig{}, "", nil, t.TempDir()) != nil {
+	if fleetCleaner(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.Config{}, "", nil, t.TempDir()) != nil {
 		t.Error("a fleet with no board has a cleanup")
 	}
 }
@@ -200,7 +203,7 @@ func TestAFleetWithoutABoardHasNoCleanup(t *testing.T) {
 // is stopped through it as written, flags and all.
 func TestAConfiguredCommandStopsSessionsAsWritten(t *testing.T) {
 	bin, recorded := claudeThatRecordsArgs(t, "")
-	if err := sessionStopper(runOpts{}, config.AgentConfig{Command: []string{bin, "--flag"}})(context.Background(), "abc12345"); err != nil {
+	if err := sessionStopper(runOpts{}, config.Config{Agent: config.AgentConfig{Command: []string{bin, "--flag"}}})(context.Background(), "abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	args, _ := os.ReadFile(recorded)
@@ -216,8 +219,42 @@ func TestAFailedStopSaysWhatClaudeSaid(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'no session abc12345' >&2\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	err := sessionStopper(runOpts{}, config.AgentConfig{Command: []string{bin}})(context.Background(), "abc12345")
+	err := sessionStopper(runOpts{}, config.Config{Agent: config.AgentConfig{Command: []string{bin}}})(context.Background(), "abc12345")
 	if err == nil || !strings.Contains(err.Error(), "no session abc12345") {
 		t.Errorf("err = %v, want claude's own words", err)
+	}
+}
+
+// An accepted Codex card is cleaned up like Claude's, through its runtime:
+// its final answer is archived, and only then is it stopped.
+func TestTheCleanupOfACodexCardArchivesItsLastWordsThenStopsIt(t *testing.T) {
+	key := "codex:" + runtimeTestThread
+	s := standFor(t, "")
+	s.deps.list = func(context.Context) ([]daemon.Session, error) { return []daemon.Session{{Short: key}}, nil }
+	s.deps.words = func(_ context.Context, k string) (executor.Said, error) {
+		if k != key {
+			t.Fatalf("words asked of %s", k)
+		}
+		return executor.Said{Words: "PR draft ready"}, nil
+	}
+	res, err := newCleaner(s.deps).Cleanup(context.Background(), orchestrator.Accepted{Session: key, Card: s.card})
+	if err != nil || !res.OK {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if !strings.Contains(s.archive(t), "PR draft ready") || len(s.stopped) != 1 || s.stopped[0] != key {
+		t.Fatalf("archive=%q stopped=%v", s.archive(t), s.stopped)
+	}
+}
+
+func TestACodexCardWhoseWordsCannotBeReadKeepsRunning(t *testing.T) {
+	key := "codex:" + runtimeTestThread
+	s := standFor(t, "")
+	s.deps.list = func(context.Context) ([]daemon.Session, error) { return []daemon.Session{{Short: key}}, nil }
+	s.deps.words = func(context.Context, string) (executor.Said, error) {
+		return executor.Said{}, errors.New("runtime unavailable")
+	}
+	res, _ := newCleaner(s.deps).Cleanup(context.Background(), orchestrator.Accepted{Session: key, Card: s.card})
+	if res.OK || len(s.stopped) != 0 {
+		t.Fatalf("res=%+v stopped=%v", res, s.stopped)
 	}
 }

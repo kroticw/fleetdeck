@@ -27,6 +27,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/orchestrator"
+
+	"github.com/kroticw/fleetdeck/internal/executor"
+
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/buildinfo"
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -335,6 +339,15 @@ func main() {
 		return
 	}
 
+	// `fleetdeck runtime` owns one Codex session; it must never reach the
+	// panel's flags, configuration checks or HTTP port.
+	if len(os.Args) > 1 && os.Args[1] == "runtime" {
+		if err := runtimeCommand(os.Args[2:]); err != nil {
+			log.Fatalf("fleetdeck runtime: %v", err)
+		}
+		return
+	}
+
 	// `fleetdeck version` is read here for the same reason, and answered by the same
 	// function as the --version flag below.
 	if len(os.Args) > 1 && os.Args[1] == "version" {
@@ -560,8 +573,36 @@ func serve(parent context.Context, o runOpts) error {
 	jobStoreDir = jobs.DirIn(claudeDir)
 
 	dc := daemonClient(o.standSocket, claudeDir)
+	// Without a running daemon the panel starts one, and owns it: closing the
+	// panel puts it out. One found running is left alone.
+	// In the background: the window waits seconds for the panel to answer,
+	// and a daemon may take longer to come up.
+	ownedc := make(chan *ownedDaemon, 1)
+	go func() {
+		owned, err := ensureDaemon(ctx, o, cfg.Agent, dc.ListSessions)
+		if err != nil {
+			log.Printf("fleetdeck: no Claude Code daemon: %v", err)
+		} else if owned != nil && owned.exited == nil {
+			log.Print("fleetdeck: took over the Claude Code daemon the panel before this one started")
+		} else if owned != nil {
+			log.Print("fleetdeck: started the Claude Code daemon; it stops when this panel does")
+		}
+		ownedc <- owned
+	}()
+	// A panel being replaced by an update leaves its daemon, and the record
+	// of it, to the panel after it; only a close puts the daemon out.
+	var handedOver atomic.Bool
+	defer func() {
+		owned := <-ownedc
+		if handedOver.Load() && owned != nil {
+			log.Print("fleetdeck: left the Claude Code daemon to the panel replacing this one")
+			return
+		}
+		owned.Stop()
+	}()
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir(claudeDir))
+	collector.codexState = codexStateDir(o.configPath)
 
 	p := newPanel(
 		collector.Collect,
@@ -571,7 +612,7 @@ func serve(parent context.Context, o runOpts) error {
 	)
 
 	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
-	d := deps(p, dc, collector, cfg, o.configPath)
+	d := deps(p, dc, collector, cfg, o)
 
 	// A write answers once its file is written, its commit queued (T-161), and
 	// every socket hears of it at once rather than at its next tick. The queues
@@ -597,7 +638,7 @@ func serve(parent context.Context, o runOpts) error {
 	// Stopped with the claude sessions are started with; nil on a stand given
 	// none, and then a fleet with running sessions is not deleted.
 	home, _ := os.UserHomeDir()
-	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg.Agent), home)
+	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg), home)
 	// Every fleet's board, docs, pin and wizard, the first fleet's also in
 	// d's own fields, so a request naming no fleet is served as before. Made
 	// before anything below is started, so there is nothing to stop if it fails.
@@ -609,6 +650,18 @@ func serve(parent context.Context, o runOpts) error {
 	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession, d.StartWork = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession, first.StartWork
 	d.SendToSession, d.CleanupSession = first.SendToSession, first.CleanupSession
 	d.ReviewWorkdir = first.ReviewWorkdir
+	waker := &orchestratorWaker{
+		fleets: func() []fleet.Fleet { return collector.Config().FleetList() },
+		listed: d.SessionListed,
+		resume: d.ResumeSession,
+		every:  2 * time.Minute,
+	}
+	d.HandOver = func() { handedOver.Store(true) }
+	d.FleetOpened = func(name string) {
+		if err := waker.wake(context.WithoutCancel(ctx), name); err != nil {
+			log.Printf("fleetdeck: %v", err)
+		}
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -1045,16 +1098,41 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 
 // deps is the whole contract between this program and the HTTP surface. Every entry
 // is a function internal/server calls and none of them reaches back here.
-func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, configPath string) server.Deps {
+func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, o runOpts) server.Deps {
+	configPath := o.configPath
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
 	var create func(board.NewCard) (string, error)
 	if cfg.BoardPath != "" {
 		create = func(card board.NewCard) (string, error) {
+			// default_executor applies to new cards only; one chosen in the form wins.
+			if card.Executor == "" {
+				card.Executor = string(collector.Config().DefaultExecutor)
+			}
 			return createCard(cfg.BoardPath, card, time.Now())
 		}
 	}
 	home, _ := os.UserHomeDir()
+	claudeResume := resumeSession(resumeDeps{
+		jobStore: jobStoreDir,
+		projects: projectsDir(claudeDirOf(cfg)),
+		listed:   func(lctx context.Context) ([]daemon.Session, error) { return dc.ListSessions(lctx) },
+		resume:   func(rctx context.Context, spec daemon.ResumeSpec) error { return dc.Resume(rctx, spec) },
+	})
+	// Every session operation below goes through the session's executor.
+	reg := executors(o, cfg, orchestrator.Claude{
+		List:   dc.ListSessions,
+		Resume: claudeResume,
+		// Returned through a local: a nil *daemon.Attachment put straight
+		// into the interface would be a non-nil Terminal holding nothing.
+		Attach: func(actx context.Context, session string, cols, rows int) (executor.Terminal, error) {
+			a, err := dc.Attach(actx, session, cols, rows)
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
+	})
 	return server.Deps{
 		Snapshot: p.snapshot,
 		// Resuming reads the job store and the transcripts on every press
@@ -1062,24 +1140,53 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// was drawn from a reading that may be hours old, and a working
 		// directory deleted since then is exactly the case this must not
 		// dispatch into. See resume.go.
-		ResumeSession: resumeSession(resumeDeps{
-			jobStore: jobStoreDir,
-			projects: projectsDir(claudeDirOf(cfg)),
-			listed:   func(lctx context.Context) ([]daemon.Session, error) { return dc.ListSessions(lctx) },
-			resume:   func(rctx context.Context, spec daemon.ResumeSpec) error { return dc.Resume(rctx, spec) },
-		}),
+		ResumeSession: resumeVia(reg),
 		// Returned through a local, not directly: a nil *daemon.Attachment put straight
 		// into the interface would be a non-nil Terminal holding nothing.
 		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {
-			a, err := dc.Attach(actx, session, cols, rows)
+			a, key, err := reg.ForKey(session)
 			if err != nil {
 				return nil, err
 			}
-			return a, nil
+			if a.OpenTerminal == nil {
+				return nil, executor.ErrUnsupported
+			}
+			t, err := a.OpenTerminal(actx, key, cols, rows)
+			if err != nil {
+				return nil, err
+			}
+			return t, nil
+		},
+		SessionRequests: func(rctx context.Context, session string) ([]executor.PendingRequest, error) {
+			a, key, err := reg.ForKey(session)
+			if err != nil {
+				return nil, err
+			}
+			if a.Requests == nil {
+				return nil, executor.ErrUnsupported
+			}
+			return a.Requests(rctx, key)
+		},
+		RespondRequest: func(rctx context.Context, session string, answer executor.Answer) error {
+			a, key, err := reg.ForKey(session)
+			if err != nil {
+				return err
+			}
+			if a.Respond == nil {
+				return executor.ErrUnsupported
+			}
+			return a.Respond(rctx, key, answer)
 		},
 		// Asked of the daemon itself, never of p.snapshot: the bridge asks the moment
 		// a stream ends, and the snapshot can be a whole poll behind that moment.
 		SessionListed: func(lctx context.Context, session string) (bool, error) {
+			if !isClaude(session) {
+				a, _, err := reg.ForKey(session)
+				if err != nil {
+					return false, err
+				}
+				return listedAlive(liveRows(lctx, a), session), nil
+			}
 			sessions, err := dc.ListSessions(lctx)
 			if err != nil {
 				return false, err

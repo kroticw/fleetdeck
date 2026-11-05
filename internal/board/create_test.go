@@ -55,7 +55,7 @@ func TestCreateCardWritesTheTitleAndZoneAndNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "---\nid: T-001\nzone: urgent\nstage: new\nprogress: 0\nsession: \"\"\ncreated: 2026-09-11\n---\n\n# Fix the header clamp\n"
+	want := "---\nid: T-001\nzone: urgent\nstage: new\nprogress: 0\nsession: \"\"\nexecutor: claude\ncreated: 2026-09-11\n---\n\n# Fix the header clamp\n"
 	if string(raw) != want {
 		t.Fatalf("card content:\n%q\nwant\n%q", raw, want)
 	}

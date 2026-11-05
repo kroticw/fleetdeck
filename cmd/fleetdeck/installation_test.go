@@ -70,7 +70,7 @@ func TestAFoundClaudeWorksInTheInstallationThePanelReads(t *testing.T) {
 					if op == "start" {
 						_, err = sessionStarter(runOpts{}, cfg.Agent)(context.Background(), t.TempDir(), "orchestrator")
 					} else {
-						err = sessionStopper(runOpts{}, cfg.Agent)(context.Background(), "abc12345")
+						err = sessionStopper(runOpts{}, cfg)(context.Background(), "abc12345")
 					}
 					if err != nil {
 						t.Fatal(err)
@@ -98,7 +98,7 @@ func TestAConfiguredCommandKeepsThePanelsEnvironment(t *testing.T) {
 	if got, _ := os.ReadFile(seen); string(got) != "/wrapper/decides" {
 		t.Errorf("start: the command saw CLAUDE_CONFIG_DIR %q, want the panel's own", got)
 	}
-	if err := sessionStopper(runOpts{}, agent)(context.Background(), "abc12345"); err != nil {
+	if err := sessionStopper(runOpts{}, config.Config{Agent: agent})(context.Background(), "abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(seen); string(got) != "/wrapper/decides" {

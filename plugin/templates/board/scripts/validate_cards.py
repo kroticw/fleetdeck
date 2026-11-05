@@ -16,7 +16,7 @@ STAGES = ("new", "active", "review", "done", "blocked")
 STARTED_STAGES = ("active", "review", "done", "blocked")
 PROGRESS_VALUES = (0, 10, 20, 40, 60, 80, 100)
 REQUIRED_FIELDS = ("id", "zone", "stage", "progress", "created")
-KNOWN_FIELDS = ("id", "zone", "stage", "progress", "session", "repo", "worktree", "created")
+KNOWN_FIELDS = ("id", "zone", "stage", "progress", "session", "executor", "repo", "worktree", "created")
 # Панель свойств Obsidian сама дописывает эти поля во frontmatter карточки.
 # Они не часть схемы доски, но валидатор не вправе их удалять — терпим.
 OBSIDIAN_FIELDS = ("tags", "aliases", "cssclasses", "cssclass")
@@ -24,7 +24,9 @@ OBSIDIAN_FIELDS = ("tags", "aliases", "cssclasses", "cssclass")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Наблюдались идентификаторы и в шесть, и в восемь шестнадцатеричных символов;
 # диапазон намеренно шире наблюдений, чтобы валидатор не падал на смене формата.
-SESSION_RE = re.compile(r"^[0-9a-fA-F]{6,12}$")
+CLAUDE_SESSION_RE = re.compile(r"[0-9a-fA-F]{6,12}")
+CODEX_SESSION_RE = re.compile(r"codex:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+SESSION_RE = re.compile(r"(?:[0-9a-fA-F]{6,12}|codex:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})")
 # Идентификатор карточки: постоянный префикс и сквозной номер по всей доске.
 # Ведущие нули — чтобы карточки сортировались по номеру, а не лексикографически.
 # Знаков не меньше трёх, но и не ровно три: на доске бывает до тридцати карточек
@@ -137,9 +139,14 @@ def validate_card(name: str, text: str) -> list[str]:
     if worktree and not worktree.startswith("/"):
         errors.append(f"{name}: worktree must be an absolute path, got {worktree!r}")
 
+    executor = fields.get("executor", "claude")
+    if executor not in ("claude", "codex"):
+        errors.append(f"{name}: неизвестный executor: {executor!r}")
     session = fields.get("session")
-    if session and not SESSION_RE.match(session):
-        errors.append(f"{name}: session не похож на short id: {session!r}")
+    if session:
+        pattern = CODEX_SESSION_RE if executor == "codex" else CLAUDE_SESSION_RE
+        if not pattern.fullmatch(session):
+            errors.append(f"{name}: session не похож на short id или ключ исполнителя {executor}: {session!r}")
     if not session and stage in STARTED_STAGES:
         errors.append(
             f"{name}: при stage {stage} поле session обязано быть заполнено: "
@@ -325,7 +332,7 @@ def validate_doc_frontmatter(root: Path) -> list[str]:
             if fields is None:
                 errors.append(f"{name}: frontmatter документа не закрыт строкой ---")
                 continue
-            if "session" in fields and not SESSION_RE.match(fields["session"]):
+            if "session" in fields and not SESSION_RE.fullmatch(fields["session"]):
                 errors.append(f"{name}: session документа не похож на short id: {fields['session']!r}")
     return errors
 

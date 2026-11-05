@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
+
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -33,6 +35,9 @@ type cleanupDeps struct {
 	list func(ctx context.Context) ([]daemon.Session, error)
 	stop func(ctx context.Context, short string) error
 	now  func() time.Time
+	// words asks a session's executor for its final answer, for sessions
+	// that are not Claude's (whose words are read off its transcript here).
+	words func(ctx context.Context, key string) (executor.Said, error)
 }
 
 // fleetCleaner is how a fleet tidies away the session behind a card the
@@ -40,18 +45,40 @@ type cleanupDeps struct {
 // not: a fleet with no board has nowhere to record the session it would put
 // out, and a panel that stops no sessions (sessionStopper) has nothing to put
 // it out with. Nil leaves a card moved into done with its session running.
-func fleetCleaner(o runOpts, agent config.AgentConfig, boardDir string, dc *daemon.Client, projects string) *orchestrator.Cleaner {
-	stop := sessionStopper(o, agent)
+func fleetCleaner(o runOpts, cfg config.Config, boardDir string, dc *daemon.Client, projects string) *orchestrator.Cleaner {
+	stop := sessionStopper(o, cfg)
 	if boardDir == "" || stop == nil {
 		return nil
 	}
+	reg := executors(o, cfg, orchestrator.Claude{})
 	return newCleaner(cleanupDeps{
 		jobStore: jobStoreDir,
 		projects: projects,
 		board:    boardDir,
-		list:     dc.ListSessions,
-		stop:     stop,
-		now:      time.Now,
+		// Every running session counts, whichever executor runs it: a
+		// cleanup must see one running to put it out.
+		list: func(ctx context.Context) ([]daemon.Session, error) {
+			sessions, err := dc.ListSessions(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if a, err := reg.ForID(executor.Codex); err == nil {
+				sessions = append(sessions, liveRows(ctx, a)...)
+			}
+			return sessions, nil
+		},
+		stop: stop,
+		now:  time.Now,
+		words: func(ctx context.Context, key string) (executor.Said, error) {
+			a, k, err := reg.ForKey(key)
+			if err != nil {
+				return executor.Said{}, err
+			}
+			if a.LastWords == nil {
+				return executor.Said{}, fmt.Errorf("%w: this panel cannot read what %s said", executor.ErrUnsupported, key)
+			}
+			return a.LastWords(ctx, k)
+		},
 	})
 }
 
@@ -61,7 +88,13 @@ func fleetCleaner(o runOpts, agent config.AgentConfig, boardDir string, dc *daem
 // each of its four reaches is answered on this machine.
 func newCleaner(d cleanupDeps) *orchestrator.Cleaner {
 	return &orchestrator.Cleaner{
-		Unpin: func(short string) error { return jobs.Unpin(d.jobStore, short) },
+		Unpin: func(short string) error {
+			// Only Claude's sessions are pinned, in its job store.
+			if !isClaude(short) {
+				return nil
+			}
+			return jobs.Unpin(d.jobStore, short)
+		},
 		Words: func(short string) (orchestrator.Said, error) { return d.said(short) },
 		Archive: func(a orchestrator.Accepted, said orchestrator.Said) error {
 			return d.archive(a, said)
@@ -76,6 +109,9 @@ func newCleaner(d cleanupDeps) *orchestrator.Cleaner {
 // does not know the session, a transcript that cannot be found and a transcript
 // with nothing in it are each reported as themselves.
 func (d cleanupDeps) said(short string) (orchestrator.Said, error) {
+	if !isClaude(short) {
+		return d.executorSaid(short)
+	}
 	rec, err := jobRecord(d.jobStore, short)
 	if err != nil {
 		return orchestrator.Said{}, err
@@ -91,6 +127,21 @@ func (d cleanupDeps) said(short string) (orchestrator.Said, error) {
 		return orchestrator.Said{}, err
 	}
 	return orchestrator.Said{Words: words, Transcript: path, Name: rec.Name}, nil
+}
+
+// executorSaid is the executor's final answer. A finished turn with none is
+// archived as no words; failing to read is an error that keeps the session.
+func (d cleanupDeps) executorSaid(key string) (orchestrator.Said, error) {
+	if d.words == nil {
+		return orchestrator.Said{}, fmt.Errorf("this panel cannot read what %s said", key)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	said, err := d.words(ctx, key)
+	if err != nil {
+		return orchestrator.Said{}, fmt.Errorf("read what %s said: %w", key, err)
+	}
+	return orchestrator.Said{Words: said.Words}, nil
 }
 
 // archive records the session in the board's archive.

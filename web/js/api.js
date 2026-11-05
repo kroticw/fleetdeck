@@ -131,8 +131,10 @@ export async function setCardField(path, field, value, expect) {
 // would make a second one. queued is a card written whose commit the board's
 // queue makes afterwards (T-161): nothing is missing yet. A thrown error means
 // no card was made.
-export async function createCard(title, zone, repo = "", description = "", attachments = []) {
+export async function createCard(title, zone, repo = "", description = "", attachments = [], executor = "") {
   const card = { title: String(title), zone: String(zone), repo: String(repo), description: String(description) };
+  // Only when chosen: without it the panel's default_executor applies.
+  if (executor) card.executor = String(executor);
   // Only when there are any: {name, data} with data in base64.
   if (attachments.length > 0) card.attachments = attachments;
   const response = await fetch(inFleet("/api/cards"), {
@@ -215,6 +217,18 @@ async function post(url, body) {
   if (!response.ok) {
     throw await refusal(response);
   }
+}
+
+// sessionRequests is what a Codex session waits on (internal/server
+// handleSessionRequests); respondRequest answers one by its token.
+export async function sessionRequests(id) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/requests`);
+  if (!response.ok) throw await refusal(response);
+  return (await readJSON(response)) ?? [];
+}
+
+export function respondRequest(id, answer) {
+  return post(`/api/sessions/${encodeURIComponent(id)}/requests/respond`, answer);
 }
 
 // resumeSession brings a stopped session back, under its own short id and with

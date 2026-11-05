@@ -551,6 +551,7 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 		return true
 	case bin := <-k.restartTo:
 		k.setBin(bin)
+		announceHandover(ctx, k.URL)
 		_ = p.Stop(handoverStopGrace)
 		return true
 	case <-p.Exited():

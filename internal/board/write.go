@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,11 +19,6 @@ var (
 	validStages   = map[string]bool{"new": true, "active": true, "review": true, "done": true, "blocked": true}
 	validProgress = map[int]bool{0: true, 10: true, 20: true, 40: true, 60: true, 80: true, 100: true}
 	startedStages = map[string]bool{"active": true, "review": true, "done": true, "blocked": true}
-	// shortID is the board validator's own rule for a session field
-	// (scripts/validate_cards.py). Emptying the field is not offered: it is
-	// what ties a card to the agent writing it, and every stage but new
-	// requires it.
-	shortID = regexp.MustCompile(`^[0-9a-fA-F]{6,12}$`)
 )
 
 // SetField rewrites exactly one frontmatter line and leaves every other byte
@@ -58,10 +54,11 @@ func SetField(path, field, value string, expect *string) error {
 		// leading-zero scalar as octal on the next read.
 		normalized = strconv.Itoa(n)
 	case "session":
-		if !shortID.MatchString(value) {
-			return fmt.Errorf("session must be a short id of 6 to 12 hex digits, got %q", value)
+		_, key, err := executor.ParseKey(value)
+		if err != nil {
+			return fmt.Errorf("session must be a short id of 6 to 12 hex digits or a Codex session key, got %q", value)
 		}
-		normalized = value
+		normalized = string(key)
 	case "repo":
 		repo, err := NormalizeRepo(value)
 		if err != nil {
@@ -87,6 +84,16 @@ func SetField(path, field, value string, expect *string) error {
 	var fm frontmatter
 	if err := yaml.Unmarshal(m[1], &fm); err != nil {
 		return fmt.Errorf("card %s has malformed frontmatter, refusing write: %w", path, err)
+	}
+	if field == "session" {
+		provider, err := executor.ParseID(fm.Executor)
+		if err != nil {
+			return err
+		}
+		owner, _, err := executor.ParseKey(normalized)
+		if err != nil || owner != provider {
+			return fmt.Errorf("session does not match executor %q", provider)
+		}
 	}
 	if expect != nil {
 		if held := fieldValue(field, fm); held != normalize(field, *expect) {

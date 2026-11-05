@@ -37,7 +37,8 @@ The fields below and their allowed values are the schema enforced by the board's
 | `stage` | string | yes | one of `new`, `active`, `review`, `done`, `blocked` |
 | `progress` | integer | yes | one of `0`, `10`, `20`, `40`, `60`, `80`, `100` |
 | `created` | string | yes | a date in `YYYY-MM-DD` format |
-| `session` | string | required once `stage` is `active`, `review`, `done`, or `blocked` | 6 to 12 hexadecimal characters |
+| `session` | string | required once `stage` is `active`, `review`, `done`, or `blocked` | Claude: 6 to 12 hexadecimal characters; Codex: `codex:<Fleetdeck runtime UUID>` |
+| `executor` | string | no for legacy cards | `claude` or `codex`; missing means `claude`; new cards always write it explicitly |
 | `repo` | string | no | any string; not otherwise validated |
 | `worktree` | string | no | the absolute path of the working tree the agent works in; written by the agent, read by the panel's review |
 
@@ -64,7 +65,7 @@ Two rules connect `stage`, `progress`, and `session` to each other, and both are
 
 The board splits ownership by who is writing:
 
-- The panel writes four fields: `stage`, `progress`, `session` and `repo`. Its write path accepts no other field name — asking it to write `zone` or `created` is refused as an unwritable field, reported as `field is not writable: <field>`. `session` is accepted only as a short id of 6 to 12 hexadecimal characters; emptying it is not offered. `repo` is a path from the home directory, the checkout a worker the panel starts works in; a `~/` or `$HOME/` in front is dropped. Empty is the home directory itself: `~`, `~/` and `$HOME` are written as `repo: ""`, since a bare `~` is YAML's null. A path that is absolute or climbs out of the home directory is refused, and so is one that names no folder there; the page says the refusal in its own words, by the refusal's code. A write may also name the value it expects the field to hold, and is then refused with `the card has moved on since this write was made` when the card holds something else: a hand dragging a card acts on a snapshot up to a second old.
+- The panel writes four fields: `stage`, `progress`, `session` and `repo`. Its write path accepts no other field name — asking it to write `zone` or `created` is refused as an unwritable field, reported as `field is not writable: <field>`. `session` accepts a Claude short id of 6 to 12 hexadecimal characters or a Codex key `codex:<Fleetdeck runtime UUID>`, and must match the card’s `executor`; emptying it is not offered. `repo` is a path from the home directory, the checkout a worker the panel starts works in; a `~/` or `$HOME/` in front is dropped. Empty is the home directory itself: `~`, `~/` and `$HOME` are written as `repo: ""`, since a bare `~` is YAML's null. A path that is absolute or climbs out of the home directory is refused, and so is one that names no folder there; the page says the refusal in its own words, by the refusal's code. A write may also name the value it expects the field to hold, and is then refused with `the card has moved on since this write was made` when the card holds something else: a hand dragging a card acts on a snapshot up to a second old.
 - The body of the card — its heading, its context section, and its log — belongs to the agents working on the task. The panel never edits the body.
 - The `session` field is filled in by whoever starts a session for the card, before the session is told about the card: the orchestrator, or the panel when a card is dropped into the board's active column. The panel starts the session with no prompt, writes its short id into the card, sets the stage to `active`, and only then sends it one line naming the card; an agent told to work a card before its id is on it writes its own copy of the field.
 - `created` and `zone` are not written by the panel after a card is started, and are not documented as belonging to the agent either. In practice they are set once, by whoever creates the card, and left alone. `repo` is set the same way, and the panel also writes it when asked from the open card.
@@ -103,7 +104,7 @@ session: e62e1d58
 ---
 ```
 
-The value is the session's short id, in the same form as a card's `session`. The panel opens that session next to the document, so an answer to a question the document asks goes to the one who asked it. A session that rewrites someone else's document puts its own id there: answers go to whoever keeps the document now. The field is optional; a document without it falls back to the `session` of the card it was opened from, and the panel says so. Other frontmatter fields (`date`, `cards`, `prs`) are free. Checking the whole board, the validator rejects a `session` that is not a short id and a frontmatter that is not closed; checking one card, it leaves documents alone.
+The value is the session key, in the same form as a card’s `session`. The panel opens that session next to the document, so an answer to a question the document asks goes to the one who asked it. A session that rewrites someone else's document puts its own id there: answers go to whoever keeps the document now. The field is optional; a document without it falls back to the `session` of the card it was opened from, and the panel says so. Other frontmatter fields (`date`, `cards`, `prs`) are free. Checking the whole board, the validator rejects a `session` that is not a supported session key and a frontmatter that is not closed; checking one card, it leaves documents alone.
 
 A document written as a path — `docs/reports/x.md`, in backticks or not — cannot be opened from the card, so the validator rejects it and names the link to write instead. `scripts/link_docs.py` rewrites the paths in cards written before this rule; without `--write` it only prints what it would change.
 
@@ -111,7 +112,7 @@ A path to a file in a task's repository, a branch, a PR and a screenshot are not
 
 ## What makes a card unreadable
 
-A card fails to parse in exactly two situations: the file does not start with a frontmatter block at all (no `---` fence at the very top), or the frontmatter is present but is not valid YAML. Either way, the card is not dropped from the board: it is kept, marked with a parse error, and shown as unreadable rather than silently disappearing. A file that cannot even be read from disk — permission denied, or deleted between listing the directory and reading the file — is handled the same way, as a card carrying an error rather than as a reason to abort scanning the rest of the board.
+A card fails to parse when the file does not start with a frontmatter block at all (no `---` fence at the very top), or the frontmatter is present but is not valid YAML, the executor is unsupported, or a non-empty session does not match its executor’s key format. In each case, the card is not dropped from the board: it is kept, marked with a parse error, and shown as unreadable rather than silently disappearing. A file that cannot even be read from disk — permission denied, or deleted between listing the directory and reading the file — is handled the same way, as a card carrying an error rather than as a reason to abort scanning the rest of the board.
 
 One broken card never hides the others: the rest of the board is scanned and reported normally. A broken card is also excluded, on both sides of a comparison, when the panel checks which cards changed stage since the last time it looked — so a half-written card cannot trigger a false "moved to blocked" or "moved to review" notification.
 
@@ -126,13 +127,13 @@ The Go code the panel uses to read cards (`internal/board`) and the Python valid
 | Required fields present | not checked | not checked | required: `zone`, `stage`, `progress`, `created` |
 | `zone` is one of the four allowed values | not checked | not checked | enforced |
 | `created` matches `YYYY-MM-DD` | not checked | not checked | enforced |
-| `session` matches the hex-character pattern | not checked | not checked | enforced |
+| `executor` is supported and `session` matches its key format | enforced (missing executor defaults to Claude) | enforced when writing session | enforced |
 | `stage` is one of the five allowed values | not checked | enforced | enforced |
 | `progress` is one of the seven allowed values | not checked | enforced | enforced |
 | `stage: done` requires `progress: 100`, and vice versa | not checked | enforced | enforced |
 | A started stage requires a non-empty `session` | not checked | enforced | enforced |
 
-A card the panel starts (`CreateCard`, behind the **+ card** button) is the one thing the Go code writes whole, and it is written to pass the validator script: exactly `zone` — one of the four allowed values, checked — `stage: new`, `progress: 0`, an empty `session` and `created`, and a title. A test runs the validator script itself on such a card in each of the four zones.
+A card the panel starts (`CreateCard`, behind the **+ card** button) is the one thing the Go code writes whole, and it is written to pass the validator script: exactly `zone` — one of the four allowed values, checked — `stage: new`, `progress: 0`, an empty `session`, an explicit `executor`, `created`, and a title. A test runs the validator script itself on such a card in each of the four zones.
 
 The Go reader is a lenient reader and a surgical writer of three fields; it was not built to be a schema gate. The validator script is the strict gate, and it has to be run on purpose — by a person or by an agent — since nothing in the Go code calls it. A card that the panel reads without complaint can still fail the validator script, and a card that fails the validator script can still be read and have its `stage` or `progress` field updated by the panel without any warning that something else about it is malformed.
 

@@ -80,6 +80,16 @@ class NextNumberTest(unittest.TestCase):
 
 
 class CreateCardTest(unittest.TestCase):
+    def test_executor_is_explicit_and_validated_before_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = board(tmp)
+            params = dict(title="Task", slug="task", zone="planned", created="2026-11-04")
+            with self.assertRaises(ValueError):
+                create_card(root, executor="other", **params)
+            path = create_card(root, executor="codex", **params)
+            self.assertTrue(path.name.startswith("T-001-"))
+            self.assertIn("executor: codex\n", path.read_text())
+
     def make(self, root: Path, slug: str = "slug", **kwargs) -> Path:
         return create_card(
             root, title="Заголовок", slug=slug, zone="planned", created="2026-09-12", **kwargs

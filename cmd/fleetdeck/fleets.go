@@ -64,7 +64,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			// The ordinary send, not the first-message one: what goes through
 			// here is addressed to a session that has been working for a while
 			// (server.Deps.SendToSession).
-			SendToSession: dc.SendText,
+			SendToSession: sendVia(executors(o, fleetConfig(collector.Config(), f), orchestrator.Claude{Send: dc.SendText})),
 			ReviewWorkdir: reviewWorkdir(jobStoreDir),
 		}
 		// Left nil without a board, as deps leaves the first fleet's: the route
@@ -72,18 +72,22 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 		if f.BoardPath != "" {
 			boardDir := f.BoardPath
 			fd.CreateCard = func(card board.NewCard) (string, error) {
+				// default_executor applies to new cards only, in every fleet.
+				if card.Executor == "" {
+					card.Executor = string(collector.Config().DefaultExecutor)
+				}
 				return createCard(boardDir, card, time.Now())
 			}
 			// Left nil where the panel starts no sessions (a stand given no
 			// claude): the snapshot then tells the page not to offer a start.
-			if d := dispatcherOf(f); d.Start != nil {
+			if d := dispatcherOf(f); startsAny(d.Executors) {
 				fd.StartWork = d.Dispatch
 			}
 			// Made per request rather than kept: a cleaner holds nothing
 			// between cleanups. Wired with the board and not beside it, since
 			// the cleanup's third step writes the board's archive.
 			cfg := collector.Config()
-			if c := fleetCleaner(o, cfg.Agent, boardDir, dc, projectsDir(claudeDirOf(cfg))); c != nil {
+			if c := fleetCleaner(o, cfg, boardDir, dc, projectsDir(claudeDirOf(cfg))); c != nil {
 				fd.CleanupSession = c.Cleanup
 			}
 		}

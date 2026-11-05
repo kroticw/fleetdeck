@@ -338,6 +338,7 @@ func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 		Zone        string             `json:"zone"`
 		Repo        string             `json:"repo"`
 		Description string             `json:"description"`
+		Executor    string             `json:"executor"`
 		Attachments []board.Attachment `json:"attachments"`
 	}
 	if !decodeBodyLimit(w, r, &body, maxCardBytes) {
@@ -346,7 +347,7 @@ func (d Deps) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	if d.refuseRepo(w, body.Repo) {
 		return
 	}
-	path, err := d.CreateCard(board.NewCard{Title: body.Title, Zone: body.Zone, Repo: body.Repo, Description: body.Description, Attachments: body.Attachments})
+	path, err := d.CreateCard(board.NewCard{Title: body.Title, Zone: body.Zone, Repo: body.Repo, Description: body.Description, Executor: body.Executor, Attachments: body.Attachments})
 	switch {
 	case err == nil && d.QueuedCommits:
 		d.changed()

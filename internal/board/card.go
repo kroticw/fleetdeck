@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
 	"gopkg.in/yaml.v3"
 )
 
@@ -64,6 +65,7 @@ type Card struct {
 	Stage    string `json:"stage"`
 	Progress int    `json:"progress"`
 	Session  string `json:"session"`
+	Executor string `json:"executor"`
 	Repo     string `json:"repo"`
 	// Worktree is the working tree the agent keeping the card said it works
 	// in. The review's diff is read there; the agent writes it, the panel
@@ -82,6 +84,7 @@ type frontmatter struct {
 	Stage    string `yaml:"stage"`
 	Progress int    `yaml:"progress"`
 	Session  string `yaml:"session"`
+	Executor string `yaml:"executor"`
 	Repo     string `yaml:"repo"`
 	Worktree string `yaml:"worktree"`
 	Created  string `yaml:"created"`
@@ -108,6 +111,19 @@ func ParseCard(path string) (Card, error) {
 	c.ID, c.Zone, c.Stage, c.Progress = fm.ID, fm.Zone, fm.Stage, fm.Progress
 	c.Session, c.Repo, c.Created = fm.Session, fm.Repo, fm.Created
 	c.Worktree = fm.Worktree
+	provider, err := executor.ParseID(fm.Executor)
+	if err != nil {
+		c.ParseError = "executor: " + err.Error()
+		return c, nil
+	}
+	c.Executor = string(provider)
+	if fm.Session != "" {
+		owner, _, err := executor.ParseKey(fm.Session)
+		if err != nil || owner != provider {
+			c.ParseError = "session does not match executor"
+			return c, nil
+		}
+	}
 	c.Body = string(raw[len(m[0]):])
 
 	// Title and links are pulled from the body with fenced code regions

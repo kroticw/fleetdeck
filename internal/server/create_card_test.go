@@ -169,3 +169,22 @@ func TestCreateCardRefusesAForeignPage(t *testing.T) {
 		t.Fatalf("a foreign page created a card: %v", *calls)
 	}
 }
+
+// The executor chosen in the form reaches the board; an absent one is left
+// to the panel's default_executor.
+func TestCreateCardPassesTheChosenExecutor(t *testing.T) {
+	d, _ := testDeps()
+	var got []string
+	d.CreateCard = func(c board.NewCard) (string, error) {
+		got = append(got, c.Executor)
+		return "/b/cards/x.md", nil
+	}
+	for _, body := range []string{`{"title":"A","zone":"planned","executor":"codex"}`, `{"title":"A","zone":"planned"}`} {
+		if rec := do(d, http.MethodPost, "/api/cards", body); rec.Code != http.StatusCreated {
+			t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	if len(got) != 2 || got[0] != "codex" || got[1] != "" {
+		t.Fatalf("executors %q", got)
+	}
+}

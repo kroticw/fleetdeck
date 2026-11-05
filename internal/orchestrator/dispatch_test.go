@@ -12,6 +12,7 @@ import (
 
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/daemon"
+	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
 const workCard = `---
@@ -37,6 +38,8 @@ type fakeWorker struct {
 	setErr  error
 	// firstErrs are returned by SendFirst one per call, then nil.
 	firstErrs []error
+	claude    Claude
+	codex     *executor.Adapter
 }
 
 func newWorker() *fakeWorker {
@@ -94,17 +97,22 @@ func dispatcher(t *testing.T, f *fakeWorker) (*Dispatcher, string) {
 	if err := os.MkdirAll(filepath.Join(home, "work", "proj"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return &Dispatcher{
-		Start:     f.start,
-		List:      f.list,
-		Send:      f.send,
-		SendFirst: f.first,
-		SetField:  f.set,
-		Home:      home,
-		Poll:      time.Millisecond,
-		StartWait: 200 * time.Millisecond,
-		SendWait:  200 * time.Millisecond,
-	}, card
+	f.claude = Claude{Start: f.start, List: f.list, Send: f.send, SendFirst: f.first, Poll: time.Millisecond, StartWait: 200 * time.Millisecond}
+	return &Dispatcher{Executors: f.registry(), SetField: f.set, Home: home}, card
+}
+
+// registry is the fake's executors as they are now: a test that changes
+// f.claude or f.codex rebuilds it.
+func (f *fakeWorker) registry() *executor.Registry {
+	adapters := []executor.Adapter{ClaudeAdapter(f.claude)}
+	if f.codex != nil {
+		adapters = append(adapters, *f.codex)
+	}
+	r, err := executor.NewRegistry(adapters...)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
 
 // The order is the whole point of this path: a session with no prompt, its
@@ -143,7 +151,8 @@ func TestDispatchStartsTheSessionWritesTheIDThenSendsTheTask(t *testing.T) {
 func TestDispatchSendsTheTaskBySendWhenThereIsNoSendFirst(t *testing.T) {
 	f := newWorker()
 	d, card := dispatcher(t, f)
-	d.SendFirst = nil
+	f.claude.SendFirst = nil
+	d.Executors = f.registry()
 	res, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"})
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +346,8 @@ func TestDispatchRefusesWithoutACard(t *testing.T) {
 func TestDispatchRefusesOnAPanelThatStartsNoSessions(t *testing.T) {
 	f := newWorker()
 	d, card := dispatcher(t, f)
-	d.Start = nil
+	f.claude.Start = nil
+	d.Executors = f.registry()
 	if _, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"}); !errors.Is(err, ErrCannotStart) {
 		t.Fatalf("want ErrCannotStart, got %v", err)
 	}
@@ -378,11 +388,12 @@ func TestASecondDispatchWhileOneRunsIsRefused(t *testing.T) {
 	f := newWorker()
 	d, card := dispatcher(t, f)
 	inside, release := make(chan struct{}), make(chan struct{})
-	d.SendFirst = func(context.Context, string, string) error {
+	f.claude.SendFirst = func(context.Context, string, string) error {
 		close(inside)
 		<-release
 		return nil
 	}
+	d.Executors = f.registry()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

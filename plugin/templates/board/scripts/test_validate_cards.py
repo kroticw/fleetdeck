@@ -16,6 +16,20 @@ from validate_cards import (
     vault_names,
 )
 
+
+class ExecutorTest(unittest.TestCase):
+    def test_executor_and_session_must_match(self):
+        key = "codex:01a1a6d4-90a4-70f3-9130-a59ec873d0ba"
+        for provider, session, valid in (
+            ("codex", key, True),
+            ("codex", "abc12345", False),
+            ("claude", key, False),
+            ("other", "abc12345", False),
+        ):
+            with self.subTest(provider=provider, session=session):
+                errors = validate_card("T-001-task.md", card(executor=provider, session=session))
+                self.assertEqual(not errors, valid, errors)
+
 VALID = """---
 id: T-001
 zone: unplanned

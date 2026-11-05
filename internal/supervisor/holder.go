@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os/exec"
 	"strconv"
@@ -62,6 +63,9 @@ func StopHolder(ctx context.Context, panelURL string, grace time.Duration) error
 	if pid == 0 {
 		return nil
 	}
+	// The panel is being replaced, not closed: what it owns goes on to the
+	// next one. A panel too old to know the route stops as it always did.
+	announceHandover(ctx, panelURL)
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("stop the panel (pid %d): %w", pid, err)
 	}
@@ -162,5 +166,20 @@ func portFreed(ctx context.Context, port int, d time.Duration) bool {
 			return false
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// announceHandover tells the panel at panelURL that another replaces it.
+// Best effort and bounded: a panel that does not answer is stopped anyway.
+func announceHandover(ctx context.Context, panelURL string) {
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(panelURL, "/")+"/api/handover", strings.NewReader("{}"))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if res, err := http.DefaultClient.Do(req); err == nil {
+		_ = res.Body.Close()
 	}
 }
