@@ -24,6 +24,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
+	"github.com/kroticw/fleetdeck/internal/userenv"
 )
 
 // reportTTL is how long a statusline report is preferred over the transcript
@@ -611,7 +612,8 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	entries := mergeStopped(sessions, records)
 	snap.CodexEnabled, snap.DefaultExecutor = cfg.Codex.Enabled, string(cfg.DefaultExecutor)
 	if cfg.Codex.Enabled && c.codexState != "" {
-		entries = append(entries, codexSessionRows(ctx, c.codexState)...)
+		home, _ := codexHome(cfg.Codex, userenv.Environ())
+		entries = append(entries, codexSessionRows(ctx, c.codexState, home, c.now())...)
 	}
 	listed := make([]daemon.Session, len(entries))
 	for i, e := range entries {
@@ -627,6 +629,9 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 		snap.Sessions[i].LastState = entries[i].lastState
 		if entries[i].context != nil {
 			snap.Sessions[i].Context = entries[i].context
+		}
+		if entries[i].silentFor > 0 {
+			snap.Sessions[i].SilentFor = entries[i].silentFor
 		}
 	}
 	snap.CodexLimits = accountLimits(entries)
@@ -681,6 +686,9 @@ type listedSession struct {
 	// are read from its transcript and statusline instead (enrich).
 	context *transcript.Usage
 	limits  *executor.Metric[[]executor.Limit]
+	// silentFor is how long a non-Claude session's own record has gone
+	// unwritten; zero is not measured.
+	silentFor time.Duration
 }
 
 // mergeStopped puts the daemon's live sessions and the job store's records

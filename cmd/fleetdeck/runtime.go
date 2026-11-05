@@ -64,6 +64,22 @@ func runtimeCommand(args []string) error {
 	return codexruntime.Serve(ctx, spec)
 }
 
+// codexHome is the CODEX_HOME the runtimes run under: the configured one,
+// else the environment's, else Codex's own default.
+func codexHome(c config.CodexConfig, environ []string) (string, error) {
+	if c.Home != "" {
+		return c.Home, nil
+	}
+	if home := envValue(environ, "CODEX_HOME"); home != "" {
+		return home, nil
+	}
+	user, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(user, ".codex"), nil
+}
+
 // codexService maps the Codex settings onto one runtime. The same CODEX_HOME
 // serves the daemon, its control socket and the TUI.
 func codexService(c config.CodexConfig, stateDir string, key executor.Key, environ []string) (codexruntime.ServiceSpec, error) {
@@ -73,16 +89,9 @@ func codexService(c config.CodexConfig, stateDir string, key executor.Key, envir
 	if err := c.Validate(); err != nil {
 		return codexruntime.ServiceSpec{}, err
 	}
-	home := c.Home
-	if home == "" {
-		home = envValue(environ, "CODEX_HOME")
-	}
-	if home == "" {
-		user, err := os.UserHomeDir()
-		if err != nil {
-			return codexruntime.ServiceSpec{}, err
-		}
-		home = filepath.Join(user, ".codex")
+	home, err := codexHome(c, environ)
+	if err != nil {
+		return codexruntime.ServiceSpec{}, err
 	}
 	env := append(slices.DeleteFunc(slices.Clone(environ), func(e string) bool { return strings.HasPrefix(e, "CODEX_HOME=") }), "CODEX_HOME="+home)
 	executable := ""

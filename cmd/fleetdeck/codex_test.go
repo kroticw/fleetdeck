@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
+	"github.com/kroticw/fleetdeck/internal/transcript"
 )
 
 func TestExecutorRowsSayOnlyWhatWasObserved(t *testing.T) {
@@ -106,5 +108,37 @@ func TestCodexRowsCarryContextAndTheNewestAccountLimits(t *testing.T) {
 	}
 	if accountLimits([]listedSession{{lifecycle: state.LifecycleLive}}) != nil {
 		t.Fatal("no reported limits must read as none")
+	}
+}
+
+// A live Codex row its runtime has told nothing yet reads its rollout; what
+// the runtime reported wins, and a stopped row is not measured (T-216).
+func TestALiveCodexRowFallsBackToItsRollout(t *testing.T) {
+	home, thread := t.TempDir(), "01a1aa74-c99c-7142-b9ed-c5384ae7b9d2"
+	dir := filepath.Join(home, "sessions", "2026", "11", "05")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout-2026-11-05T11-45-43-"+thread+".jsonl")
+	line := `{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":171829},"model_context_window":475000}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	written := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, written, written); err != nil {
+		t.Fatal(err)
+	}
+	now := written.Add(90 * time.Second)
+
+	silent := withRollout(listedSession{lifecycle: state.LifecycleLive}, thread, home, now)
+	if silent.context == nil || silent.context.Tokens != 171829 || silent.context.Window != 475000 || silent.silentFor != 90*time.Second {
+		t.Fatalf("row %+v context %+v", silent, silent.context)
+	}
+	reported := withRollout(listedSession{lifecycle: state.LifecycleLive, context: &transcript.Usage{Tokens: 5, Window: 10}}, thread, home, now)
+	if reported.context.Tokens != 5 {
+		t.Fatalf("the rollout overrode the runtime: %+v", reported.context)
+	}
+	if stopped := withRollout(listedSession{lifecycle: "stopped"}, thread, home, now); stopped.context != nil || stopped.silentFor != 0 {
+		t.Fatalf("a stopped row was measured: %+v", stopped)
 	}
 }

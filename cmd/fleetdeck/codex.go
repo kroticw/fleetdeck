@@ -208,8 +208,10 @@ func accountLimits(rows []listedSession) *usage.Limits {
 	return out
 }
 
-// codexSessionRows lists the runtimes kept in stateDir.
-func codexSessionRows(ctx context.Context, stateDir string) []listedSession {
+// codexSessionRows lists the runtimes kept in stateDir. A live one that has
+// not reported its context yet -- reconnected, or of an older build -- takes
+// it from its rollout under home, and its silence from when that was written.
+func codexSessionRows(ctx context.Context, stateDir, home string, now time.Time) []listedSession {
 	if _, err := os.Stat(stateDir); err != nil {
 		return nil
 	}
@@ -219,9 +221,26 @@ func codexSessionRows(ctx context.Context, stateDir string) []listedSession {
 	}
 	rows := make([]listedSession, 0, len(sessions))
 	for _, s := range sessions {
-		rows = append(rows, sessionRow(s))
+		rows = append(rows, withRollout(sessionRow(s), s.NativeID, home, now))
 	}
 	return rows
+}
+
+// withRollout fills a live row's context, when its runtime reported none, and
+// its silence from the thread's rollout.
+func withRollout(row listedSession, threadID, home string, now time.Time) listedSession {
+	if row.lifecycle != state.LifecycleLive {
+		return row
+	}
+	r, ok := codex.ReadRollout(home, threadID)
+	if !ok {
+		return row
+	}
+	if row.context == nil {
+		row.context = &transcript.Usage{Tokens: int(r.Tokens), Window: int(r.Window)}
+	}
+	row.silentFor = max(now.Sub(r.WrittenAt), 0)
+	return row
 }
 
 // resumeVia brings a session back through its executor, as the resume route
