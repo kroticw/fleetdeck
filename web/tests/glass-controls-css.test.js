@@ -51,7 +51,7 @@ const OPAQUE_BOARD = ':root[data-surface="board"][data-glass="opaque"]';
 // .btn capsules in every surface and in a browser tab alike:
 // web/tests/buttons-css.test.js holds them.
 const ISLAND_CONTROLS = [{ class: ".o-pick-select", control: ".o-pick-select" }];
-const FORM_CONTROLS = [".newcard-title", ".newcard-zone"].map((c) => ({ class: c, control: c }));
+const FORM_CONTROLS = [".newcard-title", ".newcard-zone", ".newcard-executor"].map((c) => ({ class: c, control: c }));
 const CONTROLS = [
   ...ISLAND_CONTROLS.map((c) => ({ surface: ORCHESTRATOR, opaque: OPAQUE_ORCHESTRATOR, ...c })),
   ...FORM_CONTROLS.map((c) => ({ surface: BOARD, opaque: OPAQUE_BOARD, ...c })),
@@ -201,7 +201,7 @@ test("the new card title's placeholder is read like muted text", () => {
 // The closed control is drawn by the page; the list a select opens stays the
 // system's menu.
 test("a select in the window draws its own chevron in the text's colour", () => {
-  for (const { surface, control } of CONTROLS.filter((c) => /select|zone/.test(c.control))) {
+  for (const { surface, control } of CONTROLS.filter((c) => /select|zone|executor/.test(c.control))) {
     const body = ruleBody(`${surface} ${control}`);
     assert.match(body, /-webkit-appearance:\s*none/, control);
     assert.match(body, /(^|[;\s])appearance:\s*none/, control);

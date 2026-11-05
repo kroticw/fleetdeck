@@ -3088,7 +3088,8 @@ button.review-line-add:hover {
   font-size: var(--fs-sm);
 }
 
-.newcard-zone {
+.newcard-zone,
+.newcard-executor {
   font: inherit;
   font-size: var(--fs-sm);
 }
@@ -5223,7 +5224,8 @@ body.is-resizing {
 
 :root[data-surface="board"] .newcard-title,
 :root[data-surface="board"] .newcard-repo,
-:root[data-surface="board"] .newcard-zone {
+:root[data-surface="board"] .newcard-zone,
+:root[data-surface="board"] .newcard-executor {
   min-height: 30px;
   padding: 4px 14px;
   border: none;
@@ -5237,7 +5239,8 @@ body.is-resizing {
 :root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"] .newcard-repo:hover:not(:disabled),
-:root[data-surface="board"] .newcard-zone:hover:not(:disabled) {
+:root[data-surface="board"] .newcard-zone:hover:not(:disabled),
+:root[data-surface="board"] .newcard-executor:hover:not(:disabled) {
   background-color: var(--glass-control-hover);
 }
 
@@ -5269,7 +5272,8 @@ body.is-resizing {
 /* The closed select is drawn by the page, its chevron in the text's colour; the
    list it opens stays the system's menu. */
 :root[data-surface="orchestrator"] .o-pick-select,
-:root[data-surface="board"] .newcard-zone {
+:root[data-surface="board"] .newcard-zone,
+:root[data-surface="board"] .newcard-executor {
   -webkit-appearance: none;
   appearance: none;
   padding-right: 26px;
@@ -5310,7 +5314,8 @@ body.is-resizing {
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo,
-:root[data-surface="board"][data-glass="opaque"] .newcard-zone {
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone,
+:root[data-surface="board"][data-glass="opaque"] .newcard-executor {
   background-color: var(--surface-raised);
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
@@ -5318,7 +5323,8 @@ body.is-resizing {
 :root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo:hover:not(:disabled),
-:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled) {
+:root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
+:root[data-surface="board"][data-glass="opaque"] .newcard-executor:hover:not(:disabled) {
   background-color: var(--surface-hover);
 }
 
