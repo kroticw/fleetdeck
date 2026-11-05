@@ -133,6 +133,8 @@ type Config struct {
 	Agent AgentConfig
 	// Workers is how the panel starts the worker sessions it hands cards to.
 	Workers Workers
+	// UI is the panel's look.
+	UI UI
 	// DefaultExecutor applies only when creating a new card. Legacy cards
 	// without an executor field remain Claude regardless of this setting.
 	DefaultExecutor executor.ID
@@ -315,7 +317,25 @@ type file struct {
 	Executors       struct {
 		Codex CodexConfig `yaml:"codex,omitempty"`
 	} `yaml:"executors,omitempty"`
+	UI UI `yaml:"ui,omitempty"`
 }
+
+// UI is the panel's look, kept in its file so every window and browser tab
+// shows the same: the theme (empty follows the system) and the terminals'
+// type size (zero is the page's default).
+type UI struct {
+	Theme            string `yaml:"theme,omitempty"`
+	TerminalFontSize int    `yaml:"terminal_font_size,omitempty"`
+}
+
+// Themes are ui.theme's values besides empty, which follows the system.
+var Themes = []string{"light", "dark"}
+
+// The terminals' type size bounds, as web/js/terminalfont.js clamps it.
+const (
+	MinTerminalFontSize = 9
+	MaxTerminalFontSize = 24
+)
 
 // Workers is how the panel starts a worker session for a card, for every
 // fleet alike: the model, the permission mode and whether Bash runs in the
@@ -325,7 +345,12 @@ type Workers struct {
 	Model          string `yaml:"model,omitempty"`
 	PermissionMode string `yaml:"permission_mode,omitempty"`
 	Sandbox        bool   `yaml:"sandbox,omitempty"`
+	// Effort is claude's --effort; empty leaves it to the CLI.
+	Effort string `yaml:"effort,omitempty"`
 }
+
+// Efforts are the values claude's --effort accepts (2.1.316).
+var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // PermissionModes are the values claude's --permission-mode accepts (2.1.283).
 var PermissionModes = []string{"acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"}
@@ -381,6 +406,7 @@ func configToFile(c Config) file {
 		f.DefaultExecutor = c.DefaultExecutor
 	}
 	f.Executors.Codex = c.Codex
+	f.UI = c.UI
 	for _, fl := range c.Fleets {
 		var ff fleetFile
 		ff.Name = fl.Name
@@ -424,6 +450,7 @@ func fileToConfig(f file) Config {
 		Name:    f.Name,
 		Fleets:  fleetsFromFile(f.Fleets),
 		Workers: f.Workers,
+		UI:      f.UI,
 	}
 }
 
@@ -587,6 +614,15 @@ func validate(c Config) error {
 	}
 	if m := c.Workers.PermissionMode; m != "" && !slices.Contains(PermissionModes, m) {
 		return fmt.Errorf("workers.permission_mode %q is not one of %s", m, strings.Join(PermissionModes, ", "))
+	}
+	if e := c.Workers.Effort; e != "" && !slices.Contains(Efforts, e) {
+		return fmt.Errorf("workers.effort %q is not one of %s", e, strings.Join(Efforts, ", "))
+	}
+	if t := c.UI.Theme; t != "" && !slices.Contains(Themes, t) {
+		return fmt.Errorf("ui.theme %q is not one of %s (or empty, to follow the system)", t, strings.Join(Themes, ", "))
+	}
+	if s := c.UI.TerminalFontSize; s != 0 && (s < MinTerminalFontSize || s > MaxTerminalFontSize) {
+		return fmt.Errorf("ui.terminal_font_size must be between %d and %d, got %d", MinTerminalFontSize, MaxTerminalFontSize, s)
 	}
 	if c.ServerPort < 1 || c.ServerPort > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.ServerPort)

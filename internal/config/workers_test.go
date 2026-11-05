@@ -74,3 +74,35 @@ func TestAnUnknownPermissionModeIsRefused(t *testing.T) {
 		t.Fatalf("want a refusal naming the key and the choices, got %v", err)
 	}
 }
+
+// Effort is claude's --effort; a level it does not know would fail every
+// start, so it is refused at load like a mode.
+func TestTheWorkersEffortIsReadAndAnUnknownOneRefused(t *testing.T) {
+	c, err := loadText(t, "board:\n    path: /b\nworkers:\n    effort: xhigh\n")
+	if err != nil || c.Workers.Effort != "xhigh" {
+		t.Fatalf("Workers = %+v, err %v", c.Workers, err)
+	}
+	_, err = loadText(t, "board:\n    path: /b\nworkers:\n    effort: huge\n")
+	if err == nil || !strings.Contains(err.Error(), `workers.effort "huge"`) || !strings.Contains(err.Error(), "max") {
+		t.Fatalf("want a refusal naming the key and the choices, got %v", err)
+	}
+}
+
+// The look is the panel's, in its file, so every window shows the same one.
+func TestTheLookIsReadAndWrittenBackAndCheckedAtLoad(t *testing.T) {
+	c, err := loadText(t, "board:\n    path: /b\nui:\n    theme: dark\n    terminal_font_size: 14\n")
+	if err != nil || c.UI != (UI{Theme: "dark", TerminalFontSize: 14}) {
+		t.Fatalf("UI = %+v, err %v", c.UI, err)
+	}
+	if back, _ := saveAndReload(t, c); back.UI != c.UI {
+		t.Fatalf("round trip gave %+v", back.UI)
+	}
+	if _, raw := saveAndReload(t, Config{BoardPath: "/b", DaemonPollInterval: 1, ServerPort: 1}); strings.Contains(raw, "ui:") {
+		t.Fatalf("an unset look was written:\n%s", raw)
+	}
+	for _, bad := range []string{"ui:\n    theme: pink\n", "ui:\n    terminal_font_size: 99\n"} {
+		if _, err := loadText(t, "board:\n    path: /b\n"+bad); err == nil {
+			t.Fatalf("%q was accepted", bad)
+		}
+	}
+}
