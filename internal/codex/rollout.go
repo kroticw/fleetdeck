@@ -9,12 +9,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kroticw/fleetdeck/internal/executor"
 )
 
 // Rollout is what a thread's rollout file says about it: the context of its
-// last model response, and when Codex last wrote to it.
+// last model response, the account limits Codex saw with it and when, and
+// when Codex last wrote to the file.
 type Rollout struct {
 	Tokens, Window int64
+	Limits         []executor.Limit
+	LimitsAt       time.Time
 	WrittenAt      time.Time
 }
 
@@ -100,7 +105,8 @@ func lastTokenCount(path string, size int64) (Rollout, bool) {
 			continue
 		}
 		var event struct {
-			Payload struct {
+			Timestamp time.Time `json:"timestamp"`
+			Payload   struct {
 				Type string `json:"type"`
 				Info *struct {
 					Last struct {
@@ -108,12 +114,39 @@ func lastTokenCount(path string, size int64) (Rollout, bool) {
 					} `json:"last_token_usage"`
 					Window int64 `json:"model_context_window"`
 				} `json:"info"`
+				RateLimits *struct {
+					Primary, Secondary *rolloutLimit
+				} `json:"rate_limits"`
 			} `json:"payload"`
 		}
 		if json.Unmarshal(line, &event) != nil || event.Payload.Type != "token_count" || event.Payload.Info == nil || event.Payload.Info.Window <= 0 {
 			continue
 		}
-		return Rollout{Tokens: event.Payload.Info.Last.Total, Window: event.Payload.Info.Window}, true
+		r := Rollout{Tokens: event.Payload.Info.Last.Total, Window: event.Payload.Info.Window}
+		if l := event.Payload.RateLimits; l != nil {
+			for _, w := range []*rolloutLimit{l.Primary, l.Secondary} {
+				if w != nil && w.Minutes > 0 {
+					r.Limits = append(r.Limits, w.limit())
+				}
+			}
+			r.LimitsAt = event.Timestamp
+		}
+		return r, true
 	}
 	return Rollout{}, false
+}
+
+type rolloutLimit struct {
+	UsedPercent float64 `json:"used_percent"`
+	Minutes     int64   `json:"window_minutes"`
+	ResetsAt    int64   `json:"resets_at"`
+}
+
+func (l rolloutLimit) limit() executor.Limit {
+	out := executor.Limit{Name: windowName(l.Minutes), Minutes: l.Minutes, UsedPercent: l.UsedPercent}
+	if l.ResetsAt > 0 {
+		at := time.Unix(l.ResetsAt, 0)
+		out.ResetsAt = &at
+	}
+	return out
 }

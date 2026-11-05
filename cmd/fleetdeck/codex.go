@@ -226,8 +226,9 @@ func codexSessionRows(ctx context.Context, stateDir, home string, now time.Time)
 	return rows
 }
 
-// withRollout fills a live row's context, when its runtime reported none, and
-// its silence from the thread's rollout.
+// withRollout fills what a live row's runtime has not reported -- its context
+// and the account limits, dated when Codex saw them -- and its silence, from
+// the thread's rollout.
 func withRollout(row listedSession, threadID, home string, now time.Time) listedSession {
 	if row.lifecycle != state.LifecycleLive {
 		return row
@@ -238,6 +239,9 @@ func withRollout(row listedSession, threadID, home string, now time.Time) listed
 	}
 	if row.context == nil {
 		row.context = &transcript.Usage{Tokens: int(r.Tokens), Window: int(r.Window)}
+	}
+	if row.limits == nil && len(r.Limits) > 0 {
+		row.limits = &executor.Metric[[]executor.Limit]{Value: r.Limits, ObservedAt: r.LimitsAt, Source: "codex"}
 	}
 	row.silentFor = max(now.Sub(r.WrittenAt), 0)
 	return row
