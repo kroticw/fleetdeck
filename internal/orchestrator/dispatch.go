@@ -138,6 +138,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	// The refusal carries the task itself: the card names the session and the
 	// session runs, so what is left for a hand to do is send this line into it.
 	task := Task(lang, w.Card)
+	if adapter.ID == executor.Codex {
+		task = CodexTask(lang, w.Card)
+	}
 	return d.task(ctx, res, adapter, short, task)
 }
 
@@ -191,6 +194,14 @@ func written(err error) (string, error) {
 // multi-line reply can be left sitting in the prompt unsent.
 func Task(lang, cardPath string) string {
 	return fmt.Sprintf(words[Lang(lang)].task, "`"+cardPath+"`")
+}
+
+// CodexTask is Task for a Codex session. Codex has no card-keeping skill -- it
+// is a Claude Code plugin, and Codex picks a skill up only when it matches the
+// task, from a place that varies with its version and CODEX_HOME -- so the
+// rules the skill gives are in the line itself.
+func CodexTask(lang, cardPath string) string {
+	return fmt.Sprintf(words[Lang(lang)].codexTask, "`"+cardPath+"`")
 }
 
 // maxSessionNameRunes bounds a session's name: a row of `claude agents` and of
