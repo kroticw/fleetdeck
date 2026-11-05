@@ -15,7 +15,15 @@ import (
 // forwards every client answer to answers.
 func requestNative(t *testing.T, requests []map[string]any, answers chan<- nativeMessage) *nativeControl {
 	t.Helper()
+	// Requests for a thread not yet owned are dropped by design, so they are
+	// sent only once the client owns it.
+	owned := make(chan struct{})
 	socket := nativeServer(t, func(ctx context.Context, conn *websocket.Conn) {
+		select {
+		case <-owned:
+		case <-ctx.Done():
+			return
+		}
 		for _, r := range requests {
 			nativeWrite(ctx, t, conn, r)
 		}
@@ -38,6 +46,7 @@ func requestNative(t *testing.T, requests []map[string]any, answers chan<- nativ
 	}
 	t.Cleanup(c.Close)
 	c.own(nativeThread)
+	close(owned)
 	return c
 }
 
