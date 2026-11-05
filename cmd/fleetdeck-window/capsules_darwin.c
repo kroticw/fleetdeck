@@ -94,7 +94,7 @@ static id rowDrawn;
 static id segmentedDrawn, newCardDrawn, themeDrawn, themeIconDrawn, compactLabelDrawn;
 // The limits menu's chevrons: on the last limit, and on the compact limits.
 static id limitsChevronDrawn, compactChevronDrawn;
-static id levelsDrawn[maxLimits];
+static id dotsDrawn[maxLimits];
 static id tabsCapsule, newCardCapsule, compactCapsule, themeCapsule, themeIconCapsule;
 static id limitCapsules[maxLimits];
 static int limitsDrawn;
@@ -394,7 +394,7 @@ void fd_capsules_clear(void *container) {
   segmentedDrawn = newCardDrawn = themeDrawn = themeIconDrawn = compactLabelDrawn = (id)0;
   limitsChevronDrawn = compactChevronDrawn = (id)0;
   tabsCapsule = newCardCapsule = compactCapsule = themeCapsule = themeIconCapsule = (id)0;
-  for (int i = 0; i < maxLimits; i++) limitCapsules[i] = levelsDrawn[i] = (id)0;
+  for (int i = 0; i < maxLimits; i++) limitCapsules[i] = dotsDrawn[i] = (id)0;
   limitsDrawn = 0;
   capsulesDrawn = 0;
   // No row, nothing for the window to keep room for.
@@ -465,19 +465,16 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
 
   limitsDrawn = limitCount < maxLimits ? limitCount : maxLimits;
   for (int i = 0; i < limitsDrawn; i++) {
-    id level = initWithFrame(cls("NSLevelIndicator"), CGRectMake(0, 0, 44, 8));
-    sendVoidLong(level, sel("setLevelIndicatorStyle:"), 1);  // continuous capacity
-    sendVoidDouble(level, sel("setMinValue:"), 0);
-    sendVoidDouble(level, sel("setMaxValue:"), 100);
-    sendVoidDouble(level, sel("setDoubleValue:"), limitValues[i]);
+    // The level is a dot in its colour, as the page draws it: a level
+    // indicator drew nothing on glass. The number is the text beside it.
+    id dot = label("●");
     id colour = srgb(&limitRGB[3 * i]);
-    if (colour && respondsTo(level, "setFillColor:")) sendVoid1(level, sel("setFillColor:"), colour);
-    levelsDrawn[i] = level;
-    id views[4] = {label(limitLabels[i]), level, label(limitTexts[i]), (id)0};
+    if (colour) sendVoid1(dot, sel("setTextColor:"), colour);
+    dotsDrawn[i] = dot;
+    id views[4] = {dot, label(limitLabels[i]), label(limitTexts[i]), (id)0};
     int count = 3;
     if (i == limitsDrawn - 1) views[count++] = limitsChevronDrawn = limitsChevron(compactTooltip);
     id content = row(views, count);
-    sendVoid0(level, sel("release"));
     limitCapsules[i] = capsule(mode, content, 0, capsulePadding);
     adopt(into, limitCapsules[i]);
   }
@@ -607,7 +604,8 @@ fd_capsule_insets fd_test_tabs_insets(void) {
 }
 const char *fd_test_new_card_title(void) { return cstring(send0(newCardDrawn, sel("title"))); }
 const char *fd_test_theme_title(void) { return cstring(send0(themeDrawn, sel("title"))); }
-double fd_test_level_value(int i) { return sendDouble0(levelsDrawn[i], sel("doubleValue")); }
+const char *fd_test_dot_title(int i) { return cstring(send0(dotsDrawn[i], sel("stringValue"))); }
+double fd_test_dot_green(int i) { return sendDouble0(send0(dotsDrawn[i], sel("textColor")), sel("greenComponent")); }
 
 // The capsules drawn, in order: the tabs, the new card button, each limit, the
 // compact limits when there are limits, the theme and its icon.

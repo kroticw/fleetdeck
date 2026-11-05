@@ -48,7 +48,8 @@ typedef struct {
 fd_capsule_insets fd_test_tabs_insets(void);
 const char *fd_test_new_card_title(void);
 const char *fd_test_theme_title(void);
-double fd_test_level_value(int i);
+const char *fd_test_dot_title(int i);
+double fd_test_dot_green(int i);
 int fd_test_capsule_slots(void);
 const char *fd_test_capsule_slot_name(int i);
 fd_capsule_frame fd_test_capsule_slot_frame(int i);

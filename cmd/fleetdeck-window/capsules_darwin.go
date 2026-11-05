@@ -104,7 +104,8 @@ type capsulesProbe struct {
 	tabsInsets         [4]float64
 	newCardTitle       string
 	themeTitle         string
-	levelValue         float64
+	dotTitle           string
+	dotGreen           float64
 	capsuleCount       int
 	countAfterRedraw   int
 	rowPassesThrough   bool
@@ -137,7 +138,8 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	out.tabsInsets = [4]float64{float64(insets.left), float64(insets.right), float64(insets.top), float64(insets.bottom)}
 	out.newCardTitle = C.GoString(C.fd_test_new_card_title())
 	out.themeTitle = C.GoString(C.fd_test_theme_title())
-	out.levelValue = float64(C.fd_test_level_value(0))
+	out.dotTitle = C.GoString(C.fd_test_dot_title(0))
+	out.dotGreen = float64(C.fd_test_dot_green(0))
 	out.capsuleCount = int(C.fd_test_capsule_count())
 	out.rowPassesThrough = C.fd_test_row_passes_through(f.capsules()) != 0
 	for which := range out.clicksReach {
