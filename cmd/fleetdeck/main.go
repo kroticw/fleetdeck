@@ -582,12 +582,24 @@ func serve(parent context.Context, o runOpts) error {
 		owned, err := ensureDaemon(ctx, o, cfg.Agent, dc.ListSessions)
 		if err != nil {
 			log.Printf("fleetdeck: no Claude Code daemon: %v", err)
+		} else if owned != nil && owned.exited == nil {
+			log.Print("fleetdeck: took over the Claude Code daemon the panel before this one started")
 		} else if owned != nil {
 			log.Print("fleetdeck: started the Claude Code daemon; it stops when this panel does")
 		}
 		ownedc <- owned
 	}()
-	defer func() { (<-ownedc).Stop() }()
+	// A panel being replaced by an update leaves its daemon, and the record
+	// of it, to the panel after it; only a close puts the daemon out.
+	var handedOver atomic.Bool
+	defer func() {
+		owned := <-ownedc
+		if handedOver.Load() && owned != nil {
+			log.Print("fleetdeck: left the Claude Code daemon to the panel replacing this one")
+			return
+		}
+		owned.Stop()
+	}()
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir(claudeDir))
 	collector.codexState = codexStateDir(o.configPath)
@@ -644,6 +656,7 @@ func serve(parent context.Context, o runOpts) error {
 		resume: d.ResumeSession,
 		every:  2 * time.Minute,
 	}
+	d.HandOver = func() { handedOver.Store(true) }
 	d.FleetOpened = func(name string) {
 		if err := waker.wake(context.WithoutCancel(ctx), name); err != nil {
 			log.Printf("fleetdeck: %v", err)

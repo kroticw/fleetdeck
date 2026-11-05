@@ -59,3 +59,14 @@ func requestFailure(w http.ResponseWriter, err error) {
 		fail(w, http.StatusBadGateway, err.Error())
 	}
 }
+
+// handleHandOver is the window saying this panel is being replaced, not
+// closed.
+func (d Deps) handleHandOver(w http.ResponseWriter, _ *http.Request) {
+	if d.HandOver == nil {
+		unavailable(w, "a handover")
+		return
+	}
+	d.HandOver()
+	w.WriteHeader(http.StatusNoContent)
+}

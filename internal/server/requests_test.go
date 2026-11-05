@@ -53,3 +53,16 @@ func TestSessionRequestsAreListedAndAnsweredExplicitly(t *testing.T) {
 		t.Fatalf("answers %+v", answered)
 	}
 }
+
+func TestAPanelToldToHandOverSaysSo(t *testing.T) {
+	d, _ := testDeps()
+	told := 0
+	d.HandOver = func() { told++ }
+	if rec := do(d, http.MethodPost, "/api/handover", `{}`); rec.Code != http.StatusNoContent || told != 1 {
+		t.Fatalf("handover: %d told=%d", rec.Code, told)
+	}
+	d.HandOver = nil
+	if rec := do(d, http.MethodPost, "/api/handover", `{}`); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no handover: %d", rec.Code)
+	}
+}

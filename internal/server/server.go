@@ -241,6 +241,9 @@ type Deps struct {
 
 	// FleetOpened is told the name of a fleet a page opened; nil does nothing.
 	FleetOpened func(name string)
+	// HandOver is told by the window that a panel replacing this one comes
+	// next: what this panel owns is left for it rather than put out.
+	HandOver func()
 
 	// SessionRequests lists what a Codex session waits on, and RespondRequest
 	// answers one. Nil on a panel without Codex.
@@ -368,6 +371,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/orchestrator", d.handleOrchestratorPreview)
 	mux.HandleFunc("POST /api/orchestrator", d.handleAppoint)
 	mux.HandleFunc("GET /ws", d.handleWS)
+	mux.HandleFunc("POST /api/handover", d.handleHandOver)
 	mux.HandleFunc("GET /api/sessions/{id}/requests", d.handleSessionRequests)
 	mux.HandleFunc("POST /api/sessions/{id}/requests/respond", d.handleRespondRequest)
 	mux.HandleFunc("GET /api/sessions/{id}/pty", d.handlePTY)

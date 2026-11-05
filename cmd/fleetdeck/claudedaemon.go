@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -28,8 +32,46 @@ const (
 // sessions it runs, which stay resumable. A daemon the panel found running is
 // never one of these and is never stopped by it.
 type ownedDaemon struct {
-	cmd    *exec.Cmd
+	pid int
+	// exited is closed when a daemon this panel started exits; nil for one
+	// taken over from the panel before it, which is not this panel's child.
 	exited chan struct{}
+	record string
+}
+
+// daemonOwnership is where a panel records the daemon it started, beside its
+// configuration, so the panel after it in an update can take that daemon
+// over instead of stopping it. Empty for a panel with no configuration path.
+func daemonOwnership(o runOpts) string {
+	if o.configPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(codexStateDir(o.configPath)), "claude-daemon.json")
+}
+
+// takeOver adopts the running daemon a previous panel recorded as started by
+// fleetdeck. A record naming a process that is not a Claude daemon (a reused
+// PID) is not adopted.
+func takeOver(record string) *ownedDaemon {
+	if record == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(record)
+	if err != nil {
+		return nil
+	}
+	var r struct {
+		PID int `json:"pid"`
+	}
+	if json.Unmarshal(raw, &r) != nil || r.PID < 2 || !isClaudeDaemon(r.PID) {
+		return nil
+	}
+	return &ownedDaemon{pid: r.PID, record: record}
+}
+
+func isClaudeDaemon(pid int) bool {
+	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && strings.Contains(string(out), "daemon run")
 }
 
 // ensureDaemon starts `claude daemon run` when list finds no daemon, and
@@ -41,7 +83,9 @@ func ensureDaemon(ctx context.Context, o runOpts, agent config.AgentConfig, list
 		return nil, nil
 	}
 	if _, err := list(ctx); !errors.Is(err, daemon.ErrDaemonUnavailable) {
-		return nil, nil
+		// Running already: fleetdeck's own, handed on by the panel before
+		// this one, or someone else's, which is never touched.
+		return takeOver(daemonOwnership(o)), nil
 	}
 	argv, env := agent.Command, []string(nil)
 	if len(argv) == 0 {
@@ -60,8 +104,13 @@ func ensureDaemon(ctx context.Context, o runOpts, agent config.AgentConfig, list
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the Claude Code daemon: %w", err)
 	}
-	d := &ownedDaemon{cmd: cmd, exited: make(chan struct{})}
+	d := &ownedDaemon{pid: cmd.Process.Pid, exited: make(chan struct{}), record: daemonOwnership(o)}
 	go func() { _ = cmd.Wait(); close(d.exited) }()
+	if d.record != "" {
+		if err := os.WriteFile(d.record, fmt.Appendf(nil, "{\"pid\":%d}\n", d.pid), 0o600); err != nil {
+			log.Printf("fleetdeck: record the Claude Code daemon for the next panel: %v", err)
+		}
+	}
 	deadline := time.After(daemonStartWait)
 	for {
 		if _, err := list(ctx); err == nil {
@@ -81,19 +130,40 @@ func ensureDaemon(ctx context.Context, o runOpts, agent config.AgentConfig, list
 	}
 }
 
-// Stop puts out the daemon the panel started. Nil is a daemon it did not
-// start, and there is nothing to do.
+// Stop puts out the daemon the panel owns, and its record. Nil is a daemon
+// it does not own, and there is nothing to do.
 func (d *ownedDaemon) Stop() {
 	if d == nil {
 		return
 	}
-	_ = d.cmd.Process.Signal(syscall.SIGTERM)
-	select {
-	case <-d.exited:
-	case <-time.After(daemonStopWait):
-		_ = d.cmd.Process.Kill()
-		<-d.exited
+	_ = syscall.Kill(d.pid, syscall.SIGTERM)
+	if !d.wait(daemonStopWait) {
+		_ = syscall.Kill(d.pid, syscall.SIGKILL)
+		d.wait(daemonStopWait)
 	}
+	if d.record != "" {
+		_ = os.Remove(d.record)
+	}
+}
+
+// wait reports whether the daemon is gone within limit.
+func (d *ownedDaemon) wait(limit time.Duration) bool {
+	if d.exited != nil {
+		select {
+		case <-d.exited:
+			return true
+		case <-time.After(limit):
+			return false
+		}
+	}
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if syscall.Kill(d.pid, 0) != nil {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
 
 // orchestratorWaker brings a fleet's pinned orchestrator back when the fleet

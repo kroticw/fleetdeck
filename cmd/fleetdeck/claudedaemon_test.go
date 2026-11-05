@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,7 +37,7 @@ func TestThePanelStartsAMissingDaemonAndPutsOutOnlyItsOwn(t *testing.T) {
 		}
 		return nil, daemon.ErrDaemonUnavailable
 	}
-	owned, err := ensureDaemon(context.Background(), runOpts{}, config.AgentConfig{Command: []string{bin}}, list)
+	owned, err := ensureDaemon(context.Background(), runOpts{configPath: filepath.Join(t.TempDir(), "config.yaml")}, config.AgentConfig{Command: []string{bin}}, list)
 	if err != nil || owned == nil {
 		t.Fatalf("owned=%v err=%v", owned, err)
 	}
@@ -104,5 +105,45 @@ func TestOpeningAFleetWakesItsPinnedOrchestratorOnce(t *testing.T) {
 	w2 := &orchestratorWaker{fleets: w.fleets, listed: w.listed, resume: func(string) error { return errors.New("gone for good") }, every: time.Hour}
 	if err := w2.wake(context.Background(), ""); err == nil {
 		t.Fatal("a failed wake must be reported")
+	}
+}
+
+func TestTheNextPanelTakesOverTheDaemonAPanelHandedOn(t *testing.T) {
+	bin, up, down := fakeDaemonClaude(t)
+	list := func(context.Context) ([]daemon.Session, error) {
+		if exists(up) && !exists(down) {
+			return nil, nil
+		}
+		return nil, daemon.ErrDaemonUnavailable
+	}
+	o := runOpts{configPath: filepath.Join(t.TempDir(), "config.yaml")}
+	agent := config.AgentConfig{Command: []string{bin}}
+	first, err := ensureDaemon(context.Background(), o, agent, list)
+	if err != nil || first == nil {
+		t.Fatalf("first panel: %v %v", first, err)
+	}
+	// The first panel hands over and goes without stopping the daemon.
+	next, err := ensureDaemon(context.Background(), o, agent, list)
+	if err != nil || next == nil || next.pid != first.pid {
+		t.Fatalf("the next panel did not take the daemon over: %+v %v", next, err)
+	}
+	next.Stop()
+	if !exists(down) {
+		t.Fatal("the daemon taken over was not put out at the last close")
+	}
+	if exists(daemonOwnership(o)) {
+		t.Fatal("the ownership record outlived its daemon")
+	}
+}
+
+func TestADaemonNotStartedByFleetdeckIsNeverTakenOver(t *testing.T) {
+	o := runOpts{configPath: filepath.Join(t.TempDir(), "config.yaml")}
+	running := func(context.Context) ([]daemon.Session, error) { return nil, nil }
+	// A record naming a process that is no Claude daemon (this test) is ignored.
+	if err := os.WriteFile(daemonOwnership(o), []byte(fmt.Sprintf(`{"pid":%d}`, os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if owned, err := ensureDaemon(context.Background(), o, config.AgentConfig{}, running); owned != nil || err != nil {
+		t.Fatalf("took over a process it did not start: %v %v", owned, err)
 	}
 }
