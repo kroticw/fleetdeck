@@ -4,6 +4,7 @@ package codex
 import (
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kroticw/fleetdeck/internal/codexruntime"
@@ -38,6 +39,11 @@ func BuildLaunch(c config.CodexConfig, executable, threadID string, environ []st
 		if pair[1] != "" {
 			argv = append(argv, pair[0], pair[1])
 		}
+	}
+	if c.Effort != "" {
+		// The TUI starts every turn, so it carries the effort; quoted, since
+		// Codex reads a --config value as TOML.
+		argv = append(argv, "--config", "model_reasoning_effort="+strconv.Quote(c.Effort))
 	}
 	argv = append(argv, "resume", threadID)
 	env := codexruntime.TerminalEnvironment(environ)

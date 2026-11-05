@@ -21,6 +21,8 @@ type Launch struct {
 	Model          string
 	PermissionMode string
 	Sandbox        bool
+	// Effort is claude's --effort, given only when set.
+	Effort string
 }
 
 // Args are the claude flags for l. Each is always given, a default included:
@@ -28,9 +30,13 @@ type Launch struct {
 // settings file instead. The sandbox has no flag of its own — it is the
 // settings key sandbox.enabled, so it goes in through --settings.
 func (l Launch) Args() []string {
-	return []string{
+	args := []string{
 		"--model", cmp.Or(l.Model, DefaultModel),
 		"--permission-mode", cmp.Or(l.PermissionMode, DefaultPermissionMode),
 		"--settings", fmt.Sprintf(`{"sandbox":{"enabled":%t}}`, l.Sandbox),
 	}
+	if l.Effort != "" {
+		args = append(args, "--effort", l.Effort)
+	}
+	return args
 }
