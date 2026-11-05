@@ -5,14 +5,10 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 
+	"github.com/kroticw/fleetdeck/internal/codex"
 	"github.com/kroticw/fleetdeck/internal/codexruntime"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -21,10 +17,6 @@ import (
 	"github.com/kroticw/fleetdeck/internal/server"
 	"github.com/kroticw/fleetdeck/internal/state"
 )
-
-// codexNeeds is how a Codex question reaches the waiting counter: words that
-// are no stall, so daemon.Session.Waiting reads them as a person needed.
-const codexNeeds = "codex: an approval or an answer is pending"
 
 // codexStateDir keeps runtimes beside the configuration that started them,
 // so a stand's runtimes never mix with the operator's.
@@ -35,276 +27,174 @@ func codexStateDir(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), "runtime")
 }
 
-func isCodexKey(id string) bool { return strings.HasPrefix(id, "codex:") }
-
-// codexSessions starts and tasks one fleet's Codex sessions; nil when Codex
-// is off, or on a stand without a Codex home of its own, which would
-// otherwise reach the operator's real Codex.
-func codexSessions(o runOpts, cfg config.Config) *orchestrator.CodexSessions {
-	if !codexAllowed(o, cfg) {
-		return nil
-	}
-	stateDir := codexStateDir(o.configPath)
-	return &orchestrator.CodexSessions{
-		Start: func(ctx context.Context, cwd, card, _ string) (string, error) {
-			spec, err := codexStartSpec(o, stateDir, cfg.BoardPath)
-			if err != nil {
-				return "", err
-			}
-			spec.CWD, spec.Card = cwd, card
-			key, _, err := codexruntime.Start(ctx, spec)
-			return string(key), err
-		},
-		Send: func(ctx context.Context, key, op, text string) (executor.Receipt, error) {
-			return codexSend(ctx, stateDir, key, op, text)
-		},
-	}
+// codexAllowed is whether this panel may start or resume Codex at all: a
+// stand without a Codex home of its own would reach the operator's real one.
+func codexAllowed(o runOpts, cfg config.Config) bool {
+	return cfg.Codex.Enabled && (o.standSocket == "" || cfg.Codex.Home != "")
 }
 
-func codexSend(ctx context.Context, stateDir, key, op, text string) (executor.Receipt, error) {
-	var receipt executor.Receipt
-	err := codexCall(ctx, stateDir, key, "send", map[string]string{"operationId": op, "text": text}, &receipt)
-	if errors.Is(err, codexruntime.ErrReplyUnknown) || errors.Is(err, executor.ErrDeliveryUnknown) {
-		return executor.Receipt{OperationID: op, State: executor.DeliveryUnknown}, nil
+// codexAdapter is this panel's Codex, spawning runtimes from this binary
+// with this configuration and the fleet's board.
+func codexAdapter(o runOpts, cfg config.Config) (executor.Adapter, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return executor.Adapter{}, err
 	}
-	return receipt, err
-}
-
-// codexAwareSend routes a message for a Codex key to its runtime, once under
-// a fresh operation ID; an unconfirmed delivery is an error, never a resend.
-func codexAwareSend(stateDir string, claude func(ctx context.Context, short, text string) error) func(ctx context.Context, short, text string) error {
-	return func(ctx context.Context, short, text string) error {
-		if !isCodexKey(short) {
-			return claude(ctx, short, text)
+	configPath, err := filepath.Abs(o.configPath)
+	if err != nil {
+		return executor.Adapter{}, err
+	}
+	board := cfg.BoardPath
+	if board != "" {
+		if board, err = filepath.Abs(board); err != nil {
+			return executor.Adapter{}, err
 		}
-		receipt, err := codexSend(ctx, stateDir, short, rand.Text(), text)
+	}
+	return codex.NewAdapter(codex.Runtimes{
+		StateDir: codexStateDir(o.configPath),
+		Spawn:    codexruntime.StartSpec{Command: []string{exe}, ConfigPath: configPath, Board: board},
+	}), nil
+}
+
+// executors is the registry every session operation goes through: Claude as
+// given, and Codex when this panel may run it. A key names its executor, so a
+// Codex key never reaches Claude, nor the other way round.
+func executors(o runOpts, cfg config.Config, claude orchestrator.Claude) *executor.Registry {
+	adapters := []executor.Adapter{orchestrator.ClaudeAdapter(claude)}
+	if codexAllowed(o, cfg) {
+		if a, err := codexAdapter(o, cfg); err == nil {
+			adapters = append(adapters, a)
+		}
+	}
+	r, err := executor.NewRegistry(adapters...)
+	if err != nil {
+		// Two fixed, distinct IDs: this cannot fail.
+		panic(err)
+	}
+	return r
+}
+
+// isClaude reports whether a session ID names a Claude session.
+func isClaude(id string) bool {
+	executorID, _, err := executor.ParseKey(id)
+	return err == nil && executorID == executor.Claude
+}
+
+// adapterFor is the adapter and canonical key for a session ID.
+func adapterFor(r *executor.Registry, id string) (executor.Adapter, executor.Key, error) {
+	return r.ForKey(id)
+}
+
+// startsAny reports whether some executor here can start a session.
+func startsAny(r *executor.Registry) bool {
+	for _, id := range []executor.ID{executor.Claude, executor.Codex} {
+		if a, err := r.ForID(id); err == nil && a.Start != nil && a.Send != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// stopVia stops a session through its executor, which for Codex proves its
+// work stopped first.
+func stopVia(r *executor.Registry) func(ctx context.Context, short string) error {
+	return func(ctx context.Context, short string) error {
+		a, key, err := adapterFor(r, short)
+		if err != nil {
+			return err
+		}
+		if a.Stop == nil {
+			return fmt.Errorf("%w: this panel cannot stop %s", executor.ErrUnsupported, short)
+		}
+		return a.Stop(ctx, key)
+	}
+}
+
+// sendVia sends one message through the session's executor, once under a
+// fresh operation ID; an unconfirmed delivery is an error, never a resend.
+func sendVia(r *executor.Registry) func(ctx context.Context, short, text string) error {
+	return func(ctx context.Context, short, text string) error {
+		a, key, err := adapterFor(r, short)
+		if err != nil {
+			return err
+		}
+		if a.Send == nil {
+			return fmt.Errorf("%w: this panel cannot send to %s", executor.ErrUnsupported, short)
+		}
+		receipt, err := a.Send(ctx, key, executor.Message{OperationID: rand.Text(), Text: text})
 		switch {
 		case err != nil:
 			return err
 		case receipt.State == executor.Accepted:
 			return nil
 		case receipt.State == executor.Failed:
-			return errors.New("codex rejected the message")
+			return errors.New("the session rejected the message")
 		}
 		return executor.ErrDeliveryUnknown
 	}
 }
 
-// codexAwareStop stops a Codex key through its runtime, which proves its work
-// stopped first. Nil stays nil: a panel that stops no sessions stops none.
-func codexAwareStop(stateDir string, claude func(ctx context.Context, short string) error) func(ctx context.Context, short string) error {
-	if claude == nil {
+// liveRows is a non-Claude executor's live sessions as rows, for a list that
+// must see every running session (a cleanup, an ending terminal).
+func liveRows(ctx context.Context, a executor.Adapter) []daemon.Session {
+	if a.List == nil {
 		return nil
 	}
-	return func(ctx context.Context, short string) error {
-		if isCodexKey(short) {
-			return codexCall(ctx, stateDir, short, "stop", nil, nil)
+	sessions, _ := a.List(ctx)
+	var out []daemon.Session
+	for _, s := range sessions {
+		if row := sessionRow(s); row.lifecycle == state.LifecycleLive {
+			out = append(out, row.session)
 		}
-		return claude(ctx, short)
 	}
+	return out
 }
 
-// codexResume brings back a Codex key's runtime; its thread is resumed.
-func codexResume(o runOpts, cfg config.Config, key string) error {
-	if !codexAllowed(o, cfg) {
-		return fmt.Errorf("%w: Codex is not enabled for this panel", server.ErrSessionNotResumable)
+// sessionRow shows an executor session in the panel's list with only what
+// it observed: a question counts as waiting, an unknown state as unknown.
+func sessionRow(s executor.Session) listedSession {
+	row := daemon.Session{Short: string(s.Key), PID: s.PID, CWD: s.CWD, Name: s.Name}
+	if s.Lifecycle != state.LifecycleLive {
+		return listedSession{session: row, lifecycle: s.Lifecycle, lastState: s.Activity}
 	}
-	board := cfg.BoardPath
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	stateDir := codexStateDir(o.configPath)
-	spec, err := codexStartSpec(o, stateDir, board)
-	if err != nil {
-		return err
+	row.State = map[string]string{"working": "working", "idle": "idle", "error": "blocked"}[s.Activity]
+	switch s.NeedsHuman {
+	case executor.Yes:
+		row.Needs = new(s.Reason)
+	case executor.No:
+		row.Needs = new("")
 	}
-	_, err = codexruntime.Resume(ctx, spec, executor.Key(key))
-	if errors.Is(err, executor.ErrNotResumable) {
-		return fmt.Errorf("%w: %w", server.ErrSessionNotResumable, err)
-	}
-	return err
+	return listedSession{session: row, lifecycle: state.LifecycleLive}
 }
 
-// codexListed reports whether a Codex runtime answers for key.
-func codexListed(ctx context.Context, stateDir, key string) bool {
-	_, err := codexruntime.Connect(ctx, stateDir, executor.Key(key))
-	return err == nil
-}
-
-// codexAllowed is whether this panel may start or resume Codex at all.
-func codexAllowed(o runOpts, cfg config.Config) bool {
-	return cfg.Codex.Enabled && (o.standSocket == "" || cfg.Codex.Home != "")
-}
-
-func codexStartSpec(o runOpts, stateDir, board string) (codexruntime.StartSpec, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return codexruntime.StartSpec{}, err
-	}
-	configPath, err := filepath.Abs(o.configPath)
-	if err != nil {
-		return codexruntime.StartSpec{}, err
-	}
-	if board, err = filepath.Abs(board); err != nil {
-		return codexruntime.StartSpec{}, err
-	}
-	return codexruntime.StartSpec{StateDir: stateDir, Command: []string{exe}, ConfigPath: configPath, Board: board}, nil
-}
-
-// codexRows lists the saved runtimes as panel rows. A record is only what
-// was saved; a runtime is asked for its status, and one that cannot answer
-// is shown as not known rather than idle.
-func codexRows(ctx context.Context, stateDir string) []listedSession {
+// codexSessionRows lists the runtimes kept in stateDir.
+func codexSessionRows(ctx context.Context, stateDir string) []listedSession {
 	if _, err := os.Stat(stateDir); err != nil {
 		return nil
 	}
-	store, err := codexruntime.OpenStore(stateDir)
+	sessions, err := codex.NewAdapter(codex.Runtimes{StateDir: stateDir}).List(ctx)
 	if err != nil {
 		return nil
 	}
-	records, err := store.List()
-	if err != nil {
-		_ = store.Close()
-		return nil
+	rows := make([]listedSession, 0, len(sessions))
+	for _, s := range sessions {
+		rows = append(rows, sessionRow(s))
 	}
-	// Asked in parallel under one deadline: a wedged runtime must not hold
-	// up the snapshot for the rest.
-	askCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	statuses := make([]*codexruntime.Status, len(records))
-	var wg sync.WaitGroup
-	for i, r := range records {
-		if r.Lifecycle != "live" && r.Lifecycle != "starting" && r.Lifecycle != "stopping" {
-			continue
-		}
-		wg.Go(func() {
-			var s codexruntime.Status
-			if codexCall(askCtx, stateDir, string(r.Key), "status", nil, &s) == nil {
-				statuses[i] = &s
-			}
-		})
-	}
-	wg.Wait()
-	rows := make([]listedSession, 0, len(records))
-	for i, r := range records {
-		held := true
-		// A free lock is a runtime that is gone, whatever its record says.
-		// Never probed for a starting record: the lock is free between the
-		// panel's release and the runtime's own take, and probing then would
-		// make the runtime lose its key.
-		if statuses[i] == nil && (r.Lifecycle == "live" || r.Lifecycle == "stopping") {
-			if owner, err := store.Acquire(r.Key); err == nil {
-				held = false
-				_ = owner.Close()
-			}
-		}
-		rows = append(rows, codexRow(r, statuses[i], held))
-	}
-	_ = store.Close()
 	return rows
 }
 
-func codexRow(r codexruntime.Record, status *codexruntime.Status, held bool) listedSession {
-	s := daemon.Session{Short: string(r.Key), PID: r.PID, CWD: r.CWD, Name: strings.TrimSuffix(filepath.Base(r.Card), ".md")}
-	switch r.Lifecycle {
-	case "live", "starting", "stopping":
-		if !held {
-			return listedSession{session: s, lifecycle: state.LifecycleStopped, lastState: "unknown"}
+// resumeVia brings a session back through its executor, as the resume route
+// expects: a session that cannot come back is ErrSessionNotResumable.
+func resumeVia(r *executor.Registry) func(string) error {
+	return func(id string) error {
+		a, key, err := adapterFor(r, id)
+		if err != nil || a.Resume == nil {
+			return fmt.Errorf("%w: no executor here resumes %s", server.ErrSessionNotResumable, id)
 		}
-		if status != nil {
-			s.State = map[string]string{"working": "working", "idle": "idle", "error": "blocked"}[status.Activity]
-			switch status.NeedsHuman {
-			case executor.Yes:
-				s.Needs = new(codexNeeds)
-			case executor.No:
-				s.Needs = new("")
-			}
+		_, err = a.Resume(context.Background(), key)
+		if errors.Is(err, executor.ErrNotResumable) && !errors.Is(err, server.ErrSessionNotResumable) {
+			return fmt.Errorf("%w: %w", server.ErrSessionNotResumable, err)
 		}
-		return listedSession{session: s, lifecycle: state.LifecycleLive}
-	case "stopped":
-		return listedSession{session: s, lifecycle: state.LifecycleStopped, lastState: "idle"}
-	case "dead":
-		return listedSession{session: s, lifecycle: state.LifecycleDead}
-	}
-	// The TUI ended while Codex may still be working: resumable, state unknown.
-	return listedSession{session: s, lifecycle: state.LifecycleStopped, lastState: "unknown"}
-}
-
-// terminalStream is the part of codexruntime.TerminalStream the bridge uses.
-type terminalStream interface {
-	Next(deadline time.Time) (codexruntime.TerminalEvent, error)
-	Input([]byte) error
-	Resize(cols, rows int) error
-	Close() error
-}
-
-// codexTerminal presents a runtime view as the bridge's Terminal. A repaint
-// becomes a terminal reset (ESC c) before the redraw, so the browser's screen
-// starts blank exactly where the runtime's replay does.
-type codexTerminal struct {
-	stream   terminalStream
-	pending  []byte
-	writable atomic.Bool
-}
-
-func (t *codexTerminal) Read(p []byte) (int, error) {
-	for len(t.pending) == 0 {
-		ev, err := t.stream.Next(time.Time{})
-		if err != nil {
-			return 0, err
-		}
-		if ev.Writable != nil {
-			t.writable.Store(*ev.Writable)
-		}
-		if ev.End != "" {
-			return 0, io.EOF
-		}
-		if ev.Reset {
-			t.pending = append(t.pending, "\x1bc"...)
-		}
-		t.pending = append(t.pending, ev.Data...)
-	}
-	n := copy(p, t.pending)
-	t.pending = t.pending[n:]
-	return n, nil
-}
-
-func (t *codexTerminal) Write(p []byte) (int, error) {
-	if err := t.stream.Input(p); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-func (t *codexTerminal) Resize(_ context.Context, cols, rows int) error {
-	return t.stream.Resize(cols, rows)
-}
-func (t *codexTerminal) Writable() bool { return t.writable.Load() }
-func (t *codexTerminal) Close() error   { return t.stream.Close() }
-
-// codexAttach opens a view; the bridge's Close, not its open deadline, ends it.
-func codexAttach(ctx context.Context, stateDir, key string, cols, rows int) (*codexTerminal, error) {
-	client, err := codexruntime.Connect(ctx, stateDir, executor.Key(key))
-	if err != nil {
-		return nil, err
-	}
-	stream, err := client.AttachTerminal(context.WithoutCancel(ctx), nil)
-	if err != nil {
-		return nil, err
-	}
-	t := &codexTerminal{stream: stream}
-	t.writable.Store(stream.Writable)
-	// The geometry belongs to the lease holder; an observer's is ignored.
-	if stream.Writable {
-		_ = stream.Resize(cols, rows)
-	}
-	return t, nil
-}
-
-// codexCall makes one request to a serving runtime.
-func codexCall(ctx context.Context, stateDir, key, method string, params, result any) error {
-	client, err := codexruntime.Connect(ctx, stateDir, executor.Key(key))
-	if err != nil {
 		return err
 	}
-	return client.Call(ctx, method, params, result)
 }

@@ -27,7 +27,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kroticw/fleetdeck/internal/codexruntime"
+	"github.com/kroticw/fleetdeck/internal/orchestrator"
+
 	"github.com/kroticw/fleetdeck/internal/executor"
 
 	"github.com/kroticw/fleetdeck/internal/board"
@@ -610,7 +611,7 @@ func serve(parent context.Context, o runOpts) error {
 	// Stopped with the claude sessions are started with; nil on a stand given
 	// none, and then a fleet with running sessions is not deleted.
 	home, _ := os.UserHomeDir()
-	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg.Agent), home)
+	d.DeleteFleet = fleetDeleter(o.configPath, live, p.snapshot, p.refresh, sessionStopper(o, cfg), home)
 	// Every fleet's board, docs, pin and wizard, the first fleet's also in
 	// d's own fields, so a request naming no fleet is served as before. Made
 	// before anything below is started, so there is nothing to stop if it fails.
@@ -1079,6 +1080,20 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		listed:   func(lctx context.Context) ([]daemon.Session, error) { return dc.ListSessions(lctx) },
 		resume:   func(rctx context.Context, spec daemon.ResumeSpec) error { return dc.Resume(rctx, spec) },
 	})
+	// Every session operation below goes through the session's executor.
+	reg := executors(o, cfg, orchestrator.Claude{
+		List:   dc.ListSessions,
+		Resume: claudeResume,
+		// Returned through a local: a nil *daemon.Attachment put straight
+		// into the interface would be a non-nil Terminal holding nothing.
+		Attach: func(actx context.Context, session string, cols, rows int) (executor.Terminal, error) {
+			a, err := dc.Attach(actx, session, cols, rows)
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
+	})
 	return server.Deps{
 		Snapshot: p.snapshot,
 		// Resuming reads the job store and the transcripts on every press
@@ -1086,47 +1101,52 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		// was drawn from a reading that may be hours old, and a working
 		// directory deleted since then is exactly the case this must not
 		// dispatch into. See resume.go.
-		ResumeSession: func(id string) error {
-			if isCodexKey(id) {
-				return codexResume(o, collector.Config(), id)
-			}
-			return claudeResume(id)
-		},
+		ResumeSession: resumeVia(reg),
 		// Returned through a local, not directly: a nil *daemon.Attachment put straight
 		// into the interface would be a non-nil Terminal holding nothing.
 		Attach: func(actx context.Context, session string, cols, rows int) (server.Terminal, error) {
-			if isCodexKey(session) {
-				t, err := codexAttach(actx, codexStateDir(configPath), session, cols, rows)
-				if err != nil {
-					return nil, err
-				}
-				return t, nil
-			}
-			a, err := dc.Attach(actx, session, cols, rows)
+			a, key, err := reg.ForKey(session)
 			if err != nil {
 				return nil, err
 			}
-			return a, nil
-		},
-		SessionRequests: func(rctx context.Context, session string) ([]codexruntime.PendingRequest, error) {
-			if !isCodexKey(session) {
+			if a.OpenTerminal == nil {
 				return nil, executor.ErrUnsupported
 			}
-			var list []codexruntime.PendingRequest
-			err := codexCall(rctx, codexStateDir(configPath), session, "requests", nil, &list)
-			return list, err
+			t, err := a.OpenTerminal(actx, key, cols, rows)
+			if err != nil {
+				return nil, err
+			}
+			return t, nil
 		},
-		RespondRequest: func(rctx context.Context, session string, answer codexruntime.Answer) error {
-			if !isCodexKey(session) {
+		SessionRequests: func(rctx context.Context, session string) ([]executor.PendingRequest, error) {
+			a, key, err := reg.ForKey(session)
+			if err != nil {
+				return nil, err
+			}
+			if a.Requests == nil {
+				return nil, executor.ErrUnsupported
+			}
+			return a.Requests(rctx, key)
+		},
+		RespondRequest: func(rctx context.Context, session string, answer executor.Answer) error {
+			a, key, err := reg.ForKey(session)
+			if err != nil {
+				return err
+			}
+			if a.Respond == nil {
 				return executor.ErrUnsupported
 			}
-			return codexCall(rctx, codexStateDir(configPath), session, "requests.respond", answer, nil)
+			return a.Respond(rctx, key, answer)
 		},
 		// Asked of the daemon itself, never of p.snapshot: the bridge asks the moment
 		// a stream ends, and the snapshot can be a whole poll behind that moment.
 		SessionListed: func(lctx context.Context, session string) (bool, error) {
-			if isCodexKey(session) {
-				return codexListed(lctx, codexStateDir(configPath), session), nil
+			if !isClaude(session) {
+				a, _, err := reg.ForKey(session)
+				if err != nil {
+					return false, err
+				}
+				return listedAlive(liveRows(lctx, a), session), nil
 			}
 			sessions, err := dc.ListSessions(lctx)
 			if err != nil {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/executor"
-	"github.com/kroticw/fleetdeck/internal/state"
 
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -36,9 +35,9 @@ type cleanupDeps struct {
 	list func(ctx context.Context) ([]daemon.Session, error)
 	stop func(ctx context.Context, short string) error
 	now  func() time.Time
-	// codexWords asks a Codex runtime for its final answer; nil on a panel
-	// without Codex.
-	codexWords func(ctx context.Context, key string) (executor.Said, error)
+	// words asks a session's executor for its final answer, for sessions
+	// that are not Claude's (whose words are read off its transcript here).
+	words func(ctx context.Context, key string) (executor.Said, error)
 }
 
 // fleetCleaner is how a fleet tidies away the session behind a card the
@@ -47,44 +46,38 @@ type cleanupDeps struct {
 // out, and a panel that stops no sessions (sessionStopper) has nothing to put
 // it out with. Nil leaves a card moved into done with its session running.
 func fleetCleaner(o runOpts, cfg config.Config, boardDir string, dc *daemon.Client, projects string) *orchestrator.Cleaner {
-	stop := sessionStopper(o, cfg.Agent)
+	stop := sessionStopper(o, cfg)
 	if boardDir == "" || stop == nil {
 		return nil
 	}
-	stateDir := codexStateDir(o.configPath)
+	reg := executors(o, cfg, orchestrator.Claude{})
 	return newCleaner(cleanupDeps{
 		jobStore: jobStoreDir,
 		projects: projects,
 		board:    boardDir,
-		// Codex sessions are not in Claude's list; a cleanup must see them
-		// running to put them out.
+		// Every running session counts, whichever executor runs it: a
+		// cleanup must see one running to put it out.
 		list: func(ctx context.Context) ([]daemon.Session, error) {
 			sessions, err := dc.ListSessions(ctx)
 			if err != nil {
 				return nil, err
 			}
-			for _, row := range codexRows(ctx, stateDir) {
-				if row.lifecycle == state.LifecycleLive {
-					sessions = append(sessions, row.session)
-				}
+			if a, err := reg.ForID(executor.Codex); err == nil {
+				sessions = append(sessions, liveRows(ctx, a)...)
 			}
 			return sessions, nil
 		},
 		stop: stop,
 		now:  time.Now,
-		codexWords: func(ctx context.Context, key string) (executor.Said, error) {
-			var said executor.Said
-			err := codexCall(ctx, stateDir, key, "lastWords", nil, &said)
-			if err == nil {
-				return said, nil
+		words: func(ctx context.Context, key string) (executor.Said, error) {
+			a, k, err := reg.ForKey(key)
+			if err != nil {
+				return executor.Said{}, err
 			}
-			// The history outlives the runtime: one that ended is brought
-			// back to read it, and the cleanup then stops it as usual.
-			if rerr := codexResume(o, cfg, key); rerr != nil {
-				return said, fmt.Errorf("%w; bringing it back to read its history failed: %w", err, rerr)
+			if a.LastWords == nil {
+				return executor.Said{}, fmt.Errorf("%w: this panel cannot read what %s said", executor.ErrUnsupported, key)
 			}
-			err = codexCall(ctx, stateDir, key, "lastWords", nil, &said)
-			return said, err
+			return a.LastWords(ctx, k)
 		},
 	})
 }
@@ -96,8 +89,8 @@ func fleetCleaner(o runOpts, cfg config.Config, boardDir string, dc *daemon.Clie
 func newCleaner(d cleanupDeps) *orchestrator.Cleaner {
 	return &orchestrator.Cleaner{
 		Unpin: func(short string) error {
-			// Codex sessions are never pinned in Claude's job store.
-			if isCodexKey(short) {
+			// Only Claude's sessions are pinned, in its job store.
+			if !isClaude(short) {
 				return nil
 			}
 			return jobs.Unpin(d.jobStore, short)
@@ -116,8 +109,8 @@ func newCleaner(d cleanupDeps) *orchestrator.Cleaner {
 // does not know the session, a transcript that cannot be found and a transcript
 // with nothing in it are each reported as themselves.
 func (d cleanupDeps) said(short string) (orchestrator.Said, error) {
-	if isCodexKey(short) {
-		return d.codexSaid(short)
+	if !isClaude(short) {
+		return d.executorSaid(short)
 	}
 	rec, err := jobRecord(d.jobStore, short)
 	if err != nil {
@@ -136,15 +129,15 @@ func (d cleanupDeps) said(short string) (orchestrator.Said, error) {
 	return orchestrator.Said{Words: words, Transcript: path, Name: rec.Name}, nil
 }
 
-// codexSaid is the runtime's final answer. A finished turn with none is
+// executorSaid is the executor's final answer. A finished turn with none is
 // archived as no words; failing to read is an error that keeps the session.
-func (d cleanupDeps) codexSaid(key string) (orchestrator.Said, error) {
-	if d.codexWords == nil {
-		return orchestrator.Said{}, fmt.Errorf("this panel has no Codex, so it cannot read what %s said", key)
+func (d cleanupDeps) executorSaid(key string) (orchestrator.Said, error) {
+	if d.words == nil {
+		return orchestrator.Said{}, fmt.Errorf("this panel cannot read what %s said", key)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	said, err := d.codexWords(ctx, key)
+	said, err := d.words(ctx, key)
 	if err != nil {
 		return orchestrator.Said{}, fmt.Errorf("read what %s said: %w", key, err)
 	}

@@ -64,7 +64,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			// The ordinary send, not the first-message one: what goes through
 			// here is addressed to a session that has been working for a while
 			// (server.Deps.SendToSession).
-			SendToSession: codexAwareSend(codexStateDir(o.configPath), dc.SendText),
+			SendToSession: sendVia(executors(o, fleetConfig(collector.Config(), f), orchestrator.Claude{Send: dc.SendText})),
 			ReviewWorkdir: reviewWorkdir(jobStoreDir),
 		}
 		// Left nil without a board, as deps leaves the first fleet's: the route
@@ -80,7 +80,7 @@ func newFleets(o runOpts, dc *daemon.Client, collector *Collector) func(name str
 			}
 			// Left nil where the panel starts no sessions (a stand given no
 			// claude): the snapshot then tells the page not to offer a start.
-			if d := dispatcherOf(f); d.Start != nil || d.Codex != nil {
+			if d := dispatcherOf(f); startsAny(d.Executors) {
 				fd.StartWork = d.Dispatch
 			}
 			// Made per request rather than kept: a cleaner holds nothing

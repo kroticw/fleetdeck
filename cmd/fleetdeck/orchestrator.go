@@ -45,13 +45,14 @@ func appointer(o runOpts, cfg config.Config, dc *daemon.Client, collector *Colle
 func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client, workers func() config.Workers) *orchestrator.Dispatcher {
 	home, _ := os.UserHomeDir()
 	return &orchestrator.Dispatcher{
-		Start:     workerStarter(o, cfg.Agent, workers),
-		List:      dc.ListSessions,
-		Send:      dc.SendText,
-		SendFirst: dc.SendFirst,
-		SetField:  setCardField,
-		Home:      home,
-		Codex:     codexSessions(o, cfg),
+		Executors: executors(o, cfg, orchestrator.Claude{
+			Start:     workerStarter(o, cfg.Agent, workers),
+			List:      dc.ListSessions,
+			Send:      dc.SendText,
+			SendFirst: dc.SendFirst,
+		}),
+		SetField: setCardField,
+		Home:     home,
 	}
 }
 
@@ -144,8 +145,12 @@ const stopWait = 10 * time.Second
 // A stand given no claude of its own stops nothing, for the reason it starts
 // nothing: the claude on PATH reaches the operator's real daemon, and a
 // stand's done card would put out a session of the operator's own.
-func sessionStopper(o runOpts, agent config.AgentConfig) func(ctx context.Context, short string) error {
-	return codexAwareStop(codexStateDir(o.configPath), claudeStopper(o, agent))
+func sessionStopper(o runOpts, cfg config.Config) func(ctx context.Context, short string) error {
+	claude := claudeStopper(o, cfg.Agent)
+	if claude == nil {
+		return nil
+	}
+	return stopVia(executors(o, cfg, orchestrator.Claude{Stop: claude}))
 }
 
 func claudeStopper(o runOpts, agent config.AgentConfig) func(ctx context.Context, short string) error {

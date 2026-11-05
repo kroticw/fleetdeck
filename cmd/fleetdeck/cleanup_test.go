@@ -154,7 +154,7 @@ func TestAStandStopsSessionsOnlyWithItsOwnClaude(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(onPath))
 	standBin, recorded := claudeThatRecordsArgs(t, "")
 
-	stop := sessionStopper(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.AgentConfig{})
+	stop := sessionStopper(runOpts{standSocket: "/tmp/no.sock", standClaude: standBin}, config.Config{})
 	if stop == nil {
 		t.Fatal("a stand with its own claude cannot stop sessions")
 	}
@@ -178,7 +178,7 @@ func TestAStandWithoutItsOwnClaudeStopsNoSession(t *testing.T) {
 	onPath, ranOnPath := claudeThatRecords(t, "0a1b2c3d")
 	t.Setenv("PATH", filepath.Dir(onPath))
 	o := runOpts{standSocket: "/tmp/no.sock"}
-	if stop := sessionStopper(o, config.AgentConfig{}); stop != nil {
+	if stop := sessionStopper(o, config.Config{}); stop != nil {
 		_ = stop(context.Background(), "abc12345")
 		t.Error("a stand given no claude of its own can stop sessions")
 	}
@@ -203,7 +203,7 @@ func TestAFleetWithoutABoardHasNoCleanup(t *testing.T) {
 // is stopped through it as written, flags and all.
 func TestAConfiguredCommandStopsSessionsAsWritten(t *testing.T) {
 	bin, recorded := claudeThatRecordsArgs(t, "")
-	if err := sessionStopper(runOpts{}, config.AgentConfig{Command: []string{bin, "--flag"}})(context.Background(), "abc12345"); err != nil {
+	if err := sessionStopper(runOpts{}, config.Config{Agent: config.AgentConfig{Command: []string{bin, "--flag"}}})(context.Background(), "abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	args, _ := os.ReadFile(recorded)
@@ -219,7 +219,7 @@ func TestAFailedStopSaysWhatClaudeSaid(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'no session abc12345' >&2\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	err := sessionStopper(runOpts{}, config.AgentConfig{Command: []string{bin}})(context.Background(), "abc12345")
+	err := sessionStopper(runOpts{}, config.Config{Agent: config.AgentConfig{Command: []string{bin}}})(context.Background(), "abc12345")
 	if err == nil || !strings.Contains(err.Error(), "no session abc12345") {
 		t.Errorf("err = %v, want claude's own words", err)
 	}
@@ -231,7 +231,7 @@ func TestTheCleanupOfACodexCardArchivesItsLastWordsThenStopsIt(t *testing.T) {
 	key := "codex:" + runtimeTestThread
 	s := standFor(t, "")
 	s.deps.list = func(context.Context) ([]daemon.Session, error) { return []daemon.Session{{Short: key}}, nil }
-	s.deps.codexWords = func(_ context.Context, k string) (executor.Said, error) {
+	s.deps.words = func(_ context.Context, k string) (executor.Said, error) {
 		if k != key {
 			t.Fatalf("words asked of %s", k)
 		}
@@ -250,7 +250,7 @@ func TestACodexCardWhoseWordsCannotBeReadKeepsRunning(t *testing.T) {
 	key := "codex:" + runtimeTestThread
 	s := standFor(t, "")
 	s.deps.list = func(context.Context) ([]daemon.Session, error) { return []daemon.Session{{Short: key}}, nil }
-	s.deps.codexWords = func(context.Context, string) (executor.Said, error) {
+	s.deps.words = func(context.Context, string) (executor.Said, error) {
 		return executor.Said{}, errors.New("runtime unavailable")
 	}
 	res, _ := newCleaner(s.deps).Cleanup(context.Background(), orchestrator.Accepted{Session: key, Card: s.card})

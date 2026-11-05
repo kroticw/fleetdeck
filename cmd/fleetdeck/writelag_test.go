@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
+
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/daemon"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
@@ -130,7 +132,7 @@ func TestADispatchDeliversItsTaskWithoutWaitingForTheCommits(t *testing.T) {
 
 	var mu sync.Mutex
 	var sentAt time.Time
-	d := &orchestrator.Dispatcher{
+	reg, err := executor.NewRegistry(orchestrator.ClaudeAdapter(orchestrator.Claude{
 		Start: func(context.Context, string, string) (string, error) { return "5e55c0de", nil },
 		List: func(context.Context) ([]daemon.Session, error) {
 			mu.Lock()
@@ -143,9 +145,11 @@ func TestADispatchDeliversItsTaskWithoutWaitingForTheCommits(t *testing.T) {
 			sentAt = time.Now()
 			return nil
 		},
-		SetField: setCardField,
-		Home:     t.TempDir(),
+	}))
+	if err != nil {
+		t.Fatal(err)
 	}
+	d := &orchestrator.Dispatcher{Executors: reg, SetField: setCardField, Home: t.TempDir()}
 	start := time.Now()
 	res, err := d.Dispatch(context.Background(), orchestrator.Work{Card: card, Lang: "en"})
 	if err != nil || !res.OK {
