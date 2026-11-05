@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/codex"
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -84,5 +85,26 @@ func TestSessionKeysReachOnlyTheirOwnExecutor(t *testing.T) {
 	}
 	if startsAny(executors(o, config.Config{}, orchestrator.Claude{})) {
 		t.Fatal("a panel that starts nothing offered a start")
+	}
+}
+
+func TestCodexRowsCarryContextAndTheNewestAccountLimits(t *testing.T) {
+	key := executor.Key("codex:" + runtimeTestThread)
+	old, newer := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC), time.Date(2026, 11, 5, 11, 0, 0, 0, time.UTC)
+	limits := func(at time.Time, five float64) *executor.Metric[[]executor.Limit] {
+		return &executor.Metric[[]executor.Limit]{ObservedAt: at, Value: []executor.Limit{{Name: "5h", UsedPercent: five}, {Name: "7d", UsedPercent: 51}}}
+	}
+	a := sessionRow(executor.Session{Key: key, Lifecycle: "live", Activity: "working", Limits: limits(old, 10),
+		Context: &executor.Metric[executor.ContextUse]{Value: executor.ContextUse{Tokens: 51200, Window: 256000}}})
+	b := sessionRow(executor.Session{Key: "codex:02a1a6d4-90a4-70f3-9130-a59ec873d0ba", Lifecycle: "live", Limits: limits(newer, 20)})
+	if a.context == nil || a.context.Tokens != 51200 || a.context.Window != 256000 || a.context.Estimated {
+		t.Fatalf("context %+v", a.context)
+	}
+	got := accountLimits([]listedSession{a, b, {lifecycle: state.LifecycleLive}})
+	if got == nil || got.FiveHour.Utilization != 20 || got.SevenDay.Utilization != 51 || !got.FetchedAt.Equal(newer) {
+		t.Fatalf("limits %+v", got)
+	}
+	if accountLimits([]listedSession{{lifecycle: state.LifecycleLive}}) != nil {
+		t.Fatal("no reported limits must read as none")
 	}
 }

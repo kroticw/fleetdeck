@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/transcript"
+	"github.com/kroticw/fleetdeck/internal/usage"
+
 	"github.com/kroticw/fleetdeck/internal/codex"
 	"github.com/kroticw/fleetdeck/internal/codexruntime"
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -155,6 +158,10 @@ func sessionRow(s executor.Session) listedSession {
 	if s.Lifecycle != state.LifecycleLive {
 		return listedSession{session: row, lifecycle: s.Lifecycle, lastState: s.Activity}
 	}
+	listed := listedSession{session: row, lifecycle: state.LifecycleLive, limits: s.Limits}
+	if c := s.Context; c != nil {
+		listed.context = &transcript.Usage{Tokens: int(c.Value.Tokens), Window: int(c.Value.Window)}
+	}
 	row.State = map[string]string{"working": "working", "idle": "idle", "error": "blocked"}[s.Activity]
 	switch s.NeedsHuman {
 	case executor.Yes:
@@ -162,7 +169,41 @@ func sessionRow(s executor.Session) listedSession {
 	case executor.No:
 		row.Needs = new("")
 	}
-	return listedSession{session: row, lifecycle: state.LifecycleLive}
+	listed.session = row
+	return listed
+}
+
+// accountLimits is the newest Codex account limits any live session
+// reported, as the panel's limit gauges read them. They are Codex's own and
+// never merged into Claude's; windows of other lengths are not shown.
+func accountLimits(rows []listedSession) *usage.Limits {
+	var newest *executor.Metric[[]executor.Limit]
+	for _, r := range rows {
+		if r.limits != nil && (newest == nil || r.limits.ObservedAt.After(newest.ObservedAt)) {
+			newest = r.limits
+		}
+	}
+	if newest == nil {
+		return nil
+	}
+	out := &usage.Limits{FetchedAt: newest.ObservedAt}
+	found := false
+	for _, l := range newest.Value {
+		w := usage.Window{Utilization: l.UsedPercent}
+		if l.ResetsAt != nil {
+			w.ResetsAt = *l.ResetsAt
+		}
+		switch l.Name {
+		case "5h":
+			out.FiveHour, found = w, true
+		case "7d":
+			out.SevenDay, found = w, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return out
 }
 
 // codexSessionRows lists the runtimes kept in stateDir.

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
+
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -623,7 +625,11 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	for i := range snap.Sessions {
 		snap.Sessions[i].Lifecycle = entries[i].lifecycle
 		snap.Sessions[i].LastState = entries[i].lastState
+		if entries[i].context != nil {
+			snap.Sessions[i].Context = entries[i].context
+		}
 	}
+	snap.CodexLimits = accountLimits(entries)
 	snap.OrphanCards = state.OrphanCards(snap.Sessions, snap.Boards[0].Cards)
 	snap.StoppedCards = state.StoppedCards(snap.Sessions, snap.Boards[0].Cards)
 	c.pruneContextCache(c.enrich(snap.Sessions, cfg.SessionLabels))
@@ -671,6 +677,10 @@ type listedSession struct {
 	session   daemon.Session
 	lifecycle string
 	lastState string
+	// context and limits are what a non-Claude executor reported; Claude's
+	// are read from its transcript and statusline instead (enrich).
+	context *transcript.Usage
+	limits  *executor.Metric[[]executor.Limit]
 }
 
 // mergeStopped puts the daemon's live sessions and the job store's records

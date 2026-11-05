@@ -72,28 +72,38 @@ type Capabilities struct {
 
 // Session is an executor observation. NativeID is never used to route a request.
 type Session struct {
-	Key          Key              `json:"key"`
-	Executor     ID               `json:"executor"`
-	NativeID     string           `json:"nativeId"`
-	Name         string           `json:"name"`
-	CWD          string           `json:"cwd"`
-	Role         string           `json:"role,omitempty"`
-	PID          int              `json:"pid,omitempty"`
-	Lifecycle    string           `json:"lifecycle"`
-	Activity     string           `json:"activity"`
-	NeedsHuman   Verdict          `json:"needsHuman"`
-	Reason       string           `json:"reason,omitempty"`
-	ObservedAt   time.Time        `json:"observedAt"`
-	Stale        bool             `json:"stale"`
-	Capabilities Capabilities     `json:"capabilities"`
-	Model        *Metric[string]  `json:"model,omitempty"`
-	Context      *Metric[float64] `json:"context,omitempty"`
-	Cost         *Metric[float64] `json:"cost,omitempty"`
-	Limits       *Metric[[]Limit] `json:"limits,omitempty"`
+	Key          Key                 `json:"key"`
+	Executor     ID                  `json:"executor"`
+	NativeID     string              `json:"nativeId"`
+	Name         string              `json:"name"`
+	CWD          string              `json:"cwd"`
+	Role         string              `json:"role,omitempty"`
+	PID          int                 `json:"pid,omitempty"`
+	Lifecycle    string              `json:"lifecycle"`
+	Activity     string              `json:"activity"`
+	NeedsHuman   Verdict             `json:"needsHuman"`
+	Reason       string              `json:"reason,omitempty"`
+	ObservedAt   time.Time           `json:"observedAt"`
+	Stale        bool                `json:"stale"`
+	Capabilities Capabilities        `json:"capabilities"`
+	Model        *Metric[string]     `json:"model,omitempty"`
+	Context      *Metric[ContextUse] `json:"context,omitempty"`
+	Cost         *Metric[float64]    `json:"cost,omitempty"`
+	Limits       *Metric[[]Limit]    `json:"limits,omitempty"`
 }
 
+// ContextUse is the context a session's last turn filled against its
+// model's window, both in tokens.
+type ContextUse struct {
+	Tokens int64 `json:"tokens"`
+	Window int64 `json:"window"`
+}
+
+// Limit is one rate-limit window of the account a session runs under. Name
+// is the window's length ("5h", "7d") when it has a known one.
 type Limit struct {
 	Name        string     `json:"name"`
+	Minutes     int64      `json:"minutes,omitempty"`
 	UsedPercent float64    `json:"usedPercent"`
 	ResetsAt    *time.Time `json:"resetsAt,omitempty"`
 }
