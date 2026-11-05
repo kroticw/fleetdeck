@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/codex"
 	"github.com/kroticw/fleetdeck/internal/codexruntime"
@@ -61,10 +63,13 @@ func codexAdapter(o runOpts, cfg config.Config) (executor.Adapter, error) {
 // Codex key never reaches Claude, nor the other way round.
 func executors(o runOpts, cfg config.Config, claude orchestrator.Claude) *executor.Registry {
 	adapters := []executor.Adapter{orchestrator.ClaudeAdapter(claude)}
-	if codexAllowed(o, cfg) {
-		if a, err := codexAdapter(o, cfg); err == nil {
-			adapters = append(adapters, a)
+	if a, err := codexAdapter(o, cfg); err == nil {
+		// Runtimes already running stay reachable to stop and read, whatever
+		// the configuration says now; only starting one needs Codex allowed.
+		if !codexAllowed(o, cfg) {
+			a.Start, a.Resume = nil, nil
 		}
+		adapters = append(adapters, a)
 	}
 	r, err := executor.NewRegistry(adapters...)
 	if err != nil {
@@ -74,16 +79,9 @@ func executors(o runOpts, cfg config.Config, claude orchestrator.Claude) *execut
 	return r
 }
 
-// isClaude reports whether a session ID names a Claude session.
-func isClaude(id string) bool {
-	executorID, _, err := executor.ParseKey(id)
-	return err == nil && executorID == executor.Claude
-}
-
-// adapterFor is the adapter and canonical key for a session ID.
-func adapterFor(r *executor.Registry, id string) (executor.Adapter, executor.Key, error) {
-	return r.ForKey(id)
-}
+// isClaude reports whether a session ID is Claude's: every ID that is not a
+// Codex key, as it always was.
+func isClaude(id string) bool { return !strings.HasPrefix(id, "codex:") }
 
 // startsAny reports whether some executor here can start a session.
 func startsAny(r *executor.Registry) bool {
@@ -99,7 +97,7 @@ func startsAny(r *executor.Registry) bool {
 // work stopped first.
 func stopVia(r *executor.Registry) func(ctx context.Context, short string) error {
 	return func(ctx context.Context, short string) error {
-		a, key, err := adapterFor(r, short)
+		a, key, err := r.ForKey(short)
 		if err != nil {
 			return err
 		}
@@ -114,7 +112,7 @@ func stopVia(r *executor.Registry) func(ctx context.Context, short string) error
 // fresh operation ID; an unconfirmed delivery is an error, never a resend.
 func sendVia(r *executor.Registry) func(ctx context.Context, short, text string) error {
 	return func(ctx context.Context, short, text string) error {
-		a, key, err := adapterFor(r, short)
+		a, key, err := r.ForKey(short)
 		if err != nil {
 			return err
 		}
@@ -187,11 +185,13 @@ func codexSessionRows(ctx context.Context, stateDir string) []listedSession {
 // expects: a session that cannot come back is ErrSessionNotResumable.
 func resumeVia(r *executor.Registry) func(string) error {
 	return func(id string) error {
-		a, key, err := adapterFor(r, id)
+		a, key, err := r.ForKey(id)
 		if err != nil || a.Resume == nil {
 			return fmt.Errorf("%w: no executor here resumes %s", server.ErrSessionNotResumable, id)
 		}
-		_, err = a.Resume(context.Background(), key)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_, err = a.Resume(ctx, key)
 		if errors.Is(err, executor.ErrNotResumable) && !errors.Is(err, server.ErrSessionNotResumable) {
 			return fmt.Errorf("%w: %w", server.ErrSessionNotResumable, err)
 		}

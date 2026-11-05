@@ -41,8 +41,8 @@ func TestCodexIsOffOnAStandWithoutItsOwnHome(t *testing.T) {
 	if codexAllowed(stand, cfg) {
 		t.Fatal("a stand would reach the operator's Codex home")
 	}
-	if _, err := executors(stand, cfg, orchestrator.Claude{}).ForID(executor.Codex); !errors.Is(err, executor.ErrUnavailable) {
-		t.Fatalf("a stand without its own home registered Codex: %v", err)
+	if a, err := executors(stand, cfg, orchestrator.Claude{}).ForID(executor.Codex); err != nil || a.Start != nil || a.Resume != nil || a.Stop == nil {
+		t.Fatalf("a stand without its own home may only stop and read Codex: %v", err)
 	}
 	if err := resumeVia(executors(stand, cfg, orchestrator.Claude{}))("codex:" + runtimeTestThread); !errors.Is(err, server.ErrSessionNotResumable) {
 		t.Fatalf("a stand without its own home resumed Codex: %v", err)
