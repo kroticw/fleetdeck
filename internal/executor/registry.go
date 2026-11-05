@@ -18,6 +18,9 @@ type Adapter struct {
 	OpenTerminal func(context.Context, Key, int, int) (Terminal, error)
 	History      func(context.Context, Key) ([]Entry, error)
 	LastWords    func(context.Context, Key) (Said, error)
+	// Requests lists what a session waits on and Respond answers one.
+	Requests func(context.Context, Key) ([]PendingRequest, error)
+	Respond  func(context.Context, Key, Answer) error
 }
 
 // Registry is immutable after construction and safe for concurrent lookups.

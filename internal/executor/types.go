@@ -144,3 +144,36 @@ type Terminal interface {
 	Writable() bool
 	Close() error
 }
+
+// PendingRequest is what a panel may show of a request a session waits on:
+// an approval or a question. Native IDs and raw RPC stay with the executor;
+// Token addresses this one delivery and is invalidated by a replay.
+type PendingRequest struct {
+	Token      string     `json:"token"`
+	Kind       string     `json:"kind"`
+	Method     string     `json:"method"`
+	TurnID     string     `json:"turnId,omitempty"`
+	ItemID     string     `json:"itemId,omitempty"`
+	ApprovalID string     `json:"approvalId,omitempty"`
+	Command    string     `json:"command,omitempty"`
+	CWD        string     `json:"cwd,omitempty"`
+	Reason     string     `json:"reason,omitempty"`
+	GrantRoot  string     `json:"grantRoot,omitempty"`
+	Questions  []Question `json:"questions,omitempty"`
+}
+
+type Question struct {
+	ID       string   `json:"id"`
+	Header   string   `json:"header"`
+	Question string   `json:"question"`
+	Options  []string `json:"options,omitempty"`
+	IsOther  bool     `json:"isOther,omitempty"`
+	IsSecret bool     `json:"isSecret,omitempty"`
+}
+
+// Answer is the panel's explicit reply to one request.
+type Answer struct {
+	Token    string              `json:"token"`
+	Decision string              `json:"decision,omitempty"`
+	Answers  map[string][]string `json:"answers,omitempty"`
+}
