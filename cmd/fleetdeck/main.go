@@ -588,7 +588,8 @@ func serve(parent context.Context, o runOpts) error {
 	// In the background: the window waits seconds for the panel to answer,
 	// and a daemon may take longer to come up.
 	ownedc := make(chan *ownedDaemon, 1)
-	go func() {
+	// o by value: o.live is set below, while this runs.
+	go func(o runOpts) {
 		owned, err := ensureDaemon(ctx, o, cfg.Agent, dc.ListSessions)
 		if err != nil {
 			log.Printf("fleetdeck: no Claude Code daemon: %v", err)
@@ -598,7 +599,7 @@ func serve(parent context.Context, o runOpts) error {
 			log.Print("fleetdeck: started the Claude Code daemon; it stops when this panel does")
 		}
 		ownedc <- owned
-	}()
+	}(o)
 	// A panel being replaced by an update leaves its daemon, and the record
 	// of it, to the panel after it; only a close puts the daemon out.
 	var handedOver atomic.Bool
