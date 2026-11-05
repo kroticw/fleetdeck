@@ -97,9 +97,16 @@ function codexCard(page) {
   const chosen = c.models.find((m) => m.id === current) ?? c.models.find((m) => m.default);
   let modelField;
   if (c.models.length > 0) {
-    const options = c.models.map((m) => ({ value: m.id, label: m.default ? `${m.id} ${t("set_model_codex_default")}` : m.id }));
-    if (current && !c.models.some((m) => m.id === current)) options.unshift({ value: current, label: current });
-    modelField = select("executors.codex.model", options, current || chosen?.id || "");
+    // Unset is an option of its own: Codex then picks the model, and the one
+    // it calls its default is named, not shown as chosen -- marked chosen, it
+    // could not be picked to write it.
+    const fallback = c.models.find((m) => m.default);
+    const options = [
+      { value: "", label: fallback ? `${t("set_model_codex_default")} — ${fallback.id}` : t("set_model_codex_default") },
+      ...c.models.map((m) => ({ value: m.id, label: m.id })),
+    ];
+    if (current && !c.models.some((m) => m.id === current)) options.push({ value: current, label: current });
+    modelField = select("executors.codex.model", options, current);
   } else {
     modelField = text("executors.codex.model", current, { placeholder: t("set_model_codex_default") });
   }

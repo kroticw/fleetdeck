@@ -105,3 +105,11 @@ test("settings: a refused write is said on the page, and nothing is applied", as
   assert.match(r.root.innerHTML, /workers\.effort refused/);
   assert.equal(r.saved.length, 0);
 });
+
+// Unset is not the model Codex calls its default: shown as chosen, that model
+// could not be picked to write it, and sessions would stay on Codex's choice.
+test("settings: an unset Codex model is its own option, and the default model can be picked", () => {
+  const html = settingsHTML(page({ "executors.codex.model": "" }));
+  assert.match(html, /<option value="" selected>по умолчанию Codex — gpt-6\.1-sol<\/option>|<option value="" selected>Codex default — gpt-6\.1-sol<\/option>/);
+  assert.match(html, /<option value="gpt-6\.1-sol">gpt-6\.1-sol<\/option>/);
+});
