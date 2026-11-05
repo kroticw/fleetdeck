@@ -17,6 +17,97 @@ type observer struct {
 	status    string
 	flags     []string
 	at        time.Time
+	context   *ContextUse
+	// primary and secondary are the account's limit windows; limitsAt is
+	// when either was last reported.
+	primary, secondary *LimitWindow
+	limitsAt           time.Time
+}
+
+// ContextUse is the context the thread's last turn filled, as Codex
+// reported it, against the model's window.
+type ContextUse struct {
+	Tokens     int64     `json:"tokens"`
+	Window     int64     `json:"window"`
+	ObservedAt time.Time `json:"observedAt"`
+}
+
+// AccountLimits are the Codex account's rate-limit windows as last reported,
+// in Codex's order (primary first). They are the account's, not the
+// thread's, and never mixed with another provider's.
+type AccountLimits struct {
+	Windows    []LimitWindow `json:"windows"`
+	ObservedAt time.Time     `json:"observedAt"`
+}
+
+type LimitWindow struct {
+	Minutes     int64      `json:"minutes,omitempty"`
+	UsedPercent float64    `json:"usedPercent"`
+	ResetsAt    *time.Time `json:"resetsAt,omitempty"`
+}
+
+type nativeLimitWindow struct {
+	UsedPercent float64 `json:"usedPercent"`
+	Minutes     *int64  `json:"windowDurationMins"`
+	ResetsAt    *int64  `json:"resetsAt"`
+}
+
+type nativeLimits struct {
+	Primary   *nativeLimitWindow `json:"primary"`
+	Secondary *nativeLimitWindow `json:"secondary"`
+}
+
+func (w *nativeLimitWindow) window() *LimitWindow {
+	if w == nil {
+		return nil
+	}
+	out := &LimitWindow{UsedPercent: w.UsedPercent}
+	if w.Minutes != nil {
+		out.Minutes = *w.Minutes
+	}
+	if w.ResetsAt != nil {
+		at := time.Unix(*w.ResetsAt, 0).UTC()
+		out.ResetsAt = &at
+	}
+	return out
+}
+
+// mergeLimits applies a snapshot, which may be sparse: a window it leaves
+// out keeps its last value.
+func (o *observer) mergeLimits(l nativeLimits) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if w := l.Primary.window(); w != nil {
+		o.primary = w
+	}
+	if w := l.Secondary.window(); w != nil {
+		o.secondary = w
+	}
+	if l.Primary != nil || l.Secondary != nil {
+		o.limitsAt = time.Now().UTC()
+	}
+}
+
+// usage is the last observed context and account limits; nil is unmeasured.
+func (o *observer) usage() (*ContextUse, *AccountLimits) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var c *ContextUse
+	if o.context != nil {
+		copied := *o.context
+		c = &copied
+	}
+	var l *AccountLimits
+	for _, w := range []*LimitWindow{o.primary, o.secondary} {
+		if w == nil {
+			continue
+		}
+		if l == nil {
+			l = &AccountLimits{ObservedAt: o.limitsAt}
+		}
+		l.Windows = append(l.Windows, *w)
+	}
+	return c, l
 }
 
 type threadStatus struct {
@@ -27,7 +118,33 @@ type threadStatus struct {
 // handle runs on the native reader; dispatch has already dropped other
 // threads' events, including a subagent's.
 func (o *observer) handle(m nativeMessage) {
-	if m.Method != "thread/status/changed" {
+	switch m.Method {
+	case "thread/tokenUsage/updated":
+		var p struct {
+			TokenUsage struct {
+				Last struct {
+					TotalTokens int64 `json:"totalTokens"`
+				} `json:"last"`
+				Window *int64 `json:"modelContextWindow"`
+			} `json:"tokenUsage"`
+		}
+		// Without the model's window there is no fill to report.
+		if json.Unmarshal(m.Params, &p) == nil && p.TokenUsage.Window != nil && *p.TokenUsage.Window > 0 {
+			o.mu.Lock()
+			o.context = &ContextUse{Tokens: p.TokenUsage.Last.TotalTokens, Window: *p.TokenUsage.Window, ObservedAt: time.Now().UTC()}
+			o.mu.Unlock()
+		}
+		return
+	case "account/rateLimits/updated":
+		var p struct {
+			RateLimits nativeLimits `json:"rateLimits"`
+		}
+		if json.Unmarshal(m.Params, &p) == nil {
+			o.mergeLimits(p.RateLimits)
+		}
+		return
+	case "thread/status/changed":
+	default:
 		return
 	}
 	var p struct {
@@ -101,6 +218,14 @@ func (l *nativeLink) reconcile(ctx context.Context, c *nativeControl) error {
 		return err
 	}
 	l.obs.set(read.Thread.Status)
+	// The account's limits, read once per connection; later changes arrive
+	// as updates. A Codex that cannot say leaves them unmeasured.
+	var limits struct {
+		RateLimits nativeLimits `json:"rateLimits"`
+	}
+	if c.call(ctx, "account/rateLimits/read", map[string]any{"excludeResetCreditDetails": true}, &limits) == nil {
+		l.obs.mergeLimits(limits.RateLimits)
+	}
 	return nil
 }
 
