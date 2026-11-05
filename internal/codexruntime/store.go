@@ -188,17 +188,24 @@ func validRecord(r Record, key executor.Key) error {
 	if r.Version != ProtocolVersion {
 		return ErrIncompatible
 	}
-	if r.Key != key || len(r.Nonce) < 32 || r.PID < 1 || !filepath.IsAbs(r.CWD) || !filepath.IsAbs(r.Board) || !filepath.IsAbs(r.Card) || r.CreatedAt.IsZero() {
-		return ErrInvalidRecord
+	switch {
+	case r.Key != key:
+		return fmt.Errorf("%w: key", ErrInvalidRecord)
+	case len(r.Nonce) < 32 || r.PID < 1 || r.CreatedAt.IsZero():
+		return fmt.Errorf("%w: identity", ErrInvalidRecord)
+	case !filepath.IsAbs(r.CWD):
+		return fmt.Errorf("%w: working directory %q is not absolute", ErrInvalidRecord, r.CWD)
+	case !filepath.IsAbs(r.Board) || !filepath.IsAbs(r.Card):
+		return fmt.Errorf("%w: board %q and card %q must be absolute", ErrInvalidRecord, r.Board, r.Card)
 	}
 	rel, err := filepath.Rel(r.Board, r.Card)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return ErrInvalidRecord
+		return fmt.Errorf("%w: card %q is outside board %q", ErrInvalidRecord, r.Card, r.Board)
 	}
 	switch r.Lifecycle {
 	case "starting", "live", "stopping", "stopped", "dead", "unknown":
 	default:
-		return ErrInvalidRecord
+		return fmt.Errorf("%w: lifecycle %q", ErrInvalidRecord, r.Lifecycle)
 	}
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"syscall"
 	"time"
@@ -43,7 +44,7 @@ func Start(ctx context.Context, spec StartSpec) (executor.Key, Client, error) {
 	}
 	client, err := launch(ctx, spec, key, func(*Record) (Record, error) {
 		return Record{
-			Version: ProtocolVersion, Key: key, CWD: spec.CWD, Board: spec.Board, Card: spec.Card,
+			Version: ProtocolVersion, Key: key, CWD: canonical(spec.CWD), Board: canonical(spec.Board), Card: canonical(spec.Card),
 			ConfigPath: spec.ConfigPath, CreatedAt: time.Now().UTC(),
 		}, nil
 	})
@@ -251,5 +252,22 @@ func acquireSettled(ctx context.Context, store *Store, key executor.Key) (*Owner
 			return nil, err
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+}
+
+// canonical resolves symlinks, so a card and its board are compared, and
+// recorded, by the same path however each was named (/tmp is a link on
+// macOS). A path not there yet is resolved through its nearest existing
+// parent.
+func canonical(path string) string {
+	rest := ""
+	for dir := filepath.Clean(path); ; dir = filepath.Dir(dir) {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		if parent := filepath.Dir(dir); parent == dir {
+			return path
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
 	}
 }

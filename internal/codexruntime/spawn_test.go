@@ -210,3 +210,27 @@ func TestResumeWaitsForAStoppingRuntimeToReleaseItsKey(t *testing.T) {
 		t.Fatalf("resume after stop: %+v %v", again.Record, err)
 	}
 }
+
+// /tmp is a symlink on macOS: a card named by its real path still belongs to
+// a board named through the link.
+func TestStartComparesBoardAndCardByTheirCanonicalPaths(t *testing.T) {
+	spec := spawnFixture(t)
+	resolved, err := filepath.EvalSymlinks(spec.CWD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved == spec.CWD {
+		t.Skip("the fixture directory is not reached through a symlink here")
+	}
+	spec.Card = filepath.Join(resolved, "cards", "T-002-spawn.md")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	key, client, err := Start(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopRuntime(t, spec.StateDir, key)
+	if client.Record.Board != resolved || client.Record.Card != spec.Card {
+		t.Fatalf("record keeps non-canonical paths: %+v", client.Record)
+	}
+}
