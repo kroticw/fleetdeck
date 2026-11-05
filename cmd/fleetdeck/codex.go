@@ -187,7 +187,7 @@ func accountLimits(rows []listedSession) *usage.Limits {
 		return nil
 	}
 	out := &usage.Limits{FetchedAt: newest.ObservedAt}
-	found := false
+	var five, seven bool
 	for _, l := range newest.Value {
 		w := usage.Window{Utilization: l.UsedPercent}
 		if l.ResetsAt != nil {
@@ -195,12 +195,14 @@ func accountLimits(rows []listedSession) *usage.Limits {
 		}
 		switch l.Name {
 		case "5h":
-			out.FiveHour, found = w, true
+			out.FiveHour, five = w, true
 		case "7d":
-			out.SevenDay, found = w, true
+			out.SevenDay, seven = w, true
 		}
 	}
-	if !found {
+	// shortcut: both windows or none, since a missing one would read as 0%;
+	// make the windows optional if Codex starts reporting only one.
+	if !five || !seven {
 		return nil
 	}
 	return out
