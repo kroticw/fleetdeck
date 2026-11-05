@@ -11,6 +11,8 @@ import (
 func TestTheSettingsAreReadAndWritten(t *testing.T) {
 	d, _ := testDeps()
 	var wrote map[string]any
+	changed := 0
+	d.Changed = func() { changed++ }
 	d.Settings = func(context.Context) (any, error) {
 		return map[string]any{"values": map[string]any{"ui.theme": "dark"}}, nil
 	}
@@ -29,6 +31,9 @@ func TestTheSettingsAreReadAndWritten(t *testing.T) {
 	}
 	if rec := do(d, http.MethodPatch, "/api/settings", `{"workers.effort":"huge"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("a refused value: %d %s", rec.Code, rec.Body.String())
+	}
+	if changed != 1 {
+		t.Fatalf("the snapshot was made again %d times, want once, for the one write", changed)
 	}
 	d.WriteSettings = func(context.Context, map[string]any) (any, error) { return nil, errors.New("disk full") }
 	if rec := do(d, http.MethodPatch, "/api/settings", `{"ui.theme":"dark"}`); rec.Code != http.StatusInternalServerError {

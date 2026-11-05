@@ -39,6 +39,11 @@ func (d Deps) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		fail(w, http.StatusInternalServerError, err.Error())
 	default:
+		// The snapshot carries the look; made again now, it does not take
+		// the page back to the old theme until the next poll.
+		if d.Changed != nil {
+			d.Changed()
+		}
 		writeJSON(w, http.StatusOK, page)
 	}
 }
