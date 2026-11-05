@@ -31,9 +31,9 @@ func TestTerminalHelper(_ *testing.T) {
 			_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", 128*1024)+"FLOOD_DONE\n")
 		case "fd":
 			fd, _ := strconv.Atoi(os.Getenv("FLEETDECK_PARENT_FD"))
-			expected, _ := strconv.ParseUint(os.Getenv("FLEETDECK_PARENT_RDEV"), 10, 64)
+			// Rdev's type differs by platform; its decimal form does not.
 			var stat unix.Stat_t
-			if err := unix.Fstat(fd, &stat); err == nil && uint64(stat.Rdev) == expected {
+			if err := unix.Fstat(fd, &stat); err == nil && fmt.Sprint(stat.Rdev) == os.Getenv("FLEETDECK_PARENT_RDEV") {
 				_, _ = fmt.Fprintln(os.Stdout, "FD_LEAK")
 			} else {
 				_, _ = fmt.Fprintln(os.Stdout, "FD_SAFE")
@@ -161,7 +161,7 @@ func TestTerminalMasterIsNotInherited(t *testing.T) {
 		t.Fatal(statErr)
 	}
 	t.Setenv("FLEETDECK_PARENT_FD", strconv.Itoa(parentFD))
-	t.Setenv("FLEETDECK_PARENT_RDEV", strconv.FormatUint(uint64(stat.Rdev), 10))
+	t.Setenv("FLEETDECK_PARENT_RDEV", fmt.Sprint(stat.Rdev))
 	second, err := startTerminal(ctx, []string{binary, "-test.run=^TestTerminalHelper$"}, t.TempDir(), 80, 24, 4096)
 	if err != nil {
 		t.Fatal(err)
