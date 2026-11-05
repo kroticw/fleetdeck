@@ -54,6 +54,11 @@ func (d Deps) handleWS(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, err.Error())
 		return
 	}
+	// An opened fleet is one the operator is about to work in: its
+	// orchestrator, if asleep, is woken for it.
+	if d.FleetOpened != nil {
+		go d.FleetOpened(r.URL.Query().Get(fleetParam))
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})

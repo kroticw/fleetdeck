@@ -239,6 +239,9 @@ type Deps struct {
 	// changed. Nil serves the page as embedded and the snapshot without it.
 	Build *buildinfo.Fingerprint
 
+	// FleetOpened is told the name of a fleet a page opened; nil does nothing.
+	FleetOpened func(name string)
+
 	// SessionRequests lists what a Codex session waits on, and RespondRequest
 	// answers one. Nil on a panel without Codex.
 	SessionRequests func(ctx context.Context, session string) ([]codexruntime.PendingRequest, error)

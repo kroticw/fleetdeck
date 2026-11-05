@@ -573,6 +573,21 @@ func serve(parent context.Context, o runOpts) error {
 	jobStoreDir = jobs.DirIn(claudeDir)
 
 	dc := daemonClient(o.standSocket, claudeDir)
+	// Without a running daemon the panel starts one, and owns it: closing the
+	// panel puts it out. One found running is left alone.
+	// In the background: the window waits seconds for the panel to answer,
+	// and a daemon may take longer to come up.
+	ownedc := make(chan *ownedDaemon, 1)
+	go func() {
+		owned, err := ensureDaemon(ctx, o, cfg.Agent, dc.ListSessions)
+		if err != nil {
+			log.Printf("fleetdeck: no Claude Code daemon: %v", err)
+		} else if owned != nil {
+			log.Print("fleetdeck: started the Claude Code daemon; it stops when this panel does")
+		}
+		ownedc <- owned
+	}()
+	defer func() { (<-ownedc).Stop() }()
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir(claudeDir))
 	collector.codexState = codexStateDir(o.configPath)
@@ -623,6 +638,17 @@ func serve(parent context.Context, o runOpts) error {
 	d.OrchestratorPreview, d.Appoint, d.SetOrchestratorSession, d.StartWork = first.OrchestratorPreview, first.Appoint, first.SetOrchestratorSession, first.StartWork
 	d.SendToSession, d.CleanupSession = first.SendToSession, first.CleanupSession
 	d.ReviewWorkdir = first.ReviewWorkdir
+	waker := &orchestratorWaker{
+		fleets: func() []fleet.Fleet { return collector.Config().FleetList() },
+		listed: d.SessionListed,
+		resume: d.ResumeSession,
+		every:  2 * time.Minute,
+	}
+	d.FleetOpened = func(name string) {
+		if err := waker.wake(context.WithoutCancel(ctx), name); err != nil {
+			log.Printf("fleetdeck: %v", err)
+		}
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
