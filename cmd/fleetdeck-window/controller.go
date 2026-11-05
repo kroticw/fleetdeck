@@ -501,6 +501,8 @@ func (c *controller) capsuleAction(action string) []effect {
 		return c.to("board", map[string]any{"type": "newCard"})
 	case "theme":
 		return c.to("board", map[string]any{"type": "cycleTheme"})
+	case "limits":
+		return c.to("board", map[string]any{"type": "limits"})
 	}
 	return nil
 }

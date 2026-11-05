@@ -498,6 +498,7 @@ func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 		"tab:docs": {"type": "show", "section": "docs"},
 		"newCard":  {"type": "newCard"},
 		"theme":    {"type": "cycleTheme"},
+		"limits":   {"type": "limits"},
 	}
 	for action, msg := range cases {
 		if got := c.capsuleAction(action); !reflect.DeepEqual(got, []effect{sendTo{Surface: "board", Message: msg}}) {

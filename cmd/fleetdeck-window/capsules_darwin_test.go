@@ -547,3 +547,15 @@ func TestTheThemesIconSaysTheModeAndCyclesItAsTheLabelDoes(t *testing.T) {
 		t.Fatalf("presses = %v", p.iconPresses)
 	}
 }
+
+// The limits open their menu from a real button, in both forms of the row, so
+// a keyboard and VoiceOver reach it as a pointer does.
+func TestTheLimitsChevronOpensTheMenuInEitherForm(t *testing.T) {
+	p, want := layoutResults[2], layoutModel.compactLimits()
+	if !reflect.DeepEqual(p.limitsPresses, []string{"limits", "limits"}) {
+		t.Fatalf("presses = %v", p.limitsPresses)
+	}
+	if p.limitsAccessible != want.Tooltip {
+		t.Fatalf("accessibility label %q; want %q", p.limitsAccessible, want.Tooltip)
+	}
+}

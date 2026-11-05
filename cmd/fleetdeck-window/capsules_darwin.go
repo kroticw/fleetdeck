@@ -182,6 +182,8 @@ type capsuleLayoutProbe struct {
 	compactText, compactTooltip                           string
 	themeIconTitle, themeIconTooltip, themeIconAccessible string
 	iconPresses                                           []string
+	limitsAccessible                                      string
+	limitsPresses                                         []string
 }
 
 func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bool) capsuleLayoutProbe {
@@ -222,6 +224,11 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 	out.themeIconAccessible = C.GoString(C.fd_test_theme_icon_accessibility_label())
 	setCapsuleEvents(func(action string) { out.iconPresses = append(out.iconPresses, action) })
 	C.fd_test_press_theme_icon()
+	setCapsuleEvents(nil)
+	out.limitsAccessible = C.GoString(C.fd_test_limits_accessibility_label())
+	setCapsuleEvents(func(action string) { out.limitsPresses = append(out.limitsPresses, action) })
+	C.fd_test_press_limits(0)
+	C.fd_test_press_limits(1)
 	setCapsuleEvents(nil)
 
 	clearCapsules(f.capsules())
