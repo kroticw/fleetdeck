@@ -83,8 +83,10 @@ func TestCapsulesDrawThePagesModel(t *testing.T) {
 	if r.newCardTitle != "+ карточка" || r.themeTitle != "тема: авто" {
 		t.Fatalf("buttons = %q %q", r.newCardTitle, r.themeTitle)
 	}
-	if r.levelValue != 37 {
-		t.Fatalf("level = %v", r.levelValue)
+	// The limit's level is a dot in its colour before its name: a level
+	// indicator drew nothing on glass on the operator's window.
+	if r.dotTitle != "●" || math.Round(r.dotGreen*255) != 0x9e {
+		t.Fatalf("dot = %q, green %v; want ● in #2f9e44", r.dotTitle, r.dotGreen)
 	}
 	if r.capsuleCount != 4 {
 		t.Fatalf("capsules = %d, want tabs, new card, theme, one limit", r.capsuleCount)

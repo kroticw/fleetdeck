@@ -120,7 +120,7 @@ func TestALiveCodexRowFallsBackToItsRollout(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "rollout-2026-11-05T11-45-43-"+thread+".jsonl")
-	line := `{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":171829},"model_context_window":475000}}}` + "\n"
+	line := `{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":171829},"model_context_window":475000},"rate_limits":{"primary":{"used_percent":22.0,"window_minutes":300},"secondary":{"used_percent":19.0,"window_minutes":10080}}},"timestamp":"2026-11-05T11:59:00Z"}` + "\n"
 	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +133,10 @@ func TestALiveCodexRowFallsBackToItsRollout(t *testing.T) {
 	silent := withRollout(listedSession{lifecycle: state.LifecycleLive}, thread, home, now)
 	if silent.context == nil || silent.context.Tokens != 171829 || silent.context.Window != 475000 || silent.silentFor != 90*time.Second {
 		t.Fatalf("row %+v context %+v", silent, silent.context)
+	}
+	if got := accountLimits([]listedSession{silent}); got == nil || got.FiveHour.Utilization != 22 || got.SevenDay.Utilization != 19 ||
+		!got.FetchedAt.Equal(time.Date(2026, 11, 5, 11, 59, 0, 0, time.UTC)) {
+		t.Fatalf("rollout limits %+v", got)
 	}
 	reported := withRollout(listedSession{lifecycle: state.LifecycleLive, context: &transcript.Usage{Tokens: 5, Window: 10}}, thread, home, now)
 	if reported.context.Tokens != 5 {

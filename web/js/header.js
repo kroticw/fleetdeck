@@ -334,34 +334,37 @@ export function limitsOf(snap, nowMs) {
 // limitsButtonHTML is the limits capsule of the header: each provider's
 // worst window, opening the menu below.
 export function limitsButtonHTML(snap, nowMs, open) {
-  const parts = providerLimits(snap, nowMs)
-    .map((p) => `<span class="limits-provider limits-${p.level}"><span class="limits-dot" aria-hidden="true"></span>${escapeHTML(p.name)} ${p.pct === null ? "—" : `${p.pct}%`}</span>`)
+  const providers = providerLimits(snap, nowMs);
+  const said = (p) => `${p.name} ${p.pct === null ? "—" : `${p.pct}%`}`;
+  const parts = providers
+    .map((p) => `<span class="limits-provider"><span class="limits-dot limits-${p.level}" aria-hidden="true"></span>${escapeHTML(said(p))}</span>`)
     .join("");
-  return `<button type="button" class="limits-button" aria-haspopup="true" aria-expanded="${open}" aria-label="${escapeHTML(t("limits_title"))}">${parts}<span class="limits-chevron" aria-hidden="true">▾</span></button>`;
+  const label = `${t("limits_title")}: ${providers.map(said).join(", ")}`;
+  return `<button type="button" class="limits-button" aria-haspopup="true" aria-expanded="${open}" aria-label="${escapeHTML(label)}">${parts}<span class="limits-chevron" aria-hidden="true">▾</span></button>`;
 }
 
 // limitsTableHTML is the menu's table: providers down, windows across, each
 // cell its percentage, meter and reset, then when each provider last spoke.
 export function limitsTableHTML(snap, nowMs) {
   const providers = providerLimits(snap, nowMs);
-  const head = providers[0].windows.map((w) => `<th scope="col">${escapeHTML(w.title)}</th>`).join("");
+  const head = providers[0].windows.map((w) => `<span class="limits-col">${escapeHTML(w.title)}</span>`).join("");
   const rows = providers
     .map((p) => {
       const cells = p.windows
         .map((w) =>
           w.pct === null
-            ? `<td class="limits-cell limits-off">—</td>`
-            : `<td class="limits-cell limits-${w.level}"><span class="limits-pct">${w.pct}%</span><meter min="0" max="100" value="${w.pct}" class="gauge-track"></meter><span class="limits-reset">${escapeHTML(t("resets_in"))} ${escapeHTML(humanDuration(w.resetsAt))}</span></td>`,
+            ? `<div class="limits-cell limits-off">—</div>`
+            : `<div class="limits-cell limits-${w.level}"><span class="limits-pct">${w.pct}%</span><div class="limits-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${w.pct}" aria-label="${escapeHTML(`${p.name} ${w.title}`)}"><span style="width: ${Math.min(100, Math.max(0, w.pct))}%"></span></div><span class="limits-reset">${escapeHTML(t("resets_in"))} ${escapeHTML(humanDuration(w.resetsAt))}</span></div>`,
         )
         .join("");
-      return `<tr><th scope="row">${escapeHTML(p.name)}</th>${cells}</tr>`;
+      return `<span class="limits-name">${escapeHTML(p.name)}</span>${cells}`;
     })
     .join("");
   const ages = providers
     .filter((p) => p.fetchedAt)
     .map((p) => `${escapeHTML(p.name)}: ${escapeHTML(humanAge(p.fetchedAt))}`)
     .join(" · ");
-  return `<table class="limits-table"><thead><tr><td></td>${head}</tr></thead><tbody>${rows}</tbody></table>${ages ? `<div class="limits-ages">${escapeHTML(t("limits_updated"))} ${ages}</div>` : ""}`;
+  return `<div class="limits-grid"><span></span>${head}${rows}</div>${ages ? `<div class="limits-ages">${escapeHTML(t("limits_updated"))} ${ages}</div>` : ""}`;
 }
 
 // The header's parts, in the order the header draws them. A browser tab draws

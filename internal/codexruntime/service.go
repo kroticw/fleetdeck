@@ -188,10 +188,15 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 			pending := 0
 			if nerr == nil {
 				pending = len(native.pending())
-			} else {
-				obs.lost()
 			}
 			activity, needs, at := obs.view(pending)
+			// Without a connection nothing is observed, but the observer is
+			// left alone: a reconnect in progress has already read the
+			// thread, and marking it lost here would keep it unknown until
+			// Codex next says something (maintain marks a real loss).
+			if nerr != nil {
+				activity, needs = "unknown", executor.Unknown
+			}
 			context, limits := obs.usage()
 			return Status{Lifecycle: current.Lifecycle, ThreadID: current.ThreadID, Native: nerr == nil, Terminal: !isDone(term.done), Activity: activity, NeedsHuman: needs, ObservedAt: at, Context: context, Limits: limits}, nil
 		case "terminal.attach":
