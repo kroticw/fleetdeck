@@ -64,6 +64,8 @@ test("limits: the button names both providers and the menu shows every window", 
   assert.match(button, /Claude 51%/);
   assert.match(button, /Codex 64%/);
   assert.match(button, /aria-expanded="false"/);
+  // The label is what VoiceOver reads instead of the content: it carries the values.
+  assert.match(button, /aria-label="[^"]*Claude 51%, Codex 64%"/);
   const table = header.limitsTableHTML(snap, now);
   for (const pct of ["13%", "51%", "20%", "64%"]) assert.match(table, new RegExp(pct));
 });

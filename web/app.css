@@ -5588,76 +5588,106 @@ body.is-resizing {
 .limits-menu,
 .limits-popover {
   z-index: 3;
-  min-width: 18rem;
-  padding: var(--gap);
+  box-sizing: border-box;
+  width: 380px;
+  padding: 14px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: 14px;
   background: var(--surface-raised);
   color: var(--text);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 .limits-menu {
   position: absolute;
   top: calc(100% + var(--gap-sm));
   right: 0;
+  max-width: calc(100vw - 2 * var(--gap));
 }
 
-/* In the window the capsule row is the window's; the popover sits under it,
- * at the right edge where the limits capsule is. */
+/* In the window the capsule row and the side panels are the window's own
+ * views, above the page: the popover sits under the row and inside the
+ * content the panels leave, at its right edge where the limits capsule is. */
 .limits-popover {
   position: fixed;
   top: calc(var(--host-inset-top, 0px) + var(--gap-sm));
-  right: calc(var(--host-inset-right, 0px) + var(--gap));
+  right: calc(var(--host-inset-content-right, 0px) + var(--gap));
+  max-width: calc(100vw - var(--host-inset-left, 0px) - var(--host-inset-content-right, 0px) - 2 * var(--gap));
 }
 
-.limits-table {
-  border-collapse: collapse;
-  width: 100%;
-  font-variant-numeric: tabular-nums;
+.limits-grid {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: center;
 }
 
-.limits-table th,
-.limits-table td {
-  padding: 4px 6px;
-  text-align: left;
-  vertical-align: top;
-}
-
-.limits-table thead th {
+.limits-col {
   color: var(--text-muted);
-  font-weight: 400;
+  font-size: var(--fs-xs);
+}
+
+.limits-name {
+  font-weight: 600;
 }
 
 .limits-cell {
-  min-width: 7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text);
 }
 
-.limits-cell > span {
-  display: block;
+.limits-cell.limits-warm .limits-pct,
+.limits-cell.limits-hot .limits-pct {
+  color: var(--limits-level);
 }
 
-.limits-cell .gauge-track {
-  display: block;
-  width: 100%;
-  height: 6px;
+.limits-cell.limits-off {
+  color: var(--text-faint);
 }
-.limits-cell .gauge-track::-webkit-meter-bar {
+
+.limits-bar {
+  height: 5px;
+  border-radius: 3px;
   background: var(--border-strong);
-  border: none;
-}
-.limits-cell .gauge-track::-webkit-meter-optimum-value,
-.limits-cell .gauge-track::-webkit-meter-suboptimum-value,
-.limits-cell .gauge-track::-webkit-meter-even-less-good-value,
-.limits-cell .gauge-track::-moz-meter-bar {
-  background: currentColor;
+  overflow: hidden;
 }
 
-.limits-reset,
-.limits-ages {
+.limits-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--limits-level);
+}
+
+.limits-cell.limits-cool {
+  --limits-level: var(--ok);
+}
+.limits-cell.limits-warm {
+  --limits-level: var(--attn);
+}
+.limits-cell.limits-hot {
+  --limits-level: var(--danger);
+}
+.limits-cell.limits-stale {
+  --limits-level: var(--text-muted);
+}
+
+.limits-reset {
   color: var(--text-muted);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .limits-ages {
-  margin-top: var(--gap-sm);
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
 }
