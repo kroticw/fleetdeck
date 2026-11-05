@@ -1104,6 +1104,7 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 // is a function internal/server calls and none of them reaches back here.
 func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, o runOpts) server.Deps {
 	configPath := o.configPath
+	settingsOf := &settingsStore{o: o, collector: collector}
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
 	var create func(board.NewCard) (string, error)
@@ -1230,6 +1231,8 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		SetSessionLabel: func(sessionID, label string) error {
 			return setSessionLabel(configPath, collector, sessionID, label)
 		},
+		Settings:      settingsOf.page,
+		WriteSettings: settingsOf.write,
 
 		// Which build this is: stamped on every snapshot, and its web hash put
 		// into the page itself, so a page left open while this binary is

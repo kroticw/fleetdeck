@@ -76,6 +76,15 @@ func scalarFor(v any) (*yaml.Node, error) {
 			return nil, nil
 		}
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(v)}, nil
+	case []string:
+		if len(v) == 0 {
+			return nil, nil
+		}
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
+		for _, item := range v {
+			seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: item})
+		}
+		return seq, nil
 	}
 	return nil, fmt.Errorf("a %T is not a setting's value", v)
 }
