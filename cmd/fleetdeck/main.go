@@ -461,6 +461,9 @@ type runOpts struct {
 	// watch watches one fleet's board; nil is watchBoard. A test counts the
 	// watches a panel starts through it.
 	watch func(ctx context.Context, boardDir string, onChange func())
+	// live is the configuration as the settings page last left it; nil is
+	// the one the panel started with, which is all a test or a subcommand has.
+	live func() config.Config
 }
 
 // boardWatch is o.watch, or watchBoard when none was given.
@@ -603,6 +606,7 @@ func serve(parent context.Context, o runOpts) error {
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir(claudeDir))
 	collector.codexState = codexStateDir(o.configPath)
+	o.live = collector.Config
 
 	p := newPanel(
 		collector.Collect,

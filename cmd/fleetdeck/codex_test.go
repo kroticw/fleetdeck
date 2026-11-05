@@ -146,3 +146,27 @@ func TestALiveCodexRowFallsBackToItsRollout(t *testing.T) {
 		t.Fatalf("a stopped row was measured: %+v", stopped)
 	}
 }
+
+// Codex switched on in the settings starts the next card without a restart,
+// and switched off stops starting any.
+func TestCodexFollowsTheLiveConfiguration(t *testing.T) {
+	live := config.Config{}
+	o := runOpts{configPath: filepath.Join(t.TempDir(), "config.yaml"), live: func() config.Config { return live }}
+	a, err := executors(o, config.Config{}, orchestrator.Claude{}).ForID(executor.Codex)
+	if err != nil || a.Start == nil || a.Resume == nil {
+		t.Fatalf("a live panel must keep Codex's start: %v", err)
+	}
+	if _, err := a.Start(context.Background(), executor.StartRequest{}); !errors.Is(err, executor.ErrUnavailable) {
+		t.Fatalf("Codex off started: %v", err)
+	}
+	if _, err := a.Resume(context.Background(), executor.Key("codex:"+runtimeTestThread)); !errors.Is(err, executor.ErrUnavailable) {
+		t.Fatalf("Codex off resumed: %v", err)
+	}
+	live.Codex.Enabled = true
+	// Cancelled: what is checked is the refusal, not a runtime started.
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.Start(gone, executor.StartRequest{}); errors.Is(err, executor.ErrUnavailable) {
+		t.Fatal("Codex switched on is still refused")
+	}
+}
