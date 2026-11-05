@@ -499,8 +499,8 @@ func (c *controller) capsuleAction(action string) []effect {
 		return c.to("board", map[string]any{"type": "show", "section": "docs"})
 	case "newCard":
 		return c.to("board", map[string]any{"type": "newCard"})
-	case "theme":
-		return c.to("board", map[string]any{"type": "cycleTheme"})
+	case "tab:settings":
+		return c.to("board", map[string]any{"type": "show", "section": "settings"})
 	case "limits":
 		return c.to("board", map[string]any{"type": "limits"})
 	}

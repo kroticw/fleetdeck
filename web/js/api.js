@@ -387,3 +387,28 @@ export async function fetchTerminalToken() {
   }
   return body.token;
 }
+
+// fetchSettings is the settings page (GET /api/settings): every setting's
+// value, what each may be set to, and which apply only after a restart.
+export async function fetchSettings() {
+  const response = await fetch("/api/settings");
+  if (!response.ok) {
+    throw await refusal(response);
+  }
+  return response.json();
+}
+
+// saveSettings writes the given settings, each under its config key
+// ("workers.effort"), and answers the page anew. An empty string or 0 puts a
+// setting back to its default.
+export async function saveSettings(values) {
+  const response = await fetch("/api/settings", {
+    method: "PATCH",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(values),
+  });
+  if (!response.ok) {
+    throw await refusal(response);
+  }
+  return response.json();
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -14,7 +15,7 @@ const runtimeTestThread = "01a1a6d4-90a4-70f3-9130-a59ec873d0ba"
 
 func TestCodexServiceUsesConfiguredHomeAndOrdinaryResume(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "codex-home")
-	c := config.CodexConfig{Enabled: true, Command: []string{"/opt/codex-wrapper"}, Home: home, Model: "gpt-test", Sandbox: "read-only", ApprovalPolicy: "on-request"}
+	c := config.CodexConfig{Enabled: true, Command: []string{"/opt/codex-wrapper"}, Home: home, Model: "gpt-test", Sandbox: "read-only", ApprovalPolicy: "on-request", Effort: "high"}
 	spec, err := codexService(c, "/state", "codex:"+runtimeTestThread, []string{"PATH=/usr/bin", "CODEX_HOME=/real/home"})
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +23,10 @@ func TestCodexServiceUsesConfiguredHomeAndOrdinaryResume(t *testing.T) {
 	if spec.NativeSocket != filepath.Join(home, "app-server-control", "app-server-control.sock") {
 		t.Fatalf("native socket outside the configured home: %s", spec.NativeSocket)
 	}
-	if spec.Thread["model"] != "gpt-test" || spec.Thread["sandbox"] != "read-only" || spec.Thread["approvalPolicy"] != "on-request" {
+	// Effort is a per-turn setting in the app-server; a thread takes it as
+	// the config key every turn on it starts from.
+	if spec.Thread["model"] != "gpt-test" || spec.Thread["sandbox"] != "read-only" || spec.Thread["approvalPolicy"] != "on-request" ||
+		!reflect.DeepEqual(spec.Thread["config"], map[string]any{"model_reasoning_effort": "high"}) {
 		t.Fatalf("thread params: %v", spec.Thread)
 	}
 	argv, env, err := spec.Launch(runtimeTestThread)

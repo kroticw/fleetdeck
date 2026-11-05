@@ -201,6 +201,13 @@ type Deps struct {
 	// configuration store; the route then answers 503.
 	SetOrchestratorSession func(id string) error
 
+	// Settings is the settings page: every setting's value and what each may
+	// be set to. WriteSettings writes the given keys to the configuration
+	// file, applies what applies without a restart, and returns the page
+	// anew; a refusal wraps ErrBadSettings. Nil answers 503.
+	Settings      func(ctx context.Context) (any, error)
+	WriteSettings func(ctx context.Context, values map[string]any) (any, error)
+
 	// SetSessionLabel writes (or, given an empty label, deletes) the
 	// operator's own name for one session, persisted to the configuration
 	// file's session_labels map — see internal/config.SetSessionLabel,
@@ -367,6 +374,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/status", d.handleStatus)
 	mux.HandleFunc("GET /api/sessions/{id}/cards", d.handleSessionCards)
 	mux.HandleFunc("PATCH /api/config", d.handlePatchConfig)
+	mux.HandleFunc("GET /api/settings", d.handleGetSettings)
+	mux.HandleFunc("PATCH /api/settings", d.handlePatchSettings)
 	mux.HandleFunc("PATCH /api/sessions/{id}/label", d.handleSetSessionLabel)
 	mux.HandleFunc("GET /api/orchestrator", d.handleOrchestratorPreview)
 	mux.HandleFunc("POST /api/orchestrator", d.handleAppoint)

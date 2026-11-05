@@ -46,7 +46,7 @@ const MIGRATED = [
   "review-send", "review-form-ok", "review-form-cancel", "review-comment-action", "review-round-notify",
   "o-name-edit", "label-edit-btn",
   "card-dock-place", "card-dock-font", "card-dock-open", "card-dock-resume", "card-dock-write", "card-dock-orchestrator",
-  "s-key", "s-font-btn", "sresume-btn", "build-reload", "update-button", "theme-toggle", "fleet-menu-button",
+  "s-key", "s-font-btn", "sresume-btn", "build-reload", "update-button", "fleet-menu-button",
   "newcard-create", "newcard-close", "newcard-pick", "newcard-attach",
 ];
 

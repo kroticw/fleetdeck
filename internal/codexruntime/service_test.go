@@ -81,6 +81,21 @@ func newFakeNative(t *testing.T) *fakeNative {
 			if m.Method == "thread/turns/list" || m.Method == "thread/backgroundTerminals/list" {
 				result["data"] = []any{}
 			}
+			if m.Method == "model/list" {
+				// Two pages, so the cursor is followed.
+				var params struct {
+					Cursor *string `json:"cursor"`
+				}
+				_ = json.Unmarshal(m.Params, &params)
+				if params.Cursor == nil {
+					result["data"] = []any{map[string]any{"id": "gpt-5.6", "model": "gpt-5.6", "displayName": "GPT-5.6", "isDefault": true, "hidden": false,
+						"defaultReasoningEffort": "medium", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "low", "description": ""}, map[string]any{"reasoningEffort": "medium", "description": ""}}}}
+					result["nextCursor"] = "p2"
+				} else {
+					result["data"] = []any{map[string]any{"id": "gpt-6.1-sol", "model": "gpt-6.1-sol", "displayName": "GPT-6.1 Sol", "isDefault": false, "hidden": false,
+						"defaultReasoningEffort": "high", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high", "description": ""}, map[string]any{"reasoningEffort": "xhigh", "description": ""}}}}
+				}
+			}
 			if m.Method == "account/rateLimits/read" {
 				// Each read says more is used, so a reading is told from the one before.
 				n := 0

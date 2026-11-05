@@ -50,8 +50,44 @@ function read(key) {
  * is nothing trustworthy there. A terminal with no key has nowhere to remember
  * anything and always starts at the default.
  */
+// The panel's one size for every terminal (config ui.terminal_font_size),
+// once a snapshot has said it; null before that, when the size remembered here
+// is what a terminal opens at. writer takes a size a terminal stepped to, to
+// write it to the configuration; listeners are the open terminals, told when
+// the size changes anywhere.
+let configured = null;
+let writer = null;
+const listeners = new Set();
+// A size stepped to here wins over the snapshots that are still on their way
+// with the one before it, for as long as the write takes to come back.
+const STEP_HOLD_MS = 2000;
+let heldUntil = 0;
+
+/**
+ * setConfiguredFontSize takes the configuration's size (0 for the default)
+ * and tells every open terminal when it changes.
+ */
+export function setConfiguredFontSize(size) {
+  const next = size ? clampFontSize(size) : DEFAULT_FONT_SIZE;
+  if (next === configured || Date.now() < heldUntil) return;
+  configured = next;
+  for (const listener of listeners) listener(next);
+}
+
+/** setFontSizeWriter is where a stepped size is written; null writes nowhere. */
+export function setFontSizeWriter(write) {
+  writer = write;
+}
+
+/** onFontSize hears the configured size change; it returns the unsubscribe. */
+export function onFontSize(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function storedFontSize(key, fallback = DEFAULT_FONT_SIZE) {
   if (!key) return fallback;
+  if (configured !== null) return configured;
   const raw = read(key);
   if (raw === null || String(raw).trim() === "") return fallback;
   const size = Number(String(raw).trim());
@@ -65,6 +101,11 @@ export function storedFontSize(key, fallback = DEFAULT_FONT_SIZE) {
  */
 export function rememberFontSize(key, size, fallback = DEFAULT_FONT_SIZE) {
   if (!key) return;
+  if (writer) {
+    configured = size;
+    heldUntil = Date.now() + STEP_HOLD_MS;
+    writer(size === fallback ? 0 : size);
+  }
   try {
     if (size === fallback) localStorage.removeItem(key);
     else localStorage.setItem(key, String(size));

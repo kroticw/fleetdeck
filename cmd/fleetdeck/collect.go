@@ -186,6 +186,18 @@ func (c *Collector) Config() config.Config {
 	return cfg
 }
 
+// ApplySettings takes f, the file as the settings page left it, as the live
+// configuration: everything but what the panel keeps per fleet and per
+// session, which has setters of its own and stays as it is here.
+func (c *Collector) ApplySettings(f config.Config) {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	cur := c.cfg
+	f.BoardPath, f.DocsPaths, f.OrchestratorSession, f.Name = cur.BoardPath, cur.DocsPaths, cur.OrchestratorSession, cur.Name
+	f.SessionLabels, f.Fleets = cur.SessionLabels, cur.Fleets
+	c.cfg = f
+}
+
 // SetFleetOrchestrator is SetOrchestratorSession for a fleet of the fleets
 // list, found by name; the top-level fleet goes through
 // SetOrchestratorSession. It reports whether such a fleet is configured. The
@@ -611,6 +623,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	}
 	entries := mergeStopped(sessions, records)
 	snap.CodexEnabled, snap.DefaultExecutor = cfg.Codex.Enabled, string(cfg.DefaultExecutor)
+	snap.Theme, snap.TerminalFontSize = cfg.UI.Theme, cfg.UI.TerminalFontSize
 	if cfg.Codex.Enabled && c.codexState != "" {
 		home, _ := codexHome(cfg.Codex, userenv.Environ())
 		entries = append(entries, codexSessionRows(ctx, c.codexState, home, c.now())...)

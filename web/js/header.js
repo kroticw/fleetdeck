@@ -2,7 +2,7 @@
 import { subscribe } from "./store.js";
 import { t } from "./i18n.js";
 import { envelopeText, incomingMessage } from "./envelope.js";
-import { initTheme, cycleTheme, currentTheme } from "./theme.js";
+import { initTheme } from "./theme.js";
 import { brandHTML, hasUnsentText, pageStorage } from "./buildcheck.js";
 import { headerSessions, fleetEntries, switchFleet } from "./fleet.js";
 import { fleetIconHTML } from "./icon.js";
@@ -370,8 +370,9 @@ export function limitsTableHTML(snap, nowMs) {
 // The header's parts, in the order the header draws them. A browser tab draws
 // all of them; in the fleetdeck window the orchestrator surface draws the brand
 // row and the sessions surface the counters, and the board draws none — its
-// tabs, theme and limits are the window's capsules.
-export const HEADER_PARTS = ["brand", "theme", "update", "limits", "counters"];
+// tabs and limits are the window's capsules. The theme is a setting
+// (web/js/settings.js).
+export const HEADER_PARTS = ["brand", "update", "limits", "counters"];
 
 export function joinHeaderParts(parts, html) {
   return HEADER_PARTS.filter((part) => parts.includes(part))
@@ -431,21 +432,6 @@ export function stalledList(stalledSessions) {
   const rest = reasons.length - shown.length;
   const tail = rest > 0 ? `<span class="stall-more">+${rest} more</span>` : "";
   return `<span class="stall-reasons">${shown.join("")}${tail}</span>`;
-}
-
-// currentTheme()/cycleTheme() return null for "no override" — not a missing
-// case here, the auto state genuinely has its own label and button state.
-function themeLabelKey(theme) {
-  return theme === "light" ? "theme_light" : theme === "dark" ? "theme_dark" : "theme_auto";
-}
-
-// The theme button's words for the current choice, for the window's theme capsule.
-export function themeLabelText() {
-  return t(themeLabelKey(currentTheme()));
-}
-
-function themeButtonHTML() {
-  return `<button type="button" class="btn btn-sm theme-toggle">${t(themeLabelKey(currentTheme()))}</button>`;
 }
 
 // alarmHTML renders the two problems that genuinely mean "you see no live
@@ -734,20 +720,7 @@ export function renderHeader(
     const menu = event.target.closest("[data-fleet-menu]");
     if (menu) {
       applyMenu(menu.dataset.fleetMenu, menu.dataset.fleet ?? "");
-      return;
     }
-    const button = event.target.closest(".theme-toggle");
-    if (!button) return;
-    const label = t(themeLabelKey(cycleTheme()));
-    // The label is written to whatever button is in the page now, not to the
-    // node that was clicked. Clicking the theme with the fleet menu open
-    // closes the menu first, on the capture phase, and that repaints the
-    // header whole — the clicked node is detached by the time this runs, and
-    // writing to it would leave the header reading "theme: auto" on a page
-    // that had just turned light. The update button beside it has always
-    // re-queried for the same reason.
-    const live = root.querySelector(".theme-toggle") ?? button;
-    live.textContent = label;
   });
 
   const paint = (rawSnap, connected) => {
@@ -768,8 +741,6 @@ export function renderHeader(
       brand: `
       ${brandHTML(snap.build)}
       ${fleetMenuHTML(fleetEntries(snap, isWaiting), menuOpen)}`,
-      theme: `
-      ${themeButtonHTML()}`,
       update: `
       ${hostUpdate && !panel ? updateHTML(update, nowMs) : ""}`,
       limits: `

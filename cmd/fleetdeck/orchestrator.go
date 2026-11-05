@@ -59,7 +59,7 @@ func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client, workers fu
 // workerLaunch is the workers section as the flags a worker is started with;
 // what it leaves unset is orchestrator.Launch's default.
 func workerLaunch(w config.Workers) orchestrator.Launch {
-	return orchestrator.Launch{Model: w.Model, PermissionMode: w.PermissionMode, Sandbox: w.Sandbox}
+	return orchestrator.Launch{Model: w.Model, PermissionMode: w.PermissionMode, Sandbox: w.Sandbox, Effort: w.Effort}
 }
 
 // workerStarter is sessionStarter for a worker session: the same claude, with

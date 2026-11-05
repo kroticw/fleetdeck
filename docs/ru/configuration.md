@@ -27,6 +27,7 @@ fleetdeck настраивается одним YAML-файлом. Эта стр
 | `workers.model` | строка | не задано (`opus`) | не проверяется; модель, которой CLI не знает, проваливает каждый запуск, и запуск говорит, что ответил CLI. См. [Сессии-исполнители](#сессии-исполнители) |
 | `workers.permission_mode` | строка | не задано (`auto`) | не один из режимов CLI: `workers.permission_mode "%s" is not one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan` |
 | `workers.sandbox` | булево | `false` (исполнитель работает **без** песочницы) | не проверяется (должно быть булевым) |
+| `workers.effort` | строка | не задано (умолчание CLI) | не один из уровней CLI: `workers.effort "%s" is not one of low, medium, high, xhigh, max` |
 | `default_executor` | строка | `claude` | `claude` или `codex`; Codex должен быть включён; влияет только на новые карточки |
 | `executors.codex.enabled` | логическое | `false` | включает запуск Codex |
 | `executors.codex.command` | список строк | не задано (найденный исполняемый файл Codex) | первый элемент — абсолютный путь; пустые аргументы отклоняются; shell не используется |
@@ -35,6 +36,9 @@ fleetdeck настраивается одним YAML-файлом. Эта стр
 | `executors.codex.model` | строка | умолчание Codex | передаётся как `--model`; `workers.model` не наследуется |
 | `executors.codex.sandbox` | строка | умолчание Codex | `read-only`, `workspace-write` или `danger-full-access` |
 | `executors.codex.approval_policy` | строка | умолчание Codex | `on-request` или `never`, поддерживаемые обычным TUI |
+| `executors.codex.effort` | строка | умолчание Codex | одна строка; уровни — те, что объявляет модель |
+| `ui.theme` | строка | не задано (как в системе) | `light` или `dark`: `ui.theme "%s" is not one of light, dark (or empty, to follow the system)` |
+| `ui.terminal_font_size` | целое | не задано (12) | `ui.terminal_font_size must be between 9 and 24, got %d` |
 | `name` | строка | папка над `board.path`, `main`, если она ничего не говорит | пустое имя, пробелы вокруг или управляющий символ: `the top-level fleet: name ...`; имя другого флота: см. [Несколько флотов](#несколько-флотов) |
 | `fleets` | список флотов | не задан (пусто) | см. [Несколько флотов](#несколько-флотов) |
 | `fleets[].name` | строка | нет: обязателен | пусто, пробелы по краям или управляющий символ: `fleets[N]: name ...`; имя другого флота: `fleets[1]: name "clining" is already the name of fleets[0]` |

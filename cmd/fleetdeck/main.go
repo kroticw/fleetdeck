@@ -81,9 +81,12 @@ const (
 // running at once would each diff against a snapshot the other had already replaced,
 // which either fires a banner twice or loses one entirely.
 type panel struct {
-	collect      func(context.Context) state.Snapshot
-	banners      banner
-	notifyCfg    config.NotifyConfig
+	collect   func(context.Context) state.Snapshot
+	banners   banner
+	notifyCfg config.NotifyConfig
+	// liveNotify, when set, is the notify section as the settings page last
+	// left it, read each cycle instead of notifyCfg.
+	liveNotify   func() config.NotifyConfig
 	onNotifyFail func(error)
 
 	// cycleMu serialises the cycle itself. snapMu guards only the published
@@ -134,8 +137,12 @@ func (p *panel) refresh(ctx context.Context) {
 		p.published()
 	}
 
-	fire, cleared := state.Diff(prev, next, p.notifyCfg.SilenceAfter)
-	deliver(ctx, p.banners, p.notifyCfg, fire, cleared, p.onNotifyFail)
+	notifyCfg := p.notifyCfg
+	if p.liveNotify != nil {
+		notifyCfg = p.liveNotify()
+	}
+	fire, cleared := state.Diff(prev, next, notifyCfg.SilenceAfter)
+	deliver(ctx, p.banners, notifyCfg, fire, cleared, p.onNotifyFail)
 }
 
 // snapshot is what server.Deps.Snapshot hands out: the last cycle's result, already
@@ -461,6 +468,9 @@ type runOpts struct {
 	// watch watches one fleet's board; nil is watchBoard. A test counts the
 	// watches a panel starts through it.
 	watch func(ctx context.Context, boardDir string, onChange func())
+	// live is the configuration as the settings page last left it; nil is
+	// the one the panel started with, which is all a test or a subcommand has.
+	live func() config.Config
 }
 
 // boardWatch is o.watch, or watchBoard when none was given.
@@ -578,7 +588,8 @@ func serve(parent context.Context, o runOpts) error {
 	// In the background: the window waits seconds for the panel to answer,
 	// and a daemon may take longer to come up.
 	ownedc := make(chan *ownedDaemon, 1)
-	go func() {
+	// o by value: o.live is set below, while this runs.
+	go func(o runOpts) {
 		owned, err := ensureDaemon(ctx, o, cfg.Agent, dc.ListSessions)
 		if err != nil {
 			log.Printf("fleetdeck: no Claude Code daemon: %v", err)
@@ -588,7 +599,7 @@ func serve(parent context.Context, o runOpts) error {
 			log.Print("fleetdeck: started the Claude Code daemon; it stops when this panel does")
 		}
 		ownedc <- owned
-	}()
+	}(o)
 	// A panel being replaced by an update leaves its daemon, and the record
 	// of it, to the panel after it; only a close puts the daemon out.
 	var handedOver atomic.Bool
@@ -603,6 +614,7 @@ func serve(parent context.Context, o runOpts) error {
 	uf := usage.NewFetcher(usage.KeychainToken, usage.Endpoint, usageTTL)
 	collector := NewCollector(cfg, dc, uf, projectsDir(claudeDir))
 	collector.codexState = codexStateDir(o.configPath)
+	o.live = collector.Config
 
 	p := newPanel(
 		collector.Collect,
@@ -610,6 +622,7 @@ func serve(parent context.Context, o runOpts) error {
 		cfg.Notify,
 		func(err error) { log.Printf("notify: %v", err) },
 	)
+	p.liveNotify = func() config.NotifyConfig { return collector.Config().Notify }
 
 	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
 	d := deps(p, dc, collector, cfg, o)
@@ -1100,6 +1113,7 @@ func listedAlive(sessions []daemon.Session, short string) bool {
 // is a function internal/server calls and none of them reaches back here.
 func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, o runOpts) server.Deps {
 	configPath := o.configPath
+	settingsOf := &settingsStore{o: o, collector: collector}
 	// Left nil without a board: the route then answers that this panel has no
 	// board, instead of creating cards relative to wherever the panel started.
 	var create func(board.NewCard) (string, error)
@@ -1226,6 +1240,8 @@ func deps(p *panel, dc *daemon.Client, collector *Collector, cfg config.Config, 
 		SetSessionLabel: func(sessionID, label string) error {
 			return setSessionLabel(configPath, collector, sessionID, label)
 		},
+		Settings:      settingsOf.page,
+		WriteSettings: settingsOf.write,
 
 		// Which build this is: stamped on every snapshot, and its web hash put
 		// into the page itself, so a page left open while this binary is

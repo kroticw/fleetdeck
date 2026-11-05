@@ -1,6 +1,6 @@
 import { connect, subscribe, get } from "./store.js";
 import { renderSessions } from "./sessions.js";
-import { renderHeader, HEADER_PARTS, limitsOf, themeLabelText } from "./header.js";
+import { renderHeader, HEADER_PARTS, limitsOf } from "./header.js";
 import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
@@ -24,7 +24,10 @@ import { readHost, callHost } from "./host.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
-import { applyTheme, cycleTheme, currentTheme, initTheme } from "./theme.js";
+import { applyTheme, currentTheme, initTheme, setConfiguredTheme } from "./theme.js";
+import { renderSettings } from "./settings.js";
+import { setConfiguredFontSize, setFontSizeWriter } from "./terminalfont.js";
+import { saveSettings } from "./api.js";
 import { capsuleModel } from "./capsules.js";
 import { createLimitsPopover } from "./limitsmenu.js";
 
@@ -267,6 +270,33 @@ if (regions.has("orchestrator")) {
   renderOrchestrator(document.getElementById("orchestrator"), { links: { resolve: terminalLinks.resolve, open: routes.openCard } });
 }
 
+// The panel's look is a setting (config ui): the theme and the terminals' type
+// size come with every snapshot, and the settings section's answer applies
+// them at once, before the next snapshot. The board tells the window, whose
+// own appearance and other surfaces follow the theme.
+function followLook(theme, fontSize) {
+  if (setConfiguredTheme(theme) && host?.surface === "board") {
+    callHost(window, "fleetdeckTheme", currentTheme() ?? "auto");
+    publishCapsules();
+  }
+  setConfiguredFontSize(fontSize);
+}
+function followSettings(page) {
+  followLook(page.values["ui.theme"], page.values["ui.terminal_font_size"]);
+}
+subscribe((snap) => {
+  if (snap) followLook(snap.theme ?? "", snap.terminalFontSize ?? 0);
+});
+// A step at a terminal (A−/A+, Cmd+=) is the panel's size: written once the
+// steps stop, so a run of presses is one write.
+let fontWrite = null;
+setFontSizeWriter((size) => {
+  clearTimeout(fontWrite);
+  fontWrite = setTimeout(() => {
+    saveSettings({ "ui.terminal_font_size": size }).catch((err) => console.error("fleetdeck: the terminal size was not saved:", err));
+  }, 400);
+});
+
 // The centre column's two sections.
 //
 // Neither panel is closed when a section is switched, and does not need to be:
@@ -289,6 +319,12 @@ if (regions.has("center")) {
       label: t("tab_docs"),
       root: document.getElementById("docs"),
       onFirstShow: () => renderDocs(document.getElementById("docs"), { onOpenCard: cardPanel.open }),
+    },
+    {
+      id: "settings",
+      label: t("tab_settings"),
+      root: document.getElementById("settings"),
+      onFirstShow: () => renderSettings(document.getElementById("settings"), { onSaved: followSettings }),
     },
   ]);
 
@@ -313,7 +349,7 @@ function publishCapsules() {
   const style = getComputedStyle(document.documentElement);
   const token = (name) => style.getPropertyValue(name).trim();
   const colors = { cool: token("--ok"), warm: token("--attn"), hot: token("--danger"), stale: token("--text-muted"), off: token("--text-faint") };
-  const model = capsuleModel({ section, themeLabel: themeLabelText(), limits: limitsOf(get() ?? {}, Date.now()), t, colors });
+  const model = capsuleModel({ section, limits: limitsOf(get() ?? {}, Date.now()), t, colors });
   const json = JSON.stringify(model);
   if (json === capsulesSent) return;
   capsulesSent = json;
@@ -408,11 +444,6 @@ if (host) {
     },
     toggleNewCard: () => newCard?.toggle(),
     toggleLimits: () => limitsPopover?.toggle(),
-    cycleTheme: () => {
-      const choice = cycleTheme() ?? "auto";
-      publishCapsules();
-      return choice;
-    },
     applyTheme,
     setInsets: (insets) => {
       const names = { top: "top", left: "left", right: "right", contentRight: "content-right" };

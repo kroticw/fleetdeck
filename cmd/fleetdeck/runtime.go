@@ -110,6 +110,11 @@ func codexService(c config.CodexConfig, stateDir string, key executor.Key, envir
 			thread[name] = value
 		}
 	}
+	if c.Effort != "" {
+		// Effort is per turn in the app-server; on the thread it is the
+		// config every turn starts from.
+		thread["config"] = map[string]any{"model_reasoning_effort": c.Effort}
+	}
 	return codexruntime.ServiceSpec{
 		StateDir: stateDir, Key: key, Cols: 120, Rows: 40, Thread: thread,
 		NativeSocket: filepath.Join(home, "app-server-control", "app-server-control.sock"),

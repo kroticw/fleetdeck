@@ -69,7 +69,25 @@ func executors(o runOpts, cfg config.Config, claude orchestrator.Claude) *execut
 	if a, err := codexAdapter(o, cfg); err == nil {
 		// Runtimes already running stay reachable to stop and read, whatever
 		// the configuration says now; only starting one needs Codex allowed.
-		if !codexAllowed(o, cfg) {
+		switch {
+		case o.live != nil:
+			// Allowed or not is asked at each start, so Codex switched on or
+			// off in the settings applies to the next card.
+			start, resume := a.Start, a.Resume
+			allowed := func() bool { return codexAllowed(o, o.live()) }
+			a.Start = func(ctx context.Context, req executor.StartRequest) (executor.Session, error) {
+				if !allowed() {
+					return executor.Session{}, executor.ErrUnavailable
+				}
+				return start(ctx, req)
+			}
+			a.Resume = func(ctx context.Context, key executor.Key) (executor.Session, error) {
+				if !allowed() {
+					return executor.Session{Key: key, Executor: executor.Codex}, executor.ErrUnavailable
+				}
+				return resume(ctx, key)
+			}
+		case !codexAllowed(o, cfg):
 			a.Start, a.Resume = nil, nil
 		}
 		adapters = append(adapters, a)

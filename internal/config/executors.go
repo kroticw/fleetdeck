@@ -20,6 +20,9 @@ type CodexConfig struct {
 	Model          string   `yaml:"model,omitempty"`
 	Sandbox        string   `yaml:"sandbox,omitempty"`
 	ApprovalPolicy string   `yaml:"approval_policy,omitempty"`
+	// Effort is Codex's model_reasoning_effort; the levels are each model's
+	// own (model/list), so it is checked only as one line.
+	Effort string `yaml:"effort,omitempty"`
 }
 
 func validateExecutors(c Config) error {
@@ -53,9 +56,9 @@ func (c CodexConfig) Validate() error {
 	if c.ApprovalPolicy != "" && !slices.Contains([]string{"on-request", "never"}, c.ApprovalPolicy) {
 		return errors.New("executors.codex.approval_policy must be on-request or never")
 	}
-	for _, v := range []string{c.Profile, c.Model} {
+	for _, v := range []string{c.Profile, c.Model, c.Effort} {
 		if strings.ContainsAny(v, "\x00\r\n") {
-			return errors.New("executors.codex profile and model must be single-line values")
+			return errors.New("executors.codex profile, model and effort must be single-line values")
 		}
 	}
 	return nil

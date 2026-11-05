@@ -15,6 +15,8 @@ import (
 var (
 	capsulesResult capsulesProbe
 	themeResult    capsuleThemeProbe
+	// noThemeCount is how many capsules a model without a theme is drawn as.
+	noThemeCount int
 )
 
 func collectCapsuleResults() {
@@ -25,6 +27,16 @@ func collectCapsuleResults() {
 	capsulesResult = probeCapsulesForTest(m)
 	collectCapsuleLayoutResults()
 	themeResult = probeCapsuleThemeForTest(m)
+	m.Theme = capsuleLabel{}
+	noThemeCount = probeCapsuleCountForTest(m)
+}
+
+// The theme is a setting of the page now: a model with no theme draws no
+// theme capsule, and the row still lays out.
+func TestAModelWithoutAThemeDrawsNoThemeCapsule(t *testing.T) {
+	if noThemeCount != 3 {
+		t.Fatalf("capsules = %d, want tabs, new card and one limit", noThemeCount)
+	}
 }
 
 // --- the capsules and the app's theme ----------------------------------------------

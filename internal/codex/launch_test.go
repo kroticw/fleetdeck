@@ -11,12 +11,12 @@ import (
 const launchThread = "01a1a6d4-90a4-70f3-9130-a59ec873d0ba"
 
 func TestLaunchUsesOrdinaryResumeAndExplicitPolicies(t *testing.T) {
-	c := config.CodexConfig{Enabled: true, Command: []string{"/opt/wrapper with spaces", "codex"}, Profile: "work", Model: "model-id", Sandbox: "read-only", ApprovalPolicy: "on-request"}
+	c := config.CodexConfig{Enabled: true, Command: []string{"/opt/wrapper with spaces", "codex"}, Profile: "work", Model: "model-id", Sandbox: "read-only", ApprovalPolicy: "on-request", Effort: "high"}
 	l, err := BuildLaunch(c, "", launchThread, []string{"PATH=/bin", "TERM=dumb", "CODEX_THREAD_ID=parent", "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=parent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"/opt/wrapper with spaces", "codex", "--profile", "work", "--model", "model-id", "--sandbox", "read-only", "--ask-for-approval", "on-request", "resume", launchThread}
+	want := []string{"/opt/wrapper with spaces", "codex", "--profile", "work", "--model", "model-id", "--sandbox", "read-only", "--ask-for-approval", "on-request", "--config", `model_reasoning_effort="high"`, "resume", launchThread}
 	if !reflect.DeepEqual(l.Argv, want) {
 		t.Fatalf("argv=%q", l.Argv)
 	}

@@ -300,6 +300,11 @@ type Snapshot struct {
 
 	CodexEnabled    bool   `json:"codexEnabled,omitempty"`
 	DefaultExecutor string `json:"defaultExecutor,omitempty"`
+	// Theme and TerminalFontSize are the panel's look (config ui): the
+	// theme, empty to follow the system, and the terminals' type size, 0
+	// for the page's default.
+	Theme            string `json:"theme,omitempty"`
+	TerminalFontSize int    `json:"terminalFontSize,omitempty"`
 }
 
 // Start is one session being started for a card: the card it is for and when

@@ -4,7 +4,9 @@
 // :root carries `color-scheme: light dark` and every surface is a token, not
 // a hardcoded colour. This module is the one thing that theme mechanism does
 // not give a person on its own: a way to pin one theme regardless of what the
-// system says, remembered across a reload.
+// system says. The choice is the panel's (config ui.theme, set in the
+// settings); it is kept here too only so a reload opens on it before the
+// first snapshot arrives.
 //
 // Nothing here decides what light or dark actually look like. That is
 // app.css's [data-theme="light"|"dark"] blocks; this module only ever writes
@@ -40,43 +42,28 @@ function apply(theme) {
 }
 
 // The cycle a click walks: no override -> light -> dark -> no override.
-const NEXT = { light: "dark", dark: null };
-
-// Applies whatever choice was already remembered. Called once at startup, so
-// a reload lands on the same theme instead of flashing the system default
-// for one frame before a click handler runs.
 export function initTheme() {
   apply(readStored());
 }
 
-// The remembered override (null | "light" | "dark"), for a caller that wants
-// to render a label matching the state without walking the cycle itself.
 export function currentTheme() {
   return readStored();
 }
 
-// Applies a choice made somewhere else without remembering it. In the fleetdeck
-// window the board owns the choice (and the storage all three web views share);
-// the orchestrator and sessions surfaces are told it and only follow. "auto" is
-// the no-override state, as null is here.
 export function applyTheme(choice) {
   apply(choice === "light" || choice === "dark" ? choice : null);
 }
 
-// Advances the cycle, applies it, remembers it, and returns the new state
-// (null | "light" | "dark") so a caller can update a label immediately
-// rather than waiting for the next redraw.
-//
-// `?? "light"` would be wrong here: NEXT.dark is the legitimate value
-// `null` (dark's successor is "no override"), and `??` cannot tell that
-// apart from "current is not a key of NEXT at all" (the no-override state
-// itself, where current is also `null`) — both would fall through to the
-// same default and dark could never cycle back to auto. The `in` check
-// keeps those two nulls apart.
-export function cycleTheme() {
-  const current = readStored();
-  const next = current && current in NEXT ? NEXT[current] : "light";
-  writeStored(next);
-  apply(next);
-  return next;
+/**
+ * setConfiguredTheme takes the theme the panel's configuration holds (ui.theme:
+ * "light", "dark", or empty to follow the system), shows it, and keeps it as
+ * the one the next page load opens on before its first snapshot. It reports
+ * whether that changed what was shown.
+ */
+export function setConfiguredTheme(theme) {
+  const choice = theme === "light" || theme === "dark" ? theme : null;
+  const changed = choice !== readStored() || document.documentElement.getAttribute("data-theme") !== choice;
+  writeStored(choice);
+  apply(choice);
+  return changed;
 }

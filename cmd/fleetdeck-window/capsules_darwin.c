@@ -493,17 +493,21 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     adopt(into, compactCapsule);
   }
 
-  themeDrawn = button(themeLabel, tagTheme);
-  themeCapsule = capsule(mode, themeDrawn, 0, capsulePadding);
-  adopt(into, themeCapsule);
+  // A page that keeps the theme among its settings sends none: no theme
+  // capsule then, and the row lays out without it (widthOf and put take nil).
+  if (themeLabel && *themeLabel) {
+    themeDrawn = button(themeLabel, tagTheme);
+    themeCapsule = capsule(mode, themeDrawn, 0, capsulePadding);
+    adopt(into, themeCapsule);
 
-  // The theme with no room for its label: the same press, and the label -- the
-  // mode it is in -- is what a pointer or VoiceOver finds on it.
-  themeIconDrawn = button("◐", tagTheme);
-  sendVoid1(themeIconDrawn, sel("setToolTip:"), nsstring(themeLabel));
-  sendVoid1(themeIconDrawn, sel("setAccessibilityLabel:"), nsstring(themeLabel));
-  themeIconCapsule = capsule(mode, themeIconDrawn, 0, capsulePadding);
-  adopt(into, themeIconCapsule);
+    // The theme with no room for its label: the same press, and the label --
+    // the mode it is in -- is what a pointer or VoiceOver finds on it.
+    themeIconDrawn = button("◐", tagTheme);
+    sendVoid1(themeIconDrawn, sel("setToolTip:"), nsstring(themeLabel));
+    sendVoid1(themeIconDrawn, sel("setAccessibilityLabel:"), nsstring(themeLabel));
+    themeIconCapsule = capsule(mode, themeIconDrawn, 0, capsulePadding);
+    adopt(into, themeIconCapsule);
+  }
 
   rowDrawn = rowView;
   placeCapsules(bounds.size.width);

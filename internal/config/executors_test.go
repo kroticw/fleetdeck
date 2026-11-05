@@ -73,3 +73,12 @@ func TestCodexConfigRejectsInvalidLaunchSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexEffortIsOneLine(t *testing.T) {
+	if err := (CodexConfig{Effort: "high"}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (CodexConfig{Effort: "high\nmodel=x"}).Validate(); err == nil {
+		t.Fatal("a multi-line effort was accepted")
+	}
+}
