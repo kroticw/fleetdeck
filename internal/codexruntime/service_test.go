@@ -81,6 +81,19 @@ func newFakeNative(t *testing.T) *fakeNative {
 			if m.Method == "thread/turns/list" || m.Method == "thread/backgroundTerminals/list" {
 				result["data"] = []any{}
 			}
+			if m.Method == "account/rateLimits/read" {
+				// Each read says more is used, so a reading is told from the one before.
+				n := 0
+				for _, seen := range f.seen() {
+					if seen == m.Method {
+						n++
+					}
+				}
+				result["rateLimits"] = map[string]any{
+					"primary":   map[string]any{"usedPercent": n, "windowDurationMins": 300},
+					"secondary": map[string]any{"usedPercent": 50, "windowDurationMins": 10080},
+				}
+			}
 			if m.Method == "thread/start" || m.Method == "thread/resume" || m.Method == "thread/read" {
 				result["thread"] = map[string]any{"id": nativeThread, "status": map[string]string{"type": status}}
 			}
@@ -418,4 +431,18 @@ func TestServiceObservesThreadAndReconnectsToNative(t *testing.T) {
 	if f.native.conns < 2 || !slices.Contains(f.native.methods[1:], "thread/resume") {
 		t.Fatalf("reconnect did not resume the thread: conns=%d %v", f.native.conns, f.native.methods)
 	}
+}
+
+// Codex says its limits only as turns run; an idle fleet's limits would go
+// stale. The runtime asks for them again while it is connected.
+func TestServicePollsTheAccountLimitsWhileConnected(t *testing.T) {
+	every := limitsPollEvery
+	limitsPollEvery = 30 * time.Millisecond
+	defer func() { limitsPollEvery = every }()
+	f := newServiceFixture(t, "")
+	served := f.run(t)
+	client := f.awaitLive(t, served)
+	awaitStatus(t, client, func(s Status) bool {
+		return s.Limits != nil && len(s.Limits.Windows) == 2 && s.Limits.Windows[0].UsedPercent >= 3
+	})
 }

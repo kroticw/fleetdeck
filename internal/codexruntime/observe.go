@@ -218,15 +218,43 @@ func (l *nativeLink) reconcile(ctx context.Context, c *nativeControl) error {
 		return err
 	}
 	l.obs.set(read.Thread.Status)
-	// The account's limits, read once per connection; later changes arrive
-	// as updates. A Codex that cannot say leaves them unmeasured.
+	// The account's limits, read now and again every limitsPollEvery while
+	// this connection lasts: Codex sends updates only as turns run, so an
+	// idle fleet's limits would otherwise go stale. A Codex that cannot say
+	// leaves them unmeasured.
+	l.readLimits(ctx, c)
+	go l.pollLimits(ctx, c)
+	return nil
+}
+
+// limitsPollEvery is how often a connected runtime asks for the account's
+// limits; the panel calls a reading older than two minutes stale.
+var limitsPollEvery = time.Minute
+
+func (l *nativeLink) readLimits(ctx context.Context, c *nativeControl) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	var limits struct {
 		RateLimits nativeLimits `json:"rateLimits"`
 	}
 	if c.call(ctx, "account/rateLimits/read", map[string]any{"excludeResetCreditDetails": true}, &limits) == nil {
 		l.obs.mergeLimits(limits.RateLimits)
 	}
-	return nil
+}
+
+func (l *nativeLink) pollLimits(ctx context.Context, c *nativeControl) {
+	tick := time.NewTicker(limitsPollEvery)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case <-tick.C:
+			l.readLimits(ctx, c)
+		}
+	}
 }
 
 func (l *nativeLink) connect(ctx context.Context) error {
