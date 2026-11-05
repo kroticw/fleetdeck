@@ -28,7 +28,7 @@
 import { fetchTerminalToken } from "./api.js";
 import { t } from "./i18n.js";
 import { wikiLinkProvider } from "./terminallinks.js";
-import { DEFAULT_FONT_SIZE, clampFontSize, fontStep, rememberFontSize, storedFontSize } from "./terminalfont.js";
+import { DEFAULT_FONT_SIZE, clampFontSize, fontStep, onFontSize, rememberFontSize, storedFontSize } from "./terminalfont.js";
 
 // The close codes GET /api/sessions/{id}/pty ends a stream with
 // (internal/server/pty.go), each turned into what the operator should read.
@@ -432,11 +432,14 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     }, delay);
   };
 
+  let stopFollowingSize = null;
   const disposeTerminal = () => {
     // xterm holds a renderer, listeners and a resize observer. Dropping the
     // reference without disposing leaks all three for the life of the page.
     if (terminal && typeof terminal.dispose === "function") terminal.dispose();
     if (terminal) say.fontSize(null);
+    stopFollowingSize?.();
+    stopFollowingSize = null;
     terminal = null;
     refit = null;
     if (paneWatcher) paneWatcher.disconnect();
@@ -485,6 +488,9 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
     }
     terminal = made;
     say.fontSize(made.options.fontSize);
+    // The panel's one size, changed in the settings or at another terminal,
+    // is taken here as a step of its own would be, without writing it back.
+    if (fontKey) stopFollowingSize = onFontSize((size) => adoptFontSize(size));
     followWheel(made);
     followFontKeys(made);
     if (links && typeof made.registerLinkProvider === "function") made.registerLinkProvider(wikiLinkProvider(made, links));
@@ -865,6 +871,13 @@ export function createLiveTerminal(host, short, { timers = globalThis, report = 
   // The new size is on screen, and said to the caller, at once; the terminal
   // is refitted and the session told once the steps stop, as for a pane that
   // changed size.
+  const adoptFontSize = (size) => {
+    if (!terminal || terminal.options.fontSize === size) return;
+    terminal.options.fontSize = size;
+    say.fontSize(size);
+    settleThenFollow();
+  };
+
   const stepFont = (step) => {
     if (!terminal) return;
     const size = terminal.options.fontSize;

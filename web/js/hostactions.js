@@ -5,10 +5,10 @@
 // messages meant for it — the board opens things and lays itself out around the
 // panels, the side surfaces follow the theme and their panel's state — and turns
 // them into what the page already does when a person asks for the same thing.
-import { callHost, onHostMessage } from "./host.js";
+import { onHostMessage } from "./host.js";
 
 const ACCEPTS = {
-  board: new Set(["open", "show", "newCard", "limits", "cycleTheme", "insets", "glass"]),
+  board: new Set(["open", "show", "newCard", "limits", "insets", "glass"]),
   orchestrator: new Set(["theme", "glass", "folded", "focusTerminal", "fullscreen", "titlebar"]),
   sessions: new Set(["theme", "glass", "folded"]),
 };
@@ -31,9 +31,6 @@ export function wireHostActions(win, host, targets) {
         return;
       case "limits":
         targets.toggleLimits?.();
-        return;
-      case "cycleTheme":
-        callHost(win, "fleetdeckTheme", targets.cycleTheme());
         return;
       case "theme":
         targets.applyTheme(message.choice);

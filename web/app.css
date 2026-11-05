@@ -546,17 +546,6 @@ body {
   opacity: 0.8;
 }
 
-/* A person overriding the system theme — web/js/theme.js. Kept visually
- * quiet: it lives beside the brand, not among the counters that are the
- * actual point of the header. */
-.theme-toggle {
-  color: var(--text-muted);
-}
-
-.theme-toggle:hover {
-  color: var(--text);
-}
-
 /* --- fleets (web/js/fleet.js) ---
  *
  * The switcher beside the brand, only on a panel with more than one fleet:
@@ -5690,4 +5679,451 @@ body.is-resizing {
   border-top: 1px solid var(--border);
   color: var(--text-muted);
   font-size: var(--fs-xs);
+}
+
+/* The settings section (web/js/settings.js), drawn to the settings design,
+ * variant A: sizes and, in the dark theme, colours are the design's own. */
+
+:root {
+  --set-card: #ffffff;
+  --set-line: #dde1e7;
+  --set-track: #eef0f3;
+  --set-selected: #ffffff;
+  --set-selected-text: #14161a;
+  --set-control-text: #4b5260;
+  --set-input-line: #cdd2da;
+  --set-muted: #5f6672;
+  --set-on: #2f6fd6;
+  --set-off: #cdd2da;
+  --set-off-knob: #ffffff;
+  --set-ok: #1f8a57;
+  --set-badge-bg: #fbeed5;
+  --set-badge-text: #8a5a00;
+  --set-code-bg: #f4f5f7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --set-card: #1f2125;
+    --set-line: #33363c;
+    --set-track: #26282d;
+    --set-selected: #3a3d45;
+    --set-selected-text: #ffffff;
+    --set-control-text: #c9ccd1;
+    --set-input-line: #383b42;
+    --set-muted: #a3a8b0;
+    --set-on: #3f7be0;
+    --set-off: #3a3d45;
+    --set-off-knob: #c9ccd1;
+    --set-ok: #4cc38a;
+    --set-badge-bg: #3a2e17;
+    --set-badge-text: #f0c27a;
+    --set-code-bg: #141518;
+  }
+}
+
+:root[data-theme="dark"] {
+  --set-card: #1f2125;
+  --set-line: #33363c;
+  --set-track: #26282d;
+  --set-selected: #3a3d45;
+  --set-selected-text: #ffffff;
+  --set-control-text: #c9ccd1;
+  --set-input-line: #383b42;
+  --set-muted: #a3a8b0;
+  --set-on: #3f7be0;
+  --set-off: #3a3d45;
+  --set-off-knob: #c9ccd1;
+  --set-ok: #4cc38a;
+  --set-badge-bg: #3a2e17;
+  --set-badge-text: #f0c27a;
+  --set-code-bg: #141518;
+}
+
+#settings {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.settings {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.settings-layout {
+  display: flex;
+  gap: 24px;
+  padding: 8px 32px 32px 32px;
+}
+
+:root[data-surface="board"] .settings-layout {
+  padding: calc(var(--host-inset-top, 64px) + 8px) calc(var(--host-inset-content-right, 356px) + 32px) 32px var(--host-inset-left, 394px);
+}
+
+.set-nav {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  align-self: flex-start;
+  position: sticky;
+  top: 8px;
+}
+
+.set-nav-link {
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--set-control-text);
+  text-decoration: none;
+}
+
+.set-nav-link:hover {
+  color: var(--text);
+}
+
+.set-nav-link.on {
+  background: var(--set-track);
+  color: var(--set-selected-text);
+}
+
+.set-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.set-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.set-h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  scroll-margin-top: 16px;
+}
+
+.set-h1.spaced {
+  margin-top: 12px;
+}
+
+.set-head p {
+  margin: 0;
+}
+
+.settings h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.set-muted {
+  color: var(--set-muted);
+}
+
+.set-small {
+  font-size: 12px;
+}
+
+.set-strong {
+  color: var(--text);
+}
+
+.set-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.set-card {
+  background: var(--set-card);
+  border: 1px solid var(--set-line);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.set-card.set-list {
+  padding: 4px 16px;
+  gap: 0;
+}
+
+.set-row-card {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.set-card-head,
+.set-row-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.set-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.set-titles.set-grow {
+  gap: 6px;
+}
+
+.set-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--set-muted);
+}
+
+.set-status.ok {
+  color: var(--set-ok);
+}
+
+.set-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--set-muted);
+}
+
+.set-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.set-input {
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 1px solid var(--set-input-line);
+  border-radius: 8px;
+  background: var(--set-track);
+  color: var(--text);
+  font: inherit;
+  min-width: 0;
+}
+
+.set-input.narrow {
+  width: 80px;
+  padding: 6px 8px;
+}
+
+textarea.set-input {
+  resize: vertical;
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.set-segmented {
+  display: flex;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--set-track);
+  gap: 2px;
+}
+
+.set-seg {
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--set-control-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.set-segmented.wide .set-seg {
+  flex: 1 1 0;
+  padding: 6px 4px;
+}
+
+.set-seg.on {
+  background: var(--set-selected);
+  color: var(--set-selected-text);
+}
+
+.set-seg:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.set-switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--set-off);
+  cursor: pointer;
+}
+
+.set-switch.on {
+  background: var(--set-on);
+}
+
+.set-switch:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.set-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--set-off-knob);
+}
+
+.set-switch.on .set-knob {
+  left: 19px;
+  background: #ffffff;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--set-line);
+}
+
+.set-row.last {
+  border-bottom: 0;
+}
+
+.set-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.set-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.set-inline-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--set-muted);
+}
+
+.set-inline-label .set-input.narrow {
+  width: 64px;
+}
+
+.set-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--set-badge-bg);
+  color: var(--set-badge-text);
+  font-size: 11px;
+}
+
+.set-advanced {
+  padding: 12px 0;
+}
+
+.set-advanced summary {
+  cursor: pointer;
+  color: var(--set-control-text);
+}
+
+.set-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.set-preview {
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--set-control-text);
+  background: var(--set-code-bg);
+  padding: 6px 8px;
+  border-radius: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.set-stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--set-track);
+}
+
+.set-step {
+  width: 36px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--set-control-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.set-step.on {
+  min-width: 44px;
+  background: var(--set-selected);
+  color: var(--set-selected-text);
+}
+
+.set-step:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.set-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.set-loading {
+  padding: 32px;
+}
+
+@media (max-width: 720px) {
+  .settings-layout {
+    flex-direction: column;
+    padding: 8px 16px 24px 16px;
+  }
+  .set-nav {
+    position: static;
+    flex: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .set-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .set-row,
+  .set-row-card {
+    flex-wrap: wrap;
+  }
 }

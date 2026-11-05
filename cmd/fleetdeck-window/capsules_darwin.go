@@ -120,6 +120,15 @@ type capsulesProbe struct {
 	measured standFrameReport
 }
 
+func probeCapsuleCountForTest(m capsuleModel) int {
+	window := C.fd_test_window(1512, 982)
+	f := installFrame(window)
+	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}))
+	f.setMode(glassModeGlass)
+	drawCapsules(f.capsules(), m, glassModeGlass)
+	return int(C.fd_test_capsule_count())
+}
+
 func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	var out capsulesProbe
 	window := C.fd_test_window(1512, 982)

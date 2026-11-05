@@ -495,10 +495,10 @@ func TestReducedTransparencyRebuildsTheFrameAndTellsEverySurface(t *testing.T) {
 func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 	c := loadedFrame()
 	cases := map[string]map[string]any{
-		"tab:docs": {"type": "show", "section": "docs"},
-		"newCard":  {"type": "newCard"},
-		"theme":    {"type": "cycleTheme"},
-		"limits":   {"type": "limits"},
+		"tab:docs":     {"type": "show", "section": "docs"},
+		"newCard":      {"type": "newCard"},
+		"tab:settings": {"type": "show", "section": "settings"},
+		"limits":       {"type": "limits"},
 	}
 	for action, msg := range cases {
 		if got := c.capsuleAction(action); !reflect.DeepEqual(got, []effect{sendTo{Surface: "board", Message: msg}}) {

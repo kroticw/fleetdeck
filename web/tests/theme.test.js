@@ -1,14 +1,14 @@
+// web/tests/theme.test.js
 // web/js/theme.js: the one override on top of the system theme app.css
-// already reads correctly on its own. Three things have to hold: the cycle
-// visits all three states in the right order and does not get stuck on
-// "dark" (the ?? bug the module's own comment documents), a stored choice is
-// what a fresh load applies, and a storage failure (a private window) is
-// swallowed rather than thrown at the caller.
+// already reads correctly on its own. The override is the configuration's
+// (ui.theme, a setting), shown when a snapshot carries it and kept for the
+// next load; a storage failure (a private window) is swallowed rather than
+// thrown at the caller.
 
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { initTheme, cycleTheme, applyTheme } from "../js/theme.js";
+import { initTheme, setConfiguredTheme, applyTheme } from "../js/theme.js";
 
 function fakeStorage() {
   const store = new Map();
@@ -43,17 +43,17 @@ beforeEach(() => {
   globalThis.document = { documentElement: root };
 });
 
-test("the cycle visits no-override, light, dark, and back to no-override", () => {
-  assert.equal(cycleTheme(), "light");
-  assert.equal(root.getAttribute("data-theme"), "light");
-  assert.equal(cycleTheme(), "dark");
+// The theme is the configuration's (ui.theme): shown when a snapshot says it,
+// kept for the next load, and reported only when it changed what is shown.
+test("the configured theme is shown, kept, and reported only when it changes", () => {
+  assert.equal(setConfiguredTheme("dark"), true);
   assert.equal(root.getAttribute("data-theme"), "dark");
-  // The bug this pins: NEXT.dark is the legitimate value null, and treating
-  // "no entry" and "entry is null" alike (a bare ?? fallback does) would send
-  // this back to "light" instead of clearing the override.
-  assert.equal(cycleTheme(), null);
+  assert.equal(localStorage.getItem("fleetdeck-theme"), "dark");
+  assert.equal(setConfiguredTheme("dark"), false);
+  assert.equal(setConfiguredTheme(""), true);
   assert.equal(root.getAttribute("data-theme"), null);
-  assert.equal(cycleTheme(), "light");
+  assert.equal(localStorage.getItem("fleetdeck-theme"), null);
+  assert.equal(setConfiguredTheme("sepia"), false, "an unknown theme is the system's");
 });
 
 test("initTheme applies whatever was already remembered", () => {
@@ -70,7 +70,7 @@ test("initTheme with nothing stored leaves the attribute unset", () => {
 test("a storage failure is swallowed, not thrown", () => {
   globalThis.localStorage = throwingStorage();
   assert.doesNotThrow(() => initTheme());
-  assert.doesNotThrow(() => cycleTheme());
+  assert.doesNotThrow(() => setConfiguredTheme("light"));
   // The choice still applies for the rest of this load even though it could
   // not be written down for the next one.
   assert.equal(root.getAttribute("data-theme"), "light");

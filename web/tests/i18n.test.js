@@ -182,9 +182,10 @@ const KEYS = [
   // fails here, not silently in whichever language this machine's locale
   // is not.
   "sessions_title",
-  "theme_auto",
-  "theme_light",
-  "theme_dark",
+  "tab_settings",
+  "set_theme_auto",
+  "set_theme_light",
+  "set_theme_dark",
 
   // web/js/header.js's stale-usage notices, added alongside the fresh
   // usage_down muting -- same reason as everything else on this list.

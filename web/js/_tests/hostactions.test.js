@@ -62,10 +62,12 @@ test("the board opens what the window asks it to open", () => {
   assert.deepEqual(calls, [["openCard", "cards/T-1.md"], ["openDoc", "/docs/r.md"], ["openSession", "abc12345"]]);
 });
 
-test("the board cycles the theme and reports the result to the window", () => {
+// The theme is a setting (web/js/settings.js): the window has no capsule to
+// cycle it from any more, and a stray message changes nothing.
+test("the board no longer cycles the theme for the window", () => {
   const { send, calls } = setup("board");
   send({ type: "cycleTheme" });
-  assert.deepEqual(calls, [["cycleTheme"], ["report", "dark"]]);
+  assert.deepEqual(calls, []);
 });
 
 test("the board keeps clear of the panels by the insets the window sends", () => {
