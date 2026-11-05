@@ -410,10 +410,9 @@ func TestServiceObservesThreadAndReconnectsToNative(t *testing.T) {
 	if lost.NeedsHuman != executor.Unknown || lost.Activity != "unknown" {
 		t.Fatalf("a lost observation must be unknown: %+v", lost)
 	}
-	back := awaitStatus(t, client, func(s Status) bool { return s.Native })
-	if back.Activity != "idle" || back.NeedsHuman != executor.No {
-		t.Fatalf("reconnect did not reconcile: %+v", back)
-	}
+	// Native comes back before the reconcile has read the thread's status;
+	// until then the state is honestly unknown, so the wait is for both.
+	awaitStatus(t, client, func(s Status) bool { return s.Native && s.Activity == "idle" && s.NeedsHuman == executor.No })
 	f.native.mu.Lock()
 	defer f.native.mu.Unlock()
 	if f.native.conns < 2 || !slices.Contains(f.native.methods[1:], "thread/resume") {
