@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/transcript"
+	"github.com/kroticw/fleetdeck/internal/usage"
+
 	"github.com/kroticw/fleetdeck/internal/codex"
 	"github.com/kroticw/fleetdeck/internal/codexruntime"
 	"github.com/kroticw/fleetdeck/internal/config"
@@ -155,6 +158,10 @@ func sessionRow(s executor.Session) listedSession {
 	if s.Lifecycle != state.LifecycleLive {
 		return listedSession{session: row, lifecycle: s.Lifecycle, lastState: s.Activity}
 	}
+	listed := listedSession{session: row, lifecycle: state.LifecycleLive, limits: s.Limits}
+	if c := s.Context; c != nil {
+		listed.context = &transcript.Usage{Tokens: int(c.Value.Tokens), Window: int(c.Value.Window)}
+	}
 	row.State = map[string]string{"working": "working", "idle": "idle", "error": "blocked"}[s.Activity]
 	switch s.NeedsHuman {
 	case executor.Yes:
@@ -162,11 +169,49 @@ func sessionRow(s executor.Session) listedSession {
 	case executor.No:
 		row.Needs = new("")
 	}
-	return listedSession{session: row, lifecycle: state.LifecycleLive}
+	listed.session = row
+	return listed
 }
 
-// codexSessionRows lists the runtimes kept in stateDir.
-func codexSessionRows(ctx context.Context, stateDir string) []listedSession {
+// accountLimits is the newest Codex account limits any live session
+// reported, as the panel's limit gauges read them. They are Codex's own and
+// never merged into Claude's; windows of other lengths are not shown.
+func accountLimits(rows []listedSession) *usage.Limits {
+	var newest *executor.Metric[[]executor.Limit]
+	for _, r := range rows {
+		if r.limits != nil && (newest == nil || r.limits.ObservedAt.After(newest.ObservedAt)) {
+			newest = r.limits
+		}
+	}
+	if newest == nil {
+		return nil
+	}
+	out := &usage.Limits{FetchedAt: newest.ObservedAt}
+	var five, seven bool
+	for _, l := range newest.Value {
+		w := usage.Window{Utilization: l.UsedPercent}
+		if l.ResetsAt != nil {
+			w.ResetsAt = *l.ResetsAt
+		}
+		switch l.Name {
+		case "5h":
+			out.FiveHour, five = w, true
+		case "7d":
+			out.SevenDay, seven = w, true
+		}
+	}
+	// shortcut: both windows or none, since a missing one would read as 0%;
+	// make the windows optional if Codex starts reporting only one.
+	if !five || !seven {
+		return nil
+	}
+	return out
+}
+
+// codexSessionRows lists the runtimes kept in stateDir. A live one that has
+// not reported its context yet -- reconnected, or of an older build -- takes
+// it from its rollout under home, and its silence from when that was written.
+func codexSessionRows(ctx context.Context, stateDir, home string, now time.Time) []listedSession {
 	if _, err := os.Stat(stateDir); err != nil {
 		return nil
 	}
@@ -176,9 +221,26 @@ func codexSessionRows(ctx context.Context, stateDir string) []listedSession {
 	}
 	rows := make([]listedSession, 0, len(sessions))
 	for _, s := range sessions {
-		rows = append(rows, sessionRow(s))
+		rows = append(rows, withRollout(sessionRow(s), s.NativeID, home, now))
 	}
 	return rows
+}
+
+// withRollout fills a live row's context, when its runtime reported none, and
+// its silence from the thread's rollout.
+func withRollout(row listedSession, threadID, home string, now time.Time) listedSession {
+	if row.lifecycle != state.LifecycleLive {
+		return row
+	}
+	r, ok := codex.ReadRollout(home, threadID)
+	if !ok {
+		return row
+	}
+	if row.context == nil {
+		row.context = &transcript.Usage{Tokens: int(r.Tokens), Window: int(r.Window)}
+	}
+	row.silentFor = max(now.Sub(r.WrittenAt), 0)
+	return row
 }
 
 // resumeVia brings a session back through its executor, as the resume route

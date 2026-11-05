@@ -293,19 +293,75 @@ function gaugeLevel(pct) {
   return pct >= 90 ? "hot" : pct >= 60 ? "warm" : "cool";
 }
 
-// limitsOf is the two limits as data rather than markup — what the gauges above
-// show — for the fleetdeck window, which draws them as capsules of its own
-// (web/js/capsules.js). pct is null where the gauge shows a dash.
+// isCodexLimitsStale is isUsageStale for the Codex account's windows: they
+// come from Codex's own reports, so Claude's usage error says nothing about
+// them; only their age does.
+export function isCodexLimitsStale(snap, nowMs) {
+  if (!snap.codexLimits) return false;
+  return nowMs - new Date(snap.codexLimits.fetchedAt).getTime() > RATE_LIMITS_AGE_WORTH_SHOWING_MS;
+}
+
+// providerLimits is each provider's windows, and the provider summarised by
+// its worst window. Claude is always listed (a dash without numbers); Codex
+// only once it has reported. Two providers' windows are never merged.
+export function providerLimits(snap, nowMs) {
+  const provider = (name, limits, stale) => {
+    const windows = [
+      [t("limits_5h"), t("limit_5h"), limits?.fiveHour],
+      [t("limits_7d"), t("limit_7d"), limits?.sevenDay],
+    ].map(([title, label, window_]) => {
+      if (!window_) return { title, label, pct: null, level: "off", resetsAt: null };
+      const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
+      return { title, label, pct, level: stale ? "stale" : gaugeLevel(pct), resetsAt: window_.resetsAt };
+    });
+    const known = windows.filter((w) => w.pct !== null);
+    if (known.length === 0) return { name, pct: null, level: "off", windows, fetchedAt: null };
+    const worst = known.reduce((a, b) => (b.pct > a.pct ? b : a));
+    return { name, pct: worst.pct, level: worst.level, windows, fetchedAt: limits.fetchedAt };
+  };
+  const list = [provider("Claude", snap.limits, isUsageStale(snap, nowMs))];
+  if (snap.codexLimits) list.push(provider("Codex", snap.codexLimits, isCodexLimitsStale(snap, nowMs)));
+  return list;
+}
+
+// limitsOf is the providers as data rather than markup, for the fleetdeck
+// window, which draws them as capsules of its own (web/js/capsules.js). pct
+// is null where a capsule shows a dash.
 export function limitsOf(snap, nowMs) {
-  const stale = isUsageStale(snap, nowMs);
-  return [
-    [t("limit_5h"), snap.limits?.fiveHour],
-    [t("limit_7d"), snap.limits?.sevenDay],
-  ].map(([label, window_]) => {
-    if (!window_) return { label, pct: null, level: "off" };
-    const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
-    return { label, pct, level: stale ? "stale" : gaugeLevel(pct) };
-  });
+  return providerLimits(snap, nowMs).map(({ name, pct, level }) => ({ label: name, pct, level }));
+}
+
+// limitsButtonHTML is the limits capsule of the header: each provider's
+// worst window, opening the menu below.
+export function limitsButtonHTML(snap, nowMs, open) {
+  const parts = providerLimits(snap, nowMs)
+    .map((p) => `<span class="limits-provider limits-${p.level}"><span class="limits-dot" aria-hidden="true"></span>${escapeHTML(p.name)} ${p.pct === null ? "—" : `${p.pct}%`}</span>`)
+    .join("");
+  return `<button type="button" class="limits-button" aria-haspopup="true" aria-expanded="${open}" aria-label="${escapeHTML(t("limits_title"))}">${parts}<span class="limits-chevron" aria-hidden="true">▾</span></button>`;
+}
+
+// limitsTableHTML is the menu's table: providers down, windows across, each
+// cell its percentage, meter and reset, then when each provider last spoke.
+export function limitsTableHTML(snap, nowMs) {
+  const providers = providerLimits(snap, nowMs);
+  const head = providers[0].windows.map((w) => `<th scope="col">${escapeHTML(w.title)}</th>`).join("");
+  const rows = providers
+    .map((p) => {
+      const cells = p.windows
+        .map((w) =>
+          w.pct === null
+            ? `<td class="limits-cell limits-off">—</td>`
+            : `<td class="limits-cell limits-${w.level}"><span class="limits-pct">${w.pct}%</span><meter min="0" max="100" value="${w.pct}" class="gauge-track"></meter><span class="limits-reset">${escapeHTML(t("resets_in"))} ${escapeHTML(humanDuration(w.resetsAt))}</span></td>`,
+        )
+        .join("");
+      return `<tr><th scope="row">${escapeHTML(p.name)}</th>${cells}</tr>`;
+    })
+    .join("");
+  const ages = providers
+    .filter((p) => p.fetchedAt)
+    .map((p) => `${escapeHTML(p.name)}: ${escapeHTML(humanAge(p.fetchedAt))}`)
+    .join(" · ");
+  return `<table class="limits-table"><thead><tr><td></td>${head}</tr></thead><tbody>${rows}</tbody></table>${ages ? `<div class="limits-ages">${escapeHTML(t("limits_updated"))} ${ages}</div>` : ""}`;
 }
 
 // The header's parts, in the order the header draws them. A browser tab draws
@@ -571,6 +627,7 @@ export function renderHeader(
   // snapshot. The last snapshot is kept beside it so the menu can be repainted
   // on a click without waiting for one.
   let menuOpen = openMenu;
+  let limitsOpen = false;
   let lastSnapshot = null;
   let lastPaint = () => {};
   const applyMenu = (action, fleet) => {
@@ -666,6 +723,11 @@ export function renderHeader(
       if (pressed.start) hostUpdate();
       return;
     }
+    if (event.target.closest(".limits-button")) {
+      limitsOpen = !limitsOpen;
+      lastPaint();
+      return;
+    }
     const menu = event.target.closest("[data-fleet-menu]");
     if (menu) {
       applyMenu(menu.dataset.fleetMenu, menu.dataset.fleet ?? "");
@@ -709,8 +771,8 @@ export function renderHeader(
       ${hostUpdate && !panel ? updateHTML(update, nowMs) : ""}`,
       limits: `
       <div class="limits">
-        ${snap.limits ? gauge(t("limit_5h"), snap.limits.fiveHour, usageStale, snap.limits.fetchedAt) : gauge(t("limit_5h"), null)}
-        ${snap.limits ? gauge(t("limit_7d"), snap.limits.sevenDay, usageStale, snap.limits.fetchedAt) : gauge(t("limit_7d"), null)}
+        ${limitsButtonHTML(snap, nowMs, limitsOpen)}
+        ${limitsOpen ? `<div class="limits-menu" role="dialog" aria-label="${escapeHTML(t("limits_title"))}">${limitsTableHTML(snap, nowMs)}</div>` : ""}
       </div>`,
       counters: `
       <div class="counters">
@@ -739,6 +801,23 @@ export function renderHeader(
   // menu shuts itself in the same gesture that opened it. Seen on a live page,
   // where opening it worked once and then did not — the unit tests cannot look
   // here, because they never run a real event through a real document.
+  // The limits menu closes the way the fleet menu does: a click anywhere
+  // outside it and its button, or Escape.
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!limitsOpen) return;
+      if (event.target.closest?.(".limits-menu, .limits-button")) return;
+      limitsOpen = false;
+      lastPaint();
+    },
+    true,
+  );
+  document.addEventListener("keydown", (event) => {
+    if (!limitsOpen || event.key !== "Escape") return;
+    limitsOpen = false;
+    lastPaint();
+  });
   document.addEventListener(
     "click",
     (event) => {

@@ -294,6 +294,10 @@ type Snapshot struct {
 
 	// CodexEnabled offers Codex as a card's executor, and DefaultExecutor is
 	// the one a new card gets unless another is chosen.
+	// CodexLimits are the Codex account's windows, kept apart from Limits,
+	// which are Claude's: two providers' limits are never one gauge.
+	CodexLimits *usage.Limits `json:"codexLimits,omitempty"`
+
 	CodexEnabled    bool   `json:"codexEnabled,omitempty"`
 	DefaultExecutor string `json:"defaultExecutor,omitempty"`
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
+	"github.com/kroticw/fleetdeck/internal/executor"
 	"github.com/kroticw/fleetdeck/internal/orchestrator"
 	"github.com/kroticw/fleetdeck/internal/review"
 )
@@ -409,7 +410,11 @@ func (d Deps) notifyRound(ctx context.Context, t reviewTarget, n int, lang strin
 	if d.SendToSession == nil {
 		return "this panel has no way to reach the session"
 	}
-	text := orchestrator.ReviewRound(lang, n, filepath.Join(t.dir, "comments.json"), filepath.Join(t.dir, "replies.md"))
+	round := orchestrator.ReviewRound
+	if t.card.Executor == string(executor.Codex) {
+		round = orchestrator.CodexReviewRound
+	}
+	text := round(lang, n, filepath.Join(t.dir, "comments.json"), filepath.Join(t.dir, "replies.md"))
 	if err := d.SendToSession(ctx, t.card.Session, text); err != nil {
 		return err.Error()
 	}

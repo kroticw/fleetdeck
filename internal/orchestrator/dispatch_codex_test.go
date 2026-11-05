@@ -56,7 +56,7 @@ func TestDispatchHandsACodexCardToCodexInTheSameOrder(t *testing.T) {
 			t.Fatalf("step %d = %q, want %q…", i, f.steps[i], prefix)
 		}
 	}
-	if !strings.Contains(f.steps[0], ":"+path+":") || !strings.Contains(f.steps[3], Task("", path)) {
+	if !strings.Contains(f.steps[0], ":"+path+":") || !strings.Contains(f.steps[3], CodexTask("", path)) {
 		t.Fatalf("codex start or task lacks the card: %v", f.steps)
 	}
 	if len(*ops) != 1 || len((*ops)[0]) < 8 {
@@ -83,5 +83,38 @@ func TestDispatchRefusesCodexWhenItIsNotConfigured(t *testing.T) {
 	codexCard(t, path)
 	if _, err := d.Dispatch(context.Background(), Work{Card: path}); !errors.Is(err, ErrCannotStart) || len(f.steps) != 0 {
 		t.Fatalf("err=%v steps=%v", err, f.steps)
+	}
+}
+
+// Codex has no card-keeping skill (it is a Claude Code plugin), and a Codex
+// agent left without it set its own card to done (T-216). Its task carries the
+// rules that skill would have given it.
+func TestACodexTaskCarriesTheCardKeepingRules(t *testing.T) {
+	for _, lang := range []string{"en", "ru"} {
+		text := CodexTask(lang, "/b/cards/T-042-card.md")
+		for _, rule := range []string{"/b/cards/T-042-card.md", "stage: review", "done", "stage: blocked", "## Лог", "10/20/40/60/80/100"} {
+			if !strings.Contains(text, rule) {
+				t.Errorf("%s task lacks %q: %s", lang, rule, text)
+			}
+		}
+		if strings.Contains(text, "\n") {
+			t.Errorf("%s task is more than one line: %q", lang, text)
+		}
+	}
+	if strings.Contains(Task("en", "/b/c.md"), "stage: review") {
+		t.Fatal("the Claude task names the rules its skill already gives")
+	}
+}
+
+// A round of review tells a Codex session how to answer, which for Claude the
+// skill's review section does.
+func TestACodexReviewRoundCarriesTheAnswersForm(t *testing.T) {
+	for _, lang := range []string{"en", "ru"} {
+		text := CodexReviewRound(lang, 2, "/b/reviews/T-057/comments.json", "/b/reviews/T-057/replies.md")
+		for _, part := range []string{"2", "/b/reviews/T-057/comments.json", "/b/reviews/T-057/replies.md", "## c3", "status: fixed", "declined", "question", "/b/scripts/validate_review.py"} {
+			if !strings.Contains(text, part) {
+				t.Errorf("%s round lacks %q: %s", lang, part, text)
+			}
+		}
 	}
 }

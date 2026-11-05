@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kroticw/fleetdeck/internal/executor"
+
 	"github.com/kroticw/fleetdeck/internal/board"
 	"github.com/kroticw/fleetdeck/internal/config"
 	"github.com/kroticw/fleetdeck/internal/daemon"
@@ -22,6 +24,7 @@ import (
 	"github.com/kroticw/fleetdeck/internal/state"
 	"github.com/kroticw/fleetdeck/internal/transcript"
 	"github.com/kroticw/fleetdeck/internal/usage"
+	"github.com/kroticw/fleetdeck/internal/userenv"
 )
 
 // reportTTL is how long a statusline report is preferred over the transcript
@@ -609,7 +612,8 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	entries := mergeStopped(sessions, records)
 	snap.CodexEnabled, snap.DefaultExecutor = cfg.Codex.Enabled, string(cfg.DefaultExecutor)
 	if cfg.Codex.Enabled && c.codexState != "" {
-		entries = append(entries, codexSessionRows(ctx, c.codexState)...)
+		home, _ := codexHome(cfg.Codex, userenv.Environ())
+		entries = append(entries, codexSessionRows(ctx, c.codexState, home, c.now())...)
 	}
 	listed := make([]daemon.Session, len(entries))
 	for i, e := range entries {
@@ -623,7 +627,14 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	for i := range snap.Sessions {
 		snap.Sessions[i].Lifecycle = entries[i].lifecycle
 		snap.Sessions[i].LastState = entries[i].lastState
+		if entries[i].context != nil {
+			snap.Sessions[i].Context = entries[i].context
+		}
+		if entries[i].silentFor > 0 {
+			snap.Sessions[i].SilentFor = entries[i].silentFor
+		}
 	}
+	snap.CodexLimits = accountLimits(entries)
 	snap.OrphanCards = state.OrphanCards(snap.Sessions, snap.Boards[0].Cards)
 	snap.StoppedCards = state.StoppedCards(snap.Sessions, snap.Boards[0].Cards)
 	c.pruneContextCache(c.enrich(snap.Sessions, cfg.SessionLabels))
@@ -671,6 +682,13 @@ type listedSession struct {
 	session   daemon.Session
 	lifecycle string
 	lastState string
+	// context and limits are what a non-Claude executor reported; Claude's
+	// are read from its transcript and statusline instead (enrich).
+	context *transcript.Usage
+	limits  *executor.Metric[[]executor.Limit]
+	// silentFor is how long a non-Claude session's own record has gone
+	// unwritten; zero is not measured.
+	silentFor time.Duration
 }
 
 // mergeStopped puts the daemon's live sessions and the job store's records

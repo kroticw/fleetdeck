@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -178,6 +179,19 @@ func list(ctx context.Context, stateDir string) ([]executor.Session, error) {
 	return sessions, nil
 }
 
+// windowName names a limit window by its length, as the panel labels them.
+func windowName(minutes int64) string {
+	switch {
+	case minutes <= 0:
+		return ""
+	case minutes%(24*60) == 0:
+		return fmt.Sprintf("%dd", minutes/(24*60))
+	case minutes%60 == 0:
+		return fmt.Sprintf("%dh", minutes/60)
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
 func serving(lifecycle string) bool {
 	return lifecycle == "live" || lifecycle == "starting" || lifecycle == "stopping"
 }
@@ -194,6 +208,16 @@ func Observe(r codexruntime.Record, status *codexruntime.Status, held bool) exec
 			s.Activity, s.NeedsHuman, s.ObservedAt = status.Activity, status.NeedsHuman, status.ObservedAt
 			if s.NeedsHuman == executor.Yes {
 				s.Reason = Needs
+			}
+			if c := status.Context; c != nil {
+				s.Context = &executor.Metric[executor.ContextUse]{Value: executor.ContextUse{Tokens: c.Tokens, Window: c.Window}, Source: "codex", ObservedAt: c.ObservedAt}
+			}
+			if l := status.Limits; l != nil {
+				limits := make([]executor.Limit, 0, len(l.Windows))
+				for _, w := range l.Windows {
+					limits = append(limits, executor.Limit{Name: windowName(w.Minutes), Minutes: w.Minutes, UsedPercent: w.UsedPercent, ResetsAt: w.ResetsAt})
+				}
+				s.Limits = &executor.Metric[[]executor.Limit]{Value: limits, Source: "codex", ObservedAt: l.ObservedAt}
 			}
 		}
 	case r.Lifecycle == "stopped":

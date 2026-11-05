@@ -51,6 +51,9 @@ type Status struct {
 	Activity   string           `json:"activity"`
 	NeedsHuman executor.Verdict `json:"needsHuman"`
 	ObservedAt time.Time        `json:"observedAt"`
+	// Context and Limits are what Codex last reported; absent is unmeasured.
+	Context *ContextUse    `json:"context,omitempty"`
+	Limits  *AccountLimits `json:"limits,omitempty"`
 }
 
 // SocketPath is the runtime's private IPC endpoint inside stateDir.
@@ -189,7 +192,8 @@ func Serve(ctx context.Context, spec ServiceSpec) (err error) {
 				obs.lost()
 			}
 			activity, needs, at := obs.view(pending)
-			return Status{Lifecycle: current.Lifecycle, ThreadID: current.ThreadID, Native: nerr == nil, Terminal: !isDone(term.done), Activity: activity, NeedsHuman: needs, ObservedAt: at}, nil
+			context, limits := obs.usage()
+			return Status{Lifecycle: current.Lifecycle, ThreadID: current.ThreadID, Native: nerr == nil, Terminal: !isDone(term.done), Activity: activity, NeedsHuman: needs, ObservedAt: at, Context: context, Limits: limits}, nil
 		case "terminal.attach":
 			var req struct {
 				Offset *uint64 `json:"offset"`

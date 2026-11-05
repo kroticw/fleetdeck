@@ -180,6 +180,14 @@ func ReviewRound(lang string, n int, commentsPath, repliesPath string) string {
 	return fmt.Sprintf(words[Lang(lang)].review, n, "`"+commentsPath+"`", "`"+repliesPath+"`")
 }
 
+// CodexReviewRound is ReviewRound for a Codex session, which has no
+// card-keeping skill to say how to answer (CodexTask). The validator is the
+// board's: the round's files are in <board>/reviews/<card>.
+func CodexReviewRound(lang string, n int, commentsPath, repliesPath string) string {
+	validator := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(repliesPath))), "scripts", "validate_review.py")
+	return fmt.Sprintf(words[Lang(lang)].codexReview, n, "`"+commentsPath+"`", "`"+repliesPath+"`", "`"+validator+"`")
+}
+
 // WriteBrief puts content at path, replacing a brief fleetdeck wrote before
 // and refusing anything else there. The directory must exist: it is one the
 // configuration names, and making it is setup's business, not this one's.
@@ -216,7 +224,7 @@ func WriteBrief(path string, content []byte) error {
 // words are the brief's head, the message and a new session's name, in each language the working
 // order is written in, and the one line a worker session is sent with its card (Task).
 var words = map[string]struct {
-	written, board, boardRules, docs, config, message, sessionName, task, stage, review, workerName string
+	written, board, boardRules, docs, config, message, sessionName, task, codexTask, stage, review, codexReview, workerName string
 }{
 	"en": {
 		written:    "fleetdeck's orchestrator wizard wrote this file when it appointed this panel's orchestrator, and will write it again the next time it runs.",
@@ -228,10 +236,25 @@ var words = map[string]struct {
 		// What a new session is called in the daemon's list and the panel's.
 		sessionName: "orchestrator",
 		task:        "fleetdeck: this session is taking on the board card %s. Read the whole card and work by it, keeping it up to date by the card-keeping skill: it is what the operator sees instead of reading this session.",
+		// task for a Codex session, with the card-keeping skill's rules in it (CodexTask).
+		codexTask: "fleetdeck: this session is taking on the board card %s. Read the whole card and work by it: it is what the operator sees instead of reading this session. " +
+			"Keep it this way. Re-read the card before every write and change only your fields: stage, progress, worktree and the section \"## Лог\"; never rewrite the file, never touch id or session. " +
+			"Start with stage: active and progress: 10. Progress is only 10/20/40/60/80/100: 10 started, 20 working, 40 draft handed over, 60 iterating on comments, 80 nearly done. " +
+			"Add to \"## Лог\" one dated line per finding or decision, and keep that heading as it is. " +
+			"Stuck on something outside you, or on a permission nobody can give: stage: blocked, and the reason as the last line of the log. " +
+			"Finished: stage: review, and the last log line says where the result is (branch, PR, document as a [[link]]) and what the operator must do. " +
+			"stage: done and progress: 100 are the operator's acceptance, never yours, even after a merge or a release. " +
+			"Do not commit the board.",
 		// What the session keeping a card is told when the operator moves its stage (StageByHand).
 		stage: "fleetdeck: the operator moved this card's stage from %s to %s by hand — that write is not yours. Re-read the card %s before you write anything into it again.",
 		// What the session keeping a card is told when the operator sends it a round of review (ReviewRound).
 		review: "fleetdeck: the operator sent review round %d of your branch: the comments are in %s. Answer in %s by the card-keeping skill's review section.",
+		// review for a Codex session, with the skill's review section in it (CodexReviewRound).
+		codexReview: "fleetdeck: the operator sent review round %[1]d of your branch: the comments are in %[2]s. " +
+			"Read it, never write it; take the comments whose round is %[1]d — the anchor's text is the truth, positions are a hint. " +
+			"Commit the fixes first, then answer in %[3]s: one section per comment, below the earlier ones, which you never edit — " +
+			"a line \"## c3\" with the comment's id, then \"status: fixed\", \"declined\" or \"question\", an optional \"commit: <sha>\", a blank line and what was done or why not. " +
+			"Then run python3 %[4]s %[3]s; it must say replies are valid. A question waits for the next round.",
 		// What a worker session is called when its card has no number.
 		workerName: "worker",
 	},
@@ -244,8 +267,21 @@ var words = map[string]struct {
 		message:     "fleetdeck: эта сессия назначена оркестратором флота. Прочитай целиком файл %s и дальше работай по нему. Если до этого сообщения у тебя была своя задача, не бросай её молча: скажи оператору, в каком она состоянии.",
 		sessionName: "оркестратор",
 		task:        "fleetdeck: эта сессия берёт в работу карточку доски %s. Прочитай карточку целиком и работай по ней, ведя её по скилу card-keeping: оператор видит карточку вместо того, чтобы читать эту сессию.",
-		stage:       "fleetdeck: оператор вручную перевёл стадию этой карточки из %s в %s — это не твоя запись. Перечитай карточку %s, прежде чем снова в неё писать.",
-		review:      "fleetdeck: оператор прислал раунд ревью %d твоей ветки: замечания в %s. Ответь в %s по разделу о ревью в скиле card-keeping.",
-		workerName:  "исполнитель",
+		codexTask: "fleetdeck: эта сессия берёт в работу карточку доски %s. Прочитай карточку целиком и работай по ней: оператор видит карточку вместо того, чтобы читать эту сессию. " +
+			"Веди её так. Перед каждой записью перечитывай карточку и меняй только свои поля: stage, progress, worktree и раздел «## Лог»; файл целиком не переписывай, id и session не трогай. " +
+			"Начни с stage: active и progress: 10. Прогресс только 10/20/40/60/80/100: 10 — запустился, 20 — работаю, 40 — черновик отдан, 60 — итерация по замечаниям, 80 — почти готово. " +
+			"В «## Лог» дописывай снизу одну строку с датой на находку или решение; заголовок раздела не переименовывай. " +
+			"Упёрся во внешнюю причину или в разрешение, которого некому дать: stage: blocked и причина последней строкой лога. " +
+			"Закончил: stage: review, и последняя строка лога говорит, где результат (ветка, PR, документ ссылкой [[имя]]) и что нужно от оператора. " +
+			"stage: done и progress: 100 — приёмка оператора, не твоя работа, даже после мёржа или выпуска. " +
+			"Доску не коммить.",
+		stage:  "fleetdeck: оператор вручную перевёл стадию этой карточки из %s в %s — это не твоя запись. Перечитай карточку %s, прежде чем снова в неё писать.",
+		review: "fleetdeck: оператор прислал раунд ревью %d твоей ветки: замечания в %s. Ответь в %s по разделу о ревью в скиле card-keeping.",
+		codexReview: "fleetdeck: оператор прислал раунд ревью %[1]d твоей ветки: замечания в %[2]s. " +
+			"Читай, но никогда не пиши в него; бери замечания с round %[1]d — истина текст якоря, позиции подсказка. " +
+			"Сначала закоммить исправления, потом ответь в %[3]s: на каждое замечание раздел ниже прежних, прежние не правь — " +
+			"строка «## c3» с id замечания, затем «status: fixed», «declined» или «question», необязательная «commit: <sha>», пустая строка и что сделано или почему нет. " +
+			"Затем прогони python3 %[4]s %[3]s — он должен ответить replies are valid. На question жди следующего раунда.",
+		workerName: "исполнитель",
 	},
 }

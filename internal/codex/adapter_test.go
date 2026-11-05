@@ -130,3 +130,20 @@ func TestAnUnreachableRuntimeNeverClaimsSuccess(t *testing.T) {
 		t.Fatalf("send %+v %v", r, err)
 	}
 }
+
+func TestObserveCarriesReportedContextAndLimitsOnly(t *testing.T) {
+	at := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	status := &codexruntime.Status{Activity: "working", NeedsHuman: executor.No,
+		Context: &codexruntime.ContextUse{Tokens: 51200, Window: 256000, ObservedAt: at},
+		Limits:  &codexruntime.AccountLimits{ObservedAt: at, Windows: []codexruntime.LimitWindow{{Minutes: 300, UsedPercent: 13}, {Minutes: 10080, UsedPercent: 51}}}}
+	s := Observe(record("live"), status, true)
+	if s.Context == nil || s.Context.Value.Tokens != 51200 || s.Context.Value.Window != 256000 || s.Context.ObservedAt != at {
+		t.Fatalf("context %+v", s.Context)
+	}
+	if s.Limits == nil || len(s.Limits.Value) != 2 || s.Limits.Value[0].Name != "5h" || s.Limits.Value[1].Name != "7d" || s.Limits.Value[1].UsedPercent != 51 {
+		t.Fatalf("limits %+v", s.Limits)
+	}
+	if bare := Observe(record("live"), &codexruntime.Status{Activity: "idle"}, true); bare.Context != nil || bare.Limits != nil {
+		t.Fatalf("unreported metrics appeared: %+v", bare)
+	}
+}

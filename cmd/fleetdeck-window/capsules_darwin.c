@@ -80,7 +80,7 @@ static int respondsTo(id object, const char *selector) {
 
 // --- what the last draw made -----------------------------------------------------
 
-enum { tagTabs = 1, tagNewCard = 2, tagTheme = 3 };
+enum { tagTabs = 1, tagNewCard = 2, tagTheme = 3, tagLimits = 4 };
 
 #define maxTabs 8
 #define maxLimits 8
@@ -92,6 +92,8 @@ static char *tabIDsDrawn[maxTabs];
 static int tabsDrawn;
 static id rowDrawn;
 static id segmentedDrawn, newCardDrawn, themeDrawn, themeIconDrawn, compactLabelDrawn;
+// The limits menu's chevrons: on the last limit, and on the compact limits.
+static id limitsChevronDrawn, compactChevronDrawn;
 static id levelsDrawn[maxLimits];
 static id tabsCapsule, newCardCapsule, compactCapsule, themeCapsule, themeIconCapsule;
 static id limitCapsules[maxLimits];
@@ -161,6 +163,9 @@ static void capsulePressed(id self, SEL _cmd, id sender) {
       return;
     case tagTheme:
       fleetdeckCapsulePressed((char *)"theme");
+      return;
+    case tagLimits:
+      fleetdeckCapsulePressed((char *)"limits");
       return;
   }
 }
@@ -242,6 +247,15 @@ static id button(const char *title, long tag) {
                                                       nsstring(title), target(), sel("pressed:"));
   sendVoidBool(b, sel("setBordered:"), 0);
   sendVoidLong(b, sel("setTag:"), tag);
+  return b;
+}
+
+// The button that opens the limits menu; what it says to a pointer and to
+// VoiceOver is the limits in full.
+static id limitsChevron(const char *description) {
+  id b = button("▾", tagLimits);
+  sendVoid1(b, sel("setToolTip:"), nsstring(description));
+  sendVoid1(b, sel("setAccessibilityLabel:"), nsstring(description));
   return b;
 }
 
@@ -378,6 +392,7 @@ void fd_capsules_clear(void *container) {
   sendVoid0(old, sel("release"));
   rowDrawn = (id)0;
   segmentedDrawn = newCardDrawn = themeDrawn = themeIconDrawn = compactLabelDrawn = (id)0;
+  limitsChevronDrawn = compactChevronDrawn = (id)0;
   tabsCapsule = newCardCapsule = compactCapsule = themeCapsule = themeIconCapsule = (id)0;
   for (int i = 0; i < maxLimits; i++) limitCapsules[i] = levelsDrawn[i] = (id)0;
   limitsDrawn = 0;
@@ -458,8 +473,10 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id colour = srgb(&limitRGB[3 * i]);
     if (colour && respondsTo(level, "setFillColor:")) sendVoid1(level, sel("setFillColor:"), colour);
     levelsDrawn[i] = level;
-    id views[3] = {label(limitLabels[i]), level, label(limitTexts[i])};
-    id content = row(views, 3);
+    id views[4] = {label(limitLabels[i]), level, label(limitTexts[i]), (id)0};
+    int count = 3;
+    if (i == limitsDrawn - 1) views[count++] = limitsChevronDrawn = limitsChevron(compactTooltip);
+    id content = row(views, count);
     sendVoid0(level, sel("release"));
     limitCapsules[i] = capsule(mode, content, 0, capsulePadding);
     adopt(into, limitCapsules[i]);
@@ -473,7 +490,9 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id colour = srgb(compactRGB);
     if (colour) sendVoid1(compactLabelDrawn, sel("setTextColor:"), colour);
     sendVoid1(compactLabelDrawn, sel("setToolTip:"), nsstring(compactTooltip));
-    compactCapsule = capsule(mode, compactLabelDrawn, 0, capsulePadding);
+    compactChevronDrawn = limitsChevron(compactTooltip);
+    id views[2] = {compactLabelDrawn, compactChevronDrawn};
+    compactCapsule = capsule(mode, row(views, 2), 0, capsulePadding);
     adopt(into, compactCapsule);
   }
 
@@ -687,6 +706,11 @@ void fd_test_set_app_appearance(const char *name) {
   sendVoid1(send0(cls("NSApplication"), sel("sharedApplication")), sel("setAppearance:"), appearance);
 }
 void fd_test_press_theme_icon(void) { sendAction(themeIconDrawn); }
+void fd_test_press_limits(int which) { sendAction(which == 0 ? limitsChevronDrawn : compactChevronDrawn); }
+
+const char *fd_test_limits_accessibility_label(void) {
+  return cstring(send0(compactChevronDrawn, sel("accessibilityLabel")));
+}
 
 double fd_test_capsule_slot_background_brightness(int i) {
   id wrapper = slot(i, NULL);
