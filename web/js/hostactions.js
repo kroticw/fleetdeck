@@ -8,7 +8,7 @@
 import { callHost, onHostMessage } from "./host.js";
 
 const ACCEPTS = {
-  board: new Set(["open", "show", "newCard", "cycleTheme", "insets", "glass"]),
+  board: new Set(["open", "show", "newCard", "limits", "cycleTheme", "insets", "glass"]),
   orchestrator: new Set(["theme", "glass", "folded", "focusTerminal", "fullscreen", "titlebar"]),
   sessions: new Set(["theme", "glass", "folded"]),
 };
@@ -28,6 +28,9 @@ export function wireHostActions(win, host, targets) {
         return;
       case "newCard":
         targets.toggleNewCard();
+        return;
+      case "limits":
+        targets.toggleLimits?.();
         return;
       case "cycleTheme":
         callHost(win, "fleetdeckTheme", targets.cycleTheme());

@@ -150,6 +150,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/sessions.js":       true,
 		"js/fleet.js":          true,
 		"js/header.js":         true,
+		"js/limitsmenu.js":     true,
 		"js/board.js":          true,
 		"js/cardnumber.js":     true,
 		"js/orchestrator.js":   true,

@@ -5521,3 +5521,137 @@ body.is-resizing {
 .session-panel .s-request-error {
   color: var(--danger);
 }
+
+/* The limits block: one capsule naming each provider with its worst window
+ * (web/js/header.js limitsButtonHTML), and a menu with every window of every
+ * provider -- in the header's dropdown, or in the window's popover under its
+ * capsule row (web/js/limitsmenu.js). Own block at the end. */
+
+#header .limits {
+  position: relative;
+}
+
+.limits-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.limits-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.limits-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.limits-chevron {
+  color: var(--text-muted);
+}
+
+.limits-cool {
+  color: var(--ok);
+}
+.limits-warm {
+  color: var(--attn);
+}
+.limits-hot {
+  color: var(--danger);
+}
+.limits-stale {
+  color: var(--text-muted);
+}
+.limits-off {
+  color: var(--text-faint);
+}
+
+.limits-menu,
+.limits-popover {
+  z-index: 3;
+  min-width: 18rem;
+  padding: var(--gap);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+
+.limits-menu {
+  position: absolute;
+  top: calc(100% + var(--gap-sm));
+  right: 0;
+}
+
+/* In the window the capsule row is the window's; the popover sits under it,
+ * at the right edge where the limits capsule is. */
+.limits-popover {
+  position: fixed;
+  top: calc(var(--host-inset-top, 0px) + var(--gap-sm));
+  right: calc(var(--host-inset-right, 0px) + var(--gap));
+}
+
+.limits-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.limits-table th,
+.limits-table td {
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.limits-table thead th {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.limits-cell {
+  min-width: 7rem;
+}
+
+.limits-cell > span {
+  display: block;
+}
+
+.limits-cell .gauge-track {
+  display: block;
+  width: 100%;
+  height: 6px;
+}
+.limits-cell .gauge-track::-webkit-meter-bar {
+  background: var(--border-strong);
+  border: none;
+}
+.limits-cell .gauge-track::-webkit-meter-optimum-value,
+.limits-cell .gauge-track::-webkit-meter-suboptimum-value,
+.limits-cell .gauge-track::-webkit-meter-even-less-good-value,
+.limits-cell .gauge-track::-moz-meter-bar {
+  background: currentColor;
+}
+
+.limits-reset,
+.limits-ages {
+  color: var(--text-muted);
+}
+
+.limits-ages {
+  margin-top: var(--gap-sm);
+}

@@ -26,6 +26,7 @@ import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
 import { applyTheme, cycleTheme, currentTheme, initTheme } from "./theme.js";
 import { capsuleModel } from "./capsules.js";
+import { createLimitsPopover } from "./limitsmenu.js";
 
 // In the fleetdeck window this page is one of three web views, and mounts only
 // its own part of the panel (surfaces.js). The side surfaces keep the centre
@@ -388,6 +389,10 @@ if (host) {
       routes.fold(host.surface, folded);
     }).observe(column, { attributes: true, attributeFilter: ["data-folded"] });
   }
+  // The window's limits capsule opens this menu: the header's table, under
+  // the capsule row, kept current with each snapshot while it is open.
+  const limitsPopover = host.surface === "board" ? createLimitsPopover(document, get) : null;
+  if (limitsPopover) subscribe(() => limitsPopover.refresh());
   wireHostActions(window, host, {
     openCard: (path) => terminalLinks.open(path),
     openDoc: (path) => {
@@ -402,6 +407,7 @@ if (host) {
       publishCapsules();
     },
     toggleNewCard: () => newCard?.toggle(),
+    toggleLimits: () => limitsPopover?.toggle(),
     cycleTheme: () => {
       const choice = cycleTheme() ?? "auto";
       publishCapsules();
