@@ -24,17 +24,19 @@ func codexDispatcher(t *testing.T, f *fakeWorker, receipt executor.DeliveryState
 	d, path := dispatcher(t, f)
 	codexCard(t, path)
 	var ops []string
-	d.Codex = &CodexSessions{
-		Start: func(_ context.Context, cwd, card, name string) (string, error) {
-			f.steps = append(f.steps, "codex-start:"+cwd+":"+card+":"+name)
-			return codexKey, nil
+	f.codex = &executor.Adapter{
+		ID: executor.Codex,
+		Start: func(_ context.Context, req executor.StartRequest) (executor.Session, error) {
+			f.steps = append(f.steps, "codex-start:"+req.CWD+":"+req.Card+":"+req.Name)
+			return executor.Session{Key: codexKey}, nil
 		},
-		Send: func(_ context.Context, key, op, text string) (executor.Receipt, error) {
-			f.steps = append(f.steps, "codex-send:"+key+":"+text)
-			ops = append(ops, op)
-			return executor.Receipt{OperationID: op, State: receipt}, nil
+		Send: func(_ context.Context, key executor.Key, m executor.Message) (executor.Receipt, error) {
+			f.steps = append(f.steps, "codex-send:"+string(key)+":"+m.Text)
+			ops = append(ops, m.OperationID)
+			return executor.Receipt{OperationID: m.OperationID, State: receipt}, nil
 		},
 	}
+	d.Executors = f.registry()
 	return d, path, &ops
 }
 

@@ -106,7 +106,12 @@ type StartRequest struct {
 	Name        string
 }
 
-type Message struct{ OperationID, Text string }
+// Message is one turn. First marks the first message into a session just
+// started, which some executors must wait to be able to read.
+type Message struct {
+	OperationID, Text string
+	First             bool
+}
 type DeliveryState string
 
 const (
