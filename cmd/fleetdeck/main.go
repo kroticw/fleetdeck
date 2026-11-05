@@ -81,9 +81,12 @@ const (
 // running at once would each diff against a snapshot the other had already replaced,
 // which either fires a banner twice or loses one entirely.
 type panel struct {
-	collect      func(context.Context) state.Snapshot
-	banners      banner
-	notifyCfg    config.NotifyConfig
+	collect   func(context.Context) state.Snapshot
+	banners   banner
+	notifyCfg config.NotifyConfig
+	// liveNotify, when set, is the notify section as the settings page last
+	// left it, read each cycle instead of notifyCfg.
+	liveNotify   func() config.NotifyConfig
 	onNotifyFail func(error)
 
 	// cycleMu serialises the cycle itself. snapMu guards only the published
@@ -134,8 +137,12 @@ func (p *panel) refresh(ctx context.Context) {
 		p.published()
 	}
 
-	fire, cleared := state.Diff(prev, next, p.notifyCfg.SilenceAfter)
-	deliver(ctx, p.banners, p.notifyCfg, fire, cleared, p.onNotifyFail)
+	notifyCfg := p.notifyCfg
+	if p.liveNotify != nil {
+		notifyCfg = p.liveNotify()
+	}
+	fire, cleared := state.Diff(prev, next, notifyCfg.SilenceAfter)
+	deliver(ctx, p.banners, notifyCfg, fire, cleared, p.onNotifyFail)
 }
 
 // snapshot is what server.Deps.Snapshot hands out: the last cycle's result, already
@@ -614,6 +621,7 @@ func serve(parent context.Context, o runOpts) error {
 		cfg.Notify,
 		func(err error) { log.Printf("notify: %v", err) },
 	)
+	p.liveNotify = func() config.NotifyConfig { return collector.Config().Notify }
 
 	live := &liveFleets{ctx: ctx, collector: collector, watch: o.boardWatch(), refresh: p.refresh}
 	d := deps(p, dc, collector, cfg, o)
