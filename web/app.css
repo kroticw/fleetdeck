@@ -5703,7 +5703,7 @@ body.is-resizing {
 :root[data-surface="board"] .col-center::before {
   content: "";
   position: absolute;
-  top: calc(var(--host-inset-top, 52px) - 10px);
+  top: var(--host-inset-top, 52px);
   left: calc(var(--host-inset-left, 396px) - 12px);
   right: calc(var(--host-inset-content-right, 358px) + 10px);
   bottom: 10px;
@@ -5751,7 +5751,10 @@ body.is-resizing {
   border-radius: 0;
 }
 
-:root[data-surface] #header:empty {
+/* The brand, the fleet and the counters are the window's bar (T-226): a side
+   surface draws no header of its own. The update's panel is the page's body's,
+   not the header's. */
+:root[data-surface] #header {
   display: none;
 }
 
@@ -5773,44 +5776,6 @@ body.is-resizing {
   background: transparent;
   border-top: none;
   border-bottom: none;
-}
-
-/* The title bar's buttons float over this panel's top corner: the header starts
-   past the zoom button, whose right edge the window sends
-   (cmd/fleetdeck-window/titlebar.go). In full screen there are no buttons. */
-:root[data-surface="orchestrator"] #header {
-  padding-left: max(calc(var(--gap) * 2), var(--host-inset-titlebar, 0px));
-}
-
-:root[data-surface="orchestrator"][data-fullscreen] #header {
-  padding-left: calc(var(--gap) * 2);
-}
-
-/* The header's row on the line the title bar's buttons are centred on: the
-   window sends that line from the panel's top, and the header is twice as tall
-   with no padding above or below it. In v0.10.1 the brand and the fleet picker
-   sat lower than the buttons. In full screen there are no buttons, and the
-   header keeps its padding. */
-:root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) #header {
-  padding-block: 0;
-  min-height: calc(var(--host-titlebar-center) * 2);
-}
-
-/* Folded, the island is a 48 px strip with no head: the window's buttons sit in
-   its corner and its unfold control is all it shows. The header is the page's,
-   a sibling of the column, and folding hides only the column's own children:
-   on v0.11.0's stand the header started past the buttons, 260 px wide, and the
-   page scrolled sideways under the strip, a scroll bar at its foot. */
-:root[data-surface="orchestrator"]:has(.col-orchestrator[data-folded="1"]) #header {
-  display: none;
-}
-
-/* The header's room stays above the strip's unfold control: with the head
-   hidden the control rose to the strip's top, under the window's close and
-   minimize buttons. The room is the header's, the buttons' line twice; in full
-   screen there are no buttons. */
-:root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) .col-orchestrator[data-folded="1"] {
-  padding-top: calc(var(--host-titlebar-center) * 2);
 }
 
 /* The terminal is the island's lower part, edge to edge, and not a rounded box
@@ -5991,23 +5956,68 @@ body.is-resizing {
   background: transparent;
   border: none;
   border-radius: 0;
+  /* The island's head (T-226): the tabs, "Find card" and "+ Card" in a row
+     at the island's top, the board, the documents and the settings under it. */
+  --board-head: 52px;
 }
 
 :root[data-surface="board"] #tabs {
   position: absolute;
-  top: calc(var(--host-inset-top, 52px) - 8px);
+  top: calc(var(--host-inset-top, 52px) + 10px);
   left: var(--host-inset-left, 396px);
+  right: calc(var(--host-inset-content-right, 358px) + 16px);
   z-index: 3;
+  height: 32px;
+  align-items: center;
+  gap: var(--gap);
   padding: 0;
   border: none;
   background: transparent;
+}
+
+/* The tabs as one segmented control, the section shown its selected segment. */
+:root[data-surface="board"] #tabs .tab {
+  height: 30px;
+  margin: 0;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+}
+
+:root[data-surface="board"] #tabs .tab.on {
+  background: var(--surface-raised, var(--bg));
+  box-shadow: 0 0 0 0.5px var(--border), 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+:root[data-surface="board"] #tabs .tab:first-child {
+  margin-left: 0;
+}
+
+:root[data-surface="board"] .board-find {
+  margin-left: auto;
+  width: min(260px, 40%);
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+:root[data-surface="board"] .board-new {
+  height: 30px;
+  border-radius: 999px;
 }
 
 /* The build banner is the board's (only the board checks the build), and the
    capsules sit where it would be: it drops in under them, between the panels. */
 :root[data-surface="board"] #build-banner {
   position: absolute;
-  top: calc(var(--host-inset-top, 52px) - 8px);
+  top: calc(var(--host-inset-top, 52px) + 10px);
   left: var(--host-inset-left, 396px);
   right: calc(var(--host-inset-content-right, 358px) + 16px);
   z-index: 4;
@@ -6021,15 +6031,11 @@ body.is-resizing {
    be neither read nor closed (T-178). It takes the open room the columns have,
    below the toolbar, and the board's own top inset is then the note's. */
 :root[data-surface="board"] .commit-note {
-  margin: var(--host-inset-top, 52px) calc(var(--host-inset-content-right, 358px) + var(--gap-lg)) 0 var(--host-inset-left, 396px);
+  margin: calc(var(--host-inset-top, 52px) + var(--board-head)) calc(var(--host-inset-content-right, 358px) + var(--gap-lg)) 0 var(--host-inset-left, 396px);
 }
 
 :root[data-surface="board"] .commit-note:not([hidden]) + #board {
   padding-top: var(--gap-lg);
-}
-
-:root[data-surface="board"] #tabs .tab {
-  display: none;
 }
 
 /* The board's web view runs under both panels and the capsules, so the room the
@@ -6063,7 +6069,7 @@ body.is-resizing {
   position: relative;
   margin-left: calc(var(--host-inset-left, 396px) - var(--gap-lg));
   margin-right: var(--host-inset-content-right, 358px);
-  padding-top: var(--host-inset-top, 52px);
+  padding-top: calc(var(--host-inset-top, 52px) + var(--board-head));
   padding-left: var(--gap-lg);
   padding-right: var(--gap-lg);
   padding-bottom: 12px;
@@ -6172,7 +6178,7 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] .docs {
-  padding: calc(var(--host-inset-top, 52px) - 4px) calc(var(--host-inset-content-right, 358px) + 16px) 16px var(--host-inset-left, 396px);
+  padding: calc(var(--host-inset-top, 52px) + var(--board-head)) calc(var(--host-inset-content-right, 358px) + 16px) 16px var(--host-inset-left, 396px);
 }
 
 :root[data-surface="board"] .docs-island {
@@ -6926,7 +6932,7 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] .settings-layout {
-  padding: calc(var(--host-inset-top, 52px) + 8px) calc(var(--host-inset-content-right, 358px) + 32px) 32px var(--host-inset-left, 396px);
+  padding: calc(var(--host-inset-top, 52px) + var(--board-head)) calc(var(--host-inset-content-right, 358px) + 32px) 32px var(--host-inset-left, 396px);
 }
 
 .set-nav {

@@ -230,15 +230,20 @@ export function bannerHTML(state, { waiting = false } = {}) {
 // the full commit, when it was made, when this binary was built and where the
 // binary is -- sits in the title, for the moment someone asks which of several
 // installs is answering on this port.
-export function brandHTML(build) {
+// buildLabel is the build as the brand shows it beside the name; "" for none.
+export function buildLabel(build) {
   const version = build?.version ?? "";
-  const revision = build?.revision ?? "";
-  const short = revision.slice(0, 7);
-  const mark = build?.modified ? "*" : "";
-
+  const short = (build?.revision ?? "").slice(0, 7);
   let label = short;
   if (version === "dev") label = short ? `dev ${short}` : "dev";
   else if (version) label = version;
+  return label ? label + (build?.modified ? "*" : "") : "";
+}
+
+export function brandHTML(build) {
+  const version = build?.version ?? "";
+  const revision = build?.revision ?? "";
+  const label = buildLabel(build);
 
   const lines = [];
   if (version) lines.push(`${t("build_version")}: ${version}`);
@@ -248,7 +253,7 @@ export function brandHTML(build) {
   if (build?.executable) lines.push(`${t("build_executable")}: ${build.executable}`);
 
   const title = lines.length ? ` title="${escape(lines.join("\n"))}"` : "";
-  const rev = label ? ` <span class="build-rev">${escape(label + mark)}</span>` : "";
+  const rev = label ? ` <span class="build-rev">${escape(label)}</span>` : "";
   return `<div class="brand"${title}>fleetdeck${rev}</div>`;
 }
 

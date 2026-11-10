@@ -517,7 +517,16 @@ function ruleBodies(selector) {
 }
 
 test("the board keeps clear of the capsules by the inset the window sends", () => {
-  assert.match(ruleBody(':root[data-surface="board"] #board'), /padding-top:\s*var\(--host-inset-top/);
+  // Under the island's head too: the tabs, "Find card" and "+ Card" (T-226).
+  assert.match(ruleBody(':root[data-surface="board"] #board'), /padding-top:\s*calc\(var\(--host-inset-top[^;]*\+\s*var\(--board-head\)\)/);
+});
+
+// The island begins where the panels do, under the window's bar, and its head
+// sits inside it, not over the bar.
+test("the board's island starts under the bar, its head inside it", () => {
+  assert.match(ruleBody(':root[data-surface="board"] .col-center::before'), /top:\s*var\(--host-inset-top, 52px\);/);
+  assert.match(ruleBody(':root[data-surface="board"] #tabs'), /top:\s*calc\(var\(--host-inset-top, 52px\) \+ 10px\)/);
+  assert.equal(css.includes(':root[data-surface="board"] #tabs .tab {\n  display: none;'), false, "the tabs are shown in the window again");
 });
 
 // v0.10.0 made #board as wide as the window and kept its columns clear of the
@@ -851,5 +860,5 @@ test("in the window the failed-commit note stands below the toolbar, between the
   const plain = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const note = plain.match(/:root\[data-surface="board"\] \.commit-note\s*\{([^}]*)\}/)?.[1];
   assert.ok(note, "the board surface does not place the note");
-  assert.match(note, /margin:\s*var\(--host-inset-top[^;]*--host-inset-content-right[^;]*--host-inset-left/);
+  assert.match(note, /margin:\s*calc\(var\(--host-inset-top[^;]*--board-head[^;]*--host-inset-content-right[^;]*--host-inset-left/);
 });

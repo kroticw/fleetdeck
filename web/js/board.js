@@ -236,7 +236,16 @@ function writeOnce(root, html) {
   return true;
 }
 
-export function render(root, snap) {
+// cardMatches is whether a card has query in its number or its title, whatever
+// the case: the board's "Find card" (T-226). An empty query finds every card.
+export function cardMatches(card, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return `${card.id ?? ""} ${card.title ?? ""}`.toLowerCase().includes(q);
+}
+
+// query, when given, is "Find card": only the cards it finds are drawn.
+export function render(root, snap, { query = "" } = {}) {
   // A card being dragged is held by the browser as the element the gesture
   // started on. Replacing #board's children mid-gesture therefore ends the
   // drag, and the card is left in the column it came from with no sign of
@@ -251,7 +260,7 @@ export function render(root, snap) {
     return;
   }
 
-  const cards = snap?.cards ?? [];
+  const cards = (snap?.cards ?? []).filter((card) => cardMatches(card, query));
   const orphanPaths = new Set(snap?.orphanCards ?? []);
   const stoppedPaths = new Set(snap?.stoppedCards ?? []);
 
@@ -403,6 +412,8 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   const failed = new Map();
   const ghosts = [];
   let ghostCount = 0;
+  // What "Find card" holds; "" draws every card.
+  let query = "";
   // The card being dragged, while one is. render reads the same state off
   // root.dataset and skips the frame; this holds what the drop needs to know.
   let dragging = null;
@@ -429,7 +440,7 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
     // through the board, which scrolls in a browser tab.
     const clipOf = (n) => intersect(root.getBoundingClientRect(), n.closest(".kcol").getBoundingClientRect());
     const before = capture(cards(), { ...flipKeys, clipOf });
-    render(root, ghosts.length ? { ...view, creating: ghosts } : view);
+    render(root, ghosts.length ? { ...view, creating: ghosts } : view, { query });
     play(before, cards(), { ...flipKeys, viewport: viewportOf(), clipOf, reduced: reducedMotion() });
   };
   // Drawn again when a mark runs out, for a board no snapshot reaches in the
@@ -597,6 +608,12 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // created with the card's path, which the snapshot is then watched for, or
   // failed, which takes it off (the form reopens with what was typed).
   return {
+    // find draws only the cards query finds: the board head's "Find card".
+    find(next) {
+      if (next === query) return;
+      query = next;
+      draw();
+    },
     creating(title, zone) {
       ghostCount += 1;
       const ghost = { id: ghostCount, title, zone, since: Date.now() };

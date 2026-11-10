@@ -8,10 +8,13 @@
 import { onHostMessage } from "./host.js";
 
 const ACCEPTS = {
-  board: new Set(["open", "show", "newCard", "limits", "insets", "glass"]),
-  orchestrator: new Set(["theme", "glass", "folded", "focusTerminal", "fullscreen", "titlebar"]),
+  board: new Set(["open", "limits", "setTheme", "insets", "glass"]),
+  orchestrator: new Set(["theme", "glass", "folded", "focusTerminal", "fullscreen", "update"]),
   sessions: new Set(["theme", "glass", "folded"]),
 };
+
+// The theme the window's bar may set: ui.theme's own values, "" the system's.
+const THEMES = new Set(["light", "dark", ""]);
 
 export function wireHostActions(win, host, targets) {
   const accepts = ACCEPTS[host.surface];
@@ -23,14 +26,14 @@ export function wireHostActions(win, host, targets) {
         else if (message.kind === "doc") targets.openDoc(message.path);
         else if (message.kind === "session") targets.openSession(message.short);
         return;
-      case "show":
-        targets.showSection(message.section);
-        return;
-      case "newCard":
-        targets.toggleNewCard();
-        return;
       case "limits":
         targets.toggleLimits?.();
+        return;
+      case "setTheme":
+        if (THEMES.has(message.choice)) targets.setTheme(message.choice);
+        return;
+      case "update":
+        targets.pressUpdate();
         return;
       case "theme":
         targets.applyTheme(message.choice);
@@ -52,12 +55,6 @@ export function wireHostActions(win, host, targets) {
         return;
       case "fullscreen":
         targets.setFullscreen(message.on === true);
-        return;
-      case "titlebar":
-        // Where the title bar's buttons end over this panel and the line they
-        // are centred on, from its top: the header starts past them, its row on
-        // that line.
-        targets.setTitlebar({ inset: message.inset, center: message.center });
         return;
     }
   });

@@ -181,6 +181,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/newcard.js":        true,
 		"js/commitnote.js":     true,
 		"js/boardmove.js":      true,
+		"js/boardhead.js":      true,
 		"js/flip.js":           true,
 		"js/dialog.js":         true,
 		"js/setup.js":          true,

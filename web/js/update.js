@@ -190,7 +190,7 @@ function busyWithAPress(state) {
 }
 
 // offerOf is the version on offer in state, or "".
-function offerOf(state) {
+export function offerOf(state) {
   if (state.phase === "available") return state.detail;
   return state.offer ?? "";
 }

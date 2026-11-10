@@ -11,8 +11,10 @@ import { HOST_VERSION } from "./host.js";
 const ALL = ["header", "orchestrator", "center", "sessions", "build"];
 const BY_SURFACE = {
   board: ["center", "build"],
-  orchestrator: ["orchestrator", "brand"],
-  sessions: ["sessions", "counters"],
+  // The brand, the fleet and the counters are the window's bar (T-226); the
+  // update's panel lies over the orchestrator's terminal.
+  orchestrator: ["orchestrator", "update"],
+  sessions: ["sessions"],
 };
 
 export function regionsFor(host) {

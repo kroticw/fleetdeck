@@ -701,7 +701,9 @@ export function renderHeader(
   const placePanel = () => {
     const place = panelPlace(updateAt.column()?.getBoundingClientRect(), updateAt.term()?.getBoundingClientRect());
     const empty = panel.querySelector(".update-control:empty") !== null;
-    panel.hidden = !place || empty;
+    // A version on offer is the window's bar's to show (T-226); the panel is
+    // for what a press starts.
+    panel.hidden = !place || empty || update.phase === "available";
     if (!place) return;
     panel.style.top = `${place.top}px`;
     panel.style.left = `${place.left}px`;
@@ -716,14 +718,19 @@ export function renderHeader(
     const el = root.querySelector(".update-control");
     if (el) el.outerHTML = updateHTML(update, Date.now());
   };
+  // A press of the update, from its button or from the window's bar: text not
+  // yet sent in a terminal is asked about first.
+  const pressUpdate = () => {
+    if (!hostUpdate) return;
+    const pressed = onPress(update, { unsent: hasUnsentText(document), now: Date.now() });
+    update = pressed.state;
+    paintUpdate();
+    if (pressed.start) hostUpdate();
+  };
   if (panel) {
     window.addEventListener("resize", placePanel);
     panel.addEventListener("click", (event) => {
-      if (!event.target.closest(".update-button")) return;
-      const pressed = onPress(update, { unsent: hasUnsentText(document), now: Date.now() });
-      update = pressed.state;
-      paintUpdate();
-      if (pressed.start) hostUpdate();
+      if (event.target.closest(".update-button")) pressUpdate();
     });
   }
   const tookReport = (report) => {
@@ -759,10 +766,7 @@ export function renderHeader(
 
   root.addEventListener("click", (event) => {
     if (hostUpdate && event.target.closest(".update-button")) {
-      const pressed = onPress(update, { unsent: hasUnsentText(document), now: Date.now() });
-      update = pressed.state;
-      paintUpdate();
-      if (pressed.start) hostUpdate();
+      pressUpdate();
       return;
     }
     if (event.target.closest(".limits-button")) {
@@ -860,6 +864,7 @@ export function renderHeader(
     menuOpen = false;
     lastPaint();
   });
+  return { pressUpdate };
 }
 
 export default renderHeader;

@@ -23,12 +23,14 @@ test("a side surface does not check the build", () => {
   }
 });
 
-test("the orchestrator surface mounts its column and the brand row", () => {
-  assert.deepEqual([...regionsFor({ surface: "orchestrator", glass: "glass" })].sort(), ["brand", "orchestrator"]);
+// The brand, the fleet and the counters are the window's bar (T-226): the
+// orchestrator surface keeps only the update's panel over its terminal.
+test("the orchestrator surface mounts its column and the update's panel", () => {
+  assert.deepEqual([...regionsFor({ surface: "orchestrator", glass: "glass" })].sort(), ["orchestrator", "update"]);
 });
 
-test("the sessions surface mounts its column and the counters", () => {
-  assert.deepEqual([...regionsFor({ surface: "sessions", glass: "glass" })].sort(), ["counters", "sessions"]);
+test("the sessions surface mounts its column alone", () => {
+  assert.deepEqual([...regionsFor({ surface: "sessions", glass: "glass" })].sort(), ["sessions"]);
 });
 
 test("only the board reports the panel layout, and only once it knows its fleet", () => {

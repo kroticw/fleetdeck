@@ -488,8 +488,12 @@ func (c *controller) capsuleAction(action string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch action {
-	case "limits", "update":
-		return c.to("board", map[string]any{"type": action})
+	case "limits":
+		return c.to("board", map[string]any{"type": "limits"})
+	case "update":
+		// The orchestrator's page asks about text unsent in its terminal before
+		// an update starts, and shows the update's progress over it.
+		return c.to("orchestrator", map[string]any{"type": "update"})
 	case "theme:light", "theme:dark":
 		return c.to("board", map[string]any{"type": "setTheme", "choice": strings.TrimPrefix(action, "theme:")})
 	case "theme:system":

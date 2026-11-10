@@ -1,6 +1,6 @@
 import { connect, subscribe, get } from "./store.js";
 import { renderSessions } from "./sessions.js";
-import { renderHeader, HEADER_PARTS, limitsOf } from "./header.js";
+import { renderHeader, HEADER_PARTS, limitsOf, createStalledTracker, headerCounts } from "./header.js";
 import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
@@ -8,17 +8,19 @@ import { createReader } from "./reader.js";
 import { createReviewPanel } from "./review.js";
 import { createSections } from "./sections.js";
 import { createNewCard } from "./newcard.js";
+import { mountBoardHead } from "./boardhead.js";
 import { renderCommitNote } from "./commitnote.js";
 import { createBoardMove } from "./boardmove.js";
 import { probeColumnScroll, watchBoardScroll, watchCardSheetOnStand, watchGrounds, watchListScroll, watchTerminalScroll, watchTopBandOnStand } from "./standreport.js";
 import { watchHeaderLine } from "./standheader.js";
-import { STAND_UPDATE, updatePanelReport } from "./update.js";
+import { STAND_UPDATE, updatePanelReport, initialState, onProgress, offerOf, UPDATE_BINDING, KNOWN_BINDING, PROGRESS_FUNCTION } from "./update.js";
 import { watchControls } from "./standcontrols.js";
 import { watchOverflow } from "./standoverflow.js";
 import { renderDocs } from "./docs.js";
 import { renderSession } from "./session.js";
 import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } from "./buildcheck.js";
-import { rememberFleet, switchFleet } from "./fleet.js";
+import { rememberFleet, switchFleet, fleetEntries } from "./fleet.js";
+import { isWaiting } from "./needs.js";
 import { t } from "./i18n.js";
 import { readHost, callHost } from "./host.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
@@ -242,11 +244,10 @@ function showSession(short) {
 if (regions.has("sessions")) {
   renderSessions(document.getElementById("sessions"), showSession, routes.openCard, { switchFleet: routes.switchFleet });
 }
-// The orchestrator surface draws the header's brand row (with the update button
-// beside it), the sessions surface its counters, the board none of it.
-const headerParts = regions.has("header")
-  ? HEADER_PARTS
-  : HEADER_PARTS.filter((part) => regions.has(part === "update" ? "brand" : part));
+// In the window the brand, the fleet and the counters are its bar (T-226): the
+// orchestrator surface draws only the update's panel, the others none of it.
+const headerParts = regions.has("header") ? HEADER_PARTS : HEADER_PARTS.filter((part) => regions.has(part));
+let header = null;
 if (headerParts.length > 0) {
   // A stand's frame with the fleet menu open (web/js/host.js, open).
   const openMenu = host?.open?.includes("fleetmenu") ?? false;
@@ -257,7 +258,7 @@ if (headerParts.length > 0) {
   const updateAt = host?.surface === "orchestrator"
     ? { column: () => document.getElementById("orchestrator"), term: () => document.querySelector("#orchestrator .o-term") }
     : null;
-  renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu, standUpdate, updateAt });
+  header = renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu, standUpdate, updateAt });
 } else {
   initTheme();
 }
@@ -353,6 +354,11 @@ if (regions.has("center")) {
   ]);
 
   // After the tabs, not before: createSections replaces the row's children.
+  // The board island's head: "Find card" and "+ Card" beside the tabs (T-226).
+  mountBoardHead(document.getElementById("tabs"), {
+    onFind: (query) => board?.find(query),
+    onNewCard: () => newCard?.open(),
+  });
   // The form and the move dialogs both hang off the tab row rather than off
   // #board, which every snapshot replaces whole.
   newCard = createNewCard(document.getElementById("tabs"), { creating: board?.creating });
@@ -364,21 +370,57 @@ if (regions.has("center")) {
   if (host?.open?.includes("newcard")) newCard.open();
 }
 
-// The window's capsules (web/js/capsules.js), handed over by the board whenever
-// what they show changes: the section, the theme, the limits.
-let section = "board";
+// The window's bar (web/js/capsules.js), handed over by the board whenever
+// what it shows changes: the fleet, the limits, the counters, an update, the
+// theme.
 let capsulesSent = "";
+// The board's own count of stalled sessions: the tracker holds when each
+// stall began, so it lives as long as the page.
+const barStalls = createStalledTracker();
+// The version on offer, for the bar's update capsule. The press goes to the
+// orchestrator's page, which asks about unsent text in its terminal first and
+// shows the update's progress (cmd/fleetdeck-window, capsuleAction); the board
+// only follows what the window finds.
+let barUpdate = initialState();
+if (host?.surface === "board" && typeof window[UPDATE_BINDING] === "function") {
+  const took = (report) => {
+    barUpdate = onProgress(barUpdate, report ?? {}, Date.now());
+    publishCapsules();
+  };
+  window[PROGRESS_FUNCTION] = took;
+  if (typeof window[KNOWN_BINDING] === "function") {
+    Promise.resolve(window[KNOWN_BINDING]()).then((report) => {
+      if (report?.step === "available") took(report);
+    }, () => {});
+  }
+}
 function publishCapsules() {
   if (host?.surface !== "board") return;
   const style = getComputedStyle(document.documentElement);
   const token = (name) => style.getPropertyValue(name).trim();
-  const colors = { cool: token("--ok"), warm: token("--attn"), hot: token("--danger"), stale: token("--text-muted"), off: token("--text-faint") };
-  // The accent the window tints its selected tab with, and the operator's
-  // "no transparency", which the window takes for its own frame too.
+  const colors = {
+    cool: token("--ok"),
+    warm: token("--attn"),
+    hot: token("--danger"),
+    stale: token("--text-muted"),
+    off: token("--text-faint"),
+    attn: token("--attn"),
+    muted: token("--text-muted"),
+  };
+  // The accent the window tints the fleet's dot and the update with, and the
+  // operator's "no transparency", which the window takes for its own frame too.
   const accent = token("--accent");
+  const snap = get() ?? {};
+  const now = Date.now();
+  const counts = headerCounts(snap, barStalls.update(snap.sessions ?? [], now));
   const model = capsuleModel({
-    section,
-    limits: limitsOf(get() ?? {}, Date.now()),
+    build: snap.build,
+    fleet: snap.fleet ?? "",
+    fleets: fleetEntries(snap, isWaiting),
+    limits: limitsOf(snap, now),
+    update: offerOf(barUpdate),
+    counts: { waiting: counts.waiting.length, stalled: counts.stalled.length, unknown: counts.unknown.length },
+    theme: currentTheme(),
     t,
     colors,
     accent: /^#[0-9a-f]{6}$/i.test(accent) ? accent : undefined,
@@ -464,8 +506,6 @@ if (host) {
   // Its Sources button: the settings' panel section, where the limits are switched on.
   const openLimitSources = () => {
     sections?.show("settings");
-    section = "settings";
-    publishCapsules();
     settingsView?.showSection("panel");
   };
   const limitsPopover = host.surface === "board" ? createLimitsPopover(document, get, undefined, openLimitSources) : null;
@@ -478,13 +518,18 @@ if (host) {
       reader.open(path);
     },
     openSession: showSession,
-    showSection: (id) => {
-      sections?.show(id);
-      section = id;
-      publishCapsules();
-    },
-    toggleNewCard: () => newCard?.toggle(),
     toggleLimits: () => limitsPopover?.toggle(),
+    // The bar's theme segments: applied at once, as the settings section's
+    // answer is, and saved as ui.theme ("" the system's).
+    setTheme: (choice) => {
+      if (setConfiguredTheme(choice)) {
+        callHost(window, "fleetdeckTheme", currentTheme() ?? "auto");
+        refreshTerminalThemes();
+      }
+      publishCapsules();
+      saveSettings({ "ui.theme": choice }).catch((err) => console.error("fleetdeck: saving the theme failed:", err));
+    },
+    pressUpdate: () => header?.pressUpdate(),
     applyTheme,
     setInsets: (insets) => {
       const names = { top: "top", left: "left", right: "right", contentRight: "content-right" };
@@ -501,13 +546,6 @@ if (host) {
       else delete column.dataset.folded;
     },
     focusTerminal: () => document.querySelector("#orchestrator .xterm-helper-textarea")?.focus(),
-    setTitlebar: ({ inset, center }) => {
-      page.style.setProperty("--host-inset-titlebar", `${Number(inset) || 0}px`);
-      const line = Number(center) || 0;
-      page.style.setProperty("--host-titlebar-center", `${line}px`);
-      if (line > 0) page.dataset.titlebar = "1";
-      else delete page.dataset.titlebar;
-    },
     setFullscreen: (on) => {
       if (on) page.dataset.fullscreen = "1";
       else delete page.dataset.fullscreen;

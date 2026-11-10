@@ -497,7 +497,6 @@ func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 	c := loadedFrame()
 	cases := map[string]map[string]any{
 		"limits":       {"type": "limits"},
-		"update":       {"type": "update"},
 		"theme:light":  {"type": "setTheme", "choice": "light"},
 		"theme:system": {"type": "setTheme", "choice": ""},
 		"theme:dark":   {"type": "setTheme", "choice": "dark"},
@@ -506,6 +505,11 @@ func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 		if got := c.capsuleAction(action); !reflect.DeepEqual(got, []effect{sendTo{Surface: "board", Message: msg}}) {
 			t.Fatalf("%s: effects = %#v", action, got)
 		}
+	}
+	// The update goes to the orchestrator's page: it asks about text unsent in
+	// its terminal first, and shows the update's progress over it.
+	if got, want := c.capsuleAction("update"), []effect{sendTo{Surface: "orchestrator", Message: map[string]any{"type": "update"}}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("update: effects = %#v", got)
 	}
 	for _, action := range []string{"theme:sepia", "tab:docs", "newCard", "nonsense"} {
 		if got := c.capsuleAction(action); len(got) != 0 {
