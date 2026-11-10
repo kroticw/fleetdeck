@@ -14,12 +14,22 @@ import { probeColumnScroll } from "../standreport.js";
 
 // A board whose columns are drawn by draw(): each draw puts new column boxes in,
 // keeping a column's scroll only when keep says so, and tells the observer.
-function standBoard() {
+function standBoard({ folded = false } = {}) {
   let columns = [];
   let observer = null;
+  let doneFolded = folded;
+  let draw = null;
+  const unfold = {
+    click: () => {
+      doneFolded = false;
+      draw();
+    },
+  };
   const board = {
     querySelector: (selector) => {
       const stage = /data-stage="([^"]+)"/.exec(selector)?.[1];
+      if (selector.includes("kcol-unfold")) return doneFolded && stage === "done" ? unfold : null;
+      if (stage === "done" && doneFolded) return null;
       return columns.find((c) => c.dataset.stage === stage) ?? null;
     },
   };
@@ -39,7 +49,7 @@ function standBoard() {
       }
     },
   };
-  const draw = ({ tall = true, keep = false } = {}) => {
+  draw = ({ tall = true, keep = false } = {}) => {
     const before = columns.find((c) => c.dataset.stage === "done");
     columns = [
       { dataset: { stage: "new" }, scrollTop: 0, scrollHeight: 300, clientHeight: 600 },
@@ -89,4 +99,17 @@ test("a board whose column never grows taller than its room is never scrolled an
   probeColumnScroll(stand.win, stand.board, (r) => heard.push(r));
   for (let i = 0; i < 5; i++) stand.draw({ tall: false });
   assert.equal(heard.length, 0);
+});
+
+// The done column is folded to a strip by default (the redesign): the stand
+// unfolds it, as an operator would, before it scrolls it.
+test("a folded done column is unfolded first, then scrolled and heard", () => {
+  const stand = standBoard({ folded: true });
+  const heard = [];
+  probeColumnScroll(stand.win, stand.board, (r) => heard.push(r));
+  stand.draw();
+  assert.equal(stand.done().scrollTop, 120, "the unfolded column was not scrolled");
+  stand.draw({ keep: true });
+  stand.draw({ keep: true });
+  assert.deepEqual(heard, [{ report: "columnScroll", stage: "done", asked: 120, renders: 2, scrollTop: 120 }]);
 });
