@@ -477,6 +477,13 @@ body {
 #header .brand {
   font-weight: 600;
   color: var(--text);
+  /* One line, whatever the column leaves it past the window's buttons: wrapped,
+     the header grew to two lines and left the buttons' line (the redesign's
+     stand, 28 pt against 26). */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The commit beside the brand: there to be glanced at, not read, so it stays
@@ -7289,16 +7296,3 @@ textarea.set-input {
   }
 }
 
-/* The pencils that rename a session stay in sight, quietly: the name is what a
-   row is read for. */
-.label-edit-btn,
-.o-name-edit {
-  opacity: 0.55;
-}
-
-.label-edit-btn:hover,
-.label-edit-btn:focus-visible,
-.o-name-edit:hover,
-.o-name-edit:focus-visible {
-  opacity: 1;
-}
