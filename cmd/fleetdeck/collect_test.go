@@ -987,3 +987,15 @@ func TestSetSessionLabelToEmptyRemovesItFromTheNextCollect(t *testing.T) {
 		t.Fatalf("want no label on the very next Collect after clearing it, got %q", cleared.Sessions[0].Label)
 	}
 }
+
+func TestCollectCarriesTheLimitsLabels(t *testing.T) {
+	cfg := config.Default()
+	cfg.UsageEnabled = false
+	cfg.BoardPath = ""
+	cfg.UsageLabels = map[string]string{"claude": "подписка Max"}
+
+	snap := NewCollector(cfg, deadDaemon(t), nil, t.TempDir()).Collect(context.Background())
+	if snap.LimitsLabels["claude"] != "подписка Max" {
+		t.Fatalf("labels = %v", snap.LimitsLabels)
+	}
+}

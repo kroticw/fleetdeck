@@ -113,7 +113,11 @@ type Config struct {
 	Notify             NotifyConfig
 	DaemonPollInterval time.Duration
 	UsageEnabled       bool
-	ServerPort         int
+	// UsageLabels is the operator's word for each model's subscription,
+	// keyed by the model's name in lower case ("claude", "codex"): shown in
+	// the limits menu, since the panel cannot learn what an account is.
+	UsageLabels map[string]string
+	ServerPort  int
 	// StatuslineWrap is the statusline command cmd/fleetdeck-status passes
 	// stdin through to and prints the output of unchanged -- the operator's
 	// own tool (spec: their own liked, pre-existing statusline), read from
@@ -291,7 +295,8 @@ type file struct {
 		PollInterval configDuration `yaml:"poll_interval"`
 	} `yaml:"daemon"`
 	Usage struct {
-		Enabled bool `yaml:"enabled"`
+		Enabled bool              `yaml:"enabled"`
+		Labels  map[string]string `yaml:"labels,omitempty"`
 	} `yaml:"usage"`
 	Server struct {
 		Port int `yaml:"port"`
@@ -411,6 +416,7 @@ func configToFile(c Config) file {
 	f.Notify.SilenceAfter = configDuration(c.Notify.SilenceAfter)
 	f.Daemon.PollInterval = configDuration(c.DaemonPollInterval)
 	f.Usage.Enabled = c.UsageEnabled
+	f.Usage.Labels = c.UsageLabels
 	f.Server.Port = c.ServerPort
 	f.Statusline.Wrap = c.StatuslineWrap
 	f.Statusline.RateLimitsPath = c.StatuslineRateLimitsPath
@@ -456,6 +462,7 @@ func fileToConfig(f file) Config {
 		},
 		DaemonPollInterval:       time.Duration(f.Daemon.PollInterval),
 		UsageEnabled:             f.Usage.Enabled,
+		UsageLabels:              f.Usage.Labels,
 		ServerPort:               f.Server.Port,
 		StatuslineWrap:           f.Statusline.Wrap,
 		StatuslineRateLimitsPath: f.Statusline.RateLimitsPath,

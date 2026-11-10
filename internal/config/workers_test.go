@@ -124,3 +124,18 @@ func TestTheAccentGlassAndTerminalGroundAreReadAndChecked(t *testing.T) {
 		}
 	}
 }
+
+// Each model's subscription is the operator's word for it, shown in the limits
+// menu: the panel cannot learn that an account is "Max" or "ChatGPT Pro".
+func TestTheLimitsLabelsAreReadAndKeptByModel(t *testing.T) {
+	c, err := loadText(t, "board:\n    path: /b\nusage:\n    enabled: true\n    labels:\n        claude: подписка Max\n        codex: ChatGPT Pro\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UsageLabels["claude"] != "подписка Max" || c.UsageLabels["codex"] != "ChatGPT Pro" {
+		t.Fatalf("labels = %v", c.UsageLabels)
+	}
+	if back, _ := saveAndReload(t, c); back.UsageLabels["codex"] != "ChatGPT Pro" {
+		t.Fatalf("round trip gave %v", back.UsageLabels)
+	}
+}

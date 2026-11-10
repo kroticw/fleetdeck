@@ -19,6 +19,7 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 | `notify.silence_after` | duration | `30m` | negative: `notify.silence_after must not be negative, got %s`. Bare number: `must be a duration string like "30s", not a bare number (%s)`. Non-scalar value (for example a list): `line %d: must be a duration string like "30s"`. Invalid duration text: `line %d:` followed by Go's own parsing error, for example `time: invalid duration "abc"` |
 | `daemon.poll_interval` | duration | `2s` | zero or negative: `daemon.poll_interval must be positive, got %s`. Bare number, non-scalar value, or invalid text: the same three shapes as `notify.silence_after` above |
 | `usage.enabled` | boolean | `true` | not validated (must be a boolean) |
+| `usage.labels` | map of model name to text, e.g. `claude: Max plan` | none | not validated; shown beside the model in the limits menu |
 | `server.port` | integer | `7777` | outside the range 1 to 65535: `server.port must be between 1 and 65535, got %d` |
 | `statusline.wrap` | string (shell command) | unset (no wrapping) | not validated before it runs; a command that cannot be run, or that exits non-zero, is taken as no wrapping at all and `fleetdeck-status` prints its own line |
 | `statusline.rate_limits_path` | string (file path) | unset (nothing is written) | not validated; a path that cannot be written is reported nowhere, and the panel reads the account's limits over the network instead |
