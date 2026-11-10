@@ -772,6 +772,17 @@ test("a session row is followed by its short id, a start's row by its card", asy
   dom.restore();
 });
 
+// The column's head says how many of its sessions are live, as the design's
+// "Sessions · 4 live" (T-226): the counters moved to the window's bar.
+test("the head counts the live sessions the column lists", async () => {
+  const fleet = structuredClone(FLEET);
+  fleet.sessions.push({ short: "cc33", name: "a stopped task", sessionId: "u-3", lifecycle: "stopped" });
+  const { root, dom } = await list(fleet);
+  const head = /<div class="slist-head">[\s\S]*?<\/div>/.exec(root.innerHTML)?.[0] ?? "";
+  assert.match(head, /class="slist-live">2 live</, "two tasks run; the orchestrator and the stopped one are not counted");
+  dom.restore();
+});
+
 // --- a press is never lost to a snapshot ---
 //
 // The column is rewritten from markup, and a snapshot arrives once a second. A

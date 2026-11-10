@@ -463,6 +463,12 @@ function fleetOtherHtml({ name, sessions }) {
 // named nothing at all — the specific gap a live run's screenshot found.
 const HEAD = `<div class="slist-head">${escapeHtml(t("sessions_title"))}</div>`;
 
+// The head with how many of the column's sessions are live, as the design's
+// "Sessions · 4 live" (T-226): the counters are the window's bar now.
+function headHtml(live) {
+  return `<div class="slist-head">${escapeHtml(t("sessions_title"))} <span class="slist-live">${live} ${escapeHtml(t("sessions_live"))}</span></div>`;
+}
+
 // The same fold/unfold strip as the orchestrator column's own — same
 // classes (web/app.css's .col-size rules act on them for whichever column
 // carries them), same i18n keys, same mechanism — mirrored, not copied: this
@@ -830,7 +836,7 @@ export function renderSessions(
     // summary lines either, which are not sessions at all.
     // Unchanged, the nodes on screen are the ones already wired below.
     const wrote = setBody(
-      HEAD + errorHtml + emptyHtml + startsHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""),
+      headHtml(running.length + orderedUnclaimed.length) + errorHtml + emptyHtml + startsHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""),
       foldedStripHtml([...sessions, ...unclaimed], stalledNow),
     );
     if (!wrote) return;

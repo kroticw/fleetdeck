@@ -523,6 +523,7 @@ const en = {
   // override (web/js/theme.js's button, rendered by header.js). "auto" is
   // the no-override state — the panel follows the system theme.
   sessions_title: "Sessions",
+  sessions_live: "live",
   // --- fleets (web/js/fleet.js, header.js's switcher, sessions.js's groups) ---
   fleet_switch: "fleets",
   fleet_none: "No fleet",
@@ -1084,6 +1085,7 @@ const ru = {
   terminal_font_reset: "вернуть 12 px (⌘0)",
 
   sessions_title: "Сессии",
+  sessions_live: "живых",
   // --- fleets (web/js/fleet.js, header.js's switcher, sessions.js's groups) ---
   fleet_switch: "флоты",
   fleet_none: "Без флота",

@@ -1262,6 +1262,14 @@ main {
   border-bottom: 1px solid var(--border);
 }
 
+.slist-live {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
 .sempty {
   margin: var(--gap-lg) var(--gap);
   text-align: center;
