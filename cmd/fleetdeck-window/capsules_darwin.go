@@ -114,6 +114,8 @@ type capsulesProbe struct {
 	// clicksReach: a click at the middle of the tabs, the new card button and
 	// the theme button, drawn on glass, reaches that control.
 	clicksReach [3]bool
+	// limitDotOpens: a click on a limit's dot, not its chevron, opens the menu.
+	limitDotOpens bool
 	// insideGlass: each of those controls, drawn on glass, is its glass's
 	// content -- the one place a glass draws a view inside itself.
 	insideGlass [3]bool
@@ -156,6 +158,7 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 		out.insideGlass[which] = C.fd_test_capsule_inside_glass(C.int(which)) != 0
 		out.clicksReach[which] = C.fd_test_click_reaches_capsule(C.int(which)) != 0
 	}
+	out.limitDotOpens = C.fd_test_click_on_limit_dot_opens_limits() != 0
 	out.measured = measureFrame(f, window, glassModeGlass)
 	C.fd_test_press_segment(1)
 	C.fd_test_press_new_card()

@@ -259,6 +259,21 @@ static id limitsChevron(const char *description) {
   return b;
 }
 
+// A capsule that opens the limits menu from anywhere on it: a transparent
+// button over the whole capsule, its content drawn underneath. The chevron is
+// only a mark; it was the only control, and too small to hit.
+static id coverWithOpener(id wrapper, const char *description) {
+  id holder = respondsTo(wrapper, "contentView") ? send0(wrapper, sel("contentView"))
+                                                 : send0(send0(wrapper, sel("subviews")), sel("firstObject"));
+  id opener = limitsChevron(description);
+  sendVoid1(opener, sel("setTitle:"), nsstring(""));
+  sendVoidBool(opener, sel("setTransparent:"), 1);
+  sendVoidRect(opener, sel("setFrame:"), sendRect0(holder, sel("bounds")));
+  sendVoidLong(opener, sel("setAutoresizingMask:"), 18);
+  sendVoid1(holder, sel("addSubview:"), opener);
+  return opener;
+}
+
 static id label(const char *text) {
   return send1(cls("NSTextField"), sel("labelWithString:"), nsstring(text));
 }
@@ -477,9 +492,10 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     dotsDrawn[i] = dot;
     id views[4] = {dot, label(limitLabels[i]), label(limitTexts[i]), (id)0};
     int count = 3;
-    if (i == limitsDrawn - 1) views[count++] = limitsChevronDrawn = limitsChevron(compactTooltip);
+    if (i == limitsDrawn - 1) views[count++] = label("▾");
     id content = row(views, count);
     limitCapsules[i] = capsule(mode, content, 0, capsulePadding);
+    limitsChevronDrawn = coverWithOpener(limitCapsules[i], compactTooltip);
     adopt(into, limitCapsules[i]);
   }
 
@@ -491,9 +507,9 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     id colour = srgb(compactRGB);
     if (colour) sendVoid1(compactLabelDrawn, sel("setTextColor:"), colour);
     sendVoid1(compactLabelDrawn, sel("setToolTip:"), nsstring(compactTooltip));
-    compactChevronDrawn = limitsChevron(compactTooltip);
-    id views[2] = {compactLabelDrawn, compactChevronDrawn};
+    id views[2] = {compactLabelDrawn, label("▾")};
     compactCapsule = capsule(mode, row(views, 2), 0, capsulePadding);
+    compactChevronDrawn = coverWithOpener(compactCapsule, compactTooltip);
     adopt(into, compactCapsule);
   }
 
@@ -746,6 +762,27 @@ int fd_test_capsule_inside_glass(int which) {
 // A click at the middle of a capsule's control, hit-tested the way the window
 // hit-tests a mouse down: from its content view down. which is 0 for the tabs,
 // 1 for the new card button, 2 for the theme button.
+// A click on the first limit's dot, at the capsule's left, reaches a control
+// that opens the limits menu.
+int fd_test_click_on_limit_dot_opens_limits(void) {
+  if (!dotsDrawn[0]) return 0;
+  id window = send0(dotsDrawn[0], sel("window"));
+  if (!window) return 0;
+  sendVoid0(send0(window, sel("contentView")), sel("layoutSubtreeIfNeeded"));
+  CGRect b = sendRect0(dotsDrawn[0], sel("bounds"));
+  CGPoint mid = CGPointMake(b.origin.x + b.size.width / 2, b.origin.y + b.size.height / 2);
+  CGPoint inWindow =
+      ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(dotsDrawn[0], sel("convertPoint:toView:"), mid, (id)0);
+  id content = send0(window, sel("contentView"));
+  id superview = send0(content, sel("superview"));
+  CGPoint inSuper = superview ? ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(superview, sel("convertPoint:fromView:"),
+                                                                                  inWindow, (id)0)
+                              : inWindow;
+  id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(content, sel("hitTest:"), inSuper);
+  return hit && ((signed char (*)(id, SEL, id))objc_msgSend)(hit, sel("isKindOfClass:"), cls("NSButton")) &&
+         sendLong0(hit, sel("tag")) == tagLimits;
+}
+
 int fd_test_click_reaches_capsule(int which) {
   id control = which == 0 ? segmentedDrawn : which == 1 ? newCardDrawn : themeDrawn;
   id window = send0(control, sel("window"));
