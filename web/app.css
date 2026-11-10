@@ -1613,36 +1613,55 @@ main {
 .card-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--gap);
-  margin: var(--gap) 0;
+  gap: 10px;
+  margin: 16px 0 14px;
 }
 
+/* A field is its caption above its control, as in the new-card dialog. */
 .card-field {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  gap: 5px;
+  width: 150px;
   font-size: var(--fs-sm);
 }
 
+.card-field:last-child {
+  flex: 1 1 240px;
+}
+
 .card-field-name {
-  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .card-field select,
 .card-field input {
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0 12px;
   font: inherit;
+  font-size: 13px;
   color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 2px 4px;
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.card-field input {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
 }
 
 .card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--gap);
-  margin-bottom: var(--gap);
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
   font-size: var(--fs-sm);
 }
 
@@ -1659,11 +1678,15 @@ main {
    board both are --text-muted, and the parity holds there the other way. */
 .card-num {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
   font-family: var(--font-mono);
+  font-size: 12px;
   color: var(--text);
-  background: var(--surface-hover);
-  border-radius: var(--radius-sm);
-  padding: 0 var(--gap-sm);
+  background: var(--neutral-soft);
+  border-radius: 999px;
+  padding: 0 9px;
 }
 
 /* No number, said in words rather than left as a gap — see .knum-none. */
@@ -1676,7 +1699,18 @@ main {
 }
 
 .card-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
   font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* The session's chip opens it: an arrow out, as in the design. */
+.card-session.card-session-link::after {
+  content: "↗";
+  font-family: var(--font-ui);
 }
 
 /* A dead session is not, on its own, an incident — see the file header — and
@@ -1691,8 +1725,25 @@ main {
    session is calmer still — paused work, not lost work — and looks the same. */
 .card-session-dead,
 .card-session-stopped {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
   color: var(--text-muted);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.card-session-dead::before,
+.card-session-stopped::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .card-error,
@@ -1753,9 +1804,20 @@ main {
 
 .card-session-link {
   cursor: pointer;
-  text-decoration: underline dotted;
+  text-decoration: none;
   color: inherit;
   font-family: var(--font-mono);
+}
+
+.card-session.card-session-link {
+  background: var(--neutral-soft);
+  padding: 0 9px;
+  border-radius: 999px;
+}
+
+.card-session.card-session-link:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* A link to a card that does not exist. It carries no data-link attribute, so it
@@ -1768,18 +1830,44 @@ main {
 }
 
 .card-backlinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   margin-top: var(--gap-lg);
   font-size: var(--fs-sm);
 }
 
-.card-backlinks-title {
-  margin: 0 0 4px;
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
+/* The captions of the docs and backlinks rows read as the fields' captions. */
+.card-backlinks-title,
+.card-docs-title {
+  margin: 0 4px 0 0;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
-.card-backlink {
-  display: block;
+/* Each link out of the card is a chip, as in the design. */
+.card-backlink,
+.card-doc {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.card-backlink:hover,
+.card-doc:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* A card's documents: the reports and design docs its [[links]] name
@@ -1787,27 +1875,23 @@ main {
  * scrolling the body. A card with none draws no block at all.
  */
 .card-docs {
-  margin-bottom: var(--gap);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm);
-}
-
-.card-docs-title {
-  margin: 0 0 4px;
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-}
-
-.card-doc {
-  display: block;
-  overflow-wrap: anywhere;
 }
 
 /* A link in the card that opens nothing: listed with the reason, as text and
  * not a control, and styled like a missing link in the body.
  */
 .card-doc-missing {
-  display: block;
+  display: inline;
   overflow-wrap: anywhere;
+  font-size: 12px;
   color: var(--text-faint);
 }
 

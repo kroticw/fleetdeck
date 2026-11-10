@@ -254,7 +254,7 @@ export function renderCard(root, path, onClose, options = {}) {
 
   const fieldControl = (field, values, value) => {
     const wrap = el("label", "card-field");
-    wrap.append(el("span", "card-field-name", field));
+    wrap.append(el("span", "card-field-name", t(`card_field_${field}`)));
     const select = document.createElement("select");
     select.dataset.field = field;
     // A card holding a value the board does not allow still has to be shown as
@@ -281,7 +281,7 @@ export function renderCard(root, path, onClose, options = {}) {
   // — written as ~ it read back as YAML's null, and the field went blank.
   const repoControl = (value) => {
     const wrap = el("label", "card-field");
-    wrap.append(el("span", "card-field-name", "repo"));
+    wrap.append(el("span", "card-field-name", t("card_field_repo")));
     const input = document.createElement("input");
     input.type = "text";
     input.className = "card-repo";
