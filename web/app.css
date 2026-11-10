@@ -2403,9 +2403,10 @@ main {
 }
 
 .review-base {
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  margin: 0 0 var(--gap);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  margin: 0 0 10px;
 }
 
 .review-uncommitted {
@@ -2456,7 +2457,7 @@ main {
   margin-bottom: var(--gap-lg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--code-bg);
   box-shadow: var(--island-shadow);
   overflow: clip;
 }
@@ -2466,11 +2467,12 @@ main {
   top: 0;
   z-index: 1;
   margin: 0;
-  padding: var(--gap-sm) var(--gap);
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-hover);
+  background: var(--col);
   font-family: var(--font-mono);
-  font-size: var(--fs-sm);
+  font-size: 12px;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -2492,11 +2494,11 @@ main {
 }
 
 .review-line-add {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  background: var(--ok-soft);
 }
 
 .review-line-del {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: var(--danger-soft);
 }
 
 /* Lit under the pointer and while a drag covers it: an image over the row's
@@ -2566,7 +2568,8 @@ button.review-line-add:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  background: var(--surface-hover);
+  background: none;
+  border-block: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
   line-height: 1.6;
@@ -2592,15 +2595,19 @@ button.review-line-add:hover {
 }
 
 .review-line-comments {
-  margin: 0 var(--gap) var(--gap-sm);
+  margin: 6px 12px 8px calc(8ch + 16px);
 }
 
+/* A comment is a raised island over the code, as in the design. */
 .review-comment {
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: var(--gap-sm) var(--gap);
+  border-radius: 12px;
+  padding: 10px 12px;
   margin: 4px 0;
-  font-size: var(--fs-sm);
+  background: var(--surface-raised);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* A comment whose line is no longer today's — see the state words in
@@ -2625,11 +2632,24 @@ button.review-line-add:hover {
   font-family: var(--font-mono);
 }
 
+.review-comment-state,
+.review-comment-resolved {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+
 .review-comment-state {
+  background: var(--attn-soft);
   color: var(--attn);
 }
 
 .review-comment-resolved {
+  background: var(--ok-soft);
   color: var(--ok);
 }
 
@@ -2647,14 +2667,28 @@ button.review-line-add:hover {
 }
 
 .review-reply {
-  border-top: 1px solid var(--border);
-  padding-top: var(--gap-sm);
+  padding: 8px 10px;
   margin-top: var(--gap-sm);
+  border-radius: 9px;
+  background: var(--ok-soft);
 }
 
 .review-reply-status {
-  color: var(--text-muted);
+  color: var(--ok);
+  font-size: 11.5px;
   font-weight: 600;
+}
+
+/* Only a fix is green: a refusal or a question back reads as a plain note. */
+.review-reply-declined,
+.review-reply-question,
+.review-reply-raw {
+  background: var(--neutral-soft);
+}
+
+.review-reply-declined .review-reply-status,
+.review-reply-question .review-reply-status {
+  color: var(--text-muted);
 }
 
 .review-reply-commit {
