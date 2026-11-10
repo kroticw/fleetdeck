@@ -4,22 +4,26 @@ package main
 
 import "math"
 
-// The numbers are the chosen design's (canvas page "Выбрано", spec 5.2), in
-// points, with the origin at the window's top left.
+// The numbers are the redesign's (T-226, the "fleetdeck redesign" canvas), in
+// points, with the origin at the window's top left: a bar across the whole
+// window's top with the capsules on the window's buttons' line, and under it
+// three islands -- the orchestrator panel, the board, the sessions panel.
 const (
-	panelMargin     = 8.0
+	panelMargin = 10.0
+	// topBarHeight is the bar the capsules sit in, across the whole window.
+	topBarHeight    = 2*capsuleTop + capsuleHeight
 	capsuleTop      = 10.0 // centred 26 down, on the window's buttons' line
 	capsuleHeight   = 32.0
 	capsuleGapLeft  = 10.0
 	capsuleGapRight = 12.0
-	boardInsetTop   = 64.0
+	boardInsetTop   = topBarHeight
 	boardGapLeft    = 18.0
 	foldedWidth     = 48.0
-	// foldedButtonsPad is the room a folded orchestrator strip keeps past the
-	// window's buttons, which it holds.
-	foldedButtonsPad = 10.0
-	minPanelWidth    = 220.0 // web/js/columnwidth.js MIN_PIXELS
-	maxPanelShare    = 0.6   // web/js/columnwidth.js MAX_PERCENT
+	minPanelWidth   = 220.0 // web/js/columnwidth.js MIN_PIXELS
+	maxPanelShare   = 0.6   // web/js/columnwidth.js MAX_PERCENT
+	// minCenterWidth is the narrowest the board's island between the panels
+	// gets: the panels narrow for it, and the window is no narrower.
+	minCenterWidth = 360.0
 )
 
 type rect struct{ X, Y, W, H float64 }
@@ -68,57 +72,49 @@ func clampPanel(w, window float64, folded bool) float64 {
 	return w
 }
 
-// frameMinWidth is the window's minimum width less the capsule row's: both
-// panels at their readable width, the margins and the row's gaps to them.
+// frameMinWidth is the window's narrowest: both panels at their readable
+// width, the board's island at its narrowest, and the margins between. The
+// capsule row asks for its own (capsules_darwin.c), and the wider wins.
 func frameMinWidth() float64 {
-	return 2*panelMargin + 2*minPanelWidth + capsuleGapLeft + capsuleGapRight
+	return 4*panelMargin + 2*minPanelWidth + minCenterWidth
 }
 
-// layoutFor places the two panels, the capsule row between them and the
-// board's insets for a window of the given size.
+// layoutFor places the two panels under the top bar, the capsule row across
+// the bar and the board's insets for a window of the given size.
 func layoutFor(width, height float64, w panelWidths) geometry {
-	return layoutWithRow(width, height, w, 0)
+	return layoutPastButtons(width, height, w, 0)
 }
 
-// layoutWithRow is layoutFor keeping rowMin points for the capsule row, its
-// narrowest form (capsules_darwin.c): where the panels at their widths leave
-// less, the unfolded ones narrow in proportion to what each has above its
-// readable width, and no further. This is only what the window shows; the
-// widths a person set are kept, and come back in a window wide enough.
-func layoutWithRow(width, height float64, w panelWidths, rowMin float64) geometry {
-	return layoutPastButtons(width, height, w, rowMin, 0)
-}
-
-// layoutPastButtons is layoutWithRow with the window's buttons ending buttonsEnd
-// points from its left edge on the capsule row's line, 0 with none there: the
-// row begins its gap past whichever ends further right, the orchestrator panel
-// or the buttons, and the panels narrow for the row with that room taken. Only
-// the folded orchestrator strip ends short of the buttons. In v0.11.0's dev
-// build the row beside the strip began under the zoom button (the operator's
-// frame 1374).
-func layoutPastButtons(width, height float64, w panelWidths, rowMin, buttonsEnd float64) geometry {
+// layoutPastButtons is layoutFor with the window's buttons ending buttonsEnd
+// points from its left edge on the bar's line, 0 with none there (full
+// screen): the capsule row begins its gap past them, or at the margin. The
+// panels are under the bar and never meet the row; where the window is too
+// narrow for both at their widths and the board's island at its narrowest,
+// the unfolded ones narrow in proportion to what each has above its readable
+// width, and no further. This is only what the window shows; the widths a
+// person set are kept, and come back in a window wide enough.
+func layoutPastButtons(width, height float64, w panelWidths, buttonsEnd float64) geometry {
 	ow := clampPanel(w.Orchestrator, width, w.OrchestratorFolded)
 	sw := clampPanel(w.Sessions, width, w.SessionsFolded)
-	// A folded orchestrator strip holds the window's buttons.
-	if w.OrchestratorFolded && buttonsEnd > 0 {
-		ow = math.Max(ow, buttonsEnd+foldedButtonsPad-panelMargin)
-	}
-	ow, sw = narrowForRow(width, ow, sw, w, rowMin, buttonsEnd)
+	ow, sw = narrowForCenter(width, ow, sw, w)
 	// Each panel's limit is 60% of the window, so two of them can ask for more
 	// than it has: the sessions panel gets at most what the orchestrator panel
 	// and the margins leave, and the two never overlap.
 	if room := math.Max(0, width-2*panelMargin-ow); sw > room {
 		sw = room
 	}
-	h := height - 2*panelMargin
-	o := rect{X: panelMargin, Y: panelMargin, W: ow, H: h}
-	s := rect{X: width - panelMargin - sw, Y: panelMargin, W: sw, H: h}
-	capX := math.Max(o.X+o.W, buttonsEnd) + capsuleGapLeft
+	h := math.Max(0, height-topBarHeight-panelMargin)
+	o := rect{X: panelMargin, Y: topBarHeight, W: ow, H: h}
+	s := rect{X: width - panelMargin - sw, Y: topBarHeight, W: sw, H: h}
+	capX := panelMargin
+	if buttonsEnd > 0 {
+		capX = buttonsEnd + capsuleGapLeft
+	}
 	return geometry{
 		Orchestrator: o,
 		Sessions:     s,
-		// Between the panels, or nothing when a narrow window leaves no room.
-		Capsules: rect{X: capX, Y: capsuleTop, W: math.Max(0, s.X-capsuleGapRight-capX), H: capsuleHeight},
+		// Across the bar, from past the window's buttons to the right margin.
+		Capsules: rect{X: capX, Y: capsuleTop, W: math.Max(0, width-panelMargin-capX), H: capsuleHeight},
 		Board:    insets{Top: boardInsetTop, Left: o.X + o.W + boardGapLeft, Right: 0, ContentRight: width - s.X},
 
 		OrchestratorResizable: !w.OrchestratorFolded,
@@ -126,9 +122,9 @@ func layoutPastButtons(width, height float64, w panelWidths, rowMin, buttonsEnd 
 	}
 }
 
-func narrowForRow(width, ow, sw float64, w panelWidths, rowMin, buttonsEnd float64) (float64, float64) {
-	excess := besideButtons(ow, buttonsEnd) + sw - (width - 2*panelMargin - capsuleGapLeft - capsuleGapRight - rowMin)
-	if rowMin <= 0 || excess <= 0 {
+func narrowForCenter(width, ow, sw float64, w panelWidths) (float64, float64) {
+	excess := ow + sw - centerRoom(width)
+	if excess <= 0 {
 		return ow, sw
 	}
 	spare := func(pw float64, folded bool) float64 {
@@ -145,20 +141,17 @@ func narrowForRow(width, ow, sw float64, w panelWidths, rowMin, buttonsEnd float
 	return ow - os*share, sw - ss*share
 }
 
-// besideButtons is the room an orchestrator panel ow wide takes from the
-// capsule row with the window's buttons ending buttonsEnd from the window's
-// left edge: the panel's width, or the folded strip that holds the buttons.
-func besideButtons(ow, buttonsEnd float64) float64 {
-	if buttonsEnd <= 0 {
-		return ow
-	}
-	return math.Max(ow, buttonsEnd+foldedButtonsPad-panelMargin)
+// centerRoom is what both panels together may take in a window this wide,
+// leaving the board's island its narrowest.
+func centerRoom(width float64) float64 {
+	return width - 4*panelMargin - minCenterWidth
 }
 
-// rowRoomFor is the widest a panel may be dragged to beside the other panel at
-// its width, leaving the capsule row rowMin: never below the readable width.
-func rowRoomFor(width, other, rowMin float64) float64 {
-	return math.Max(minPanelWidth, width-2*panelMargin-capsuleGapLeft-capsuleGapRight-rowMin-other)
+// roomBeside is the widest a panel may be dragged to beside the other panel at
+// its width, leaving the board's island its narrowest: never below the
+// readable width.
+func roomBeside(width, other float64) float64 {
+	return math.Max(minPanelWidth, centerRoom(width)-other)
 }
 
 // draggedWidth is a panel's width after its edge was dragged dx points to the

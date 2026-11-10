@@ -13,7 +13,8 @@
 // compactText, coloured compactRGB (as limitRGB, one colour) with
 // compactTooltip, and then the theme as its icon. The answer is the row's
 // minimum width, its narrowest form; the window's minimum content width becomes
-// frameMinWidth -- the panels and gaps around the row -- and that.
+// the wider of frameMinWidth -- the panels and the board's island under the
+// bar -- and the row's own start, its minimum and the bar's right margin.
 double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, const char **tabLabels, int tabCount,
                         int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
                         const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount,

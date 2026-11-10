@@ -69,18 +69,16 @@ func (n *standNatives) send(surface string, msg map[string]any) {
 	}
 }
 
-func (n *standNatives) focus(string)                {}
-func (n *standNatives) navigateBoard(string)        {}
-func (n *standNatives) openExternal(string)         {}
-func (n *standNatives) reloadSurface(string)        {}
-func (n *standNatives) showWindowPage(string)       {}
-func (n *standNatives) setAppearance(string)        {}
-func (n *standNatives) saveWidths(panelWidths)      {}
-func (n *standNatives) reloadBoard()                {}
-func (n *standNatives) setDragBand(float64)         {}
-func (n *standNatives) setTopDrag(float64)          {}
-func (n *standNatives) setDragHoles(string, []rect) {}
-func (n *standNatives) showToolbar(bool)            {}
+func (n *standNatives) focus(string)           {}
+func (n *standNatives) navigateBoard(string)   {}
+func (n *standNatives) openExternal(string)    {}
+func (n *standNatives) reloadSurface(string)   {}
+func (n *standNatives) showWindowPage(string)  {}
+func (n *standNatives) setAppearance(string)   {}
+func (n *standNatives) saveWidths(panelWidths) {}
+func (n *standNatives) reloadBoard()           {}
+func (n *standNatives) setDragBand(float64)    {}
+func (n *standNatives) showToolbar(bool)       {}
 
 // standFrame is what is on the screen: the window's width as laid out, the
 // panels' widths and inner edges, the row's width and minimum, its capsules,
@@ -179,7 +177,7 @@ func probeFoldsForTest(m capsuleModel) []foldedStandFrame {
 	n.run(ctl.resized(width, height, false))
 	n.run(ctl.capsules(raw))
 	n.run(ctl.layout(hostVersion, "panel", "stand"))
-	n.run(ctl.titlebarButtons(f.titlebarInset(), f.titlebarCenter()))
+	n.run(ctl.titlebarButtons(f.titlebarInset()))
 	out := []foldedStandFrame{{"started with the orchestrator panel folded", measureFrame(f, window, glassModeGlass)}}
 	for _, s := range []struct {
 		side   string

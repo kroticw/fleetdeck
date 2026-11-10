@@ -221,7 +221,7 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 	if drawnAt == 0 {
 		out.laidWidth = out.contentWidth
 	}
-	out.geometry = layoutWithRow(out.laidWidth, height, widths, out.rowMin)
+	out.geometry = layoutFor(out.laidWidth, height, widths)
 	f.layout(out.geometry)
 
 	out.rowWidth = float64(C.fd_test_row_width())
@@ -273,10 +273,10 @@ func probeCapsuleRegrowForTest(m capsuleModel, from, to float64) capsuleRegrowPr
 	f := installFrame(window)
 	f.setMode(glassModeGlass)
 	f.layout(layoutFor(from, height, widths))
-	rowMin := drawCapsules(f.capsules(), m, glassModeGlass)
-	f.layout(layoutWithRow(from, height, widths, rowMin))
+	drawCapsules(f.capsules(), m, glassModeGlass)
+	f.layout(layoutFor(from, height, widths))
 	C.fd_test_layout_window(window)
-	f.layout(layoutWithRow(to, height, widths, rowMin))
+	f.layout(layoutFor(to, height, widths))
 	C.fd_test_layout_window(window)
 	out.rowWidth = float64(C.fd_test_row_width())
 	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {

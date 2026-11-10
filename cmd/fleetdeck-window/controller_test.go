@@ -29,7 +29,7 @@ func loadedFrame() *controller {
 func boardInsets() effect { return sendBoardInsets{} }
 
 func insetsMessage(left, contentRight float64) []effect {
-	return []effect{sendTo{Surface: "board", Message: map[string]any{"type": "insets", "top": 64.0, "left": left, "right": 0.0, "contentRight": contentRight}}}
+	return []effect{sendTo{Surface: "board", Message: map[string]any{"type": "insets", "top": 52.0, "left": left, "right": 0.0, "contentRight": contentRight}}}
 }
 
 // The insets go to the board as the frame is when they are sent, and not at
@@ -40,14 +40,14 @@ func TestTheBoardsInsetsAreThoseOfTheFrameAsItIsNow(t *testing.T) {
 		t.Fatalf("before the frame is up: %#v, want nothing", got)
 	}
 	c.layout(1, "panel", "work")
-	if got, want := c.boardInsetsNow(), insetsMessage(394, 356); !reflect.DeepEqual(got, want) {
+	if got, want := c.boardInsetsNow(), insetsMessage(396, 358); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the frame up: %#v, want %#v", got, want)
 	}
-	// The capsule row drawn after the insets were asked for narrows the panels.
-	c.capsuleRow(900)
+	// A window made narrower after the insets were asked for narrows the panels.
+	c.resized(1000, 700, false)
 	g := c.geometry()
-	if got, want := c.boardInsetsNow(), insetsMessage(g.Board.Left, g.Board.ContentRight); !reflect.DeepEqual(got, want) || g.Board.Left == 394 {
-		t.Fatalf("after the row narrowed the panels: %#v, want %#v", got, want)
+	if got, want := c.boardInsetsNow(), insetsMessage(g.Board.Left, g.Board.ContentRight); !reflect.DeepEqual(got, want) || g.Board.Left == 396 {
+		t.Fatalf("after the window narrowed the panels: %#v, want %#v", got, want)
 	}
 }
 
@@ -428,7 +428,7 @@ func TestFoldingSavesTheWidthsAndTellsTheSurface(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("effects = %#v", got)
 	}
-	if got, want := c.boardInsetsNow(), insetsMessage(394, 56); !reflect.DeepEqual(got, want) {
+	if got, want := c.boardInsetsNow(), insetsMessage(396, 58); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the board's insets once folded: %#v, want %#v", got, want)
 	}
 }
@@ -449,7 +449,7 @@ func TestDraggingAPanelsEdgeMovesTheFrameAndGivesTheBoardItsInsetsOnRelease(t *t
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("on release: %#v", got)
 	}
-	if got, want := c.boardInsetsNow(), insetsMessage(434, 356); !reflect.DeepEqual(got, want) {
+	if got, want := c.boardInsetsNow(), insetsMessage(436, 358); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the board's insets on release: %#v, want %#v", got, want)
 	}
 	if got := c.resizeEnd(); len(got) != 0 {
@@ -618,29 +618,25 @@ func geometryOf(t *testing.T, effects []effect) geometry {
 	return geometry{}
 }
 
-func TestTheCapsuleRowsMinimumLaysTheFrameOutAgainOnce(t *testing.T) {
+// The capsule row has the bar to itself: its minimum moves no panel.
+func TestTheCapsuleRowsMinimumLeavesThePanelsWhereTheyAre(t *testing.T) {
 	c := loadedFrame()
-	g := layoutWithRow(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
-	want := []effect{applyGeometry{G: g}, boardInsets()}
-	if got := c.capsuleRow(360); !reflect.DeepEqual(got, want) {
-		t.Fatalf("effects = %#v\nwant      %#v", got, want)
+	before := c.geometry()
+	if got := c.capsuleRow(900); len(got) != 0 {
+		t.Fatalf("effects = %#v, want none", got)
 	}
-	if got, want := c.boardInsetsNow(), insetsMessage(g.Board.Left, g.Board.ContentRight); !reflect.DeepEqual(got, want) {
-		t.Fatalf("the board's insets: %#v, want %#v", got, want)
-	}
-	if got := c.capsuleRow(360); len(got) != 0 {
-		t.Fatalf("the same minimum again: %#v, want none", got)
+	if c.geometry() != before {
+		t.Fatalf("the row's minimum moved the frame: %+v, was %+v", c.geometry(), before)
 	}
 }
 
-// Narrowing the panels for the row is what the window shows, not the widths a
-// person set: a window made wide again has them back, and nothing is saved.
+// Narrowing the panels for the board is what the window shows, not the widths
+// a person set: a window made wide again has them back, and nothing is saved.
 func TestANarrowWindowNarrowsThePanelsOnlyOnScreen(t *testing.T) {
 	c := loadedFrame()
-	c.capsuleRow(360)
 	narrow := c.resized(1000, 700, false)
-	if g := geometryOf(t, narrow); g.Orchestrator.W >= 368 || g.Capsules.W < 360-1e-9 {
-		t.Fatalf("at 1000: %+v, want the panels narrower and the row at its minimum", g)
+	if g := geometryOf(t, narrow); g.Orchestrator.W >= 368 || g.Sessions.X-(g.Orchestrator.X+g.Orchestrator.W)-2*panelMargin < minCenterWidth-1e-9 {
+		t.Fatalf("at 1000: %+v, want the panels narrower and the board's island at its minimum", g)
 	}
 	wide := c.resized(1440, 700, false)
 	if g := geometryOf(t, wide); g.Orchestrator.W != 368 || g.Sessions.W != 348 {
@@ -654,17 +650,17 @@ func TestANarrowWindowNarrowsThePanelsOnlyOnScreen(t *testing.T) {
 	}
 }
 
-// The board's layout decides the frame before the surfaces draw the capsule
-// row; laid out after the row gave its minimum, that geometry is stale, and the
+// The board's layout decides the frame before the window's buttons are
+// measured; laid out after they moved the row, that geometry is stale, and the
 // frame as it is now follows it whatever order the effects ran in.
-func TestAFrameLaidOutBeforeTheRowGaveItsMinimumIsLaidOutAgain(t *testing.T) {
+func TestAFrameLaidOutBeforeTheButtonsWereMeasuredIsLaidOutAgain(t *testing.T) {
 	c := started()
 	c.resized(1000, 700, false)
 	effects := c.layout(1, "panel", "work")
 	stale := geometryOf(t, effects)
-	c.capsuleRow(360)
+	c.titlebarButtons(79)
 	c.pageLoaded("orchestrator", "panel")
-	now := layoutWithRow(1000, 700, panelWidths{Orchestrator: 368, Sessions: 348}, 360)
+	now := layoutPastButtons(1000, 700, panelWidths{Orchestrator: 368, Sessions: 348}, 79)
 	want := []effect{applyGeometry{G: now}, boardInsets()}
 	if got := c.laidOut(stale); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after the stale geometry: %#v\nwant %#v", got, want)
@@ -681,19 +677,20 @@ func TestAFrameLaidOutBeforeTheRowGaveItsMinimumIsLaidOutAgain(t *testing.T) {
 	}
 }
 
-func TestDraggingAPanelInANarrowWindowStopsWhereTheRowNeedsItsMinimum(t *testing.T) {
+func TestDraggingAPanelInANarrowWindowStopsWhereTheBoardNeedsItsMinimum(t *testing.T) {
 	c := loadedFrame()
-	c.capsuleRow(360)
 	c.resized(1000, 700, false)
 	start, ok := c.resizeStart("orchestrator")
 	if !ok {
 		t.Fatal("no edge to drag")
 	}
-	if g := geometryOf(t, c.resizeTo("orchestrator", start, 2000)); g.Capsules.W < 360-1e-9 {
-		t.Fatalf("dragged wide: row = %v, want at least 360; %+v", g.Capsules.W, g)
+	g := geometryOf(t, c.resizeTo("orchestrator", start, 2000))
+	if island := g.Sessions.X - (g.Orchestrator.X + g.Orchestrator.W) - 2*panelMargin; island < minCenterWidth-1e-9 {
+		t.Fatalf("dragged wide: the board's island = %v, want at least %v; %+v", island, minCenterWidth, g)
 	}
 	saved := c.resizeEnd()
-	want := 1000 - 2*panelMargin - capsuleGapLeft - capsuleGapRight - 360 - 348
+	// The sessions panel at 348 already leaves only 1000-40-360-348 = 252.
+	want := 1000 - 4*panelMargin - minCenterWidth - 348
 	if len(saved) == 0 || saved[0] != (saveWidths{W: panelWidths{Orchestrator: want, Sessions: 348}}) {
 		t.Fatalf("on release: %#v, want the orchestrator saved at %v", saved, want)
 	}
@@ -724,34 +721,5 @@ func TestThePagesOpaqueSettingRebuildsTheFrameAsReducedTransparencyDoes(t *testi
 	got := c.capsules(json.RawMessage(`{"version":1}`))
 	if len(got) < 2 || got[1] != (setFrameMode{Mode: glassModeGlass}) {
 		t.Fatalf("lifting the wish: effects = %#v", got)
-	}
-}
-
-func TestTheTopBandGoesInFullScreenAndComesBack(t *testing.T) {
-	c := loadedFrame()
-	has := func(effects []effect, want effect) bool {
-		for _, e := range effects {
-			if reflect.DeepEqual(e, want) {
-				return true
-			}
-		}
-		return false
-	}
-	if got := c.resized(1512, 982, true); !has(got, setTopDrag{Height: 0}) {
-		t.Fatalf("into full screen: %#v", got)
-	}
-	if got := c.resized(1512, 982, false); !has(got, setTopDrag{Height: topDragHeight}) {
-		t.Fatalf("out of full screen: %#v", got)
-	}
-}
-
-func TestAPanelsControlsInTheTopBandAreItsSides(t *testing.T) {
-	c := loadedFrame()
-	holes := []rect{{X: 1, Y: 2, W: 3, H: 4}}
-	if got := c.dragHoles("sessions@0", holes); !reflect.DeepEqual(got, []effect{setDragHoles{Side: "sessions", Holes: holes}}) {
-		t.Fatalf("effects = %#v", got)
-	}
-	if got := c.dragHoles("board", holes); got != nil {
-		t.Fatalf("the board has no holes in the top band: %#v", got)
 	}
 }

@@ -183,6 +183,8 @@ static id target(void) {
 // --- capsules ------------------------------------------------------------------
 
 static const double capsuleHeight = 32, capsulePadding = 12, capsuleGap = 8;
+// The bar's right margin past the row (geometry.go panelMargin).
+static const double rowRightMargin = 10;
 
 // A capsule of the row's material around content, width fitted to it with
 // padding on either side. The row places it (placeCapsules); it never moves by
@@ -533,8 +535,13 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   placeCapsules(bounds.size.width);
 
   double rowMin = leftWidth() + capsuleGap + compactWidth() + widthOf(themeIconCapsule);
-  setMinContentWidth(send0(parent, sel("window")), frameMinWidth + rowMin);
-  growToMinContentWidth(send0(parent, sel("window")), frameMinWidth + rowMin);
+  // The row runs across the bar from past the window's buttons to its right
+  // margin, the panels under it: the window is as wide as the wider of the
+  // two asks.
+  double rowAsks = sendRect0(parent, sel("frame")).origin.x + rowMin + rowRightMargin;
+  double minWidth = rowAsks > frameMinWidth ? rowAsks : frameMinWidth;
+  setMinContentWidth(send0(parent, sel("window")), minWidth);
+  growToMinContentWidth(send0(parent, sel("window")), minWidth);
 
   objc_autoreleasePoolPop(pool);
   return rowMin;

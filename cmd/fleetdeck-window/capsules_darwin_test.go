@@ -501,10 +501,6 @@ func TestANarrowerWindowCompactsTheLimitsBeforeTheTheme(t *testing.T) {
 	if s := layoutResults[1].stage(t); s != 0 {
 		t.Errorf("%v: form %d, want every limit with room for it", layoutResults[1], s)
 	}
-	// The window v0.10.0 broke in: no room for the indicators.
-	if s := layoutResults[2].stage(t); s == 0 {
-		t.Errorf("%v: every limit shown in a row with no room for them", layoutResults[2])
-	}
 }
 
 func TestAWindowResizedWithoutARedrawTakesTheFormOfItsWidth(t *testing.T) {
@@ -513,17 +509,18 @@ func TestAWindowResizedWithoutARedrawTakesTheFormOfItsWidth(t *testing.T) {
 	}
 }
 
-// The window's minimum content width is the frame around the row -- both
-// panels at their readable width, margins and gaps -- and the row's narrowest
-// form: the tabs, the new card button, the compact limits and the theme's icon,
-// with the row's 8 pt gaps between them.
+// The window's minimum content width is the wider of the frame -- both panels
+// at their readable width, the board's island and the margins -- and the bar's
+// row in its narrowest form from where it starts to the right margin: the tabs,
+// the new card button, the compact limits and the theme's icon, with the row's
+// 8 pt gaps between them.
 func TestTheWindowsMinimumWidthIsTheFrameAndTheNarrowestRow(t *testing.T) {
 	for _, p := range allLayouts() {
 		parts := p.one(t, "tabs").w + 8 + p.one(t, "newCard").w + 8 + p.one(t, "compactLimits").w + 8 + p.one(t, "themeIcon").w
 		if p.rowMin != parts {
 			t.Errorf("%v: row minimum %v, want %v", p, p.rowMin, parts)
 		}
-		if want := frameMinWidth() + parts; p.minContentWidth != want {
+		if want := math.Max(frameMinWidth(), p.geometry.Capsules.X+parts+panelMargin); p.minContentWidth != want {
 			t.Errorf("%v: window minimum %v, want %v", p, p.minContentWidth, want)
 		}
 		if p.minAfterClear != 0 {
