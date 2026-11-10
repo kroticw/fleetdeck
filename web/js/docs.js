@@ -25,7 +25,7 @@
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { subscribe as storeSubscribe } from "./store.js";
-import { cardsLinkingTo, documentBody } from "./docnames.js";
+import { cardsByDocument, cardsLinkingTo, documentBody } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
 import { t } from "./i18n.js";
 import { inFleet } from "./api.js";
@@ -208,7 +208,13 @@ export function renderDocs(root, options = {}) {
     article.replaceChildren(el("p", "docs-empty", content?.text ?? t("pick_doc")));
   };
 
-  const cardOf = (doc) => cardsLinkingTo(doc, cards, docs)[0] ?? null;
+  // Which card each document belongs to, built once per change of the cards
+  // or the documents rather than asked per document on every snapshot.
+  let cardIndex = new Map();
+  const reindex = () => {
+    cardIndex = cardsByDocument(cards, docs);
+  };
+  const cardOf = (doc) => cardIndex.get(doc.path) ?? null;
 
   const paintSortControls = () => {
     for (const b of sortButtons) b.setAttribute("aria-checked", String(b.dataset.sort === sort.by));
@@ -274,6 +280,7 @@ export function renderDocs(root, options = {}) {
   const paintList = (list, error) => {
     docs = list;
     listError = error;
+    reindex();
     paintCards();
     paintEntries();
   };
@@ -325,6 +332,7 @@ export function renderDocs(root, options = {}) {
   // The section lives as long as the page, so this subscription is never undone.
   subscribe((snap) => {
     cards = snap?.cards ?? [];
+    reindex();
     paintCards();
     paintEntries();
   });

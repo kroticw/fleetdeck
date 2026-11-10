@@ -109,3 +109,26 @@ export function cardsLinkingTo(doc, cards, docs) {
   if (!doc) return [];
   return (cards ?? []).filter((card) => documentsOf(card, cards, docs).some((d) => d.path === doc.path));
 }
+
+// cardsByDocument is, for every document a card links, the first card that
+// links it: cardsLinkingTo(doc)[0] for all the documents at once. Each name is
+// resolved once through one table, so a list of every document costs the
+// cards' links and not documents x cards x links x documents.
+export function cardsByDocument(cards, docs) {
+  const index = new Map();
+  if (!Array.isArray(docs)) return index;
+  const byName = new Map();
+  for (const doc of docs) {
+    for (const name of namesOf(doc)) byName.set(name, [...(byName.get(name) ?? []), doc]);
+  }
+  const cardNames = new Set((cards ?? []).map((c) => noteName(c.path)));
+  for (const card of cards ?? []) {
+    for (const name of card?.links ?? []) {
+      if (cardNames.has(name)) continue;
+      const matches = byName.get(name);
+      if (matches?.length !== 1) continue;
+      if (!index.has(matches[0].path)) index.set(matches[0].path, card);
+    }
+  }
+  return index;
+}
