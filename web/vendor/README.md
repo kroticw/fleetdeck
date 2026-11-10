@@ -101,3 +101,47 @@ node --eval 'const m = { exports: {} };
   new Function("module", "exports", require("node:fs").readFileSync("web/vendor/addon-fit.js", "utf8"))(m, m.exports);
   console.log(Object.keys(m.exports))'
 ```
+
+## Inter 4.1 and JetBrains Mono 2.304
+
+The panel's type: Inter for the interface, JetBrains Mono for card numbers, session ids, code and the terminals. The page loads nothing from the network (`default-src 'self'`), so the faces are served from the binary like everything else.
+
+| File | Source |
+| --- | --- |
+| `fonts/InterVariable.woff2` | `web/InterVariable.woff2` in `https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip` |
+| `fonts/LICENSE.inter` | `LICENSE.txt` in the same archive |
+| `fonts/JetBrainsMono-{Regular,Medium,SemiBold,Bold}.woff2` | `fonts/webfonts/` in `https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip` |
+| `fonts/LICENSE.jetbrains-mono` | `OFL.txt` in the same archive |
+
+Licence: SIL Open Font License 1.1, both. Inter is the variable face: the interface uses weights between the named ones (550, 650), which only a variable font draws as asked.
+
+### Reproducing this exact set
+
+```bash
+tmp=$(mktemp -d)
+curl --silent --show-error --location --fail --output "$tmp/inter.zip" https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+curl --silent --show-error --location --fail --output "$tmp/jbm.zip" https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+unzip -q -j "$tmp/inter.zip" web/InterVariable.woff2 LICENSE.txt -d "$tmp/inter"
+unzip -q -j "$tmp/jbm.zip" fonts/webfonts/JetBrainsMono-Regular.woff2 fonts/webfonts/JetBrainsMono-Medium.woff2 \
+  fonts/webfonts/JetBrainsMono-SemiBold.woff2 fonts/webfonts/JetBrainsMono-Bold.woff2 OFL.txt -d "$tmp/jbm"
+cp "$tmp/inter/InterVariable.woff2" "$tmp"/jbm/*.woff2 web/vendor/fonts/
+cp "$tmp/inter/LICENSE.txt" web/vendor/fonts/LICENSE.inter
+cp "$tmp/jbm/OFL.txt" web/vendor/fonts/LICENSE.jetbrains-mono
+shasum --algorithm 256 web/vendor/fonts/*
+```
+
+Expected digests:
+
+```text
+693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3  web/vendor/fonts/InterVariable.woff2
+c503cc5ec5f8b2c7666b7ecda1adf44bd45f2e6579b2eba0fc292150416588a2  web/vendor/fonts/JetBrainsMono-Bold.woff2
+086c48dfbea9ddaff1320f7e09399b8e2924e88ce67453721255db3bdbb5a353  web/vendor/fonts/JetBrainsMono-Medium.woff2
+a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2  web/vendor/fonts/JetBrainsMono-Regular.woff2
+918edad542a1da608fd2ba8daebaff9ac802309103fe760eed465b8b4e47faf1  web/vendor/fonts/JetBrainsMono-SemiBold.woff2
+262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a  web/vendor/fonts/LICENSE.inter
+30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad  web/vendor/fonts/LICENSE.jetbrains-mono
+```
+
+### Updating
+
+`v4.1` and `v2.304` were the latest releases of `rsms/inter` and `JetBrains/JetBrainsMono` when this was vendored (2026-11-10). Check the current ones with `gh api repos/rsms/inter/releases/latest --jq .tag_name` and the same for `JetBrains/JetBrainsMono`, re-run the block above with the new versions and update the digests here.

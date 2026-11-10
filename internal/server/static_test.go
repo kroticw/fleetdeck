@@ -206,6 +206,15 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		// Sizes the terminal to its pane; pinned to the xterm release above.
 		"vendor/addon-fit.js":      true,
 		"vendor/LICENSE.addon-fit": true,
+
+		// The panel's type, with their licences (web/vendor/README.md).
+		"vendor/fonts/InterVariable.woff2":          true,
+		"vendor/fonts/JetBrainsMono-Regular.woff2":  true,
+		"vendor/fonts/JetBrainsMono-Medium.woff2":   true,
+		"vendor/fonts/JetBrainsMono-SemiBold.woff2": true,
+		"vendor/fonts/JetBrainsMono-Bold.woff2":     true,
+		"vendor/fonts/LICENSE.inter":                true,
+		"vendor/fonts/LICENSE.jetbrains-mono":       true,
 	}
 	got := map[string]bool{}
 	if err := fs.WalkDir(web.FS, ".", func(file string, d fs.DirEntry, err error) error {
