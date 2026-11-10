@@ -204,12 +204,15 @@ const PROBED_TOP = 120;
 const PROBED_RENDERS = 2;
 
 // probeColumnScroll scrolls board's done column once it is drawn taller than its
-// room, and reports where that column is after the board has drawn its columns
-// twice more: a column drawn anew at its top is one no one can read to its end.
-// Nothing is reported for a board whose column never grows taller than its room.
-export function probeColumnScroll(win, board, report) {
+// room, and reports where that column is after two more snapshots: a column
+// drawn anew at its top is one no one can read to its end. subscribe is the
+// store's: the board draws only the snapshots that change its columns (T-226),
+// so the snapshots are counted, not the draws. Nothing is reported for a board
+// whose column never grows taller than its room.
+export function probeColumnScroll(win, board, report, subscribe) {
   let asked = false;
   let renders = 0;
+  let heard = false;
   const column = () => board.querySelector(`:scope > .kcol[data-stage="${PROBED_STAGE}"]`);
   const observer = new win.MutationObserver(() => {
     // Folded to a strip by default: unfolded first, as an operator would,
@@ -220,18 +223,20 @@ export function probeColumnScroll(win, board, report) {
       return;
     }
     const c = column();
-    if (!asked) {
-      if (!c || c.scrollHeight <= c.clientHeight) return;
-      c.scrollTop = PROBED_TOP;
-      asked = true;
-      return;
-    }
-    renders += 1;
-    if (renders < PROBED_RENDERS) return;
-    observer.disconnect();
-    report({ report: "columnScroll", stage: PROBED_STAGE, asked: PROBED_TOP, renders, scrollTop: c ? c.scrollTop : null });
+    if (asked || !c || c.scrollHeight <= c.clientHeight) return;
+    c.scrollTop = PROBED_TOP;
+    asked = true;
   });
   observer.observe(board, { childList: true });
+  subscribe(() => {
+    if (!asked || heard) return;
+    renders += 1;
+    if (renders < PROBED_RENDERS) return;
+    heard = true;
+    observer.disconnect();
+    const c = column();
+    report({ report: "columnScroll", stage: PROBED_STAGE, asked: PROBED_TOP, renders, scrollTop: c ? c.scrollTop : null });
+  });
 }
 
 // --- the band the window is dragged by ----------------------------------------

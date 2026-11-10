@@ -449,7 +449,7 @@ if (host) {
   const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
   // And whether a scrolled column keeps its place while the panel's snapshots come in.
-  if (boardEl) probeColumnScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report));
+  if (boardEl) probeColumnScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report), subscribe);
   // And what stands in the way of the band the window is dragged by, with a
   // sheet open and without one (T-079).
   if (boardEl) watchTopBandOnStand(window, document.getElementById("center"), (report) => callHost(window, "fleetdeckStandReport", report));
