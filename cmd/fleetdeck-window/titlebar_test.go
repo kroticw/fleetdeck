@@ -76,8 +76,8 @@ func TestButtonsMeasuredBesideAFoldedOrchestratorLayTheFrameOutAgain(t *testing.
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("effects = %#v\nwant      %#v", got, want)
 	}
-	if g := geometryOf(t, got); g.Capsules.X != 79+capsuleGapLeft {
-		t.Fatalf("capsule row from %v, want past the zoom button at %v", g.Capsules.X, 79+capsuleGapLeft)
+	if g := geometryOf(t, got); g.Capsules.X != 79+foldedButtonsPad+capsuleGapLeft {
+		t.Fatalf("capsule row from %v, want past the zoom button at %v", g.Capsules.X, 79+foldedButtonsPad+capsuleGapLeft)
 	}
 	if got := c.titlebarButtons(79, 26); len(got) != 0 {
 		t.Fatalf("the same measure again: %#v, want nothing", got)
@@ -92,8 +92,8 @@ func TestButtonsMeasuredBesideAFoldedOrchestratorLayTheFrameOutAgain(t *testing.
 func TestFoldingTheOrchestratorPanelKeepsTheRowPastTheWindowsButtons(t *testing.T) {
 	c := loadedFrame()
 	c.titlebarButtons(79, 26)
-	if g := geometryOf(t, c.panel("orchestrator", true)); g.Capsules.X != 79+capsuleGapLeft {
-		t.Fatalf("capsule row from %v, want past the zoom button at %v", g.Capsules.X, 79+capsuleGapLeft)
+	if g := geometryOf(t, c.panel("orchestrator", true)); g.Capsules.X != 79+foldedButtonsPad+capsuleGapLeft {
+		t.Fatalf("capsule row from %v, want past the zoom button at %v", g.Capsules.X, 79+foldedButtonsPad+capsuleGapLeft)
 	}
 }
 
@@ -107,8 +107,8 @@ func TestInFullScreenTheRowBesideAFoldedOrchestratorKeepsToTheStrip(t *testing.T
 	if g := geometryOf(t, c.resized(1440, 900, true)); g.Capsules.X != panelMargin+foldedWidth+capsuleGapLeft {
 		t.Fatalf("in full screen the row is from %v, want %v past the strip", g.Capsules.X, panelMargin+foldedWidth+capsuleGapLeft)
 	}
-	if g := geometryOf(t, c.resized(1000, 700, false)); g.Capsules.X != 79+capsuleGapLeft {
-		t.Fatalf("out of full screen the row is from %v, want past the zoom button at %v", g.Capsules.X, 79+capsuleGapLeft)
+	if g := geometryOf(t, c.resized(1000, 700, false)); g.Capsules.X != 79+foldedButtonsPad+capsuleGapLeft {
+		t.Fatalf("out of full screen the row is from %v, want past the zoom button at %v", g.Capsules.X, 79+foldedButtonsPad+capsuleGapLeft)
 	}
 }
 
@@ -124,11 +124,11 @@ func TestDraggingTheSessionsPanelBesideAFoldedOrchestratorLeavesTheRowItsMinimum
 	if !ok {
 		t.Fatal("no edge to drag")
 	}
-	if g := geometryOf(t, c.resizeTo("sessions", start, -2000)); g.Capsules.X != 79+capsuleGapLeft || g.Capsules.W < 360-1e-9 {
-		t.Fatalf("dragged wide: row %+v, want it from %v and at least 360 wide", g.Capsules, 79+capsuleGapLeft)
+	if g := geometryOf(t, c.resizeTo("sessions", start, -2000)); g.Capsules.X != 79+foldedButtonsPad+capsuleGapLeft || g.Capsules.W < 360-1e-9 {
+		t.Fatalf("dragged wide: row %+v, want it from %v and at least 360 wide", g.Capsules, 79+foldedButtonsPad+capsuleGapLeft)
 	}
 	// The width kept is the one the frame shows, not one the row narrows again.
-	want := 1000 - 2*panelMargin - capsuleGapLeft - capsuleGapRight - 360 - (79 - panelMargin)
+	want := 1000 - 2*panelMargin - capsuleGapLeft - capsuleGapRight - 360 - (79 + foldedButtonsPad - panelMargin)
 	saved := c.resizeEnd()
 	if len(saved) == 0 || saved[0] != (saveWidths{W: panelWidths{Orchestrator: 368, Sessions: want, OrchestratorFolded: true}}) {
 		t.Fatalf("on release: %#v, want the sessions panel saved at %v", saved, want)

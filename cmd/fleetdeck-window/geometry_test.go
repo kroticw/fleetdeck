@@ -150,16 +150,22 @@ func TestAFoldedPanelIsNotWidenedOrNarrowedForTheRow(t *testing.T) {
 
 // v0.11.0's dev build on macOS 27 (the operator's frame 1374): with the
 // orchestrator panel folded to its strip, the capsule row began 10 pt past the
-// strip, under the window's buttons, which end 79 pt in. The row begins its gap
-// past the buttons; the strip and the board stay where they were.
-func TestTheCapsuleRowBesideAFoldedOrchestratorBeginsPastTheWindowsButtons(t *testing.T) {
+// strip, under the window's buttons, which end 79 pt in. Then the buttons hung
+// past the strip's edge, which the operator found ugly (the redesign's
+// review): the strip now holds the buttons, and the row and the board begin
+// past it.
+func TestAFoldedOrchestratorStripHoldsTheWindowsButtons(t *testing.T) {
 	folded := panelWidths{Orchestrator: 368, Sessions: 348, OrchestratorFolded: true}
 	g := layoutPastButtons(1000, 700, folded, 0, 79)
-	if g.Capsules.X != 79+capsuleGapLeft || g.Capsules.X+g.Capsules.W != g.Sessions.X-capsuleGapRight {
-		t.Fatalf("capsule row = %+v, want it from %v to the sessions panel's gap", g.Capsules, 79+capsuleGapLeft)
+	strip := 79 + foldedButtonsPad - panelMargin
+	if g.Orchestrator.W != strip {
+		t.Fatalf("the strip is %v wide, want %v to hold the buttons", g.Orchestrator.W, strip)
 	}
-	if g.Orchestrator.W != foldedWidth || g.Board.Left != panelMargin+foldedWidth+boardGapLeft {
-		t.Fatalf("the strip %+v or the board's left inset %v moved with the row", g.Orchestrator, g.Board.Left)
+	if g.Capsules.X != panelMargin+strip+capsuleGapLeft || g.Capsules.X+g.Capsules.W != g.Sessions.X-capsuleGapRight {
+		t.Fatalf("capsule row = %+v, want it past the strip to the sessions panel's gap", g.Capsules)
+	}
+	if g.Board.Left != panelMargin+strip+boardGapLeft {
+		t.Fatalf("the board's left inset %v is not past the strip", g.Board.Left)
 	}
 	if got, want := layoutPastButtons(1000, 700, folded, 0, 0), layoutFor(1000, 700, folded); got != want {
 		t.Fatalf("with no buttons on the row's line: %+v\nwant %+v", got, want)
@@ -174,8 +180,8 @@ func TestTheCapsuleRowBesideAFoldedOrchestratorBeginsPastTheWindowsButtons(t *te
 // the sessions panel narrows for the row's minimum past them.
 func TestTheSessionsPanelNarrowsForTheRowPastTheWindowsButtons(t *testing.T) {
 	g := layoutPastButtons(800, 700, panelWidths{Orchestrator: 368, Sessions: 500, OrchestratorFolded: true}, 360, 79)
-	if g.Capsules.X != 79+capsuleGapLeft || g.Capsules.W < 360-1e-9 {
-		t.Fatalf("capsule row = %+v, want it from %v and at least 360 wide", g.Capsules, 79+capsuleGapLeft)
+	if g.Capsules.X != 79+foldedButtonsPad+capsuleGapLeft || g.Capsules.W < 360-1e-9 {
+		t.Fatalf("capsule row = %+v, want it from %v and at least 360 wide", g.Capsules, 79+foldedButtonsPad+capsuleGapLeft)
 	}
 }
 
