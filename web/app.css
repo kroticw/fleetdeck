@@ -6612,9 +6612,9 @@ body.is-resizing {
   max-width: calc(100vw - 2 * var(--gap));
 }
 
-/* In the window the capsule row and the side panels are the window's own
- * views, above the page: the popover sits under the row and inside the
- * content the panels leave, at its right edge where the limits capsule is. */
+/* In the window the bar and the side panels are the window's own views, above
+ * the page: the popover opens under the bar's limits capsule, which says where
+ * it is (web/js/limitsmenu.js, toggle). This is its place until it does. */
 .limits-popover {
   position: fixed;
   top: calc(var(--host-inset-top, 0px) + var(--gap-sm));

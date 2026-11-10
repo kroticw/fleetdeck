@@ -27,7 +27,7 @@ export function wireHostActions(win, host, targets) {
         else if (message.kind === "session") targets.openSession(message.short);
         return;
       case "limits":
-        targets.toggleLimits?.();
+        targets.toggleLimits?.(Number.isFinite(message.left) ? { left: message.left, top: message.top } : undefined);
         return;
       case "setTheme":
         if (THEMES.has(message.choice)) targets.setTheme(message.choice);

@@ -171,6 +171,22 @@ static void pressWith(const char *prefix, const char *rest) {
   fleetdeckCapsulePressed(action);
 }
 
+// The limits press with where the capsule is: "limits:<left>,<bottom>", in
+// points from the window content's top left. The page's menu opens under the
+// capsule (web/js/limitsmenu.js); in 1.8.0 it opened at the bar's right end.
+static void pressLimits(void) {
+  if (!limitsCapsule || !send0(limitsCapsule, sel("window"))) {
+    fleetdeckCapsulePressed((char *)"limits");
+    return;
+  }
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(limitsCapsule, sel("convertRect:toView:"),
+                                                            sendRect0(limitsCapsule, sel("bounds")), (id)0);
+  double height = sendRect0(send0(send0(limitsCapsule, sel("window")), sel("contentView")), sel("bounds")).size.height;
+  char action[64];
+  snprintf(action, sizeof action, "limits:%g,%g", r.origin.x, height - r.origin.y);
+  fleetdeckCapsulePressed(action);
+}
+
 static void capsulePressed(id self, SEL _cmd, id sender) {
   (void)self;
   (void)_cmd;
@@ -179,7 +195,7 @@ static void capsulePressed(id self, SEL _cmd, id sender) {
       showFleetMenu();
       return;
     case tagLimits:
-      fleetdeckCapsulePressed((char *)"limits");
+      pressLimits();
       return;
     case tagUpdate:
       fleetdeckCapsulePressed((char *)"update");

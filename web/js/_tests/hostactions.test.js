@@ -12,6 +12,7 @@ const TARGETS = [
   "openSession",
   "showSection",
   "toggleNewCard",
+  "toggleLimits",
   "cycleTheme",
   "setTheme",
   "pressUpdate",
@@ -78,6 +79,14 @@ test("the board takes no tab or new card from the window", () => {
   send({ type: "show", section: "docs" });
   send({ type: "newCard" });
   assert.deepEqual(calls, []);
+});
+
+// The bar's limits capsule says where it is, and the menu opens under it.
+test("the board opens the limits menu where the capsule is", () => {
+  const { send, calls } = setup("board");
+  send({ type: "limits", left: 221.5, top: 42 });
+  send({ type: "limits" });
+  assert.deepEqual(calls, [["toggleLimits", { left: 221.5, top: 42 }], ["toggleLimits", undefined]]);
 });
 
 // The bar's theme segments: the board saves the choice, "" for the system's.

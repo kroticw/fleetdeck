@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -507,6 +508,17 @@ func (c *controller) capsuleAction(action string) []effect {
 	}
 	if name, ok := strings.CutPrefix(action, "fleet:"); ok && name != "" && name != c.fleet {
 		return c.leaveFor(c.pageURL(name))
+	}
+	// The limits capsule with where it is, its left edge and its bottom in the
+	// window: the menu opens under it (capsules_darwin.c).
+	if at, ok := strings.CutPrefix(action, "limits:"); ok {
+		xs, ys, _ := strings.Cut(at, ",")
+		x, errX := strconv.ParseFloat(xs, 64)
+		y, errY := strconv.ParseFloat(ys, 64)
+		if errX == nil && errY == nil {
+			return c.to("board", map[string]any{"type": "limits", "left": x, "top": y})
+		}
+		return c.to("board", map[string]any{"type": "limits"})
 	}
 	return nil
 }

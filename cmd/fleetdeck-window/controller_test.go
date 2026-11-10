@@ -506,6 +506,10 @@ func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 			t.Fatalf("%s: effects = %#v", action, got)
 		}
 	}
+	// The limits capsule says where it is: the menu opens under it (T-226).
+	if got, want := c.capsuleAction("limits:221.5,42"), []effect{sendTo{Surface: "board", Message: map[string]any{"type": "limits", "left": 221.5, "top": 42.0}}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("limits with its place: effects = %#v", got)
+	}
 	// The update goes to the orchestrator's page: it asks about text unsent in
 	// its terminal first, and shows the update's progress over it.
 	if got, want := c.capsuleAction("update"), []effect{sendTo{Surface: "orchestrator", Message: map[string]any{"type": "update"}}}; !reflect.DeepEqual(got, want) {

@@ -523,7 +523,7 @@ if (host) {
       reader.open(path);
     },
     openSession: showSession,
-    toggleLimits: () => limitsPopover?.toggle(),
+    toggleLimits: (at) => limitsPopover?.toggle(at),
     // The bar's theme segments: applied at once, as the settings section's
     // answer is, and saved as ui.theme ("" the system's).
     setTheme: (choice) => {

@@ -83,3 +83,17 @@ test("limits: the window's popover opens, follows the snapshot and closes on Esc
   fireEvent(dom.document, "keydown", { key: "Escape" });
   assert.equal(node.hidden, true);
 });
+
+// The bar's limits capsule says where it is: the menu opens under it, its left
+// edge on the capsule's, 6 pt below its bottom (T-226). In 1.8.0 it opened at
+// the bar's right end, far from the capsule.
+test("limits: the window's popover opens under the capsule that asked for it", async () => {
+  const { createLimitsPopover } = await import("../js/limitsmenu.js");
+  const popover = createLimitsPopover(dom.document, () => ({ limits: claude }), () => now);
+  popover.toggle({ left: 221.5, top: 42 });
+  const node = [...dom.document.body.querySelectorAll(".limits-popover")].at(-1);
+  assert.equal(node.hidden, false);
+  assert.equal(node.style.left, "221.5px");
+  assert.equal(node.style.top, "48px");
+  assert.equal(node.style.right, "auto");
+});

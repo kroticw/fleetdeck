@@ -160,8 +160,17 @@ func TestTheFleetsMenuListsEveryFleetThenAllAndAdd(t *testing.T) {
 	}
 }
 
+// The limits press says where its capsule is, its left edge and its bottom in
+// the window, so the page's menu opens under it: in 1.8.0 it opened at the
+// bar's right end.
 func TestAPressInTheBarBecomesTheControllersAction(t *testing.T) {
-	want := []string{"fleet:work", "fleets", "newFleet", "limits", "update", "theme:dark"}
+	limits := ""
+	for _, c := range capsulesResult.measured.Capsules {
+		if c.Name == "limits" {
+			limits = fmt.Sprintf("limits:%g,%g", c.X, c.Y+c.H)
+		}
+	}
+	want := []string{"fleet:work", "fleets", "newFleet", limits, "update", "theme:dark"}
 	if !reflect.DeepEqual(capsulesResult.presses, want) {
 		t.Fatalf("presses = %v, want %v", capsulesResult.presses, want)
 	}
