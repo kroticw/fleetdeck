@@ -8,4 +8,7 @@
 // view calls a bound function there, which is where it is called from.
 char *fleetdeck_choose_folder(const char *message, const char *prompt);
 
+// fleetdeck_reveal_file opens a Finder window with the file at path selected.
+void fleetdeck_reveal_file(const char *path);
+
 #endif

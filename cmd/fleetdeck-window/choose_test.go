@@ -22,3 +22,13 @@ func TestTheSetupPageLooksForTheChooserUnderTheNameTheWindowGivesIt(t *testing.T
 		t.Fatalf("web/js/setup.js never mentions globalThis.%s: the page will not find the window's folder chooser", chooseFolderBindingName)
 	}
 }
+
+func TestTheDocsLookForRevealUnderTheNameTheWindowGivesIt(t *testing.T) {
+	src, err := fs.ReadFile(web.FS, "js/reveal.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "globalThis."+revealBindingName) {
+		t.Fatalf("web/js/reveal.js never mentions globalThis.%s: the docs will not find the window's Finder button", revealBindingName)
+	}
+}

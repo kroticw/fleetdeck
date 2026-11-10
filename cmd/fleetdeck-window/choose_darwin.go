@@ -32,3 +32,15 @@ func chooseFolder(message, prompt string) string {
 	defer C.free(unsafe.Pointer(chosen))
 	return C.GoString(chosen)
 }
+
+// revealBindingName is the function the window gives the documents
+// (web/js/reveal.js): it shows a document in Finder. In a browser nothing
+// binds it and the page shows no button.
+const revealBindingName = "fleetdeckReveal"
+
+// revealFile is what the page's call runs: Finder, with the file selected.
+func revealFile(path string) {
+	c := C.CString(path)
+	defer C.free(unsafe.Pointer(c))
+	C.fleetdeck_reveal_file(c)
+}
