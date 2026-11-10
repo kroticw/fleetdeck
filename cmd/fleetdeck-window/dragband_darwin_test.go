@@ -142,3 +142,23 @@ func TestTheWindowIsDraggedByTheBandAnOpenSheetLeaves(t *testing.T) {
 		t.Error("a press on the open sheet's own first row lands on a native view, not the board")
 	}
 }
+
+// The redesign's review: the window moved by a few gaps only, the panels'
+// pages taking every press on their tops. The capsule row's strip now drags
+// the window across its whole width, over the panels too, folded or not --
+// except on a control the panel's page reported there.
+func TestTheWholeTopStripDragsTheWindowButAPanelsControls(t *testing.T) {
+	r := bandResult
+	if !r.topBandOverThePanel {
+		t.Error("a press on the orchestrator panel's top, off its controls, does not land on the top band")
+	}
+	if !r.topBandFromWindow {
+		t.Error("routed from the window, a press on the panel's top does not land on the top band")
+	}
+	if !r.holeReachesThePanel {
+		t.Error("a press on a control the panel's page reported lands on the top band, not the page")
+	}
+	if !r.belowTheStripReachesThePanel {
+		t.Error("a press under the strip does not reach the panel's page")
+	}
+}

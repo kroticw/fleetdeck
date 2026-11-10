@@ -726,3 +726,32 @@ func TestThePagesOpaqueSettingRebuildsTheFrameAsReducedTransparencyDoes(t *testi
 		t.Fatalf("lifting the wish: effects = %#v", got)
 	}
 }
+
+func TestTheTopBandGoesInFullScreenAndComesBack(t *testing.T) {
+	c := loadedFrame()
+	has := func(effects []effect, want effect) bool {
+		for _, e := range effects {
+			if reflect.DeepEqual(e, want) {
+				return true
+			}
+		}
+		return false
+	}
+	if got := c.resized(1512, 982, true); !has(got, setTopDrag{Height: 0}) {
+		t.Fatalf("into full screen: %#v", got)
+	}
+	if got := c.resized(1512, 982, false); !has(got, setTopDrag{Height: topDragHeight}) {
+		t.Fatalf("out of full screen: %#v", got)
+	}
+}
+
+func TestAPanelsControlsInTheTopBandAreItsSides(t *testing.T) {
+	c := loadedFrame()
+	holes := []rect{{X: 1, Y: 2, W: 3, H: 4}}
+	if got := c.dragHoles("sessions@0", holes); !reflect.DeepEqual(got, []effect{setDragHoles{Side: "sessions", Holes: holes}}) {
+		t.Fatalf("effects = %#v", got)
+	}
+	if got := c.dragHoles("board", holes); got != nil {
+		t.Fatalf("the board has no holes in the top band: %#v", got)
+	}
+}

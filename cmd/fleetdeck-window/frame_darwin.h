@@ -36,6 +36,16 @@ void *fd_frame_board(void *frame);
 // capsules and the width strips. 0 takes it away.
 void fd_frame_set_drag_band(void *frame, double height);
 
+// fd_frame_set_top_drag makes the top band -- the capsule row's strip across
+// the whole window, over the panels -- height points tall; 0 hides it.
+void fd_frame_set_top_drag(void *frame, double height);
+
+// fd_frame_set_drag_holes is where a side's page has controls in the top band
+// (0 the orchestrator, 1 the sessions panel): count rectangles of x, y, w, h in
+// the panel's own coordinates, which the band lets presses through to.
+void fd_frame_set_drag_holes(void *frame, int side, const double *rects, int count);
+void *fd_test_top_band(void *frame);
+
 // fd_frame_board_observed says whether fd_frame_install set the navigation
 // delegate on the board (fleetdeck_observe_navigation): 0 when the window's
 // content view was not a WKWebView.

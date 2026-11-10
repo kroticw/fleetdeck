@@ -236,6 +236,51 @@ static Class bandClass(void) {
   return klass;
 }
 
+// --- the top band ---------------------------------------------------------------
+//
+// The board's band covers only what the board shows; the panels' pages took
+// every press on their tops, so the window moved by a few gaps only (the
+// redesign's review). The top band is the capsule row's strip across the whole
+// window, over the panels and under the capsules, and it lets through the
+// presses the panels' pages say are on their controls: each page reports the
+// rectangles of its buttons in that strip (web/js/dragholes.js), in its own
+// coordinates, so a panel moved or resized needs no new word.
+
+enum { maxHoles = 64 };
+static CGRect holes[2][maxHoles];
+static int holeCount[2];
+static id holeViews[2];
+
+static id topHitTest(id self, SEL _cmd, CGPoint p) {
+  (void)_cmd;
+  if (sendBool0(self, sel("isHidden"))) return (id)0;
+  if (!CGRectContainsPoint(sendRect0(self, sel("frame")), p)) return (id)0;
+  // Over the panels only: between them the board's own band decides, which
+  // gives way to a sheet or a dialog the page opens (topband.js).
+  for (int side = 0; side < 2; side++) {
+    if (!holeViews[side]) continue;
+    CGRect panel = sendRect0(holeViews[side], sel("frame"));
+    if (!CGRectContainsPoint(panel, p)) continue;
+    CGPoint in = CGPointMake(p.x - panel.origin.x, p.y - panel.origin.y);
+    for (int i = 0; i < holeCount[side]; i++) {
+      if (CGRectContainsPoint(holes[side][i], in)) return (id)0;
+    }
+    return self;
+  }
+  return (id)0;
+}
+
+static Class topBandClass(void) {
+  static Class klass;
+  if (klass) return klass;
+  klass = objc_allocateClassPair((Class)objc_getClass("NSView"), "FleetdeckTopDrag", 0);
+  class_addMethod(klass, sel("mouseDown:"), (IMP)bandDown, "v@:@");
+  class_addMethod(klass, sel("acceptsFirstMouse:"), (IMP)stripFirstMouse, "c@:@");
+  class_addMethod(klass, sel("hitTest:"), (IMP)topHitTest, "@@:{CGPoint=dd}");
+  objc_registerClassPair(klass);
+  return klass;
+}
+
 // --- the frame ---------------------------------------------------------------
 
 struct fd_frame {
@@ -243,6 +288,9 @@ struct fd_frame {
   id root;
   id board;
   id band;
+  // topBand: the capsule row's strip across the whole window, over the
+  // panels, under the capsules (fd_frame_set_top_drag).
+  id topBand;
   id wrappers[2];
   id contents[2];
   CGRect rects[2];
@@ -318,6 +366,11 @@ void *fd_frame_install(void *window) {
   }
   f->capsules = initWithFrame(NULL, frameViewClass(), CGRectZero);
   sendVoid1(f->root, sel("addSubview:"), f->capsules);
+  f->topBand = initWithFrame(NULL, topBandClass(), CGRectMake(0, 0, whole.size.width, 0));
+  sendVoidLong(f->topBand, sel("setAutoresizingMask:"), 2 | 32);
+  sendVoidBool(f->topBand, sel("setHidden:"), 1);
+  holeViews[0] = f->contents[0];
+  holeViews[1] = f->contents[1];
   // Above everything else in the frame, over the panels' edges.
   const char *sides[2] = {"orchestrator", "sessions"};
   for (int side = 0; side < 2; side++) {
@@ -376,6 +429,10 @@ void fd_frame_set_mode(void *frame, const char *mode) {
     sendVoidRect(content, sel("setFrame:"), f->rects[side]);
     ((void (*)(id, SEL, id, long, id))objc_msgSend)(f->root, sel("addSubview:positioned:relativeTo:"), content, 1, w);
   }
+  // Over the panels just placed, under the capsules.
+  sendVoid0(f->topBand, sel("removeFromSuperview"));
+  ((void (*)(id, SEL, id, long, id))objc_msgSend)(f->root, sel("addSubview:positioned:relativeTo:"), f->topBand, -1,
+                                                  f->capsules);
 }
 
 void fd_frame_layout(void *frame, fd_rect orchestrator, fd_rect sessions, fd_rect capsules, int orchestratorResizable,
@@ -412,6 +469,24 @@ void fd_frame_set_drag_band(void *frame, double height) {
   sendVoidRect(f->band, sel("setFrame:"), CGRectMake(0, 0, width, height > 0 ? height : 0));
   sendVoidBool(f->band, sel("setHidden:"), !(height > 0));
 }
+
+void fd_frame_set_top_drag(void *frame, double height) {
+  struct fd_frame *f = frame;
+  double width = sendRect0(f->root, sel("bounds")).size.width;
+  sendVoidRect(f->topBand, sel("setFrame:"), CGRectMake(0, 0, width, height > 0 ? height : 0));
+  sendVoidBool(f->topBand, sel("setHidden:"), !(height > 0));
+}
+
+void fd_frame_set_drag_holes(void *frame, int side, const double *rects, int count) {
+  (void)frame;
+  if (side < 0 || side > 1) return;
+  holeCount[side] = count < maxHoles ? count : maxHoles;
+  for (int i = 0; i < holeCount[side]; i++) {
+    holes[side][i] = CGRectMake(rects[4 * i], rects[4 * i + 1], rects[4 * i + 2], rects[4 * i + 3]);
+  }
+}
+
+void *fd_test_top_band(void *frame) { return ((struct fd_frame *)frame)->topBand; }
 
 void *fd_frame_board(void *frame) { return ((struct fd_frame *)frame)->board; }
 

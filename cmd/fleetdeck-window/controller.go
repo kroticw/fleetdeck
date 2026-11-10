@@ -43,6 +43,13 @@ type (
 	setFrameMode   struct{ Mode glassMode }
 	reloadBoard    struct{}
 	setDragBand    struct{ Height float64 }
+	// setTopDrag is the top band over the panels; setDragHoles a side page's
+	// controls in it.
+	setTopDrag   struct{ Height float64 }
+	setDragHoles struct {
+		Side  string
+		Holes []rect
+	}
 	// showToolbar is the window's empty toolbar shown or hidden: it places the
 	// buttons out of full screen, and in full screen would only make the strip
 	// a pointer at the top of the screen brings out twice as tall.
@@ -548,7 +555,7 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	if !changed {
 		return out
 	}
-	out = append(out, c.dragBand(), showToolbar{Visible: !fullscreen})
+	out = append(out, c.dragBand(), c.topDrag(), showToolbar{Visible: !fullscreen})
 	if c.framed {
 		out = append(out, c.to("orchestrator", map[string]any{"type": "fullscreen", "on": fullscreen})...)
 	}
@@ -563,6 +570,28 @@ func (c *controller) topBand(height float64) []effect {
 	defer c.mu.Unlock()
 	c.band = math.Max(0, math.Min(height, boardInsetTop))
 	return []effect{c.dragBand()}
+}
+
+// topDragHeight is the top band's height: the capsule row's strip, with the
+// row's own margin below it as above.
+const topDragHeight = 2*capsuleTop + capsuleHeight
+
+// topDrag is the top band as the window shows it: none in full screen, where
+// there is no window to move.
+func (c *controller) topDrag() effect {
+	if c.fullscreen {
+		return setTopDrag{Height: 0}
+	}
+	return setTopDrag{Height: topDragHeight}
+}
+
+// dragHoles is where a side surface's page has controls in the top band.
+func (c *controller) dragHoles(surface string, holes []rect) []effect {
+	kind, _, ok := parseSurfaceName(surface)
+	if !ok {
+		return nil
+	}
+	return []effect{setDragHoles{Side: kind, Holes: holes}}
 }
 
 // dragBand is the band as the window shows it: none in full screen, where a

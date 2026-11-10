@@ -23,6 +23,8 @@ type natives interface {
 	setFrameMode(m glassMode)
 	reloadBoard()
 	setDragBand(height float64)
+	setTopDrag(height float64)
+	setDragHoles(side string, holes []rect)
 	showToolbar(visible bool)
 	// boardInsets tells the board its insets for the frame as it is now:
 	// the controller's boardInsetsNow, carried out.
@@ -65,6 +67,10 @@ func runEffects(n natives, effects []effect) {
 			n.reloadBoard()
 		case setDragBand:
 			n.setDragBand(e.Height)
+		case setTopDrag:
+			n.setTopDrag(e.Height)
+		case setDragHoles:
+			n.setDragHoles(e.Side, e.Holes)
 		case showToolbar:
 			n.showToolbar(e.Visible)
 		case sendBoardInsets:

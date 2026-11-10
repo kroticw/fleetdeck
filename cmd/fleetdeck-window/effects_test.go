@@ -33,6 +33,12 @@ func (f *fakeNatives) setDragBand(h float64) {
 	f.calls = append(f.calls, fmt.Sprintf("drag band %v", h))
 }
 func (f *fakeNatives) boardInsets() { f.calls = append(f.calls, "board insets") }
+func (f *fakeNatives) setTopDrag(h float64) {
+	f.calls = append(f.calls, fmt.Sprintf("top drag %v", h))
+}
+func (f *fakeNatives) setDragHoles(side string, holes []rect) {
+	f.calls = append(f.calls, fmt.Sprintf("holes %s %d", side, len(holes)))
+}
 func (f *fakeNatives) showToolbar(visible bool) {
 	f.calls = append(f.calls, fmt.Sprintf("toolbar %v", visible))
 }

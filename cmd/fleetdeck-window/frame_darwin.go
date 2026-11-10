@@ -77,6 +77,23 @@ func (f *frame) panelContent(side string) unsafe.Pointer {
 // points tall across the window; 0 is none.
 func (f *frame) setDragBand(height float64) { C.fd_frame_set_drag_band(f.p, C.double(height)) }
 
+// setTopDrag is the top band over the panels, height points tall; 0 is none.
+func (f *frame) setTopDrag(height float64) { C.fd_frame_set_top_drag(f.p, C.double(height)) }
+
+// setDragHoles is where side's page has controls in the top band, in the
+// panel's own coordinates.
+func (f *frame) setDragHoles(side string, holes []rect) {
+	flat := make([]C.double, 4*len(holes)+4)
+	for i, h := range holes {
+		flat[4*i], flat[4*i+1], flat[4*i+2], flat[4*i+3] = C.double(h.X), C.double(h.Y), C.double(h.W), C.double(h.H)
+	}
+	index := 0
+	if side == "sessions" {
+		index = 1
+	}
+	C.fd_frame_set_drag_holes(f.p, C.int(index), &flat[0], C.int(len(holes)))
+}
+
 // titlebarInset is where the title bar's zoom button ends, in points from the
 // window's left edge; 0 when there is none (titlebar.go).
 func (f *frame) titlebarInset() float64 { return float64(C.fd_frame_titlebar_inset(f.p)) }
@@ -257,6 +274,9 @@ type bandProbe struct {
 	bandWidth float64
 	// On a 64 pt band.
 	bandTakesTheTop, boardBelowTheBand, surfaceOverTheBand, capsuleOverTheBand bool
+	// The top band over the panels: it takes a panel's top, lets a press on a
+	// control the page reported through to the page, and ends at the strip.
+	topBandOverThePanel, holeReachesThePanel, belowTheStripReachesThePanel, topBandFromWindow bool
 	// The same clicks and one on the orchestrator's header row, routed as the
 	// window routes them: from above the title bar and its toolbar.
 	bandFromWindow, capsuleFromWindow, headerFromWindow bool
@@ -291,15 +311,24 @@ func probeBandForTest(g geometry) bandProbe {
 	boardX := g.Orchestrator.X + g.Orchestrator.W + 200
 
 	f.setDragBand(boardInsetTop)
+	f.setTopDrag(topDragHeight)
+	// A control 140 to 180 pt into the orchestrator panel's header row.
+	f.setDragHoles("orchestrator", []rect{{X: 140, Y: 8, W: 40, H: 28}})
+	top := C.fd_test_top_band(f.p)
+	out.topBandOverThePanel = within(g.Orchestrator.X+20, g.Orchestrator.Y+20, top)
+	out.holeReachesThePanel = within(g.Orchestrator.X+160, g.Orchestrator.Y+20, surface)
+	out.belowTheStripReachesThePanel = within(g.Orchestrator.X+20, topDragHeight+10, surface)
 	out.bandWidth = float64(C.fd_test_frame_of(band).w)
 	out.bandTakesTheTop = within(boardX, 30, band)
 	out.boardBelowTheBand = within(boardX, boardInsetTop+6, f.board())
-	out.surfaceOverTheBand = within(g.Orchestrator.X+20, g.Orchestrator.Y+20, f.panelContent("orchestrator"))
+	out.surfaceOverTheBand = within(g.Orchestrator.X+20, topDragHeight+10, f.panelContent("orchestrator"))
 	out.capsuleOverTheBand = within(g.Capsules.X+20, g.Capsules.Y+capsuleHeight/2, capsule)
 	fromWindow := func(x, y float64, view unsafe.Pointer) bool {
 		return C.fd_test_window_hit_within(window, C.double(x), C.double(y), view) != 0
 	}
 	out.bandFromWindow = fromWindow(boardX, 30, band)
+	// Past the window's buttons, off the control reported at 140 to 180.
+	out.topBandFromWindow = fromWindow(g.Orchestrator.X+100, g.Orchestrator.Y+20, top)
 	out.capsuleFromWindow = fromWindow(g.Capsules.X+20, g.Capsules.Y+capsuleHeight/2, capsule)
 	// Past the zoom button, on the header row's line.
 	out.headerFromWindow = fromWindow(g.Orchestrator.X+160, panelMargin+18, surface)
