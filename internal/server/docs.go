@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kroticw/fleetdeck/internal/board"
 )
@@ -41,6 +42,9 @@ type Doc struct {
 	// document's own frontmatter; empty, and left out, when it names none. The
 	// panel opens that session next to the document.
 	Session string `json:"session,omitempty"`
+	// Created is when the file was made (its birth time on macOS, its last
+	// change elsewhere), for sorting the docs tab by date; empty when unknown.
+	Created string `json:"created,omitempty"`
 }
 
 // handleDocsList walks every configured root and returns the markdown under them.
@@ -69,7 +73,11 @@ func (d Deps) handleDocsList(w http.ResponseWriter, r *http.Request) {
 	// not as null, which is not something the panel can map over.
 	out := make([]Doc, 0)
 	unreadable := walkDocs(d.DocsRoots, func(realRoot, resolved, rel string) {
-		out = append(out, Doc{Path: resolved, Title: rel, Root: realRoot, Session: board.DocSession(resolved)})
+		doc := Doc{Path: resolved, Title: rel, Root: realRoot, Session: board.DocSession(resolved)}
+		if info, err := os.Stat(resolved); err == nil {
+			doc.Created = createdAt(info).UTC().Format(time.RFC3339)
+		}
+		out = append(out, doc)
 	})
 
 	if len(unreadable) == len(d.DocsRoots) {

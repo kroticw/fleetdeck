@@ -430,3 +430,32 @@ func TestDocsRevisionOfNoRootsIsEmpty(t *testing.T) {
 		t.Fatalf("no roots, no revision: got %q", got)
 	}
 }
+
+// The docs tab sorts by when a document was written, so the list says it: the
+// file's birth time where the system keeps one, its last change elsewhere.
+func TestDocsListSaysWhenEachDocumentWasCreated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.md")
+	writeFile(t, path, "# a")
+	old := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	rec := getDocs(docsDeps(t, dir), "/api/docs")
+	var docs []struct {
+		Created string `json:"created"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &docs); err != nil || len(docs) != 1 {
+		t.Fatalf("decode %s: %v", rec.Body.String(), err)
+	}
+	created, err := time.Parse(time.RFC3339, docs[0].Created)
+	if err != nil {
+		t.Fatalf("created %q is not a time: %v", docs[0].Created, err)
+	}
+	// A birth time is when the test wrote the file, the fallback is the
+	// modification time set above; either way it is neither empty nor future.
+	if created.After(time.Now().Add(time.Minute)) || created.Before(old.Add(-time.Second)) {
+		t.Fatalf("created %v is outside [%v, now]", created, old)
+	}
+}
