@@ -29,50 +29,121 @@
  * run surfaced: a board of finished work read as a wall of errors.
  */
 
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/vendor/fonts/InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+}
+
 :root {
   color-scheme: light dark;
 
-  /* Surfaces, back to front. */
-  --bg: #f5f6f8;
+  /* The accent preset (config ui.accent, data-accent on <html>): a light and a
+     dark value, the theme picks one. Indigo when nothing is chosen. */
+  --accent-light: #4f56d9;
+  --accent-dark: #8b93ff;
+
+  --bg: #ececf1;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-hover: #edeff2;
-  --border: #dde1e7;
-  --border-strong: #c2c8d1;
-  --shadow: rgb(20 22 26 / 16%);
+  --surface-hover: #f1f1f4;
+  --border: #e4e4e9;
+  --border-strong: #d0d0d7;
+  --shadow: rgb(20 22 28 / 14%);
+  --text: #15161a;
+  --text-muted: #4a4d55;
+  --text-faint: #60636b;
+  --accent: var(--accent-light);
+  --accent-strong: color-mix(in oklab, var(--accent-light) 84%, black);
+  --danger: #c81e1e;
+  --attn: #b45309;
+  --ok: #15803d;
+  --col: rgb(20 22 28 / 3.5%);
+  --card: #ffffff;
+  --card-edge: rgb(20 22 28 / 9%);
+  --field: rgb(255 255 255 / 80%);
+  --track: rgb(20 22 28 / 10%);
+  --neutral-soft: rgb(20 22 28 / 6%);
+  --code-bg: rgb(20 22 28 / 4.5%);
+  --soft: 10%;
+  --hl: rgb(250 204 21 / 38%);
+  --hl-current: #f59e0b;
+  --hl-current-text: #1a1203;
+  --term-bg: #fbfbfc;
+  --term-fg: #1b1c20;
+  --wall: radial-gradient(55% 55% at 10% 15%, color-mix(in srgb, var(--accent) 32%, transparent), transparent 70%), radial-gradient(45% 45% at 90% 8%, rgb(251 146 160 / 30%), transparent 70%), radial-gradient(55% 50% at 72% 100%, rgb(110 231 183 / 30%), transparent 70%), #e7e8ee;
+  --on-glass-muted: #4a4d55;
+  --glass-control: rgb(255 255 255 / 66%);
+  --glass-control-hover: rgb(255 255 255 / 86%);
+  --glass-control-edge: rgb(20 22 28 / 10%);
+  --glass-control-highlight: rgb(255 255 255 / 92%);
+  --surface-on-glass: rgb(255 255 255 / 74%);
+  --island-shadow: 0 0 0 0.5px rgb(20 22 28 / 8%), 0 10px 30px rgb(20 22 28 / 8%);
+  --sheet-shadow: 0 0 0 0.5px rgb(20 22 28 / 10%), 0 24px 64px rgb(20 22 28 / 22%);
+  --sheet-scrim: rgb(20 22 28 / 16%);
+  --dialog-scrim: rgb(20 22 28 / 28%);
 
-  /* Text, most to least prominent. */
-  --text: #1a1d22;
-  --text-muted: #5b6470;
-  --text-faint: #8791a0;
-
-  /* The app's own accent — used for focus, links, the active tab, and the
-     "planned" zone. Teal rather than the blue every dashboard reaches for,
-     and kept out of the danger/attn family so it never reads as an alert. */
-  --accent: #1f7a72;
-  --accent-strong: #15645d;
-
-  /* Severity, exactly three steps. */
-  --danger: #c92a2a;
-  --attn: #a15c00;
-  --ok: #2f9e44;
-
-  /* Kanban zone accents. Urgent and unplanned deliberately reuse --danger
-     and --attn — a zone is a planning-priority signal, not a session-state
-     one, but "red/amber means look here" is one visual language the whole
-     page should speak, not two that happen to agree by coincidence.
-     Planned uses the app's own accent (on the roadmap, not on fire); nice-
-     to-have and the fallback for an unrecognised zone are both --text-muted:
-     low priority and unknown priority read the same until proven otherwise. */
+  /* Kanban zone accents. Urgent and unplanned reuse --danger and --attn: "red
+     or amber means look here" is one language for the whole page. Planned is
+     the accent (on the roadmap, not on fire); nice-to-have and an unknown zone
+     are faint. A zone is a small dot on a card, never a stripe. */
   --zone-urgent: var(--danger);
   --zone-unplanned: var(--attn);
-  --zone-planned: var(--accent-strong);
+  --zone-planned: var(--accent);
   --zone-nice: var(--text-faint);
   --zone-none: var(--border-strong);
 
+  /* Signal tints: the ground of a badge, a waiting row, a note. Each is its
+     signal at --soft strength, so a theme or an accent change carries them. */
+  --accent-soft: color-mix(in srgb, var(--accent) var(--soft), transparent);
+  --attn-soft: color-mix(in srgb, var(--attn) var(--soft), transparent);
+  --attn-edge: color-mix(in srgb, var(--attn) 32%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) var(--soft), transparent);
+  --danger-edge: color-mix(in srgb, var(--danger) 30%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) var(--soft), transparent);
+
+  /* Type: Inter for the interface, JetBrains Mono for numbers, ids, code and
+     terminals (web/vendor/fonts). */
+  --font-ui: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
   /* Radii and shadow, one scale each. */
-  --radius-sm: 4px;
-  --radius: 8px;
+  --radius-sm: 6px;
+  --radius: 10px;
 
   /* Spacing rhythm. Everything else in this file is one of these three or a
      literal multiple of --gap; nothing invents its own px value. */
@@ -80,44 +151,55 @@
   --gap: 8px;
   --gap-lg: 16px;
 
-  /* Type scale, in rem off the 14px root below — fixed steps so nesting two
-     "smaller" rules can no longer compound into something smaller than any
-     step actually calls for, which is what the em-based sizes this replaced
-     were doing throughout the file. */
-  --fs-2xs: 0.75rem;
-  --fs-xs: 0.85rem;
-  --fs-sm: 0.95rem;
-  --fs-md: 1.15rem;
+  /* Type scale, in rem off the root below: fixed steps so nesting two
+     "smaller" rules never compounds into something smaller than any step. */
+  --fs-2xs: 0.6875rem;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 1.0625rem;
 
   /* Button scale (the .btn block): three heights, a side padding and a type
      size each. Small is the least a pointer can hit reliably; large stands
      beside a form's fields and matches them. Which step a button takes is its
      container's to say, through the three --btn-* values below. */
-  --btn-h-sm: 24px;
-  --btn-h: 30px;
+  --btn-h-sm: 26px;
+  --btn-h: 32px;
   --btn-h-lg: 36px;
   --btn-height: var(--btn-h);
-  --btn-pad: calc(var(--gap) * 1.5);
-  --btn-font: var(--fs-xs);
-
-  /* The fleetdeck window's E layout (the block at the end of this file): what
-     sits on glass, the opaque islands content is drawn in, and the sheet a card,
-     a session or a document opens as over the board. */
-  --on-glass-muted: #434a54;
-  --glass-control: rgb(255 255 255 / 52%);
-  --glass-control-hover: rgb(255 255 255 / 74%);
-  --glass-control-edge: rgb(20 22 26 / 11%);
-  --glass-control-highlight: rgb(255 255 255 / 70%);
-  --surface-on-glass: rgb(255 255 255 / 80%);
-  --island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%);
-  --sheet-shadow: 0 2px 6px rgb(20 22 26 / 10%), 0 18px 48px rgb(20 22 26 / 24%);
-  --sheet-scrim: rgb(20 22 26 / 22%);
-  /* A dialog holds the work until it is answered, and its scrim says so: the
-     darker of the two in every theme, with no blur beside it (the .dialog
-     block says why it must not have one). */
-  --dialog-scrim: rgb(20 22 26 / 52%);
-  --radius-lg: 12px;
+  --btn-pad: calc(var(--gap) * 1.75);
+  --btn-font: var(--fs-sm);
+  --radius-lg: 14px;
   --radius-xl: 18px;
+}
+
+:root[data-accent="indigo"] {
+  --accent-light: #4f56d9;
+  --accent-dark: #8b93ff;
+}
+
+:root[data-accent="blue"] {
+  --accent-light: #1f6feb;
+  --accent-dark: #5aa2ff;
+}
+
+:root[data-accent="teal"] {
+  --accent-light: #0f766e;
+  --accent-dark: #2dd4bf;
+}
+
+:root[data-accent="violet"] {
+  --accent-light: #7c3aed;
+  --accent-dark: #b794ff;
+}
+
+:root[data-accent="rose"] {
+  --accent-light: #d6336c;
+  --accent-dark: #ff7a9a;
+}
+
+:root[data-accent="graphite"] {
+  --accent-light: #18191c;
+  --accent-dark: #ecedef;
 }
 
 /* A control panel read for hours at a stretch does not need a 16px browser
@@ -139,79 +221,104 @@ html {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --bg: #14161a;
-    --surface: #1b1e24;
-    --surface-raised: #21252c;
-    --surface-hover: #292e36;
-    --border: #2c313a;
-    --border-strong: #3c4149;
+    --bg: #0b0c10;
+    --surface: #111216;
+    --surface-raised: #18191e;
+    --surface-hover: #1f2126;
+    --border: #222429;
+    --border-strong: #30333a;
     --shadow: rgb(0 0 0 / 45%);
-
-    --text: #e7e9ec;
-    --text-muted: #9aa1ac;
-    --text-faint: #6b7280;
-
-    --accent: #34a99a;
-    --accent-strong: #4fc4b5;
-
-    --danger: #e5484d;
-    --attn: #d88a15;
-    --ok: #3fb950;
-
-    --on-glass-muted: #c1c7cf;
-    --glass-control: rgb(255 255 255 / 9%);
-    --glass-control-hover: rgb(255 255 255 / 16%);
-    --glass-control-edge: rgb(255 255 255 / 15%);
-    --glass-control-highlight: rgb(255 255 255 / 10%);
-    --surface-on-glass: rgb(27 30 36 / 80%);
-    --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
-    --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
-    --sheet-scrim: rgb(0 0 0 / 48%);
-    --dialog-scrim: rgb(0 0 0 / 68%);
+    --text: #f0f1f3;
+    --text-muted: #aaaeb6;
+    --text-faint: #8d929b;
+    --accent: var(--accent-dark);
+    --accent-strong: color-mix(in oklab, var(--accent-dark) 82%, white);
+    --danger: #f87171;
+    --attn: #f5b03c;
+    --ok: #4ade80;
+    --col: rgb(255 255 255 / 3.5%);
+    --card: #1a1b20;
+    --card-edge: rgb(255 255 255 / 8%);
+    --field: rgb(255 255 255 / 5%);
+    --track: rgb(255 255 255 / 10%);
+    --neutral-soft: rgb(255 255 255 / 7%);
+    --code-bg: rgb(0 0 0 / 32%);
+    --soft: 15%;
+    --hl: rgb(245 176 60 / 28%);
+    --hl-current: #f5b03c;
+    --hl-current-text: #1a1203;
+    --term-bg: #0c0d11;
+    --term-fg: #e6e7ea;
+    --wall: radial-gradient(55% 55% at 10% 15%, color-mix(in srgb, var(--accent) 42%, transparent), transparent 70%), radial-gradient(45% 45% at 90% 8%, rgb(168 85 247 / 28%), transparent 70%), radial-gradient(55% 50% at 72% 100%, rgb(56 189 248 / 22%), transparent 70%), #0a0b10;
+    --on-glass-muted: #aaaeb6;
+    --glass-control: rgb(255 255 255 / 8%);
+    --glass-control-hover: rgb(255 255 255 / 14%);
+    --glass-control-edge: rgb(255 255 255 / 10%);
+    --glass-control-highlight: rgb(255 255 255 / 8%);
+    --surface-on-glass: rgb(30 32 40 / 72%);
+    --island-shadow: inset 0 1px 0 rgb(255 255 255 / 4%), 0 10px 36px rgb(0 0 0 / 30%);
+    --sheet-shadow: 0 0 0 1px rgb(255 255 255 / 6%), 0 24px 64px rgb(0 0 0 / 55%);
+    --sheet-scrim: rgb(5 6 8 / 42%);
+    --dialog-scrim: rgb(5 6 8 / 58%);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #14161a;
-  --surface: #1b1e24;
-  --surface-raised: #21252c;
-  --surface-hover: #292e36;
-  --border: #2c313a;
-  --border-strong: #3c4149;
+  --bg: #0b0c10;
+  --surface: #111216;
+  --surface-raised: #18191e;
+  --surface-hover: #1f2126;
+  --border: #222429;
+  --border-strong: #30333a;
   --shadow: rgb(0 0 0 / 45%);
-
-  --text: #e7e9ec;
-  --text-muted: #9aa1ac;
-  --text-faint: #6b7280;
-
-  --accent: #34a99a;
-  --accent-strong: #4fc4b5;
-
-  --danger: #e5484d;
-  --attn: #d88a15;
-  --ok: #3fb950;
-
-  --on-glass-muted: #c1c7cf;
-  --glass-control: rgb(255 255 255 / 9%);
-  --glass-control-hover: rgb(255 255 255 / 16%);
-  --glass-control-edge: rgb(255 255 255 / 15%);
-  --glass-control-highlight: rgb(255 255 255 / 10%);
-  --surface-on-glass: rgb(27 30 36 / 80%);
-  --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
-  --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
-  --sheet-scrim: rgb(0 0 0 / 48%);
-  --dialog-scrim: rgb(0 0 0 / 68%);
+  --text: #f0f1f3;
+  --text-muted: #aaaeb6;
+  --text-faint: #8d929b;
+  --accent: var(--accent-dark);
+  --accent-strong: color-mix(in oklab, var(--accent-dark) 82%, white);
+  --danger: #f87171;
+  --attn: #f5b03c;
+  --ok: #4ade80;
+  --col: rgb(255 255 255 / 3.5%);
+  --card: #1a1b20;
+  --card-edge: rgb(255 255 255 / 8%);
+  --field: rgb(255 255 255 / 5%);
+  --track: rgb(255 255 255 / 10%);
+  --neutral-soft: rgb(255 255 255 / 7%);
+  --code-bg: rgb(0 0 0 / 32%);
+  --soft: 15%;
+  --hl: rgb(245 176 60 / 28%);
+  --hl-current: #f5b03c;
+  --hl-current-text: #1a1203;
+  --term-bg: #0c0d11;
+  --term-fg: #e6e7ea;
+  --wall: radial-gradient(55% 55% at 10% 15%, color-mix(in srgb, var(--accent) 42%, transparent), transparent 70%), radial-gradient(45% 45% at 90% 8%, rgb(168 85 247 / 28%), transparent 70%), radial-gradient(55% 50% at 72% 100%, rgb(56 189 248 / 22%), transparent 70%), #0a0b10;
+  --on-glass-muted: #aaaeb6;
+  --glass-control: rgb(255 255 255 / 8%);
+  --glass-control-hover: rgb(255 255 255 / 14%);
+  --glass-control-edge: rgb(255 255 255 / 10%);
+  --glass-control-highlight: rgb(255 255 255 / 8%);
+  --surface-on-glass: rgb(30 32 40 / 72%);
+  --island-shadow: inset 0 1px 0 rgb(255 255 255 / 4%), 0 10px 36px rgb(0 0 0 / 30%);
+  --sheet-shadow: 0 0 0 1px rgb(255 255 255 / 6%), 0 24px 64px rgb(0 0 0 / 55%);
+  --sheet-scrim: rgb(5 6 8 / 42%);
+  --dialog-scrim: rgb(5 6 8 / 58%);
 }
 
 :root[data-theme="light"] {
-  /* The system may still be dark here — this only re-affirms color-scheme
-     so native form controls (the usage <meter>s, <select>s) render with
-     light chrome even when the OS itself is set to dark. Every custom
-     property above already equals the bare :root value in that case, so
-     nothing else needs restating. */
+  /* The system may still be dark here: this re-affirms color-scheme so native
+     form controls render with light chrome. Every custom property above already
+     equals the bare :root value in that case. */
   color-scheme: light;
+}
+
+/* The terminals' ground (config ui.terminal_background, data-terminal-bg):
+   always dark, whatever the theme. */
+:root[data-terminal-bg="dark"] {
+  --term-bg: #0c0d11;
+  --term-fg: #e6e7ea;
 }
 
 * {
@@ -226,7 +333,7 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
 }
@@ -370,7 +477,7 @@ body {
    quiet. The full picture is in the brand's title. */
 #header .build-rev {
   font-weight: 400;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85em;
   color: var(--text-faint);
 }
@@ -1427,7 +1534,7 @@ main {
    board both are --text-muted, and the parity holds there the other way. */
 .card-num {
   flex: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   color: var(--text);
   background: var(--surface-hover);
   border-radius: var(--radius-sm);
@@ -1444,7 +1551,7 @@ main {
 }
 
 .card-session {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 /* A dead session is not, on its own, an incident — see the file header — and
@@ -1523,7 +1630,7 @@ main {
   cursor: pointer;
   text-decoration: underline dotted;
   color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 /* A link to a card that does not exist. It carries no data-link attribute, so it
@@ -1854,7 +1961,7 @@ main {
 
 .card-dock-id {
   flex: none;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 /* The session's name, beside its id. Any length, so it clips rather than
@@ -2104,7 +2211,7 @@ main {
 
 .review-uncommitted-path {
   display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .review-commit-hint {
@@ -2153,7 +2260,7 @@ main {
   padding: var(--gap-sm) var(--gap);
   border-bottom: 1px solid var(--border);
   background: var(--surface-hover);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
@@ -2170,7 +2277,7 @@ main {
 .review-line {
   display: flex;
   align-items: stretch;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
   line-height: 1.6;
 }
@@ -2251,7 +2358,7 @@ button.review-line-add:hover {
   flex-wrap: wrap;
   align-items: stretch;
   background: var(--surface-hover);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
   line-height: 1.6;
 }
@@ -2306,7 +2413,7 @@ button.review-line-add:hover {
 }
 
 .review-comment-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .review-comment-state {
@@ -2322,7 +2429,7 @@ button.review-line-add:hover {
   padding: var(--gap-sm);
   border-radius: var(--radius-sm);
   background: var(--surface-hover);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .review-comment-body {
@@ -2342,7 +2449,7 @@ button.review-line-add:hover {
 }
 
 .review-reply-commit {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   margin-left: var(--gap-sm);
 }
 
@@ -2375,7 +2482,7 @@ button.review-line-add:hover {
 .review-detached-where {
   display: block;
   margin-top: var(--gap-sm);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-sm);
 }
 
@@ -2714,7 +2821,7 @@ button.review-line-add:hover {
    1/l trading places is exactly the failure that costs a second attempt. */
 .knum {
   flex: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   color: var(--text-muted);
   background: var(--surface-hover);
@@ -5925,7 +6032,7 @@ body.is-resizing {
 
 textarea.set-input {
   resize: vertical;
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .set-segmented {
@@ -6058,7 +6165,7 @@ textarea.set-input {
 }
 
 .set-preview {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   color: var(--set-control-text);
   background: var(--set-code-bg);
   padding: 6px 8px;
