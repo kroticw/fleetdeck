@@ -212,11 +212,12 @@ test("with nothing open the board reports the whole band and nothing in its way"
 });
 
 test("with a session open the board reports the band the sheet leaves, and the sheet as what ends it", () => {
-  const report = topBandReport(fakeTopBandWindow({ sheetTop: 60 }));
-  assert.equal(report.height, 60);
+  // The sheet's top: the board's 52 pt inset less 4 (web/app.css).
+  const report = topBandReport(fakeTopBandWindow({ sheetTop: 48 }));
+  assert.equal(report.height, 48);
   assert.deepEqual(report.sheetOpen, ["session-panel"]);
   assert.equal(report.rows.length, 1);
-  assert.deepEqual(report.rows[0], { y: 60, x: 396, tag: "DIV", id: "session-panel", class: "session-panel" });
+  assert.deepEqual(report.rows[0], { y: 48, x: 396, tag: "DIV", id: "session-panel", class: "session-panel" });
 });
 
 // The defect itself: an unmarked scrim over the whole column takes the band from

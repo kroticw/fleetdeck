@@ -5703,9 +5703,9 @@ body.is-resizing {
 :root[data-surface="board"] .col-center::before {
   content: "";
   position: absolute;
-  top: calc(var(--host-inset-top, 64px) - 10px);
-  left: calc(var(--host-inset-left, 394px) - 12px);
-  right: calc(var(--host-inset-content-right, 356px) + 10px);
+  top: calc(var(--host-inset-top, 52px) - 10px);
+  left: calc(var(--host-inset-left, 396px) - 12px);
+  right: calc(var(--host-inset-content-right, 358px) + 10px);
   bottom: 10px;
   border-radius: var(--radius-xl);
   background: var(--surface);
@@ -5995,8 +5995,8 @@ body.is-resizing {
 
 :root[data-surface="board"] #tabs {
   position: absolute;
-  top: calc(var(--host-inset-top, 64px) - 8px);
-  left: var(--host-inset-left, 394px);
+  top: calc(var(--host-inset-top, 52px) - 8px);
+  left: var(--host-inset-left, 396px);
   z-index: 3;
   padding: 0;
   border: none;
@@ -6007,9 +6007,9 @@ body.is-resizing {
    capsules sit where it would be: it drops in under them, between the panels. */
 :root[data-surface="board"] #build-banner {
   position: absolute;
-  top: calc(var(--host-inset-top, 64px) - 8px);
-  left: var(--host-inset-left, 394px);
-  right: calc(var(--host-inset-content-right, 356px) + 16px);
+  top: calc(var(--host-inset-top, 52px) - 8px);
+  left: var(--host-inset-left, 396px);
+  right: calc(var(--host-inset-content-right, 358px) + 16px);
   z-index: 4;
   border: none;
   border-radius: var(--radius-lg);
@@ -6021,7 +6021,7 @@ body.is-resizing {
    be neither read nor closed (T-178). It takes the open room the columns have,
    below the toolbar, and the board's own top inset is then the note's. */
 :root[data-surface="board"] .commit-note {
-  margin: var(--host-inset-top, 64px) calc(var(--host-inset-content-right, 356px) + var(--gap-lg)) 0 var(--host-inset-left, 394px);
+  margin: var(--host-inset-top, 52px) calc(var(--host-inset-content-right, 358px) + var(--gap-lg)) 0 var(--host-inset-left, 396px);
 }
 
 :root[data-surface="board"] .commit-note:not([hidden]) + #board {
@@ -6035,11 +6035,11 @@ body.is-resizing {
 /* The board's web view runs under both panels and the capsules, so the room the
    form is centred in is what they leave: the same four edges, and 60% of it. */
 :root[data-surface="board"] .newcard {
-  --newcard-room-w: calc(100vw - var(--host-inset-left, 394px) - var(--host-inset-content-right, 356px));
-  --newcard-room-h: calc(100vh - var(--host-inset-top, 64px));
-  top: var(--host-inset-top, 64px);
-  left: var(--host-inset-left, 394px);
-  right: var(--host-inset-content-right, 356px);
+  --newcard-room-w: calc(100vw - var(--host-inset-left, 396px) - var(--host-inset-content-right, 358px));
+  --newcard-room-h: calc(100vh - var(--host-inset-top, 52px));
+  top: var(--host-inset-top, 52px);
+  left: var(--host-inset-left, 396px);
+  right: var(--host-inset-content-right, 358px);
   bottom: 0;
   width: min(max(20rem, calc(var(--newcard-room-w) * 0.6)), calc(var(--newcard-room-w) - 2 * var(--gap-lg)));
   height: min(max(18rem, calc(var(--newcard-room-h) * 0.6)), calc(var(--newcard-room-h) - 2 * var(--gap-lg)));
@@ -6061,9 +6061,9 @@ body.is-resizing {
    edge, so the columns no longer run on under the sessions glass. */
 :root[data-surface="board"] #board {
   position: relative;
-  margin-left: calc(var(--host-inset-left, 394px) - var(--gap-lg));
-  margin-right: var(--host-inset-content-right, 356px);
-  padding-top: var(--host-inset-top, 64px);
+  margin-left: calc(var(--host-inset-left, 396px) - var(--gap-lg));
+  margin-right: var(--host-inset-content-right, 358px);
+  padding-top: var(--host-inset-top, 52px);
   padding-left: var(--gap-lg);
   padding-right: var(--gap-lg);
   padding-bottom: 12px;
@@ -6154,9 +6154,9 @@ body.is-resizing {
 :root[data-surface="board"] #review-panel {
   position: absolute;
   inset: auto;
-  top: calc(var(--host-inset-top, 64px) - 4px);
-  left: var(--host-inset-left, 394px);
-  right: calc(var(--host-inset-content-right, 356px) + 16px);
+  top: calc(var(--host-inset-top, 52px) - 4px);
+  left: var(--host-inset-left, 396px);
+  right: calc(var(--host-inset-content-right, 358px) + 16px);
   bottom: 16px;
   z-index: 2;
   height: auto;
@@ -6172,7 +6172,7 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] .docs {
-  padding: calc(var(--host-inset-top, 64px) - 4px) calc(var(--host-inset-content-right, 356px) + 16px) 16px var(--host-inset-left, 394px);
+  padding: calc(var(--host-inset-top, 52px) - 4px) calc(var(--host-inset-content-right, 358px) + 16px) 16px var(--host-inset-left, 396px);
 }
 
 :root[data-surface="board"] .docs-island {
@@ -6926,7 +6926,7 @@ body.is-resizing {
 }
 
 :root[data-surface="board"] .settings-layout {
-  padding: calc(var(--host-inset-top, 64px) + 8px) calc(var(--host-inset-content-right, 356px) + 32px) 32px var(--host-inset-left, 394px);
+  padding: calc(var(--host-inset-top, 52px) + 8px) calc(var(--host-inset-content-right, 358px) + 32px) 32px var(--host-inset-left, 396px);
 }
 
 .set-nav {
