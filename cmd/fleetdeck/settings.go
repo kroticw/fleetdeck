@@ -67,6 +67,9 @@ var settings = map[string]setting{
 	"statusline.rate_limits_path":     {kindString, true},
 	"ui.theme":                        {kindString, false},
 	"ui.terminal_font_size":           {kindInt, false},
+	"ui.accent":                       {kindString, false},
+	"ui.glass":                        {kindString, false},
+	"ui.terminal_background":          {kindString, false},
 }
 
 // settingValues is c as the settings page reads it, one value per key.
@@ -98,6 +101,9 @@ func settingValues(c config.Config) map[string]any {
 		"statusline.rate_limits_path":     c.StatuslineRateLimitsPath,
 		"ui.theme":                        c.UI.Theme,
 		"ui.terminal_font_size":           c.UI.TerminalFontSize,
+		"ui.accent":                       c.UI.Accent,
+		"ui.glass":                        c.UI.Glass,
+		"ui.terminal_background":          c.UI.TerminalBackground,
 	}
 }
 

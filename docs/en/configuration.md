@@ -39,6 +39,9 @@ fleetdeck is configured with a single YAML file. This page lists every key it re
 | `executors.codex.effort` | string | unset (Codex default) | must be one line; the levels are the model's own |
 | `ui.theme` | string | unset (follows the system) | `light` or `dark`: `ui.theme "%s" is not one of light, dark (or empty, to follow the system)` |
 | `ui.terminal_font_size` | integer | unset (12) | `ui.terminal_font_size must be between 9 and 24, got %d` |
+| `ui.accent` | string | unset (indigo) | `indigo`, `blue`, `teal`, `violet`, `rose` or `graphite`: `ui.accent "%s" is not one of indigo, blue, teal, violet, rose, graphite` |
+| `ui.glass` | string | unset (the window's glass) | `reduced` or `opaque`: `ui.glass "%s" is not one of reduced, opaque (or empty, to show the window's glass)` |
+| `ui.terminal_background` | string | unset (follows the theme) | `dark`: `ui.terminal_background "%s" is not one of dark (or empty, to follow the theme)` |
 | `name` | string | the folder above `board.path`, `main` when that says nothing | empty, spaces around it or a control character: `the top-level fleet: name ...`; the name of another fleet: see [Several fleets](#several-fleets) |
 | `fleets` | list of fleets | unset (empty) | see [Several fleets](#several-fleets) |
 | `fleets[].name` | string | none: required | empty, spaces around it or a control character: `fleets[N]: name ...`; the name of another fleet: `fleets[1]: name "clining" is already the name of fleets[0]` |

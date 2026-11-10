@@ -305,6 +305,12 @@ type Snapshot struct {
 	// for the page's default.
 	Theme            string `json:"theme,omitempty"`
 	TerminalFontSize int    `json:"terminalFontSize,omitempty"`
+	// Accent, Glass and TerminalBackground are the rest of the look: the
+	// accent preset (empty is indigo), the glass level (empty is the
+	// window's own) and the terminals' ground (empty follows the theme).
+	Accent             string `json:"accent,omitempty"`
+	Glass              string `json:"glass,omitempty"`
+	TerminalBackground string `json:"terminalBackground,omitempty"`
 }
 
 // Start is one session being started for a card: the card it is for and when

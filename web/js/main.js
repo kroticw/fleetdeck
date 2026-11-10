@@ -24,7 +24,7 @@ import { readHost, callHost } from "./host.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
-import { applyTheme, currentTheme, initTheme, setConfiguredTheme } from "./theme.js";
+import { applyTheme, currentTheme, initTheme, setConfiguredLook, setConfiguredTheme } from "./theme.js";
 import { renderSettings } from "./settings.js";
 import { setConfiguredFontSize, setFontSizeWriter } from "./terminalfont.js";
 import { saveSettings } from "./api.js";
@@ -36,9 +36,18 @@ import { createLimitsPopover } from "./limitsmenu.js";
 // column's overlays, hidden, until opening goes through the window.
 const host = readHost(window);
 const regions = regionsFor(host);
+// The glass shown is the window's (it knows the macOS and the accessibility
+// settings), unless the look asks for none: then the page is opaque wherever
+// it runs.
+let windowGlass = host?.glass;
+function showGlass() {
+  if (!host) return;
+  const level = document.documentElement.getAttribute("data-glass-level");
+  document.documentElement.dataset.glass = level === "opaque" ? "opaque" : windowGlass;
+}
 if (host) {
   document.documentElement.dataset.surface = host.surface;
-  document.documentElement.dataset.glass = host.glass;
+  showGlass();
 }
 const center = regions.has("center");
 const kept = {
@@ -251,6 +260,8 @@ if (headerParts.length > 0) {
 } else {
   initTheme();
 }
+// The remembered look is on the page now; the glass follows it.
+showGlass();
 // One web view checks the build: in the window, the board. Its reload is the
 // window's, which reloads all three, and its reload ceiling stays in one place.
 if (regions.has("build")) renderBuildBanner(document.getElementById("build-banner"), subscribe);
@@ -274,18 +285,23 @@ if (regions.has("orchestrator")) {
 // size come with every snapshot, and the settings section's answer applies
 // them at once, before the next snapshot. The board tells the window, whose
 // own appearance and other surfaces follow the theme.
-function followLook(theme, fontSize) {
+function followLook(theme, fontSize, look) {
   if (setConfiguredTheme(theme) && host?.surface === "board") {
     callHost(window, "fleetdeckTheme", currentTheme() ?? "auto");
     publishCapsules();
   }
+  if (setConfiguredLook(look)) {
+    showGlass();
+    if (host?.surface === "board") publishCapsules();
+  }
   setConfiguredFontSize(fontSize);
 }
 function followSettings(page) {
-  followLook(page.values["ui.theme"], page.values["ui.terminal_font_size"]);
+  const v = page.values;
+  followLook(v["ui.theme"], v["ui.terminal_font_size"], { accent: v["ui.accent"], glass: v["ui.glass"], terminalBackground: v["ui.terminal_background"] });
 }
 subscribe((snap) => {
-  if (snap) followLook(snap.theme ?? "", snap.terminalFontSize ?? 0);
+  if (snap) followLook(snap.theme ?? "", snap.terminalFontSize ?? 0, { accent: snap.accent, glass: snap.glass, terminalBackground: snap.terminalBackground });
 });
 // A step at a terminal (A−/A+, Cmd+=) is the panel's size: written once the
 // steps stop, so a run of presses is one write.
@@ -451,7 +467,8 @@ if (host) {
       reportBoardScroll?.();
     },
     setGlass: (glass) => {
-      page.dataset.glass = glass;
+      windowGlass = glass;
+      showGlass();
     },
     setFolded: (folded) => {
       panelFolded = folded;

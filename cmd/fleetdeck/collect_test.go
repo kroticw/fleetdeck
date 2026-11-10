@@ -144,6 +144,20 @@ func TestCollectSkipsUsageWhenDisabled(t *testing.T) {
 	}
 }
 
+// The look travels with every snapshot, so a page follows a change made in
+// another window without reloading.
+func TestCollectCarriesTheLook(t *testing.T) {
+	cfg := config.Default()
+	cfg.UsageEnabled = false
+	cfg.BoardPath = ""
+	cfg.UI = config.UI{Theme: "dark", TerminalFontSize: 14, Accent: "teal", Glass: "opaque", TerminalBackground: "dark"}
+
+	snap := NewCollector(cfg, deadDaemon(t), nil, t.TempDir()).Collect(context.Background())
+	if snap.Theme != "dark" || snap.TerminalFontSize != 14 || snap.Accent != "teal" || snap.Glass != "opaque" || snap.TerminalBackground != "dark" {
+		t.Fatalf("look = %q %d %q %q %q", snap.Theme, snap.TerminalFontSize, snap.Accent, snap.Glass, snap.TerminalBackground)
+	}
+}
+
 func TestCollectStampsTheSnapshot(t *testing.T) {
 	cfg := config.Default()
 	cfg.UsageEnabled = false

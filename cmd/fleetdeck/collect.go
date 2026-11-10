@@ -624,6 +624,7 @@ func (c *Collector) Collect(ctx context.Context) state.Snapshot {
 	entries := mergeStopped(sessions, records)
 	snap.CodexEnabled, snap.DefaultExecutor = cfg.Codex.Enabled, string(cfg.DefaultExecutor)
 	snap.Theme, snap.TerminalFontSize = cfg.UI.Theme, cfg.UI.TerminalFontSize
+	snap.Accent, snap.Glass, snap.TerminalBackground = cfg.UI.Accent, cfg.UI.Glass, cfg.UI.TerminalBackground
 	if cfg.Codex.Enabled && c.codexState != "" {
 		home, _ := codexHome(cfg.Codex, userenv.Environ())
 		entries = append(entries, codexSessionRows(ctx, c.codexState, home, c.now())...)

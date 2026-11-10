@@ -41,9 +41,67 @@ function apply(theme) {
   else document.documentElement.removeAttribute("data-theme");
 }
 
-// The cycle a click walks: no override -> light -> dark -> no override.
+// The rest of the look (config ui.accent, ui.glass, ui.terminal_background):
+// attributes on <html> app.css reads. Unset is the default — indigo, the
+// window's own glass, the theme's terminal ground — and a value the page does
+// not know is the default too, so a typo never paints half a theme.
+const LOOK_KEY = "fleetdeck-look";
+export const ACCENTS = ["indigo", "blue", "teal", "violet", "rose", "graphite"];
+const LOOK = [
+  { field: "accent", attr: "data-accent", values: ACCENTS, fallback: ACCENTS[0] },
+  { field: "glass", attr: "data-glass-level", values: ["reduced", "opaque"], fallback: null },
+  { field: "terminalBackground", attr: "data-terminal-bg", values: ["dark"], fallback: null },
+];
+
+function lookOf(look) {
+  const out = {};
+  for (const l of LOOK) out[l.field] = l.values.includes(look?.[l.field]) ? look[l.field] : l.fallback;
+  return out;
+}
+
+function readLook() {
+  try {
+    return lookOf(JSON.parse(localStorage.getItem(LOOK_KEY) ?? "{}"));
+  } catch {
+    return lookOf({});
+  }
+}
+
+function applyLook(look) {
+  const root = document.documentElement;
+  for (const l of LOOK) {
+    if (look[l.field]) root.setAttribute(l.attr, look[l.field]);
+    else root.removeAttribute(l.attr);
+  }
+}
+
+/**
+ * setConfiguredLook shows the accent, glass level and terminal ground the
+ * configuration holds ({accent, glass, terminalBackground}, each unset for its
+ * default), keeps them for the next load, and reports whether that changed
+ * what was shown.
+ */
+export function setConfiguredLook(look) {
+  const next = lookOf(look);
+  const root = document.documentElement;
+  const changed = LOOK.some((l) => root.getAttribute(l.attr) !== next[l.field]);
+  try {
+    localStorage.setItem(LOOK_KEY, JSON.stringify(next));
+  } catch {
+    // Shown now; the next load opens on the default until a snapshot says.
+  }
+  applyLook(next);
+  return changed;
+}
+
+/** currentAccent is the accent preset shown now. */
+export function currentAccent() {
+  return document.documentElement.getAttribute("data-accent") ?? ACCENTS[0];
+}
+
 export function initTheme() {
   apply(readStored());
+  applyLook(readLook());
 }
 
 export function currentTheme() {

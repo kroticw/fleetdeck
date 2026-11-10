@@ -39,6 +39,9 @@ fleetdeck настраивается одним YAML-файлом. Эта стр
 | `executors.codex.effort` | строка | умолчание Codex | одна строка; уровни — те, что объявляет модель |
 | `ui.theme` | строка | не задано (как в системе) | `light` или `dark`: `ui.theme "%s" is not one of light, dark (or empty, to follow the system)` |
 | `ui.terminal_font_size` | целое | не задано (12) | `ui.terminal_font_size must be between 9 and 24, got %d` |
+| `ui.accent` | строка | не задано (индиго) | `indigo`, `blue`, `teal`, `violet`, `rose` или `graphite`: `ui.accent "%s" is not one of indigo, blue, teal, violet, rose, graphite` |
+| `ui.glass` | строка | не задано (стекло окна) | `reduced` или `opaque`: `ui.glass "%s" is not one of reduced, opaque (or empty, to show the window's glass)` |
+| `ui.terminal_background` | строка | не задано (как у темы) | `dark`: `ui.terminal_background "%s" is not one of dark (or empty, to follow the theme)` |
 | `name` | строка | папка над `board.path`, `main`, если она ничего не говорит | пустое имя, пробелы вокруг или управляющий символ: `the top-level fleet: name ...`; имя другого флота: см. [Несколько флотов](#несколько-флотов) |
 | `fleets` | список флотов | не задан (пусто) | см. [Несколько флотов](#несколько-флотов) |
 | `fleets[].name` | строка | нет: обязателен | пусто, пробелы по краям или управляющий символ: `fleets[N]: name ...`; имя другого флота: `fleets[1]: name "clining" is already the name of fleets[0]` |
