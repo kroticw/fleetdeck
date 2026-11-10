@@ -3946,6 +3946,110 @@ button.review-line-add:hover {
   color: var(--text);
 }
 
+/* The head as drawn: the mark, the name with its state, the model and folder
+ * under them, then the cost and the context at the right. */
+.session-panel .s-head {
+  gap: 10px;
+  margin: calc(-1 * var(--gap-lg)) calc(-1 * var(--gap-lg)) 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-panel .s-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.session-panel .s-who-box {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-panel .s-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.session-panel .s-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+
+.session-panel .s-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.session-panel .s-state[data-state="waiting"] {
+  background: var(--attn-soft);
+  color: var(--attn);
+}
+
+.session-panel .s-state[data-state="idle"] {
+  background: var(--neutral-soft);
+  color: var(--text-muted);
+}
+
+.session-panel .s-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.session-panel .s-cost,
+.session-panel .s-ctx {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.session-panel .s-cost:empty,
+.session-panel .s-ctx:empty {
+  display: none;
+}
+
+.session-panel .s-ctx::before {
+  content: "ctx ";
+}
+
+.session-panel .s-head .s-close {
+  margin-left: 0;
+}
+
 /* The cards this session has worked on, oldest first, above its terminal.
  *
  * One line, whatever it holds. A row above a terminal that changes height takes
@@ -3975,7 +4079,12 @@ button.review-line-add:hover {
 
 .session-panel .s-cards-label {
   flex: none;
-  color: var(--text-muted);
+  align-self: center;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .session-panel .s-cards-none,
@@ -3997,15 +4106,19 @@ button.review-line-add:hover {
   align-items: baseline;
   gap: 6px;
   max-width: 28em;
-  padding: 1px 8px;
-  font-size: var(--fs-xs);
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  background: var(--neutral-soft);
+  border: none;
+  border-radius: 999px;
 }
 
 .session-panel .s-card-id {
+  font-family: var(--font-mono);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }

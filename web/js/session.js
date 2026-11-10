@@ -30,6 +30,9 @@ import { t } from "./i18n.js";
 import { createLiveTerminal } from "./liveterminal.js";
 import { createRequests } from "./requests.js";
 import { FONT_KEYS } from "./terminalfont.js";
+import { sessionMark } from "./initials.js";
+import { metaLine } from "./orchestrator.js";
+import { isWaiting } from "./needs.js";
 
 // historyKey is what tells the panel the session's cards may have changed: the
 // cards of this session the snapshot holds, with what can change about them.
@@ -71,6 +74,7 @@ export function renderSession(
 ) {
   let live = null;
   let nameLine = null;
+  let headParts = null;
   let cardsRow = null;
   let errorLine = null;
   let noticeLine = null;
@@ -105,6 +109,25 @@ export function renderSession(
     if (!nameLine) return;
     const name = currentName();
     if (nameLine.textContent !== name) nameLine.textContent = name;
+    refreshHead();
+  };
+
+  // The rest of the head, written the same way: only what changed.
+  const write = (node, text) => {
+    if (node.textContent !== text) node.textContent = text;
+  };
+  const refreshHead = () => {
+    if (!headParts) return;
+    const session = (latest?.sessions ?? []).find((s) => s.short === short) ?? { short };
+    const state = isWaiting(session) ? "waiting" : session.state === "idle" ? "idle" : "working";
+    const words = { waiting: "dock_state_waiting", idle: "session_state_idle", working: "dock_state_working" };
+    write(headParts.avatar, sessionMark(session));
+    if (headParts.state.dataset.state !== state) headParts.state.dataset.state = state;
+    write(headParts.state, t(words[state]));
+    write(headParts.meta, metaLine(session));
+    write(headParts.cost, typeof session.costUSD === "number" ? `$${session.costUSD.toFixed(2)}` : "");
+    const ctx = session.context;
+    write(headParts.ctx, ctx?.window > 0 ? `${Math.round((ctx.tokens / ctx.window) * 100)}%` : "");
   };
 
   // The error line holds two states, not one. What the operator's own action
@@ -305,7 +328,20 @@ export function renderSession(
       onClose();
     });
 
-    head.append(nameLine, close);
+    headParts = {
+      avatar: el("span", "s-avatar"),
+      state: el("span", "s-state"),
+      meta: el("span", "s-meta"),
+      cost: el("span", "s-cost"),
+      ctx: el("span", "s-ctx"),
+    };
+    headParts.avatar.setAttribute("aria-hidden", "true");
+    const nameRow = el("div", "s-name-row");
+    nameRow.append(nameLine, headParts.state);
+    const who = el("div", "s-who-box");
+    who.append(nameRow, headParts.meta);
+    head.append(headParts.avatar, who, headParts.cost, headParts.ctx, close);
+    refreshHead();
 
     cardsRow = el("div", "s-cards");
     drawCardsRow(el("span", "s-cards-loading", t("session_cards_loading")));

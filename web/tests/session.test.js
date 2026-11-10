@@ -1068,3 +1068,24 @@ test("the session head has no font buttons: name first, close last", async () =>
   assert.equal(head.at(-1), "s-close");
   stop();
 });
+
+// The head as drawn in the design: the session's mark, its name with its state
+// as a badge, the model and folder under it, then what it cost and how full its
+// context is. All of it follows the snapshot.
+test("the session head carries the mark, the state, the model and folder, the cost and the context", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const session = { name: "fleetdeck server", model: "Opus 5.5", cwd: "/Users/someone/opensource/fleetdeck", costUSD: 3.214, context: { tokens: 28000, window: 200000 } };
+  const panel = await mount({ store: fakeStore(listed(session)) });
+  const head = panel.root.querySelector(".s-head");
+
+  assert.ok(head.querySelector(".s-avatar").textContent.length > 0, "the head has no mark");
+  assert.equal(head.querySelector(".s-meta").textContent, "Opus 5.5 · ~/opensource/fleetdeck");
+  assert.equal(head.querySelector(".s-cost").textContent, "$3.21");
+  assert.equal(head.querySelector(".s-ctx").textContent, "14%");
+  assert.equal(head.querySelector(".s-state").dataset.state, "working");
+
+  await panel.store.emit(listed({ ...session, state: "idle", costUSD: 4 }));
+  assert.equal(head.querySelector(".s-state").dataset.state, "idle");
+  assert.equal(head.querySelector(".s-cost").textContent, "$4.00");
+});
