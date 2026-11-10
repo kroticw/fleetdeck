@@ -51,7 +51,7 @@ function px(value) {
   const text = value.trim();
   const calc = /^calc\((.+)\)$/.exec(text);
   if (calc) {
-    const [, left, sign, right] = /^(.+?)\s([-+])\s(\S+)$/.exec(calc[1]);
+    const [, left, sign, right] = /^(.+?)\s([-+])\s(.+)$/.exec(calc[1]);
     return px(left) + (sign === "-" ? -1 : 1) * px(right);
   }
   const fallback = /^var\(--[\w-]+,\s*(.+)\)$/.exec(text);
@@ -92,7 +92,7 @@ const CENTRE = { tagName: "SECTION", id: "center", hasAttribute: (name) => name 
 
 // What the window sees at a point of the board page with the named sheet open,
 // or none. The boxes are placed by web/app.css's own numbers: the scrim over the
-// whole column, the sheet below the board's top inset less 4 pt.
+// whole column, the sheet below the island's head.
 function pageWithOpen(sheet) {
   const scrim = child("sheet-scrim");
   const scrimInset = px(declaration(ruleBody(`${BOARD} #sheet-scrim`), "inset"));
@@ -120,9 +120,9 @@ test("with a sheet open the window still has a band to be dragged by", () => {
   for (const sheet of SHEETS) {
     const band = freeTopHeight(pageWithOpen(sheet), WIDTH);
     assert.ok(band > 0, `with #${sheet} open the band is ${band} pt tall: the window cannot be moved`);
-    // The sheet's own top, 4 pt above the board's inset: the band reaches down
-    // to the sheet and no further.
-    assert.equal(band, TOP_BAND_MAX - 4, `with #${sheet} open`);
+    // The sheet opens under the island's head, below the bar (T-226): the
+    // dimmed board above it is ground, and the band is the whole bar.
+    assert.equal(band, TOP_BAND_MAX, `with #${sheet} open`);
   }
 });
 
@@ -133,7 +133,8 @@ test("the band never reaches the sheet itself", () => {
     const at = pageWithOpen(sheet);
     const band = freeTopHeight(at, WIDTH);
     const sheetLeft = px(declaration(ruleBody(`${BOARD} #card-panel`), "left"));
-    assert.equal(isGround(at(sheetLeft + 1, band)), false, `#${sheet} does not begin where the band ends`);
+    const sheetTop = px(declaration(ruleBody(`${BOARD} #card-panel`), "top"));
+    assert.ok(sheetTop >= band, `#${sheet} begins at ${sheetTop}, inside the band ${band} pt tall`);
     for (let y = 0; y < band; y += 4) {
       assert.notEqual(at(sheetLeft + 1, y).id, sheet, `#${sheet} is under the band at y = ${y}`);
     }

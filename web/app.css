@@ -5835,10 +5835,11 @@ body.is-resizing {
 }
 
 /* One head for the sessions island: the fold button and the island's name on
-   its top row, the counters under them, then the list. The two are the list's
-   first children and scroll with it in a browser tab; here they are fixed to
-   the web view's top, and the counters' row keeps the room for them. Folded,
-   the strip is the panel's whole content and stays where it is. */
+   its top row, then the list. The two are the list's first children and
+   scroll with it in a browser tab; here they are fixed to the web view's top,
+   and the list starts under them, its rows cut off at its own top rather than
+   drawn under the head as they scroll. Folded, the strip is the panel's whole
+   content and stays where it is. */
 :root[data-surface="sessions"] {
   --sessions-head: 36px;
 }
@@ -5867,24 +5868,10 @@ body.is-resizing {
   z-index: 2;
 }
 
-:root[data-surface="sessions"]:has(.col-sessions:not([data-folded="1"])) #header {
+:root[data-surface="sessions"] .col-sessions:not([data-folded="1"]) {
   margin-top: var(--sessions-head);
-  padding: 0 20px 4px 38px;
 }
 
-/* Folded, the island is a 48 px rail with no head. The counters are the page's
-   header, a sibling of the column, and folding hides only the column's own
-   children: on v0.11.0's dev build "0 waiting for you" and "0 stalled" wrapped
-   word by word and ran off the rail's edge. The rail's marks already say who
-   waits (red) and who stalled (dashed), and a panel that knows nothing shows an
-   em dash where their count would be. */
-:root[data-surface="sessions"]:has(.col-sessions[data-folded="1"]) #header {
-  display: none;
-}
-
-:root[data-surface="sessions"] #header .counters {
-  margin-left: 0;
-}
 
 /* The list stops short of the island's rounded bottom edge, and its last card
    keeps clear of it at the end of the scroll. Its scrollbar is thin and drawn
@@ -6168,7 +6155,7 @@ body.is-resizing {
 :root[data-surface="board"] #review-panel {
   position: absolute;
   inset: auto;
-  top: calc(var(--host-inset-top, 52px) - 4px);
+  top: calc(var(--host-inset-top, 52px) + var(--board-head, 52px));
   left: var(--host-inset-left, 396px);
   right: calc(var(--host-inset-content-right, 358px) + 16px);
   bottom: 16px;

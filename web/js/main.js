@@ -54,7 +54,9 @@ if (host) {
 }
 const center = regions.has("center");
 const kept = {
-  header: regions.has("header") || regions.has("brand") || regions.has("counters"),
+  // The orchestrator surface's update panel is the header's (header.js), drawn
+  // over its terminal: the header stays, hidden, for it (T-226).
+  header: regions.has("header") || regions.has("update"),
   orchestrator: regions.has("orchestrator"),
   sessions: regions.has("sessions"),
   tabs: center,

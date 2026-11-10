@@ -60,14 +60,13 @@ test("the orchestrator's terminal is the island's lower part, not a box inside i
   assert.match(ruleBody(':root[data-surface="orchestrator"] .o-term .xterm'), /padding:\s*0 10px 6px/);
 });
 
-test("the sessions island has one head: the fold button and the name on a row, the counters under them", () => {
+// The counters are the window's bar now (T-226): the list itself starts under
+// the head, its rows cut off at its own top instead of drawn under the head.
+test("the sessions island has one head: the fold button and the name on a row, the list under them", () => {
   const open = ':root[data-surface="sessions"] .col-sessions:not([data-folded="1"])';
   assert.match(ruleBody(`${open} > .col-size`), /position:\s*fixed/);
   assert.match(ruleBody(`${open} > .slist-head`), /position:\s*fixed/);
-  assert.match(
-    ruleBody(':root[data-surface="sessions"]:has(.col-sessions:not([data-folded="1"])) #header'),
-    /margin-top:\s*var\(--sessions-head\)/,
-  );
+  assert.match(ruleBody(open), /margin-top:\s*var\(--sessions-head\)/);
 });
 
 // A scrollbar-width or scrollbar-color other than auto makes WebKit ignore
