@@ -64,9 +64,13 @@ var sideSurfaces = []string{"orchestrator", "sessions"}
 type controller struct {
 	mu sync.Mutex
 
-	baseURL    string
-	widths     panelWidths
-	glass      glassMode
+	baseURL string
+	widths  panelWidths
+	glass   glassMode
+	// system is the glass the system allows; pageOpaque the operator's
+	// setting asking for none. glass is the two together.
+	system     glassMode
+	pageOpaque bool
 	width      float64
 	height     float64
 	fullscreen bool
@@ -107,7 +111,7 @@ func newController(panelURL string, widths panelWidths, glass glassMode) *contro
 		u.RawQuery, u.Fragment = "", ""
 		base = u.String()
 	}
-	return &controller{baseURL: base, widths: widths, glass: glass, loads: map[string]*pageWatch{}, now: time.Now}
+	return &controller{baseURL: base, widths: widths, glass: glass, system: glass, loads: map[string]*pageWatch{}, now: time.Now}
 }
 
 func (c *controller) pageURL(fleet string) string {
@@ -424,7 +428,20 @@ func (c *controller) theme(choice string) []effect {
 
 // capsules is the board's model for the capsule row, drawn as it is.
 func (c *controller) capsules(model json.RawMessage) []effect {
-	return []effect{setCapsules{Model: model}}
+	out := []effect{setCapsules{Model: model}}
+	var wish struct {
+		Opaque bool `json:"opaque"`
+	}
+	if json.Unmarshal(model, &wish) != nil {
+		return out
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if wish.Opaque == c.pageOpaque {
+		return out
+	}
+	c.pageOpaque = wish.Opaque
+	return append(out, c.applyGlass()...)
 }
 
 // capsuleRow is the capsule row drawn, with rowMin its narrowest form: the
@@ -557,9 +574,21 @@ func (c *controller) dragBand() effect {
 	return setDragBand{Height: c.band}
 }
 
+// glassChanged is the system's glass changing (Reduce Transparency).
 func (c *controller) glassChanged(mode glassMode) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.system = mode
+	return c.applyGlass()
+}
+
+// applyGlass frames the window in the system's glass, or opaque while the
+// page asks for it, and tells every surface. Called with c.mu held.
+func (c *controller) applyGlass() []effect {
+	mode := c.system
+	if c.pageOpaque {
+		mode = glassModeOpaque
+	}
 	c.glass = mode
 	out := append([]effect{setFrameMode{Mode: mode}}, c.glassMessage("board")...)
 	for _, side := range sideSurfaces {

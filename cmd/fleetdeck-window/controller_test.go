@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -695,5 +696,33 @@ func TestDraggingAPanelInANarrowWindowStopsWhereTheRowNeedsItsMinimum(t *testing
 	want := 1000 - 2*panelMargin - capsuleGapLeft - capsuleGapRight - 360 - 348
 	if len(saved) == 0 || saved[0] != (saveWidths{W: panelWidths{Orchestrator: want, Sessions: 348}}) {
 		t.Fatalf("on release: %#v, want the orchestrator saved at %v", saved, want)
+	}
+}
+
+// The glass setting "no transparency" makes the window opaque as Reduce
+// Transparency does, and lifting it gives the window back to the system.
+func TestThePagesOpaqueSettingRebuildsTheFrameAsReducedTransparencyDoes(t *testing.T) {
+	c := loadedFrame()
+	opaque := []effect{
+		setCapsules{Model: json.RawMessage(`{"version":1,"opaque":true}`)},
+		setFrameMode{Mode: glassModeOpaque},
+		sendTo{Surface: "board", Message: map[string]any{"type": "glass", "glass": "opaque"}},
+		sendTo{Surface: "orchestrator", Message: map[string]any{"type": "glass", "glass": "opaque"}},
+		sendTo{Surface: "sessions", Message: map[string]any{"type": "glass", "glass": "opaque"}},
+	}
+	if got := c.capsules(json.RawMessage(`{"version":1,"opaque":true}`)); !reflect.DeepEqual(got, opaque) {
+		t.Fatalf("asking for opaque: effects = %#v", got)
+	}
+	// The same wish again changes nothing.
+	if got := c.capsules(json.RawMessage(`{"version":1,"opaque":true,"accent":"#000000"}`)); len(got) != 1 {
+		t.Fatalf("an unchanged wish rebuilt the frame: %#v", got)
+	}
+	// While the page asks, the system turning transparency back on keeps it opaque.
+	if got := c.glassChanged(glassModeGlass); got[0] != (setFrameMode{Mode: glassModeOpaque}) {
+		t.Fatalf("the system overrode the page: %#v", got)
+	}
+	got := c.capsules(json.RawMessage(`{"version":1}`))
+	if len(got) < 2 || got[1] != (setFrameMode{Mode: glassModeGlass}) {
+		t.Fatalf("lifting the wish: effects = %#v", got)
 	}
 }

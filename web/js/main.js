@@ -369,7 +369,17 @@ function publishCapsules() {
   const style = getComputedStyle(document.documentElement);
   const token = (name) => style.getPropertyValue(name).trim();
   const colors = { cool: token("--ok"), warm: token("--attn"), hot: token("--danger"), stale: token("--text-muted"), off: token("--text-faint") };
-  const model = capsuleModel({ section, limits: limitsOf(get() ?? {}, Date.now()), t, colors });
+  // The accent the window tints its selected tab with, and the operator's
+  // "no transparency", which the window takes for its own frame too.
+  const accent = token("--accent");
+  const model = capsuleModel({
+    section,
+    limits: limitsOf(get() ?? {}, Date.now()),
+    t,
+    colors,
+    accent: /^#[0-9a-f]{6}$/i.test(accent) ? accent : undefined,
+    opaque: document.documentElement.dataset.glassLevel === "opaque",
+  });
   const json = JSON.stringify(model);
   if (json === capsulesSent) return;
   capsulesSent = json;

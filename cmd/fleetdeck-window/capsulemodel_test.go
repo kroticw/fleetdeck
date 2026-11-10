@@ -93,3 +93,15 @@ func TestNoLimitsAreNoCompactText(t *testing.T) {
 		t.Fatalf("compact = %+v, want nothing", c)
 	}
 }
+
+// The page's accent and its glass setting ride on the model: the window tints
+// the selected tab with the one and goes opaque on the other.
+func TestACapsuleModelCarriesTheAccentAndTheOpaqueWish(t *testing.T) {
+	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"accent":"#4f56d9","opaque":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Accent != "#4f56d9" || !m.Opaque {
+		t.Fatalf("model = %+v", m)
+	}
+}

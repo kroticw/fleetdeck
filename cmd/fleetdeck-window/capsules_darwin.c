@@ -406,7 +406,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
                         int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
                         const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount,
                         const char *compactText, const char *compactTooltip, const double *compactRGB,
-                        double frameMinWidth) {
+                        const double *accentRGB, double frameMinWidth) {
   void *pool = objc_autoreleasePoolPush();
   id parent = (id)container;
   fd_capsules_clear(container);
@@ -456,6 +456,10 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
     sendVoidLong(segmentedDrawn, sel("setBorderShape:"), 1);  // NSControlBorderShapeCapsule
     tabsPadding = (capsuleHeight - fittingSize(segmentedDrawn).height) / 2;
   }
+  // The selected tab in the page's accent, the colour the operator chose.
+  id accent = srgb(accentRGB);
+  if (accent && respondsTo(segmentedDrawn, "setSelectedSegmentBezelColor:"))
+    sendVoid1(segmentedDrawn, sel("setSelectedSegmentBezelColor:"), accent);
   tabsCapsule = capsule(mode, segmentedDrawn, 0, tabsPadding);
   adopt(into, tabsCapsule);
 

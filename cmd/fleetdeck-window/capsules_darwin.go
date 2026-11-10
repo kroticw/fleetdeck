@@ -59,9 +59,10 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) floa
 	}
 	compact := m.compactLimits()
 	compactRGB := rgbOf(compact.Color)
+	accentRGB := rgbOf(m.Accent)
 	return float64(C.fd_capsules_draw(container, cstr(string(mode)), &tabIDs[0], &tabLabels[0], C.int(len(m.Tabs)),
 		C.int(selected), cstr(m.NewCard.Label), cstr(m.Theme.Label), &limitLabels[0], &limitTexts[0], &values[0], &rgb[0],
-		C.int(n), cstr(compact.Text), cstr(compact.Tooltip), &compactRGB[0], C.double(frameMinWidth())))
+		C.int(n), cstr(compact.Text), cstr(compact.Tooltip), &compactRGB[0], &accentRGB[0], C.double(frameMinWidth())))
 }
 
 // clearCapsules empties the capsule row. Main thread.

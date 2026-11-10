@@ -18,7 +18,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
                         int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
                         const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount,
                         const char *compactText, const char *compactTooltip, const double *compactRGB,
-                        double frameMinWidth);
+                        const double *accentRGB, double frameMinWidth);
 
 // fd_capsules_clear takes every capsule out of container: no panel page, no row,
 // and no minimum width for the window.
