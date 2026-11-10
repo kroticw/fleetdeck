@@ -8,7 +8,7 @@ import (
 )
 
 func TestACapsuleModelOfAnotherVersionIsRefused(t *testing.T) {
-	if _, err := parseCapsuleModel(json.RawMessage(`{"version":2,"tabs":[]}`)); err == nil {
+	if _, err := parseCapsuleModel(json.RawMessage(`{"version":2}`)); err == nil {
 		t.Fatal("a model of another version must not be drawn")
 	}
 }
@@ -19,27 +19,56 @@ func TestACapsuleModelThatIsNotJSONIsRefused(t *testing.T) {
 	}
 }
 
+// The bar of the redesign (T-226), in the page's words and colours.
 func TestACapsuleModelKeepsThePagesWordsAndColours(t *testing.T) {
-	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[{"id":"board","label":"Доска","selected":true},{"id":"docs","label":"Доки","selected":false}],"newCard":{"label":"+ карточка"},"theme":{"label":"тема: авто"},"limits":[{"label":"5ч","text":"37%","level":"cool","color":"#2f9e44"}]}`))
+	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,
+		"brand":{"name":"fleetdeck","version":"1.8.0"},
+		"fleet":{"name":"obsidian","label":"Флот","fleets":[{"name":"obsidian","waiting":1,"current":true},{"name":"work"}],"all":"Все флоты","add":"Завести флот…"},
+		"limitsLabel":"Лимиты",
+		"limits":[{"label":"Codex","text":"63%","level":"warm","color":"#d9480f"}],
+		"update":{"text":"Доступна 1.9.0","action":"Обновить"},
+		"counters":[{"text":"1 ждёт ответа","color":"#c2410c"},{"text":"0 остановились","color":"#6b7280","hollow":true}],
+		"theme":{"label":"Тема","choice":"dark","light":"Светлая","system":"Как в системе","dark":"Тёмная"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Tabs[0].Label != "Доска" || !m.Tabs[0].Selected || m.Tabs[1].ID != "docs" {
-		t.Fatalf("tabs = %+v", m.Tabs)
+	if m.Brand != (capsuleBrand{Name: "fleetdeck", Version: "1.8.0"}) {
+		t.Fatalf("brand = %+v", m.Brand)
 	}
-	if m.NewCard.Label != "+ карточка" || m.Theme.Label != "тема: авто" {
-		t.Fatalf("buttons = %+v %+v", m.NewCard, m.Theme)
+	if m.Fleet.Name != "obsidian" || m.Fleet.All != "Все флоты" || m.Fleet.Add != "Завести флот…" || len(m.Fleet.Fleets) != 2 ||
+		m.Fleet.Fleets[0] != (capsuleFleetEntry{Name: "obsidian", Waiting: 1, Current: true}) {
+		t.Fatalf("fleet = %+v", m.Fleet)
 	}
-	if len(m.Limits) != 1 || m.Limits[0].Color != "#2f9e44" || m.Limits[0].Text != "37%" || m.Limits[0].Level != "cool" {
-		t.Fatalf("limits = %+v", m.Limits)
+	if m.LimitsLabel != "Лимиты" || len(m.Limits) != 1 || m.Limits[0].Color != "#d9480f" {
+		t.Fatalf("limits = %q %+v", m.LimitsLabel, m.Limits)
+	}
+	if m.Update == nil || m.Update.Text != "Доступна 1.9.0" || m.Update.Action != "Обновить" {
+		t.Fatalf("update = %+v", m.Update)
+	}
+	if len(m.Counters) != 2 || m.Counters[0].Hollow || !m.Counters[1].Hollow || m.Counters[1].Text != "0 остановились" {
+		t.Fatalf("counters = %+v", m.Counters)
+	}
+	if m.Theme.Choice != "dark" || m.Theme.System != "Как в системе" {
+		t.Fatalf("theme = %+v", m.Theme)
 	}
 }
 
-func TestALimitsPercentageIsReadForTheLevelIndicator(t *testing.T) {
-	cases := map[string]float64{"37%": 37, "100%": 100, "—": 0, "": 0}
-	for text, want := range cases {
-		if got := limitValue(text); got != want {
-			t.Fatalf("limitValue(%q) = %v, want %v", text, got, want)
+func TestNoUpdateIsNoUpdateCapsule(t *testing.T) {
+	m, err := parseCapsuleModel(json.RawMessage(`{"version":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Update != nil {
+		t.Fatalf("update = %+v, want none", m.Update)
+	}
+}
+
+// The page's ui.theme is "", light or dark; the window's three segments are
+// light, system and dark, and anything else is the system's.
+func TestTheThemeChoiceIsOneOfTheThreeSegments(t *testing.T) {
+	for choice, want := range map[string]int{"light": 0, "system": 1, "": 1, "sepia": 1, "dark": 2} {
+		if got := (capsuleTheme{Choice: choice}).segment(); got != want {
+			t.Errorf("segment of %q = %d, want %d", choice, got, want)
 		}
 	}
 }
@@ -54,22 +83,19 @@ func TestAColourIsReadFromThePagesHex(t *testing.T) {
 	}
 }
 
-// In a narrow window the limits are one capsule of text: every limit's label
-// and value in the model's order, coloured as the worst of them.
-func TestTheCompactLimitsAreEveryLimitInOneLineColouredAsTheWorst(t *testing.T) {
+// The limits capsule names the busiest limit, in its colour, and says every
+// limit to a pointer and to VoiceOver.
+func TestTheBusiestLimitIsTheWorstAndTheTooltipEveryLimit(t *testing.T) {
 	m := capsuleModel{Limits: []capsuleCap{
-		{Label: "5h", Text: "42%", Level: "cool", Color: "#2f9e44"},
-		{Label: "7d", Text: "91%", Level: "hot", Color: "#e03131"},
+		{Label: "Claude", Text: "42%", Level: "cool", Color: "#2f9e44"},
+		{Label: "Codex", Text: "91%", Level: "hot", Color: "#e03131"},
 	}}
-	c := m.compactLimits()
-	if c.Text != "5h 42% · 7d 91%" {
-		t.Fatalf("text = %q", c.Text)
+	b := m.busiestLimit()
+	if b.Name != "Codex" || b.Text != "91%" || b.Color != "#e03131" {
+		t.Fatalf("busiest = %+v", b)
 	}
-	if c.Tooltip != "5h: 42%\n7d: 91%" {
-		t.Fatalf("tooltip = %q", c.Tooltip)
-	}
-	if c.Color != "#e03131" {
-		t.Fatalf("colour = %q, want the hot limit's", c.Color)
+	if b.Tooltip != "Claude: 42%\nCodex: 91%" {
+		t.Fatalf("tooltip = %q", b.Tooltip)
 	}
 }
 
@@ -81,21 +107,33 @@ func TestTheWorstLimitIsHotThenWarmThenCoolThenStaleThenOff(t *testing.T) {
 			{{Level: better, Color: "#000002"}, {Level: worse, Color: "#000001"}},
 			{{Level: worse, Color: "#000001"}, {Level: better, Color: "#000002"}},
 		} {
-			if got := (capsuleModel{Limits: limits}).compactLimits().Color; got != "#000001" {
+			if got := (capsuleModel{Limits: limits}).busiestLimit().Color; got != "#000001" {
 				t.Errorf("%v: colour %q, want %s's", limits, got, worse)
 			}
 		}
 	}
 }
 
-func TestNoLimitsAreNoCompactText(t *testing.T) {
-	if c := (capsuleModel{}).compactLimits(); c != (compactLimits{}) {
-		t.Fatalf("compact = %+v, want nothing", c)
+// Two limits at the same level: the one used more is the busier.
+func TestOfTwoLimitsAtOneLevelTheHigherNumberIsTheBusier(t *testing.T) {
+	m := capsuleModel{Limits: []capsuleCap{
+		{Label: "Claude", Text: "51%", Level: "warm"},
+		{Label: "Codex", Text: "63%", Level: "warm"},
+		{Label: "Gemini", Text: "—", Level: "warm"},
+	}}
+	if b := m.busiestLimit(); b.Name != "Codex" {
+		t.Fatalf("busiest = %+v, want Codex", b)
+	}
+}
+
+func TestNoLimitsAreNoBusiestLimit(t *testing.T) {
+	if b := (capsuleModel{}).busiestLimit(); b != (busiestLimit{}) {
+		t.Fatalf("busiest = %+v, want nothing", b)
 	}
 }
 
 // The page's accent and its glass setting ride on the model: the window tints
-// the selected tab with the one and goes opaque on the other.
+// the fleet's dot and the update with the one and goes opaque on the other.
 func TestACapsuleModelCarriesTheAccentAndTheOpaqueWish(t *testing.T) {
 	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"accent":"#4f56d9","opaque":true}`))
 	if err != nil {

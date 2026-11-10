@@ -496,15 +496,45 @@ func TestReducedTransparencyRebuildsTheFrameAndTellsEverySurface(t *testing.T) {
 func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 	c := loadedFrame()
 	cases := map[string]map[string]any{
-		"tab:docs":     {"type": "show", "section": "docs"},
-		"newCard":      {"type": "newCard"},
-		"tab:settings": {"type": "show", "section": "settings"},
 		"limits":       {"type": "limits"},
+		"update":       {"type": "update"},
+		"theme:light":  {"type": "setTheme", "choice": "light"},
+		"theme:system": {"type": "setTheme", "choice": ""},
+		"theme:dark":   {"type": "setTheme", "choice": "dark"},
 	}
 	for action, msg := range cases {
 		if got := c.capsuleAction(action); !reflect.DeepEqual(got, []effect{sendTo{Surface: "board", Message: msg}}) {
 			t.Fatalf("%s: effects = %#v", action, got)
 		}
+	}
+	for _, action := range []string{"theme:sepia", "tab:docs", "newCard", "nonsense"} {
+		if got := c.capsuleAction(action); len(got) != 0 {
+			t.Errorf("%s: effects = %#v, want none", action, got)
+		}
+	}
+}
+
+// The fleet's menu in the bar changes all three web views, as the page's own
+// switch does in the window: another fleet, the start page with every fleet,
+// or the start page's form for a new one. The fleet shown already is nothing.
+func TestTheFleetsMenuSwitchesTheWholeWindow(t *testing.T) {
+	cases := map[string]string{
+		"fleet:home": "http://127.0.0.1:7777/?fleet=home",
+		"fleets":     "http://127.0.0.1:7777/",
+		"newFleet":   "http://127.0.0.1:7777/#new",
+	}
+	for action, url := range cases {
+		c := loadedFrame()
+		want := []effect{destroySurfaces{}, navigateBoard{URL: url}}
+		if got := c.capsuleAction(action); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: effects = %#v\nwant %#v", action, got, want)
+		}
+		if c.framed {
+			t.Errorf("%s: the frame is still up", action)
+		}
+	}
+	if got := loadedFrame().capsuleAction("fleet:work"); len(got) != 0 {
+		t.Fatalf("the fleet shown: %#v, want none", got)
 	}
 }
 

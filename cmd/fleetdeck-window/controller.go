@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -335,12 +336,7 @@ func (c *controller) open(kind, path, short string) []effect {
 func (c *controller) switchFleet(name string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []effect
-	if c.framed {
-		out = append(out, destroySurfaces{})
-	}
-	c.takeDown()
-	return append(out, navigateBoard{URL: c.pageURL(name)})
+	return c.leaveFor(c.pageURL(name))
 }
 
 // panel is a side surface folding or unfolding its panel.
@@ -492,18 +488,34 @@ func (c *controller) capsuleAction(action string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch action {
-	case "tab:board":
-		return c.to("board", map[string]any{"type": "show", "section": "board"})
-	case "tab:docs":
-		return c.to("board", map[string]any{"type": "show", "section": "docs"})
-	case "newCard":
-		return c.to("board", map[string]any{"type": "newCard"})
-	case "tab:settings":
-		return c.to("board", map[string]any{"type": "show", "section": "settings"})
-	case "limits":
-		return c.to("board", map[string]any{"type": "limits"})
+	case "limits", "update":
+		return c.to("board", map[string]any{"type": action})
+	case "theme:light", "theme:dark":
+		return c.to("board", map[string]any{"type": "setTheme", "choice": strings.TrimPrefix(action, "theme:")})
+	case "theme:system":
+		// The page's ui.theme has no word for the system's: it is no choice.
+		return c.to("board", map[string]any{"type": "setTheme", "choice": ""})
+	case "fleets":
+		return c.leaveFor(c.baseURL)
+	case "newFleet":
+		// The form lives on the start page; the fragment is what opens it there.
+		return c.leaveFor(c.baseURL + "#new")
+	}
+	if name, ok := strings.CutPrefix(action, "fleet:"); ok && name != "" && name != c.fleet {
+		return c.leaveFor(c.pageURL(name))
 	}
 	return nil
+}
+
+// leaveFor takes the frame down and puts url in the board: a switch changes
+// all three web views. The caller holds c.mu.
+func (c *controller) leaveFor(url string) []effect {
+	var out []effect
+	if c.framed {
+		out = append(out, destroySurfaces{})
+	}
+	c.takeDown()
+	return append(out, navigateBoard{URL: url})
 }
 
 // boardShowsOwnPage is the window putting a page of its own in the board --

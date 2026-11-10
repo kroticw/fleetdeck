@@ -11,13 +11,14 @@ import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 )
 
 // drawCapsules draws m into the frame's capsule row (capsules_darwin.c), in the
-// panels' material, and answers the row's minimum width: its narrowest form,
-// which the frame keeps room for (layoutWithRow). Main thread.
+// panels' material, and answers the row's minimum width: its narrowest form.
+// Main thread.
 func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) float64 {
 	var frees []unsafe.Pointer
 	cstr := func(s string) *C.char {
@@ -36,33 +37,78 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) floa
 		}
 		return [3]C.double{-1, 0, 0}
 	}
-
-	tabIDs := make([]*C.char, len(m.Tabs)+1)
-	tabLabels := make([]*C.char, len(m.Tabs)+1)
-	selected := 0
-	for i, tab := range m.Tabs {
-		tabIDs[i], tabLabels[i] = cstr(tab.ID), cstr(tab.Label)
-		if tab.Selected {
-			selected = i
+	flag := func(b bool) C.int {
+		if b {
+			return 1
 		}
+		return 0
 	}
-	n := len(m.Limits)
-	limitLabels := make([]*C.char, n+1)
-	limitTexts := make([]*C.char, n+1)
-	values := make([]C.double, n+1)
-	rgb := make([]C.double, 3*n+3)
+
+	// Each slice one longer than its items, so &x[0] is valid with none.
+	fleetNames := make([]*C.char, len(m.Fleet.Fleets)+1)
+	fleetWaiting := make([]C.int, len(m.Fleet.Fleets)+1)
+	fleetCurrent := make([]C.int, len(m.Fleet.Fleets)+1)
+	for i, f := range m.Fleet.Fleets {
+		fleetNames[i], fleetWaiting[i], fleetCurrent[i] = cstr(f.Name), C.int(f.Waiting), flag(f.Current)
+	}
+	limitRGB := make([]C.double, 3*len(m.Limits)+3)
 	for i, limit := range m.Limits {
-		limitLabels[i], limitTexts[i] = cstr(limit.Label), cstr(limit.Text)
-		values[i] = C.double(limitValue(limit.Text))
 		c := rgbOf(limit.Color)
-		copy(rgb[3*i:], c[:])
+		copy(limitRGB[3*i:], c[:])
 	}
-	compact := m.compactLimits()
-	compactRGB := rgbOf(compact.Color)
-	accentRGB := rgbOf(m.Accent)
-	return float64(C.fd_capsules_draw(container, cstr(string(mode)), &tabIDs[0], &tabLabels[0], C.int(len(m.Tabs)),
-		C.int(selected), cstr(m.NewCard.Label), cstr(m.Theme.Label), &limitLabels[0], &limitTexts[0], &values[0], &rgb[0],
-		C.int(n), cstr(compact.Text), cstr(compact.Tooltip), &compactRGB[0], &accentRGB[0], C.double(frameMinWidth())))
+	counterTexts := make([]*C.char, len(m.Counters)+1)
+	counterRGB := make([]C.double, 3*len(m.Counters)+3)
+	counterHollow := make([]C.int, len(m.Counters)+1)
+	for i, pill := range m.Counters {
+		counterTexts[i], counterHollow[i] = cstr(pill.Text), flag(pill.Hollow)
+		c := rgbOf(pill.Color)
+		copy(counterRGB[3*i:], c[:])
+	}
+	busy := m.busiestLimit()
+	busyRGB, accentRGB := rgbOf(busy.Color), rgbOf(m.Accent)
+	var update capsuleUpdate
+	if m.Update != nil {
+		update = *m.Update
+	}
+	bar := C.fd_bar{
+		mode:          cstr(string(mode)),
+		brandName:     cstr(m.Brand.Name),
+		brandVersion:  cstr(m.Brand.Version),
+		fleetName:     cstr(m.Fleet.Name),
+		fleetLabel:    cstr(m.Fleet.Label),
+		fleetAll:      cstr(m.Fleet.All),
+		fleetAdd:      cstr(m.Fleet.Add),
+		fleetNames:    &fleetNames[0],
+		fleetWaiting:  &fleetWaiting[0],
+		fleetCurrent:  &fleetCurrent[0],
+		fleetCount:    C.int(len(m.Fleet.Fleets)),
+		limitsLabel:   cstr(m.LimitsLabel),
+		busyName:      cstr(busy.Name),
+		busyText:      cstr(busy.Text),
+		limitsTooltip: cstr(busy.Tooltip),
+		busyRGB:       &busyRGB[0],
+		limitRGB:      &limitRGB[0],
+		limitCount:    C.int(len(m.Limits)),
+		updateText:    cstr(update.Text),
+		updateAction:  cstr(update.Action),
+		counterTexts:  &counterTexts[0],
+		counterRGB:    &counterRGB[0],
+		counterHollow: &counterHollow[0],
+		counterCount:  C.int(len(m.Counters)),
+		themeLabel:    cstr(m.Theme.Label),
+		themeLabels:   [3]*C.char{cstr(m.Theme.Light), cstr(m.Theme.System), cstr(m.Theme.Dark)},
+		themeSegment:  C.int(m.Theme.segment()),
+		accentRGB:     &accentRGB[0],
+		frameMinWidth: C.double(frameMinWidth()),
+	}
+	// bar is Go memory holding pointers into Go slices: cgo takes it only with
+	// those slices pinned.
+	var pins runtime.Pinner
+	defer pins.Unpin()
+	for _, p := range []any{&fleetNames[0], &fleetWaiting[0], &fleetCurrent[0], &limitRGB[0], &counterTexts[0], &counterRGB[0], &counterHollow[0], &busyRGB[0], &accentRGB[0]} {
+		pins.Pin(p)
+	}
+	return float64(C.fd_capsules_draw(container, &bar))
 }
 
 // clearCapsules empties the capsule row. Main thread.
@@ -93,32 +139,39 @@ func fleetdeckCapsulePressed(action *C.char) {
 
 // What capsules_darwin_test.go reads; Go test files cannot use cgo.
 
+type menuItemProbe struct {
+	title     string
+	checked   bool
+	separator bool
+	waiting   int
+}
+
 type capsulesProbe struct {
-	segmentLabels   [2]string
-	selectedSegment int
-	// The tabs' border shape (-1 before macOS 26), where the selected
-	// segment's fill starts in its top row as a share of its height, and the
-	// room around the tabs in their capsule: left, right, top, bottom.
-	segmentBorderShape int
-	selectedTopInset   float64
-	roundedTopInset    float64
-	tabsInsets         [4]float64
-	newCardTitle       string
-	themeTitle         string
-	dotTitle           string
-	dotGreen           float64
-	capsuleCount       int
-	countAfterRedraw   int
-	rowPassesThrough   bool
-	presses            []string
-	// clicksReach: a click at the middle of the tabs, the new card button and
-	// the theme button, drawn on glass, reaches that control.
-	clicksReach [3]bool
-	// limitDotOpens: a click on a limit's dot, not its chevron, opens the menu.
-	limitDotOpens bool
-	// insideGlass: each of those controls, drawn on glass, is its glass's
-	// content -- the one place a glass draws a view inside itself.
-	insideGlass [3]bool
+	texts         map[string]string
+	greens        map[string]float64
+	counterHollow []bool
+	brandIcon     bool
+	slots         []string
+	// Each slot's y and height in the row.
+	slotY, slotH []float64
+	// The theme's segments: their number, the selected one, their tooltips and
+	// whether each is an image; the control's border shape (-1 before macOS 26).
+	themeSegments, themeSelected int
+	themeTooltips                [3]string
+	themeImages                  [3]bool
+	borderShape                  int
+	selectedTopInset             float64
+	roundedTopInset              float64
+	// The fleet's menu as a press opened it, and where: its top left and the
+	// fleet capsule's left and bottom, in the window's content from its top left.
+	menu                     []menuItemProbe
+	menuX, menuY             float64
+	fleetX, fleetBottom      float64
+	capsuleCount             int
+	countAfterRedraw         int
+	rowPassesThrough         bool
+	presses                  []string
+	clicksReach, insideGlass map[string]bool
 	// measured: the frame as a stand measures it (standframe_darwin.go).
 	measured standFrameReport
 }
@@ -132,36 +185,92 @@ func probeCapsuleCountForTest(m capsuleModel) int {
 	return int(C.fd_test_capsule_count())
 }
 
+func testText(what string) string {
+	c := C.CString(what)
+	defer C.free(unsafe.Pointer(c))
+	return C.GoString(C.fd_test_text(c))
+}
+
+func testGreen(what string) float64 {
+	c := C.CString(what)
+	defer C.free(unsafe.Pointer(c))
+	return float64(C.fd_test_green(c))
+}
+
+func testPress(what string) {
+	c := C.CString(what)
+	defer C.free(unsafe.Pointer(c))
+	C.fd_test_press(c)
+}
+
+func testReach(what string) (reach, inside bool) {
+	c := C.CString(what)
+	defer C.free(unsafe.Pointer(c))
+	return C.fd_test_click_reaches(c) != 0, C.fd_test_inside_glass(c) != 0
+}
+
 func probeCapsulesForTest(m capsuleModel) capsulesProbe {
-	var out capsulesProbe
+	out := capsulesProbe{texts: map[string]string{}, greens: map[string]float64{}, clicksReach: map[string]bool{}, insideGlass: map[string]bool{}}
 	window := C.fd_test_window(1512, 982)
 	f := installFrame(window)
-	f.layout(layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}))
+	f.layout(layoutPastButtons(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}, 79))
 	f.setMode(glassModeGlass)
 	setCapsuleEvents(func(action string) { out.presses = append(out.presses, action) })
+	defer setCapsuleEvents(nil)
 
 	drawCapsules(f.capsules(), m, glassModeGlass)
-	out.segmentLabels = [2]string{C.GoString(C.fd_test_segment_label(0)), C.GoString(C.fd_test_segment_label(1))}
-	out.selectedSegment = int(C.fd_test_selected_segment())
-	out.segmentBorderShape = int(C.fd_test_segment_border_shape())
+	for _, what := range []string{"brandName", "brandVersion", "fleetName", "fleetLabel", "limitsLabel", "busyName", "busyText", "limitsTooltip", "updateText", "updateAction", "counter0", "counter1"} {
+		out.texts[what] = testText(what)
+	}
+	for _, what := range []string{"fleetDot", "busyText", "dot0", "dot1", "counter0", "counterTint0"} {
+		out.greens[what] = testGreen(what)
+	}
+	for i := 0; i < len(m.Counters); i++ {
+		out.counterHollow = append(out.counterHollow, C.fd_test_counter_hollow(C.int(i)) != 0)
+	}
+	out.brandIcon = C.fd_test_brand_has_icon() != 0
+	for i := 0; i < int(C.fd_test_capsule_slots()); i++ {
+		out.slots = append(out.slots, C.GoString(C.fd_test_capsule_slot_name(C.int(i))))
+		out.slotY = append(out.slotY, float64(C.fd_test_capsule_slot_y(C.int(i))))
+		out.slotH = append(out.slotH, float64(C.fd_test_capsule_slot_h(C.int(i))))
+	}
+	out.themeSegments = int(C.fd_test_theme_segments())
+	out.themeSelected = int(C.fd_test_theme_selected())
+	for i := range out.themeTooltips {
+		out.themeTooltips[i] = C.GoString(C.fd_test_theme_tooltip(C.int(i)))
+		out.themeImages[i] = C.fd_test_theme_segment_is_image(C.int(i)) != 0
+	}
+	out.borderShape = int(C.fd_test_segment_border_shape())
 	out.selectedTopInset = float64(C.fd_test_selected_segment_top_inset())
 	out.roundedTopInset = float64(C.fd_test_rounded_segment_top_inset())
-	insets := C.fd_test_tabs_insets()
-	out.tabsInsets = [4]float64{float64(insets.left), float64(insets.right), float64(insets.top), float64(insets.bottom)}
-	out.newCardTitle = C.GoString(C.fd_test_new_card_title())
-	out.themeTitle = C.GoString(C.fd_test_theme_title())
-	out.dotTitle = C.GoString(C.fd_test_dot_title(0))
-	out.dotGreen = float64(C.fd_test_dot_green(0))
 	out.capsuleCount = int(C.fd_test_capsule_count())
 	out.rowPassesThrough = C.fd_test_row_passes_through(f.capsules()) != 0
-	for which := range out.clicksReach {
-		out.insideGlass[which] = C.fd_test_capsule_inside_glass(C.int(which)) != 0
-		out.clicksReach[which] = C.fd_test_click_reaches_capsule(C.int(which)) != 0
+	for _, what := range []string{"fleet", "limits", "update", "theme"} {
+		out.clicksReach[what], out.insideGlass[what] = testReach(what)
 	}
-	out.limitDotOpens = C.fd_test_click_on_limit_dot_opens_limits() != 0
 	out.measured = measureFrame(f, window, glassModeGlass)
-	C.fd_test_press_segment(1)
-	C.fd_test_press_new_card()
+
+	C.fd_test_capture_menus(1)
+	testPress("fleet")
+	C.fd_test_capture_menus(0)
+	for i := 0; i < int(C.fd_test_menu_items()); i++ {
+		out.menu = append(out.menu, menuItemProbe{
+			title:     C.GoString(C.fd_test_menu_item_title(C.int(i))),
+			checked:   C.fd_test_menu_item_state(C.int(i)) == 1,
+			separator: C.fd_test_menu_item_separator(C.int(i)) != 0,
+			waiting:   int(C.fd_test_menu_item_waiting(C.int(i))),
+		})
+	}
+	out.menuX, out.menuY = float64(C.fd_test_menu_x()), float64(C.fd_test_menu_y())
+	fleet := C.fd_test_fleet_in_window()
+	out.fleetX, out.fleetBottom = float64(fleet.x), float64(C.fd_test_fleet_bottom_in_window())
+	// The second fleet, All, Add; the limits, the update, the dark theme.
+	for _, i := range []int{1, len(out.menu) - 2, len(out.menu) - 1} {
+		C.fd_test_menu_pick(C.int(i))
+	}
+	testPress("limits")
+	testPress("update")
+	C.fd_test_press_theme(2)
 
 	drawCapsules(f.capsules(), m, glassModeVibrancy)
 	out.countAfterRedraw = int(C.fd_test_capsule_count()) + int(C.fd_test_subview_count(f.capsules())) - 1
@@ -193,12 +302,6 @@ type capsuleLayoutProbe struct {
 	minContentWidth float64
 	minAfterClear   float64
 	capsules        []drawnCapsule
-
-	compactText, compactTooltip                           string
-	themeIconTitle, themeIconTooltip, themeIconAccessible string
-	iconPresses                                           []string
-	limitsAccessible                                      string
-	limitsPresses                                         []string
 }
 
 func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bool) capsuleLayoutProbe {
@@ -232,20 +335,6 @@ func probeCapsuleLayoutForTest(m capsuleModel, width, drawnAt float64, folded bo
 			name: C.GoString(C.fd_test_capsule_slot_name(C.int(i))), x: float64(fr.x), w: float64(fr.w), visible: fr.visible != 0,
 		})
 	}
-	out.compactText = C.GoString(C.fd_test_compact_text())
-	out.compactTooltip = C.GoString(C.fd_test_compact_tooltip())
-	out.themeIconTitle = C.GoString(C.fd_test_theme_icon_title())
-	out.themeIconTooltip = C.GoString(C.fd_test_theme_icon_tooltip())
-	out.themeIconAccessible = C.GoString(C.fd_test_theme_icon_accessibility_label())
-	setCapsuleEvents(func(action string) { out.iconPresses = append(out.iconPresses, action) })
-	C.fd_test_press_theme_icon()
-	setCapsuleEvents(nil)
-	out.limitsAccessible = C.GoString(C.fd_test_limits_accessibility_label())
-	setCapsuleEvents(func(action string) { out.limitsPresses = append(out.limitsPresses, action) })
-	C.fd_test_press_limits(0)
-	C.fd_test_press_limits(1)
-	setCapsuleEvents(nil)
-
 	clearCapsules(f.capsules())
 	out.minAfterClear = float64(C.fd_test_min_content_width(f.capsules()))
 	return out

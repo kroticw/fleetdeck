@@ -130,7 +130,7 @@ func probeCapsuleStandForTest(m capsuleModel) capsuleStandProbe {
 	out.afterReframe = readStandFrame(n)
 
 	longer := m
-	longer.NewCard.Label += " флота"
+	longer.Fleet.Name += "-и-ещё-флот"
 	if raw, err = json.Marshal(longer); err != nil {
 		panic(err)
 	}
