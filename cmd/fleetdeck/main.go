@@ -231,6 +231,32 @@ func setCardField(path, field, value string, expect *string) error {
 	}
 }
 
+// setCardFields is setCardField for fields written to a card in one write (a
+// dispatch's session and stage): one queued job, and one commit naming them all.
+func setCardFields(path string, writes []board.FieldWrite) error {
+	if err := board.SetFields(path, writes); err != nil {
+		return err
+	}
+	if boardQueues != nil {
+		boardDir, rel := cardInBoard(path)
+		boardQueues.of(boardDir).SetFields(rel, writes)
+		return nil
+	}
+	parts := make([]string, len(writes))
+	for i, w := range writes {
+		parts[i] = w.Field + " to " + w.Value
+	}
+	err := board.Commit(filepath.Dir(path), filepath.Base(path), "chore(board): set "+strings.Join(parts, ", "))
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, board.ErrNothingToCommit):
+		return err
+	default:
+		return fmt.Errorf("%w: %w", server.ErrFieldWrittenNotCommitted, err)
+	}
+}
+
 // createCard is server.Deps.CreateCard: start a card on the board, then record it
 // in the board's git history — the same two steps as setCardField, with the same
 // rule for the second: once the file exists, a commit that did not happen is

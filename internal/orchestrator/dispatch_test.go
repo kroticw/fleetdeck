@@ -78,12 +78,14 @@ func (f *fakeWorker) first(_ context.Context, short, text string) error {
 	return err
 }
 
-func (f *fakeWorker) set(path, field, value string, expect *string) error {
-	was := "<any>"
-	if expect != nil {
-		was = *expect
+func (f *fakeWorker) set(path string, writes []board.FieldWrite) error {
+	for _, w := range writes {
+		was := "<any>"
+		if w.Expect != nil {
+			was = *w.Expect
+		}
+		f.steps = append(f.steps, "set:"+filepath.Base(path)+":"+w.Field+"="+w.Value+":was="+was)
 	}
-	f.steps = append(f.steps, "set:"+filepath.Base(path)+":"+field+"="+value+":was="+was)
 	return f.setErr
 }
 
@@ -98,7 +100,7 @@ func dispatcher(t *testing.T, f *fakeWorker) (*Dispatcher, string) {
 		t.Fatal(err)
 	}
 	f.claude = Claude{Start: f.start, List: f.list, Send: f.send, SendFirst: f.first, Poll: time.Millisecond, StartWait: 200 * time.Millisecond}
-	return &Dispatcher{Executors: f.registry(), SetField: f.set, Home: home}, card
+	return &Dispatcher{Executors: f.registry(), SetFields: f.set, Home: home}, card
 }
 
 // registry is the fake's executors as they are now: a test that changes
@@ -431,11 +433,11 @@ func TestSessionNameIsTheCardsNumberAndTitle(t *testing.T) {
 func TestADispatchWhoseCommitFailedStillHandsOverTheTask(t *testing.T) {
 	f := newWorker()
 	d, card := dispatcher(t, f)
-	d.SetField = func(path, field, value string, expect *string) error {
-		if err := f.set(path, field, value, expect); err != nil {
+	d.SetFields = func(path string, writes []board.FieldWrite) error {
+		if err := f.set(path, writes); err != nil {
 			return err
 		}
-		if err := board.SetField(path, field, value, expect); err != nil {
+		if err := board.SetFields(path, writes); err != nil {
 			return err
 		}
 		return fmt.Errorf("%w: git commit timed out", board.ErrWrittenNotCommitted)
@@ -470,5 +472,32 @@ func TestADispatchWhoseCommitFailedStillHandsOverTheTask(t *testing.T) {
 		if strings.Contains(step.Note+step.Error, "does not name it") {
 			t.Fatalf("the card names the session, and step %s says it does not: %+v", step.Name, step)
 		}
+	}
+}
+
+// The session and the stage are one write: a card a hand moved on while the
+// session started refuses both, at the stage, and the card does not name a
+// session it was never handed to.
+func TestACardMovedOnRefusesTheStageAndNamesNoSession(t *testing.T) {
+	f := newWorker()
+	d, card := dispatcher(t, f)
+	d.SetFields = func(path string, writes []board.FieldWrite) error {
+		raw, _ := os.ReadFile(path)
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "stage: new", "stage: blocked", 1)), 0o600); err != nil {
+			return err
+		}
+		return board.SetFields(path, writes)
+	}
+
+	res, err := d.Dispatch(t.Context(), Work{Card: card, Lang: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := res.Steps[len(res.Steps)-1]
+	if res.OK || last.Name != "stage" || last.Error == "" {
+		t.Fatalf("want the stage step refused, got %+v", res.Steps)
+	}
+	if c, _ := board.ParseCard(card); c.Session != "" {
+		t.Fatalf("the card names session %q after a refused write", c.Session)
 	}
 }

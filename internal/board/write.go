@@ -36,41 +36,46 @@ var (
 // snapshot up to a second old, and without the check the panel writes the
 // stage it saw over the stage the card's own agent has since moved to.
 func SetField(path, field, value string, expect *string) error {
-	var normalized string
-	switch field {
-	case "stage":
-		if !validStages[value] {
-			return fmt.Errorf("unknown stage %q", value)
-		}
-		normalized = value
-	case "progress":
-		n, err := strconv.Atoi(value)
-		if err != nil || !validProgress[n] {
-			return fmt.Errorf("progress must be one of 0,10,20,40,60,80,100, got %q", value)
-		}
-		// Write the normalized number, never the caller's raw string: a
-		// value like "0100" or "+100" passes strconv.Atoi but is not the
-		// plain decimal literal YAML expects, and yaml.v3 resolves a
-		// leading-zero scalar as octal on the next read.
-		normalized = strconv.Itoa(n)
-	case "session":
-		_, key, err := executor.ParseKey(value)
+	err := SetFields(path, []FieldWrite{{Field: field, Value: value, Expect: expect}})
+	// One field's write says what refused it as it always did, unwrapped.
+	var fe *FieldError
+	if errors.As(err, &fe) {
+		return fe.Err
+	}
+	return err
+}
+
+// FieldWrite is one field a write sets, and, when Expect is not nil, the value
+// the card must still hold for the write to go ahead (SetField's expect).
+type FieldWrite struct {
+	Field, Value string
+	Expect       *string
+}
+
+// FieldError is a write refused by one of its fields, which it names.
+type FieldError struct {
+	Field string
+	Err   error
+}
+
+func (e *FieldError) Error() string { return e.Field + ": " + e.Err.Error() }
+func (e *FieldError) Unwrap() error { return e.Err }
+
+// SetFields is SetField for several fields in one write: the card is read once,
+// each field is checked against it as written so far, in order -- a stage that
+// needs a session finds the session set before it -- and the card is written
+// once, or not at all when any field is refused. A dispatch writes a card's
+// session and stage this way: two writes a moment apart were two jobs for the
+// board's commit queue, and a slow machine committed the second's file under
+// the first's message.
+func SetFields(path string, writes []FieldWrite) error {
+	values := make([]string, len(writes))
+	for i, w := range writes {
+		v, err := normalizeField(w.Field, w.Value)
 		if err != nil {
-			return fmt.Errorf("session must be a short id of 6 to 12 hex digits or a Codex session key, got %q", value)
+			return &FieldError{Field: w.Field, Err: err}
 		}
-		normalized = string(key)
-	case "repo":
-		repo, err := NormalizeRepo(value)
-		if err != nil {
-			return err
-		}
-		normalized = repo
-		if repo == "" {
-			// Quoted: a bare ~ or an empty value is YAML's null.
-			normalized = `""`
-		}
-	default:
-		return fmt.Errorf("%w: %s", ErrUnknownField, field)
+		values[i] = v
 	}
 
 	raw, err := os.ReadFile(path)
@@ -85,31 +90,35 @@ func SetField(path, field, value string, expect *string) error {
 	if err := yaml.Unmarshal(m[1], &fm); err != nil {
 		return fmt.Errorf("card %s has malformed frontmatter, refusing write: %w", path, err)
 	}
-	if field == "session" {
-		provider, err := executor.ParseID(fm.Executor)
-		if err != nil {
-			return err
-		}
-		owner, _, err := executor.ParseKey(normalized)
-		if err != nil || owner != provider {
-			return fmt.Errorf("session does not match executor %q", provider)
-		}
-	}
-	if expect != nil {
-		if held := fieldValue(field, fm); held != normalize(field, *expect) {
-			return fmt.Errorf("%w: %s is %q, not the %q this write was made against", ErrStale, field, held, *expect)
-		}
-	}
-	if err := checkCrossFieldRules(field, normalized, fm); err != nil {
-		return err
-	}
 
-	out, err := writeFrontmatterField(raw, field, normalized)
-	if err != nil {
-		return fmt.Errorf("card %s %w", path, err)
-	}
-	if out, err = doneProgress(out, field, normalized, fm); err != nil {
-		return fmt.Errorf("card %s %w", path, err)
+	out := raw
+	for i, w := range writes {
+		field, normalized := w.Field, values[i]
+		if field == "session" {
+			provider, err := executor.ParseID(fm.Executor)
+			if err != nil {
+				return &FieldError{Field: field, Err: err}
+			}
+			owner, _, err := executor.ParseKey(normalized)
+			if err != nil || owner != provider {
+				return &FieldError{Field: field, Err: fmt.Errorf("session does not match executor %q", provider)}
+			}
+		}
+		if w.Expect != nil {
+			if held := fieldValue(field, fm); held != normalize(field, *w.Expect) {
+				return &FieldError{Field: field, Err: fmt.Errorf("%w: %s is %q, not the %q this write was made against", ErrStale, field, held, *w.Expect)}
+			}
+		}
+		if err := checkCrossFieldRules(field, normalized, fm); err != nil {
+			return &FieldError{Field: field, Err: err}
+		}
+		if out, err = writeFrontmatterField(out, field, normalized); err != nil {
+			return fmt.Errorf("card %s %w", path, err)
+		}
+		if out, err = doneProgress(out, field, normalized, fm); err != nil {
+			return fmt.Errorf("card %s %w", path, err)
+		}
+		fm = withField(fm, field, normalized)
 	}
 
 	info, err := os.Stat(path)
@@ -117,6 +126,62 @@ func SetField(path, field, value string, expect *string) error {
 		return fmt.Errorf("stat card before write: %w", err)
 	}
 	return atomicWrite(path, out, info.Mode())
+}
+
+// withField is fm with field as just written, for the next field's checks.
+func withField(fm frontmatter, field, normalized string) frontmatter {
+	switch field {
+	case "stage":
+		fm.Stage = normalized
+	case "progress":
+		fm.Progress, _ = strconv.Atoi(normalized)
+	case "session":
+		fm.Session = normalized
+	case "repo":
+		fm.Repo = strings.Trim(normalized, `"`)
+	}
+	return fm
+}
+
+// normalizeField is value as field is written into a card, or why it cannot be.
+func normalizeField(field, value string) (string, error) {
+	var normalized string
+	switch field {
+	case "stage":
+		if !validStages[value] {
+			return "", fmt.Errorf("unknown stage %q", value)
+		}
+		normalized = value
+	case "progress":
+		n, err := strconv.Atoi(value)
+		if err != nil || !validProgress[n] {
+			return "", fmt.Errorf("progress must be one of 0,10,20,40,60,80,100, got %q", value)
+		}
+		// Write the normalized number, never the caller's raw string: a
+		// value like "0100" or "+100" passes strconv.Atoi but is not the
+		// plain decimal literal YAML expects, and yaml.v3 resolves a
+		// leading-zero scalar as octal on the next read.
+		normalized = strconv.Itoa(n)
+	case "session":
+		_, key, err := executor.ParseKey(value)
+		if err != nil {
+			return "", fmt.Errorf("session must be a short id of 6 to 12 hex digits or a Codex session key, got %q", value)
+		}
+		normalized = string(key)
+	case "repo":
+		repo, err := NormalizeRepo(value)
+		if err != nil {
+			return "", err
+		}
+		normalized = repo
+		if repo == "" {
+			// Quoted: a bare ~ or an empty value is YAML's null.
+			normalized = `""`
+		}
+	default:
+		return "", fmt.Errorf("%w: %s", ErrUnknownField, field)
+	}
+	return normalized, nil
 }
 
 // fieldValue is what the card holds for one of the three fields the panel
