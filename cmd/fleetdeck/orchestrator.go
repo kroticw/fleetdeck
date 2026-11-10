@@ -51,8 +51,8 @@ func fleetDispatcher(o runOpts, cfg config.Config, dc *daemon.Client, workers fu
 			Send:      dc.SendText,
 			SendFirst: dc.SendFirst,
 		}),
-		SetField: setCardField,
-		Home:     home,
+		SetFields: setCardFields,
+		Home:      home,
 	}
 }
 

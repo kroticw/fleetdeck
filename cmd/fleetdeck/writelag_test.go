@@ -149,7 +149,7 @@ func TestADispatchDeliversItsTaskWithoutWaitingForTheCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := &orchestrator.Dispatcher{Executors: reg, SetField: setCardField, Home: t.TempDir()}
+	d := &orchestrator.Dispatcher{Executors: reg, SetFields: setCardFields, Home: t.TempDir()}
 	start := time.Now()
 	res, err := d.Dispatch(context.Background(), orchestrator.Work{Card: card, Lang: "en"})
 	if err != nil || !res.OK {

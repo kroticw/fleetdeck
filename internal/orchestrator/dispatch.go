@@ -46,11 +46,12 @@ type Dispatcher struct {
 	// one. An executor that cannot start or send refuses its cards rather
 	// than another executor starting them.
 	Executors *executor.Registry
-	// SetField writes one frontmatter field, refusing when the card no longer
-	// holds the value the write was made against (board.SetField). An error
-	// wrapping board.ErrWrittenNotCommitted is a field that reached the card
-	// without its commit, and the dispatch goes on past it.
-	SetField func(path, field, value string, expect *string) error
+	// SetFields writes frontmatter fields in one write, refusing them all when
+	// the card no longer holds a value a write was made against
+	// (board.SetFields). An error wrapping board.ErrWrittenNotCommitted is a
+	// write that reached the card without its commit, and the dispatch goes on
+	// past it.
+	SetFields func(path string, writes []board.FieldWrite) error
 	// Home is the directory a card's repo field is read from: a worker starts
 	// in Home/<repo>, the checkout its card names, and a card naming none that
 	// exists is refused rather than started somewhere else (Workdir).
@@ -118,21 +119,25 @@ func (d *Dispatcher) Dispatch(ctx context.Context, w Work) (Result, error) {
 	// Both writes carry what the card held when it was read: between the read
 	// and here the card may have been moved by a hand or by its own agent, and
 	// writing over that is the thing the precondition exists to stop.
+	//
+	// stage is written by the panel rather than left to the agent because the
+	// card was moved into the column by a hand, and the board refuses a started
+	// stage while the session field is empty -- so the session goes first, in
+	// the same write: one write, and one commit naming both. Written apart, a
+	// slow machine committed the stage under the session's message.
 	empty := ""
-	note, err := written(d.SetField(w.Card, "session", short, &empty))
+	note, err := written(d.SetFields(w.Card, []board.FieldWrite{
+		{Field: "session", Value: short, Expect: &empty},
+		{Field: "stage", Value: "active", Expect: &card.Stage},
+	}))
 	if err != nil {
+		var fe *board.FieldError
+		if errors.As(err, &fe) && fe.Field == "stage" {
+			return refuse("stage", err)
+		}
 		return refuse("card", fmt.Errorf("%s is running, and the card does not name it: %w", short, err))
 	}
 	done("card", "session -> "+short+note)
-
-	// stage is written by the panel rather than left to the agent because the
-	// card was moved into the column by a hand, and the board refuses a started
-	// stage while the session field is empty — which is why this cannot come
-	// first.
-	note, err = written(d.SetField(w.Card, "stage", "active", &card.Stage))
-	if err != nil {
-		return refuse("stage", err)
-	}
 	done("stage", "stage -> active"+note)
 
 	// The refusal carries the task itself: the card names the session and the
