@@ -329,6 +329,11 @@ const en = {
   zone_niceToHave: "Nice to have",
   new_card_create: "Create",
   new_card_cancel: "Cancel",
+  new_card_heading: "New card",
+  new_card_title_caption: "Title",
+  new_card_desc_caption: "Description",
+  new_card_repo_caption: "Repository",
+  new_card_footnote: "The card lands in new; moving it to active starts its session.",
   new_card_title_required: "A card needs a title",
   new_card_not_committed: "Card created, but not recorded in the board's git history",
 
@@ -892,6 +897,11 @@ const ru = {
   zone_niceToHave: "Необязательная",
   new_card_create: "Создать",
   new_card_cancel: "Отмена",
+  new_card_heading: "Новая карточка",
+  new_card_title_caption: "Название",
+  new_card_desc_caption: "Описание",
+  new_card_repo_caption: "Репозиторий",
+  new_card_footnote: "Карточка встанет в new, сессию поднимет перенос в active.",
   new_card_title_required: "У карточки должен быть заголовок",
   new_card_not_committed: "Карточка создана, но не записана в историю git доски",
 

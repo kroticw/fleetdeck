@@ -198,15 +198,12 @@ test("the new card title's placeholder is read like muted text", () => {
   assert.match(body, /opacity:\s*1/);
 });
 
-// The closed control is drawn by the page; the list a select opens stays the
-// system's menu.
-test("a select in the window draws its own chevron in the text's colour", () => {
-  for (const { surface, control } of CONTROLS.filter((c) => /select|zone|executor/.test(c.control))) {
-    const body = ruleBody(`${surface} ${control}`);
-    assert.match(body, /-webkit-appearance:\s*none/, control);
-    assert.match(body, /(^|[;\s])appearance:\s*none/, control);
-    assert.match(body, /background-image:\s*linear-gradient\(45deg, transparent 50%, currentColor 50%\),\s*linear-gradient\(135deg, currentColor 50%, transparent 50%\)/, control);
-  }
+// The zone and the executor are segmented choices in a capsule: the chosen one
+// is lit, the rest lie on the capsule's glass.
+test("the new card's segmented choices light the chosen one", () => {
+  const on = ruleBody('.newcard-seg-option[aria-checked="true"]');
+  assert.match(on, /background(-color)?:\s*var\(--/);
+  assert.match(ruleBody(".newcard-seg-option"), /background:\s*transparent/);
 });
 
 // Each theme block states the capsule's tokens: the light :root, the system's

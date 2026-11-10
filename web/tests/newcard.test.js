@@ -62,7 +62,7 @@ test("new card: the form is closed until the button opens it", () => {
 
 test("new card: the form offers exactly the board's four zones", () => {
   const form = open();
-  const zones = form.querySelector("select.newcard-zone").children.map((o) => o.value);
+  const zones = [...form.querySelectorAll(".newcard-zone [data-value]")].map((o) => o.dataset.value);
   assert.deepEqual(zones, ["urgent", "unplanned", "planned", "niceToHave"]);
 });
 
@@ -75,24 +75,26 @@ test("new card: the form offers exactly the board's four zones", () => {
 test("new card: the zone list is labelled as urgency, and its options read as words, not identifiers", async () => {
   const { t } = await import("../js/i18n.js");
   const form = open();
-  const label = form.querySelector("label.newcard-zone-label");
+  const label = form.querySelector(".newcard-zone-label");
   assert.ok(label, "the zone list has a visible label");
   assert.equal(label.querySelector("span.newcard-zone-caption").textContent, t("new_card_zone"));
-  const select = label.querySelector("select.newcard-zone");
-  assert.ok(select, "the label wraps the list, so it names it without an id");
-  for (const option of select.children) {
-    assert.equal(option.textContent, t(`zone_${option.value}`), `option ${option.value} reads from the dictionary`);
-    assert.notEqual(option.textContent, option.value, `option ${option.value} does not show its identifier`);
+  const group = label.querySelector(".newcard-zone");
+  assert.ok(group, "the caption stands over the choices it names");
+  assert.equal(group.getAttribute("aria-label"), t("new_card_zone"));
+  for (const option of group.querySelectorAll("[data-value]")) {
+    assert.equal(option.textContent, t(`zone_${option.dataset.value}`), `option ${option.dataset.value} reads from the dictionary`);
+    assert.notEqual(option.textContent, option.dataset.value, `option ${option.dataset.value} does not show its identifier`);
   }
 });
 
 test("new card: choosing an option by its label sends the zone's identifier", async () => {
   const { t } = await import("../js/i18n.js");
   const form = open();
-  const select = form.querySelector("select.newcard-zone");
-  const chosen = select.children.find((o) => o.textContent === t("zone_niceToHave"));
+  const group = form.querySelector(".newcard-zone");
+  const chosen = [...group.querySelectorAll("[data-value]")].find((o) => o.textContent === t("zone_niceToHave"));
   assert.ok(chosen, "the nice-to-have zone is offered under its label");
-  select.value = chosen.value;
+  fireEvent(chosen, "click");
+  assert.equal(chosen.getAttribute("aria-checked"), "true", "the chosen zone is marked");
   form.querySelector("input.newcard-title").value = "Later";
   fireEvent(form.querySelector("button.newcard-create"), "click");
   await settle();
@@ -102,7 +104,7 @@ test("new card: choosing an option by its label sends the zone's identifier", as
 test("new card: create sends the trimmed title and the chosen zone, then closes", async () => {
   const form = open();
   form.querySelector("input.newcard-title").value = "  Fix the header  ";
-  form.querySelector("select.newcard-zone").value = "urgent";
+  form.querySelector(".newcard-zone").value = "urgent";
   fireEvent(form.querySelector("button.newcard-create"), "click");
   await settle();
 
@@ -268,7 +270,7 @@ test("new card: the capsule's second press closes the form, as the button's does
 });
 
 test("new card: Escape closes the form from anywhere in it, and goes no further", () => {
-  for (const selector of ["select.newcard-zone", "button.newcard-create", "button.newcard-close"]) {
+  for (const selector of [".newcard-zone [data-value]", "button.newcard-create", "button.newcard-close", "button.newcard-cancel"]) {
     const form = open();
     const escape = fireEvent(form.querySelector(selector), "keydown", { key: "Escape" });
     assert.equal(form.hidden, true, `Escape on ${selector} left the form open`);
@@ -369,14 +371,20 @@ test("new card: a chosen folder comes with the hint to start an agent there firs
   assert.equal(open().querySelector(".newcard-hint").hidden, true, "the next opening starts without it");
 });
 
-// The window's close is a cross in its corner, not a Cancel beside Create.
-test("new card: the form closes by a cross with a name, and has no Cancel", async () => {
+// The form is a dialog with a heading: closed by the cross in its corner or by
+// Cancel beside Create, as the approved redesign draws it (T-226).
+test("new card: the form closes by a cross with a name, or by Cancel", async () => {
   const { t } = await import("../js/i18n.js");
   const form = open();
+  assert.equal(form.querySelector(".newcard-heading").textContent, t("new_card_heading"));
   const close = form.querySelector("button.newcard-close");
   assert.ok(close);
   assert.equal(close.getAttribute("aria-label"), t("new_card_cancel"));
-  assert.equal(form.querySelector("button.newcard-cancel"), null);
+  const cancel = form.querySelector("button.newcard-cancel");
+  assert.equal(cancel.textContent, t("new_card_cancel"));
+  fireEvent(cancel, "click");
+  assert.equal(form.hidden, true, "Cancel left the form open");
+  open();
   // The panel's own buttons (the .btn block): the cross round, Create the primary action.
   assert.equal(close.className, "newcard-close btn btn-icon");
   assert.equal(form.querySelector("button.newcard-create").className, "newcard-create btn btn-primary");
@@ -469,7 +477,7 @@ test("new card: the form closes the moment Create is pressed, and the board is t
   answer = new Promise((resolve) => (release = resolve));
   const form = open();
   form.querySelector("input.newcard-title").value = "On its way";
-  form.querySelector("select.newcard-zone").value = "urgent";
+  form.querySelector(".newcard-zone").value = "urgent";
   fireEvent(form.querySelector("button.newcard-create"), "click");
   await settle();
   assert.equal(form.hidden, true, "the form waits for the server with a dead button");
@@ -547,7 +555,7 @@ test("new card: a card with its commit queued says nothing about a missing commi
 
 test("new card: without Codex there is no executor choice and none is sent", async () => {
   const form = open();
-  assert.equal(form.querySelector("select.newcard-executor")?.hidden ?? true, true);
+  assert.equal(form.querySelector(".newcard-executor-field")?.hidden ?? true, true);
   form.querySelector("input.newcard-title").value = "Task";
   fireEvent(form.querySelector("button.newcard-create"), "click");
   await settle();
@@ -560,10 +568,10 @@ test("new card: with Codex the executor is chosen, defaults from the configurati
   const made = createNewCard(other, { create: fakeCreate, executors: () => ({ codex: true, default: "codex" }) });
   made.open();
   const form = other.querySelector("div.newcard");
-  const choice = form.querySelector("select.newcard-executor");
-  assert.equal(choice.hidden, false);
+  const choice = form.querySelector(".newcard-executor");
+  assert.equal(form.querySelector(".newcard-executor-field").hidden, false);
   assert.equal(choice.value, "codex");
-  assert.deepEqual([...choice.querySelectorAll("option")].map((o) => o.value), ["claude", "codex"]);
+  assert.deepEqual([...choice.querySelectorAll("[data-value]")].map((o) => o.dataset.value), ["claude", "codex"]);
   form.querySelector("input.newcard-title").value = "Task";
   answer = new Error("refused");
   fireEvent(form.querySelector("button.newcard-create"), "click");

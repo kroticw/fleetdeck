@@ -3376,7 +3376,6 @@ button.review-line-add:hover {
   resize: none;
 }
 
-.newcard-repo-row,
 .newcard-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3454,18 +3453,118 @@ button.review-line-add:hover {
   justify-content: flex-end;
 }
 
-.newcard-zone-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
+/* The form reads top to bottom as the redesign draws it: a heading, captioned
+   fields, the files, the repository, the urgency and the executor side by
+   side, then a footnote and the two actions. */
+.newcard-heading {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 680;
+  letter-spacing: -0.01em;
 }
 
-.newcard-zone,
-.newcard-executor {
+.newcard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.newcard-caption {
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.newcard-desc-field {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.newcard-desc-field .newcard-desc {
+  flex: 1 1 auto;
+}
+
+.newcard-repo-line {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.newcard-repo-box {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.newcard-repo-box .newcard-repo {
+  flex: 1 1 auto;
+}
+
+.newcard-repo-home {
+  position: absolute;
+  left: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.newcard-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.newcard-zone-label {
+  color: var(--text-muted);
+}
+
+.newcard-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+}
+
+.newcard-seg-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
   font: inherit;
   font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.newcard-seg-option[aria-checked="true"] {
+  background: var(--glass-control-hover);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+.newcard-seg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--zone-dot, var(--zone-none));
+}
+
+.newcard-footnote {
+  flex: 1 1 auto;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
 }
 
 .newcard-error {
@@ -5639,17 +5738,19 @@ body.is-resizing {
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-/* The closed select is drawn by the page, its chevron in the text's colour; the
-   list it opens stays the system's menu. */
-:root[data-surface="board"] .newcard-zone,
-:root[data-surface="board"] .newcard-executor {
-  -webkit-appearance: none;
-  appearance: none;
-  padding-right: 26px;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
+/* The zone and the executor: a capsule holding its choices, the chosen one
+   lit. */
+:root[data-surface="board"] .newcard-seg {
+  min-height: 0;
+  padding: 3px;
+}
+
+/* The repository's field starts from the home directory, said before the
+   path. */
+:root[data-surface="board"] .newcard-repo-box .newcard-repo {
+  padding-left: 34px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
 }
 
 /* The fleet menu's list hangs from the header's right edge, not from the
