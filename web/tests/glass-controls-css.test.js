@@ -50,7 +50,7 @@ const OPAQUE_BOARD = ':root[data-surface="board"][data-glass="opaque"]';
 // The head's buttons (the edit pencil, the font buttons, the fleet menu) are
 // .btn capsules in every surface and in a browser tab alike:
 // web/tests/buttons-css.test.js holds them.
-const ISLAND_CONTROLS = [{ class: ".o-pick-select", control: ".o-pick-select" }];
+const ISLAND_CONTROLS = [];
 const FORM_CONTROLS = [".newcard-title", ".newcard-zone", ".newcard-executor"].map((c) => ({ class: c, control: c }));
 const CONTROLS = [
   ...ISLAND_CONTROLS.map((c) => ({ surface: ORCHESTRATOR, opaque: OPAQUE_ORCHESTRATOR, ...c })),

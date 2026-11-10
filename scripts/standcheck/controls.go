@@ -55,7 +55,7 @@ var floatingPanels = map[string]bool{"newCard": true, "fleetList": true, "update
 var accents = map[string]bool{"newCardCreate": true}
 
 // islandHead is what the orchestrator island's head always shows unfolded.
-var islandHead = []string{"editPencil", "picker", "fleetButton"}
+var islandHead = []string{"editPencil", "fleetButton"}
 
 // opened is what each thing a stand opens has to report, by surface.
 var opened = map[string]struct {

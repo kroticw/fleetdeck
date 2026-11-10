@@ -427,12 +427,12 @@ test("a drag the system cancels ends there: later moves size nothing", () => {
   assert.equal(m.stage.style.getPropertyValue("--card-dock-size"), "60%");
 });
 
-test("the keys under the terminal press into it", () => {
+test("the place draws no key row and no font buttons: keys go into the terminal, the size is a setting", () => {
   const m = mount({ extra: { expand: true } });
   m.dock.show({ short: ASK, from: "document" }, snap());
-  const enter = [...m.host.querySelectorAll(".s-key")].find((b) => b.dataset.key === "enter");
-  fireEvent(enter, "click");
-  assert.deepEqual(m.terms.made[0].typed, ["\r"]);
+  assert.equal(m.host.querySelector(".s-key"), null);
+  assert.equal(m.host.querySelector(".card-dock-keys"), null);
+  assert.equal(m.host.querySelector(".term-font"), null);
 });
 
 test("letting the place go stops its terminal and its watch on the width", () => {
@@ -441,24 +441,6 @@ test("letting the place go stops its terminal and its watch on the width", () =>
   m.dock.dispose();
   assert.equal(m.terms.made[0].stopped, 1);
   assert.equal(m.unobserved, 1);
-});
-
-// The operator's report after the dev build (T-091): the type is sized here as
-// in every other place a session's terminal is shown (web/js/fontcontrols.js).
-test("the open place sizes its terminal's type with the session panel's buttons", () => {
-  const m = mount({ extra: { expand: true } });
-  m.dock.show({ short: ASK, from: "document" }, snap());
-  const bigger = m.host.querySelector(".term-font-bigger");
-  assert.ok(bigger, "the buttons are on the place");
-  assert.equal(bigger.disabled, true, "no size to claim before the terminal has one");
-  m.terms.made[0].opts.report.fontSize(12);
-  assert.equal(m.host.querySelector(".term-font-reset").textContent, "12 px");
-  fireEvent(bigger, "click");
-  fireEvent(m.host.querySelector(".term-font-smaller"), "click");
-  assert.deepEqual(m.terms.made[0].steps, [1, -1]);
-  fireEvent(openButton(m.host), "click");
-  assert.equal(m.host.querySelector(".term-font-bigger").disabled, true, "folded, there is no terminal to size");
-  assert.equal(m.host.querySelector(".term-font").hidden, true);
 });
 
 // The id alone does not say which session it is: the name the session list

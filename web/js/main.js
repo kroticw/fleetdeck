@@ -25,6 +25,7 @@ import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
 import { applyTheme, currentTheme, initTheme, setConfiguredLook, setConfiguredTheme } from "./theme.js";
+import { refreshTerminalThemes } from "./liveterminal.js";
 import { renderSettings } from "./settings.js";
 import { setConfiguredFontSize, setFontSizeWriter } from "./terminalfont.js";
 import { saveSettings } from "./api.js";
@@ -286,14 +287,17 @@ if (regions.has("orchestrator")) {
 // them at once, before the next snapshot. The board tells the window, whose
 // own appearance and other surfaces follow the theme.
 function followLook(theme, fontSize, look) {
-  if (setConfiguredTheme(theme) && host?.surface === "board") {
+  const themeChanged = setConfiguredTheme(theme);
+  if (themeChanged && host?.surface === "board") {
     callHost(window, "fleetdeckTheme", currentTheme() ?? "auto");
     publishCapsules();
   }
-  if (setConfiguredLook(look)) {
+  const lookChanged = setConfiguredLook(look);
+  if (lookChanged) {
     showGlass();
     if (host?.surface === "board") publishCapsules();
   }
+  if (themeChanged || lookChanged) refreshTerminalThemes();
   setConfiguredFontSize(fontSize);
 }
 function followSettings(page) {

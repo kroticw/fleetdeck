@@ -12,10 +12,8 @@
 import { authorState } from "./docauthor.js";
 import { t } from "./i18n.js";
 import { resumeSession } from "./api.js";
-import { buildFontControls } from "./fontcontrols.js";
 import { sessionMark } from "./initials.js";
 import { createLiveTerminal } from "./liveterminal.js";
-import { KEYS } from "./session.js";
 import { FONT_KEYS } from "./terminalfont.js";
 
 // DOCK_RIGHT_MIN is the narrowest stage, in CSS px, the session is kept beside
@@ -124,7 +122,6 @@ function observeWidth(el, fn) {
  *   observe(el, fn) -> stop   the stage's width, ResizeObserver by default
  *   rect(el)       a box's place on the page, for the grip
  *   terminal(host, short, o)  createLiveTerminal by default
- *   pressKeys      the key row under the terminal (session.js KEYS)
  *   resume(short) -> Promise  bring a stopped session back (api.js resumeSession)
  *   toOrchestrator()          to the orchestrator's own terminal
  *   links, fontKey            handed to the terminal, as session.js does
@@ -137,7 +134,7 @@ function observeWidth(el, fn) {
  * a folded handle holds no attach, so it resizes nobody's terminal.
  */
 export function createCardDock(host, options) {
-  const { stage, grip, pressKeys = KEYS, toOrchestrator = () => {}, resume = resumeSession } = options;
+  const { stage, grip, toOrchestrator = () => {}, resume = resumeSession } = options;
   const terminal = options.terminal ?? createLiveTerminal;
   const storage = options.storage ?? pageStorage();
   const keyNames = options.storageKeys ?? DOCK_KEYS;
@@ -178,9 +175,6 @@ export function createCardDock(host, options) {
   toRight.dataset.place = "right";
   places.append(toBottom, toRight);
   const openClose = button("btn btn-sm card-dock-open");
-  // The type's size, as in the session panel and the orchestrator column
-  // (web/js/fontcontrols.js), there only while a terminal is.
-  const fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "card-dock-font" });
   // Folded beside the document the place is drawn like the folded session
   // list: the round button that unfolds it and the session's two-letter mark
   // (web/js/initials.js), which opens it too. The page's CSS shows them only
@@ -194,22 +188,13 @@ export function createCardDock(host, options) {
   const about = el("div", "card-dock-about");
   about.append(dot, who, named, doing, needs);
   const controls = el("div", "card-dock-controls");
-  controls.append(fontButtons.node, places, openClose);
+  controls.append(places, openClose);
   handle.append(unfold, mark, about, controls);
 
   const body = el("div", "card-dock-body");
   const errorLine = el("p", "card-dock-error");
   const term = el("div", "card-dock-term");
   term.dataset.terminal = "";
-  const keyRow = el("div", "card-dock-keys");
-  keyRow.append(el("span", "s-keys-label", t("keys_to_session")));
-  for (const key of pressKeys) {
-    const b = button("btn btn-sm s-key", key.labelKey ? t(key.labelKey) : key.label);
-    b.dataset.key = key.id;
-    if (key.hintKey) b.title = t(key.hintKey);
-    b.addEventListener("click", () => live?.type(key.bytes));
-    keyRow.append(b);
-  }
   const stoppedNote = el("div", "card-dock-note card-dock-stopped");
   const stoppedText = el("p", "card-dock-note-text", t("dock_stopped_note"));
   const resumeButton = button("btn btn-sm btn-primary card-dock-resume", t("dock_resume"));
@@ -218,7 +203,7 @@ export function createCardDock(host, options) {
   const goneNote = el("div", "card-dock-note card-dock-gone");
   goneNote.append(el("p", "card-dock-note-text", t("dock_gone")), button("btn btn-primary card-dock-write", t("dock_write_orchestrator")));
   const orchestratorButton = button("btn btn-sm btn-primary card-dock-orchestrator", t("dock_to_orchestrator"));
-  body.append(errorLine, term, keyRow, stoppedNote, goneNote, orchestratorButton);
+  body.append(errorLine, term, stoppedNote, goneNote, orchestratorButton);
   host.replaceChildren(handle, body);
 
   const place = () => effectiveDock(chosen, width);
@@ -229,7 +214,6 @@ export function createCardDock(host, options) {
     attached = "";
     streamError = "";
     host.dataset.attached = "false";
-    fontButtons.paint(null);
   };
 
   const attach = (short) => {
@@ -251,7 +235,6 @@ export function createCardDock(host, options) {
         ready: () => {
           host.dataset.attached = "true";
         },
-        fontSize: (size) => fontButtons.paint(size),
       },
     });
     attached = short;
@@ -300,10 +283,8 @@ export function createCardDock(host, options) {
     openClose.setAttribute("aria-expanded", String(open));
 
     const withTerminal = WITH_TERMINAL.has(state);
-    fontButtons.node.hidden = !(open && withTerminal);
     body.hidden = !open;
     term.hidden = !withTerminal;
-    keyRow.hidden = !withTerminal;
     errorLine.hidden = !(withTerminal && streamError);
     errorLine.textContent = streamError;
     stoppedNote.hidden = state !== "stopped";

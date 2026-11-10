@@ -994,29 +994,93 @@ main {
  * the flex container declared above; everything here lays out what gets
  * rendered inside it. */
 
+/* The head says who the orchestrator is: its mark, its name (with the pencil
+   that renames it) over its model and folder, and the context it has used. */
 .o-head {
   flex: none;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--gap);
-  padding: var(--gap);
-  font-weight: 600;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 12px 10px;
   border-bottom: 1px solid var(--border);
 }
 
+.o-avatar {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+}
+
+.o-avatar:empty {
+  display: none;
+}
+
+.o-who {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto;
+  align-items: center;
+  column-gap: 6px;
+}
+
 .o-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.o-meta {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.o-meta:empty {
+  display: none;
+}
+
 .o-ctx {
   flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
   font-weight: 400;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+.o-ctx::before {
+  content: "ctx ";
+}
+
+.o-ctx-bar {
+  flex: none;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.o-ctx-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--text-muted);
 }
 
 .o-error {
@@ -1110,11 +1174,27 @@ main {
 
 /* Nothing pinned, or a pin the daemon does not list: quiet, because neither
  * is a failure, and different words for the two because they are different
- * facts. */
+ * facts; with the wizard that appoints one. */
 .o-screen-empty {
-  padding: var(--gap);
-  opacity: 0.7;
-  font-style: italic;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+.o-screen-empty-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.o-screen-empty-text {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .col-center {
@@ -3215,7 +3295,6 @@ button.review-line-add:hover {
   font-weight: 600;
 }
 
-
 /* A window over the board, centred by margin: auto between four zero edges,
    about 60% of the room each way and never more than the room less a margin. */
 .newcard {
@@ -3758,7 +3837,7 @@ button.review-line-add:hover {
 #session-panel .xterm-viewport,
 #card-panel .xterm-viewport,
 #orchestrator .xterm-viewport {
-  background-color: var(--surface);
+  background-color: var(--term-bg);
 }
 
 /* Errors sit under the terminal, where a person is already looking — never on
@@ -3822,7 +3901,6 @@ button.review-line-add:hover {
 .md-right {
   text-align: right;
 }
-
 
 /* A notice is not a failure and must not look like one: what the terminal says
  * about itself — that it cannot type, that it could not measure its pane — is a
@@ -3941,22 +4019,6 @@ button.review-line-add:hover {
  * already does. Its value is always the true pin (see orchestrator.js's
  * draw()), so there is no separate "still really pinned" mark to style the
  * way the picker once needed one: the selected option already says so. */
-.o-pick-select {
-  flex: none;
-  font: inherit;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 1px 4px;
-  max-width: 40%;
-}
-
-.o-pick-select:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
 
 .label-edit-btn {
   flex: none;
@@ -4588,18 +4650,12 @@ body.is-resizing {
   font-size: var(--fs-sm);
 }
 
-/* The way to the orchestrator wizard from the orchestrator column's head. */
+/* The way to the orchestrator wizard from an empty orchestrator column: a
+   button, placed only. */
 .o-wizard {
-  flex: none;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
   white-space: nowrap;
+  text-decoration: none;
 }
-
-.o-wizard:hover {
-  color: var(--text);
-}
-
 
 /* The start page (start.html, web/js/start.js): the screen the application
    opens on. One column of the same width as the wizard's, because it is the
@@ -5060,7 +5116,7 @@ body.is-resizing {
 
 :root[data-surface="orchestrator"] .o-term {
   border-radius: 0;
-  background: var(--surface);
+  background: var(--term-bg);
   box-shadow: none;
 }
 
@@ -5459,15 +5515,6 @@ body.is-resizing {
  * A browser tab has no data-surface and keeps its bordered fields; its buttons
  * are .btn capsules there too. */
 
-:root[data-surface="orchestrator"] .o-pick-select {
-  min-height: 24px;
-  padding: 2px 10px;
-  border: none;
-  border-radius: 999px;
-  background-color: var(--glass-control);
-  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
-}
-
 :root[data-surface="board"] .newcard-title,
 :root[data-surface="board"] .newcard-repo,
 :root[data-surface="board"] .newcard-zone,
@@ -5482,7 +5529,6 @@ body.is-resizing {
 }
 
 /* A disabled capsule is not lit under the pointer. */
-:root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"] .newcard-repo:hover:not(:disabled),
 :root[data-surface="board"] .newcard-zone:hover:not(:disabled),
@@ -5517,7 +5563,6 @@ body.is-resizing {
 
 /* The closed select is drawn by the page, its chevron in the text's colour; the
    list it opens stays the system's menu. */
-:root[data-surface="orchestrator"] .o-pick-select,
 :root[data-surface="board"] .newcard-zone,
 :root[data-surface="board"] .newcard-executor {
   -webkit-appearance: none;
@@ -5557,7 +5602,6 @@ body.is-resizing {
 
 /* No glass: solid capsules with the border a column's controls have, and
    nothing blurred. */
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo,
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone,
@@ -5566,7 +5610,6 @@ body.is-resizing {
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),

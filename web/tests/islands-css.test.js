@@ -67,7 +67,7 @@ test("the orchestrator's terminal is the island's lower part, not a box inside i
   assert.match(term, /border-radius:\s*0/);
   assert.match(term, /box-shadow:\s*none/);
   // A terminal over glass has to be read in both themes: its ground stays dense.
-  assert.match(term, /background:\s*var\(--surface\)/);
+  assert.match(term, /background:\s*var\(--term-bg\)/);
   // The text keeps off the island's edges and its rounded bottom corners. The
   // fit addon takes .xterm's padding out of the room the terminal has.
   assert.match(ruleBody(':root[data-surface="orchestrator"] .o-term .xterm'), /padding:\s*0 10px 6px/);

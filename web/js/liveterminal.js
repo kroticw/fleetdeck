@@ -84,18 +84,53 @@ const encoder = new TextEncoder();
 // wiring test double, not a layout engine. Returning undefined here rather
 // than throwing lets those tests construct a terminal exactly as they did
 // before this function existed; the real page always has both.
-function terminalTheme() {
-  if (typeof getComputedStyle !== "function" || !document.documentElement) return undefined;
-  const style = getComputedStyle(document.documentElement);
-  const token = (name) => style.getPropertyValue(name).trim();
+function rootToken(name) {
+  if (typeof getComputedStyle !== "function" || !globalThis.document?.documentElement) return undefined;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// The terminal's own ground (--term-bg, --term-fg: the theme's, or always dark
+// when the look says so), its cursor the accent.
+export function terminalTheme() {
+  if (typeof getComputedStyle !== "function" || !globalThis.document?.documentElement) return undefined;
+  const background = rootToken("--term-bg");
   return {
-    background: token("--surface"),
-    foreground: token("--text"),
-    cursor: token("--accent"),
-    cursorAccent: token("--surface"),
-    selectionBackground: token("--surface-hover"),
+    background,
+    foreground: rootToken("--term-fg"),
+    cursor: rootToken("--accent"),
+    cursorAccent: background,
+    selectionBackground: rootToken("--surface-hover"),
   };
 }
+
+// The panel's monospace (--font-mono, JetBrains Mono), not xterm's Courier.
+export function terminalFontFamily() {
+  return rootToken("--font-mono") || undefined;
+}
+
+// Every terminal on the page, so a new theme, accent or terminal ground reaches
+// the ones already open. A disposed terminal leaves the set.
+const openTerminals = new Set();
+
+export function trackTerminal(terminal) {
+  openTerminals.add(terminal);
+  const dispose = terminal.dispose.bind(terminal);
+  terminal.dispose = () => {
+    openTerminals.delete(terminal);
+    dispose();
+  };
+  return terminal;
+}
+
+/** refreshTerminalThemes repaints every open terminal in the look shown now. */
+export function refreshTerminalThemes() {
+  const theme = terminalTheme();
+  if (!theme) return;
+  for (const terminal of openTerminals) terminal.options.theme = theme;
+}
+
+// A theme that follows the system changes with it, with no setting written.
+globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => refreshTerminalThemes());
 
 // defaultTerminalFactory builds an xterm.js terminal in `host`.
 //
@@ -110,6 +145,7 @@ function defaultTerminalFactory(host, fontSize) {
   const terminal = new Terminal({
     convertEol: true,
     fontSize,
+    fontFamily: terminalFontFamily(),
     scrollback: 2000,
     theme: terminalTheme(),
     // A Claude Code session turns on mouse tracking (the stream carries
@@ -118,7 +154,7 @@ function defaultTerminalFactory(host, fontSize) {
     macOptionClickForcesSelection: true,
   });
   terminal.open(host);
-  return terminal;
+  return trackTerminal(terminal);
 }
 
 // terminalFitter loads the fit addon into an opened terminal and returns a

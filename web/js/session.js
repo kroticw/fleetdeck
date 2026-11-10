@@ -30,27 +30,6 @@ import { t } from "./i18n.js";
 import { createLiveTerminal } from "./liveterminal.js";
 import { createRequests } from "./requests.js";
 import { FONT_KEYS } from "./terminalfont.js";
-import { buildFontControls } from "./fontcontrols.js";
-
-// The key buttons send bytes, not names.
-//
-// A button's bytes go into the live terminal's socket exactly as a keystroke
-// does, and from there into the session's PTY (internal/server/pty.go). There is
-// no translation layer anywhere between this table and the terminal, so sending
-// "up" would type the letters u and p into a live session instead of moving its
-// selection.
-export const KEYS = [
-  { id: "escape", label: "Esc", bytes: "" },
-  { id: "up", label: "↑", bytes: "[A" },
-  { id: "down", label: "↓", bytes: "[B" },
-  { id: "enter", label: "Enter", bytes: "\r" },
-  // Ctrl+O: Claude Code's own view of the whole conversation. It is the way to
-  // read what has scrolled off this screen and what came before the panel was
-  // opened, which the terminal is never sent — the daemon hands a new viewer
-  // the current screen, not the history. The same key takes it back. A word
-  // rather than a glyph, because no glyph says "the whole conversation".
-  { id: "transcript", labelKey: "key_transcript", hintKey: "key_transcript_hint", bytes: "" },
-];
 
 // historyKey is what tells the panel the session's cards may have changed: the
 // cards of this session the snapshot holds, with what can change about them.
@@ -91,7 +70,6 @@ export function renderSession(
   } = {},
 ) {
   let live = null;
-  let fontButtons = null;
   let nameLine = null;
   let cardsRow = null;
   let errorLine = null;
@@ -289,18 +267,9 @@ export function renderSession(
         actionError: showError,
         standing: paintNotice,
         ready: refreshName,
-        fontSize: (size) => fontButtons?.paint(size),
       },
     });
     live.open();
-  };
-
-  // Through the stream the terminal already holds, like any keystroke: a
-  // connection of its own per press would be an attach per press, and every
-  // attach resizes the session.
-  const pressKey = (key) => {
-    if (live) live.type(key.bytes);
-    else showError(t("terminal_not_connected"));
   };
 
   // Everything that goes with the panel: the subscription, the terminal's
@@ -319,12 +288,6 @@ export function renderSession(
 
     const head = el("div", "s-head");
 
-    // The size of the terminal's type (web/js/fontcontrols.js, the same buttons
-    // as the orchestrator column's). Built here, before the terminal is, and the
-    // same height as the rest of the header, so the header does not grow under a
-    // terminal that has already been fitted.
-    fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "s-font-btn" });
-
     // The header is where a person looks to find out what they are looking at,
     // and the keys at the foot of the panel say they are pressed in a live
     // session, which is only half an answer until the panel says which one.
@@ -342,7 +305,7 @@ export function renderSession(
       onClose();
     });
 
-    head.append(fontButtons.node, nameLine, close);
+    head.append(nameLine, close);
 
     cardsRow = el("div", "s-cards");
     drawCardsRow(el("span", "s-cards-loading", t("session_cards_loading")));
@@ -365,26 +328,7 @@ export function renderSession(
     noticeLine = el("div", "s-notice");
     noticeLine.hidden = true;
 
-    // The keys are not in the header, and this is the change the operator's
-    // first look at this panel bought. Drawn in the top-right corner beside ✕,
-    // they are in the exact place every window on the operator's machine puts
-    // controls that act on the window, and he read them as that and asked what
-    // they were for. They are not that: each one presses a key inside a Claude
-    // Code session running somewhere else, in work that is somebody's, and
-    // nothing takes it back. So they sit under the terminal they press into,
-    // under a label that names the destination.
-    const keys = el("div", "s-keys");
-    keys.appendChild(el("span", "s-keys-label", t("keys_to_session")));
-    for (const key of KEYS) {
-      const button = el("button", "btn btn-sm s-key", key.labelKey ? t(key.labelKey) : key.label);
-      button.type = "button";
-      button.dataset.key = key.id;
-      if (key.hintKey) button.title = t(key.hintKey);
-      button.addEventListener("click", () => pressKey(key));
-      keys.appendChild(button);
-    }
-
-    root.replaceChildren(head, cardsRow, body, errorLine, noticeLine, keys);
+    root.replaceChildren(head, cardsRow, body, errorLine, noticeLine);
     return host;
   };
 

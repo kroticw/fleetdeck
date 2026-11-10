@@ -1042,7 +1042,7 @@ test("an Escape a comment form or the session took is not a way back", async () 
   assert.deepEqual(back, [], "an Escape already handled closes the form only");
 });
 
-test("the card's session is mounted beside the diff, open, with its terminal and keys", async () => {
+test("the card's session is mounted beside the diff, open, with its terminal", async () => {
   const { renderReview } = await import("../js/review.js");
   const root = document.createElement("div");
   const s = withSession();
@@ -1057,14 +1057,13 @@ test("the card's session is mounted beside the diff, open, with its terminal and
   assert.equal(dock.dataset.open, "true", "open from the start: review and session are read together");
   assert.equal(dock.dataset.short, SHORT);
   assert.ok(dock.textContent.includes("which base?"), "the handle says what the session waits on");
-  assert.ok(dock.querySelector(".term-font"), "the terminal's own A−/px/A+");
+  assert.equal(dock.querySelector(".term-font"), null, "the terminal's size is a setting, not buttons on it");
   assert.deepEqual(
     s.made.map((m) => m.short),
     [SHORT],
     "one terminal, attached to the card's session",
   );
-  fireEvent(dock.querySelector(".s-key"), "click");
-  assert.equal(s.made[0].typed.length, 1, "the key row types into the session");
+  assert.equal(dock.querySelector(".s-key"), null, "keys go into the terminal itself");
 
   dispose();
   assert.equal(s.made[0].stopped, 1, "closing the review lets go of the terminal");
