@@ -103,7 +103,7 @@ func TestAStandSetsTheDeadlineTheSizeAndTheAppearance(t *testing.T) {
 // T-070: a stand's frame shows the new card form and the fleet menu's list
 // open at once, each on its own surface.
 func TestAStandOpensTheNewCardFormTheFleetMenuOrBoth(t *testing.T) {
-	for _, value := range []string{"newcard", "fleetmenu", "session", "newcard,fleetmenu", "newcard,session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip"} {
+	for _, value := range []string{"newcard", "session", "newcard,session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip"} {
 		s, err := standSettingsFrom("/tmp/stand/no-daemon.sock", func(n string) (string, bool) {
 			if n == standOpenEnv {
 				return value, true

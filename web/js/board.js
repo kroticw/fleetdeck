@@ -223,7 +223,29 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
 // healthy empty board (spec section 7's "degrade in parts, never silently").
 // snap?.boardError rather than snap.boardError so this still falls through
 // to the normal empty-columns render when snap itself is null.
-export function render(root, snap) {
+// The markup last written into each board. The same markup is not written
+// again: a snapshot comes every second, and columns drawn anew between a press
+// and its release replace the card under the pointer, so the click never
+// happens (T-226). Answers whether it wrote.
+const written = new WeakMap();
+
+function writeOnce(root, html) {
+  if (written.get(root) === html) return false;
+  written.set(root, html);
+  root.innerHTML = html;
+  return true;
+}
+
+// cardMatches is whether a card has query in its number or its title, whatever
+// the case: the board's "Find card" (T-226). An empty query finds every card.
+export function cardMatches(card, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return `${card.id ?? ""} ${card.title ?? ""}`.toLowerCase().includes(q);
+}
+
+// query, when given, is "Find card": only the cards it finds are drawn.
+export function render(root, snap, { query = "" } = {}) {
   // A card being dragged is held by the browser as the element the gesture
   // started on. Replacing #board's children mid-gesture therefore ends the
   // drag, and the card is left in the column it came from with no sign of
@@ -234,11 +256,11 @@ export function render(root, snap) {
   if (root.dataset?.dragging) return;
 
   if (snap?.boardError) {
-    root.innerHTML = `<div class="kerror">${escapeHTML(snap.boardError)}</div>`;
+    writeOnce(root, `<div class="kerror">${escapeHTML(snap.boardError)}</div>`);
     return;
   }
 
-  const cards = snap?.cards ?? [];
+  const cards = (snap?.cards ?? []).filter((card) => cardMatches(card, query));
   const orphanPaths = new Set(snap?.orphanCards ?? []);
   const stoppedPaths = new Set(snap?.stoppedCards ?? []);
 
@@ -262,7 +284,10 @@ export function render(root, snap) {
     if (column.scrollTop > 0) scrolled.set(column.dataset.stage, column.scrollTop);
   }
 
-  root.innerHTML = columns + otherColumn;
+  if (!writeOnce(root, columns + otherColumn)) {
+    markScrollable(root);
+    return;
+  }
 
   for (const column of root.querySelectorAll(":scope > .kcol")) {
     const top = scrolled.get(column.dataset.stage);
@@ -387,6 +412,8 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   const failed = new Map();
   const ghosts = [];
   let ghostCount = 0;
+  // What "Find card" holds; "" draws every card.
+  let query = "";
   // The card being dragged, while one is. render reads the same state off
   // root.dataset and skips the frame; this holds what the drop needs to know.
   let dragging = null;
@@ -413,7 +440,7 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
     // through the board, which scrolls in a browser tab.
     const clipOf = (n) => intersect(root.getBoundingClientRect(), n.closest(".kcol").getBoundingClientRect());
     const before = capture(cards(), { ...flipKeys, clipOf });
-    render(root, ghosts.length ? { ...view, creating: ghosts } : view);
+    render(root, ghosts.length ? { ...view, creating: ghosts } : view, { query });
     play(before, cards(), { ...flipKeys, viewport: viewportOf(), clipOf, reduced: reducedMotion() });
   };
   // Drawn again when a mark runs out, for a board no snapshot reaches in the
@@ -557,9 +584,12 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // dragend fires whatever ended the gesture — a drop, Escape, a release over
   // nothing — so the board is drawn again from here rather than from drop
   // alone, which a cancelled drag never reaches.
-  root.addEventListener("dragend", () => {
+  root.addEventListener("dragend", (ev) => {
     hold(null);
     unlight();
+    // A drag that moved nothing draws the same columns, which render leaves as
+    // they are: the card's own mark goes here.
+    ev.target?.closest?.(".kcard")?.classList?.remove?.("kcard-dragging");
     draw();
   });
 
@@ -578,6 +608,12 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // created with the card's path, which the snapshot is then watched for, or
   // failed, which takes it off (the form reopens with what was typed).
   return {
+    // find draws only the cards query finds: the board head's "Find card".
+    find(next) {
+      if (next === query) return;
+      query = next;
+      draw();
+    },
     creating(title, zone) {
       ghostCount += 1;
       const ghost = { id: ghostCount, title, zone, since: Date.now() };

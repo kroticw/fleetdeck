@@ -55,20 +55,19 @@ var floatingPanels = map[string]bool{"newCard": true, "fleetList": true, "update
 var accents = map[string]bool{"newCardCreate": true}
 
 // islandHead is what the orchestrator island's head always shows unfolded.
-var islandHead = []string{"editPencil", "fleetButton"}
+// The fleet's menu is the window's bar's now, a system menu (T-226).
+var islandHead = []string{"editPencil"}
 
 // opened is what each thing a stand opens has to report, by surface.
 var opened = map[string]struct {
 	surface string
 	names   []string
 }{
-	"newcard":   {"board", []string{"newCard", "newCardTitle", "newCardZone", "newCardCreate", "newCardClose"}},
-	"fleetmenu": {"orchestrator", []string{"fleetList"}},
+	"newcard": {"board", []string{"newCard", "newCardTitle", "newCardZone", "newCardCreate", "newCardClose"}},
 	// The update panel over the orchestrator's terminal (updatecontrol.go).
-	"check-checking":  {"orchestrator", []string{"updatePanel"}},
-	"check-latest":    {"orchestrator", []string{"updatePanel"}},
-	"check-failed":    {"orchestrator", []string{"updatePanel"}},
-	"check-available": {"orchestrator", []string{"updatePanel"}},
+	"check-checking": {"orchestrator", []string{"updatePanel"}},
+	"check-latest":   {"orchestrator", []string{"updatePanel"}},
+	"check-failed":   {"orchestrator", []string{"updatePanel"}},
 }
 
 // openList is FLEETDECK_STAND_OPEN as the window reads it: names, comma-separated.

@@ -1,16 +1,15 @@
-// The capsule row: tabs, new card, theme and limits as system controls in
-// glass, drawn from the board's model (capsulemodel.go). Raw runtime calls, as
+// The bar across the window's top: the brand, the fleet with its menu, the
+// limits, the update, the counters and the theme, as system controls in glass,
+// drawn from the board's model (capsulemodel.go). Raw runtime calls, as
 // frame_darwin.c.
 //
-// The row is one NSGlassEffectContainerView, the size of the row, so the glass
-// of neighbouring capsules merges (spec 5.1). It passes a click on to the board
-// wherever no capsule is under the pointer: the gaps between capsules are over
-// the board.
+// The row is one NSGlassEffectContainerView across the bar, so the glass of
+// neighbouring capsules merges (spec 5.1). It passes a click on wherever no
+// capsule is under the pointer: the gaps are the band the window is dragged by.
 //
-// A row too narrow for every capsule compacts, and never lets two capsules
-// overlap: first the limits become one capsule of text, then the theme becomes
-// its icon. The tabs and the new card button are always whole. The row's
-// narrowest form is its minimum, which the window keeps room for.
+// A row too narrow for every part hides the counters, and never lets two parts
+// overlap. The row's narrowest form is its minimum, which the window keeps room
+// for.
 #include "capsules_darwin.h"
 
 #include "_cgo_export.h"
@@ -78,31 +77,50 @@ static int respondsTo(id object, const char *selector) {
   return ((signed char (*)(id, SEL, SEL))objc_msgSend)(object, sel("respondsToSelector:"), sel(selector)) != 0;
 }
 
+
+static id sendDouble1(id recv, SEL s, double v) { return ((id (*)(id, SEL, double))objc_msgSend)(recv, s, v); }
+
 // --- what the last draw made -----------------------------------------------------
 
-enum { tagTabs = 1, tagNewCard = 2, tagTheme = 3, tagLimits = 4 };
+enum { tagFleet = 1, tagLimits = 2, tagUpdate = 3, tagTheme = 4 };
+// Menu items: a fleet's index, or one of these.
+enum { itemAll = -1, itemAdd = -2, itemSources = -3 };
 
-#define maxTabs 8
 #define maxLimits 8
+#define maxCounters 4
+#define maxFleets 32
 
-// The tabs' ids for a press; the controls and their capsules, for placing them
-// as the row's width changes and for the tests to read. Every capsule is the
-// row's subview, so a cleared row takes them all and they are forgotten here.
-static char *tabIDsDrawn[maxTabs];
-static int tabsDrawn;
+// The parts and their controls, for placing them as the row's width changes and
+// for the tests to read. Every capsule is the row's subview, so a cleared row
+// takes them all and they are forgotten here.
 static id rowDrawn;
-static id segmentedDrawn, newCardDrawn, themeDrawn, themeIconDrawn, compactLabelDrawn;
-// The limits menu's chevrons: on the last limit, and on the compact limits.
-static id limitsChevronDrawn, compactChevronDrawn;
+static id brandView, fleetCapsule, limitsCapsule, updateCapsule, themeCapsule;
+static id counterViews[maxCounters];
+static int countersDrawn;
+static id brandIconDrawn, brandNameDrawn, brandVersionDrawn;
+static id fleetDotDrawn, fleetNameDrawn, fleetOpenerDrawn;
+static id limitsLabelDrawn, busyNameDrawn, busyTextDrawn, limitsOpenerDrawn;
 static id dotsDrawn[maxLimits];
-static id tabsCapsule, newCardCapsule, compactCapsule, themeCapsule, themeIconCapsule;
-static id limitCapsules[maxLimits];
 static int limitsDrawn;
-// capsulesDrawn: how many capsules the row shows.
+static id updateTextDrawn, updateButtonDrawn;
+static id counterTextsDrawn[maxCounters], counterDotsDrawn[maxCounters];
+static int counterHollowDrawn[maxCounters];
+static id themeDrawn;
+// The fleet's menu, built at each press from what the last draw had.
+static char *fleetNamesDrawn[maxFleets];
+static int fleetWaitingDrawn[maxFleets], fleetCurrentDrawn[maxFleets], fleetsDrawn;
+static char *fleetAllDrawn, *fleetAddDrawn;
+// capsulesDrawn: how many parts the row shows.
 static int capsulesDrawn;
 
 static void placeCapsules(double rowWidth);
 static id appAppearance(void);
+static void showFleetMenu(void);
+
+static char *keep(char *old, const char *s) {
+  free(old);
+  return strdup(s ? s : "");
+}
 
 // --- the row: a container that lets clicks through its gaps ---------------------
 
@@ -145,28 +163,73 @@ static Class rowClass(void) {
 
 // --- presses -------------------------------------------------------------------
 
+static const char *themeChoices[3] = {"light", "system", "dark"};
+
+static void pressWith(const char *prefix, const char *rest) {
+  char action[256];
+  snprintf(action, sizeof action, "%s%s", prefix, rest);
+  fleetdeckCapsulePressed(action);
+}
+
+// The limits capsule's menu as the last draw built it, or nil for a page that
+// sent none; kept while the row is.
+static id limitsMenuDrawn;
+static void showMenuUnder(id menu, id under);
+
+// The limits press opens the capsule's system menu under it, over every panel:
+// the page's popover lay in the board's web view, under the orchestrator panel
+// (T-226). A page that sent no menu gets the press with where the capsule is,
+// "limits:<left>,<bottom>", in points from the window content's top left.
+static void pressLimits(void) {
+  if (limitsMenuDrawn && limitsCapsule) {
+    showMenuUnder(limitsMenuDrawn, limitsCapsule);
+    return;
+  }
+  if (!limitsCapsule || !send0(limitsCapsule, sel("window"))) {
+    fleetdeckCapsulePressed((char *)"limits");
+    return;
+  }
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(limitsCapsule, sel("convertRect:toView:"),
+                                                            sendRect0(limitsCapsule, sel("bounds")), (id)0);
+  double height = sendRect0(send0(send0(limitsCapsule, sel("window")), sel("contentView")), sel("bounds")).size.height;
+  char action[64];
+  snprintf(action, sizeof action, "limits:%g,%g", r.origin.x, height - r.origin.y);
+  fleetdeckCapsulePressed(action);
+}
+
 static void capsulePressed(id self, SEL _cmd, id sender) {
   (void)self;
   (void)_cmd;
   switch (sendLong0(sender, sel("tag"))) {
-    case tagTabs: {
-      long i = sendLong0(sender, sel("selectedSegment"));
-      if (i < 0 || i >= tabsDrawn) return;
-      char action[64];
-      strcpy(action, "tab:");
-      strncat(action, tabIDsDrawn[i], sizeof action - strlen(action) - 1);
-      fleetdeckCapsulePressed(action);
-      return;
-    }
-    case tagNewCard:
-      fleetdeckCapsulePressed((char *)"newCard");
-      return;
-    case tagTheme:
-      fleetdeckCapsulePressed((char *)"theme");
+    case tagFleet:
+      showFleetMenu();
       return;
     case tagLimits:
-      fleetdeckCapsulePressed((char *)"limits");
+      pressLimits();
       return;
+    case tagUpdate:
+      fleetdeckCapsulePressed((char *)"update");
+      return;
+    case tagTheme: {
+      long i = sendLong0(sender, sel("selectedSegment"));
+      if (i >= 0 && i < 3) pressWith("theme:", themeChoices[i]);
+      return;
+    }
+  }
+}
+
+static void menuPicked(id self, SEL _cmd, id item) {
+  (void)self;
+  (void)_cmd;
+  long tag = sendLong0(item, sel("tag"));
+  if (tag == itemAll) {
+    fleetdeckCapsulePressed((char *)"fleets");
+  } else if (tag == itemAdd) {
+    fleetdeckCapsulePressed((char *)"newFleet");
+  } else if (tag == itemSources) {
+    fleetdeckCapsulePressed((char *)"limitSources");
+  } else if (tag >= 0 && tag < fleetsDrawn) {
+    pressWith("fleet:", fleetNamesDrawn[tag]);
   }
 }
 
@@ -175,33 +238,115 @@ static id target(void) {
   if (instance) return instance;
   Class klass = objc_allocateClassPair((Class)objc_getClass("NSObject"), "FleetdeckCapsuleTarget", 0);
   class_addMethod(klass, sel("pressed:"), (IMP)capsulePressed, "v@:@");
+  class_addMethod(klass, sel("picked:"), (IMP)menuPicked, "v@:@");
   objc_registerClassPair(klass);
   instance = send0((id)klass, sel("new"));
   return instance;
 }
 
+// --- the fleet's menu ------------------------------------------------------------
+
+// The tests keep the menu instead of showing it: a shown menu runs its own loop
+// until it is dismissed.
+static int captureMenus;
+static id menuCaptured, menuCapturedUnder;
+static CGPoint menuCapturedAt;
+
+static id menuItem(const char *title, long tag) {
+  id item = ((id (*)(id, SEL, id, SEL, id))objc_msgSend)(send0(cls("NSMenuItem"), sel("alloc")),
+                                                         sel("initWithTitle:action:keyEquivalent:"), nsstring(title),
+                                                         sel("picked:"), nsstring(""));
+  sendVoid1(item, sel("setTarget:"), target());
+  sendVoidLong(item, sel("setTag:"), tag);
+  return item;
+}
+
+static void addItem(id menu, id item) {
+  sendVoid1(menu, sel("addItem:"), item);
+  sendVoid0(item, sel("release"));
+}
+
+// Every fleet, the one shown checked and the waiting ones with their count as
+// the item's badge (macOS 14) or in its title before it; then All and Add.
+static id fleetMenu(void) {
+  id menu = send1(send0(cls("NSMenu"), sel("alloc")), sel("initWithTitle:"), nsstring(""));
+  sendVoidBool(menu, sel("setAutoenablesItems:"), 0);
+  id badgeClass = cls("NSMenuItemBadge");
+  for (int i = 0; i < fleetsDrawn; i++) {
+    char title[300];
+    snprintf(title, sizeof title, "%s", fleetNamesDrawn[i]);
+    if (fleetWaitingDrawn[i] > 0 && !badgeClass) {
+      snprintf(title, sizeof title, "%s  (%d)", fleetNamesDrawn[i], fleetWaitingDrawn[i]);
+    }
+    id item = menuItem(title, i);
+    sendVoidLong(item, sel("setState:"), fleetCurrentDrawn[i] ? 1 : 0);
+    if (fleetWaitingDrawn[i] > 0 && badgeClass && respondsTo(item, "setBadge:")) {
+      id badge = ((id (*)(id, SEL, long))objc_msgSend)(send0(badgeClass, sel("alloc")), sel("initWithCount:"),
+                                                       (long)fleetWaitingDrawn[i]);
+      sendVoid1(item, sel("setBadge:"), badge);
+      sendVoid0(badge, sel("release"));
+    }
+    addItem(menu, item);
+  }
+  sendVoid1(menu, sel("addItem:"), send0(cls("NSMenuItem"), sel("separatorItem")));
+  addItem(menu, menuItem(fleetAllDrawn, itemAll));
+  addItem(menu, menuItem(fleetAddDrawn, itemAdd));
+  return menu;
+}
+
+// A menu opens under its capsule, its left edge on the capsule's: in 1.8.0 the
+// page's menus opened at the right of their buttons.
+static void showMenuUnder(id menu, id under) {
+  CGRect b = sendRect0(under, sel("bounds"));
+  int flipped = ((signed char (*)(id, SEL))objc_msgSend)(under, sel("isFlipped")) != 0;
+  CGPoint at = CGPointMake(0, flipped ? b.size.height + 6 : -6);
+  if (captureMenus) {
+    if (menuCaptured) sendVoid0(menuCaptured, sel("release"));
+    menuCaptured = send0(menu, sel("retain"));
+    menuCapturedUnder = under;
+    menuCapturedAt = ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(under, sel("convertPoint:toView:"), at, (id)0);
+    return;
+  }
+  ((signed char (*)(id, SEL, id, CGPoint, id))objc_msgSend)(menu, sel("popUpMenuPositioningItem:atLocation:inView:"),
+                                                            (id)0, at, under);
+}
+
+static void showFleetMenu(void) {
+  if (!fleetCapsule) return;
+  id menu = fleetMenu();
+  showMenuUnder(menu, fleetCapsule);
+  sendVoid0(menu, sel("release"));
+}
+
 // --- capsules ------------------------------------------------------------------
 
 static const double capsuleHeight = 32, capsulePadding = 12, capsuleGap = 8;
+static const double pillHeight = 24, pillPadding = 10;
+// The bar's right margin past the row (geometry.go panelMargin).
+static const double rowRightMargin = 10;
+
+// A view holding content, as wide as content fits plus padding on either side,
+// height tall, content centred in it.
+static id holderFor(id content, double padding, double height) {
+  CGSize fit = fittingSize(content);
+  id holder = initWithFrame(cls("NSView"), CGRectMake(0, 0, fit.width + 2 * padding, height));
+  sendVoidRect(content, sel("setFrame:"), CGRectMake(padding, (height - fit.height) / 2, fit.width, fit.height));
+  sendVoid1(holder, sel("addSubview:"), content);
+  return holder;
+}
 
 // A capsule of the row's material around content, width fitted to it with
 // padding on either side. The row places it (placeCapsules); it never moves by
 // autoresizing.
-static id capsule(const char *mode, id content, double x, double padding) {
-  CGSize fit = fittingSize(content);
-  CGRect frame = CGRectMake(x, 0, fit.width + 2 * padding, capsuleHeight);
-  CGRect inner = CGRectMake(padding, (capsuleHeight - fit.height) / 2, fit.width, fit.height);
+static id capsule(const char *mode, id content, double padding) {
+  id holder = holderFor(content, padding, capsuleHeight);
+  CGRect frame = sendRect0(holder, sel("frame"));
   id wrapper;
-  id holder = initWithFrame(cls("NSView"), CGRectMake(0, 0, frame.size.width, frame.size.height));
-  sendVoidRect(content, sel("setFrame:"), inner);
-  sendVoid1(holder, sel("addSubview:"), content);
   if (strcmp(mode, "glass") == 0 && cls("NSGlassEffectView")) {
     // The control is the glass's content: only NSGlassEffectView's contentView
     // is drawn inside the glass. In v0.10.0 the control lay beside the glass in
     // a plain view, and the row's NSGlassEffectContainerView, which draws its
     // glass in a view above its own content, drew the glass over the labels.
-    // The reason for moving it out was a hit test on a window never laid out,
-    // where the content view had no size yet; laid out, a click reaches it.
     wrapper = initWithFrame(cls("NSGlassEffectView"), frame);
     sendVoidLong(wrapper, sel("setStyle:"), 0);
     sendVoidDouble(wrapper, sel("setCornerRadius:"), capsuleHeight / 2);
@@ -250,24 +395,16 @@ static id button(const char *title, long tag) {
   return b;
 }
 
-// The button that opens the limits menu; what it says to a pointer and to
-// VoiceOver is the limits in full.
-static id limitsChevron(const char *description) {
-  id b = button("▾", tagLimits);
-  sendVoid1(b, sel("setToolTip:"), nsstring(description));
-  sendVoid1(b, sel("setAccessibilityLabel:"), nsstring(description));
-  return b;
-}
-
-// A capsule that opens the limits menu from anywhere on it: a transparent
-// button over the whole capsule, its content drawn underneath. The chevron is
-// only a mark; it was the only control, and too small to hit.
-static id coverWithOpener(id wrapper, const char *description) {
+// A capsule that is one control from anywhere on it: a transparent button over
+// the whole capsule, its content drawn underneath. What it says to a pointer and
+// to VoiceOver is description.
+static id coverWithOpener(id wrapper, long tag, const char *description) {
   id holder = respondsTo(wrapper, "contentView") ? send0(wrapper, sel("contentView"))
                                                  : send0(send0(wrapper, sel("subviews")), sel("firstObject"));
-  id opener = limitsChevron(description);
-  sendVoid1(opener, sel("setTitle:"), nsstring(""));
+  id opener = button("", tag);
   sendVoidBool(opener, sel("setTransparent:"), 1);
+  sendVoid1(opener, sel("setToolTip:"), nsstring(description));
+  sendVoid1(opener, sel("setAccessibilityLabel:"), nsstring(description));
   sendVoidRect(opener, sel("setFrame:"), sendRect0(holder, sel("bounds")));
   sendVoidLong(opener, sel("setAutoresizingMask:"), 18);
   sendVoid1(holder, sel("addSubview:"), opener);
@@ -278,81 +415,110 @@ static id label(const char *text) {
   return send1(cls("NSTextField"), sel("labelWithString:"), nsstring(text));
 }
 
-static id row(id views[], int count) {
+static id systemFont(double size, double weight) {
+  return ((id (*)(id, SEL, double, double))objc_msgSend)(cls("NSFont"), sel("systemFontOfSize:weight:"), size, weight);
+}
+
+static id monoFont(double size) {
+  const char *s = respondsTo(cls("NSFont"), "monospacedSystemFontOfSize:weight:") ? "monospacedSystemFontOfSize:weight:"
+                                                                                  : "monospacedDigitSystemFontOfSize:weight:";
+  return ((id (*)(id, SEL, double, double))objc_msgSend)(cls("NSFont"), sel(s), size, 0.0);
+}
+
+// A label in font, coloured colour when there is one.
+static id styled(const char *text, id font, id colour) {
+  id l = label(text);
+  if (font) sendVoid1(l, sel("setFont:"), font);
+  if (colour) sendVoid1(l, sel("setTextColor:"), colour);
+  return l;
+}
+
+static id systemColour(const char *name) { return send0(cls("NSColor"), sel(name)); }
+
+static id row(id views[], int count, double spacing) {
   id array = ((id (*)(id, SEL, id *, unsigned long))objc_msgSend)(cls("NSArray"), sel("arrayWithObjects:count:"), views,
                                                                   (unsigned long)count);
   id stack = send1(cls("NSStackView"), sel("stackViewWithViews:"), array);
   sendVoidLong(stack, sel("setOrientation:"), 0);  // horizontal
-  sendVoidDouble(stack, sel("setSpacing:"), 6);
+  sendVoidDouble(stack, sel("setSpacing:"), spacing);
   return stack;
 }
 
 // rgb is three components (0..1), or -1 first for no colour.
-static id srgb(const double *rgb) {
-  if (rgb[0] < 0) return (id)0;
+static id srgba(const double *rgb, double alpha) {
+  if (!rgb || rgb[0] < 0) return (id)0;
   return ((id (*)(id, SEL, double, double, double, double))objc_msgSend)(
-      cls("NSColor"), sel("colorWithSRGBRed:green:blue:alpha:"), rgb[0], rgb[1], rgb[2], 1.0);
+      cls("NSColor"), sel("colorWithSRGBRed:green:blue:alpha:"), rgb[0], rgb[1], rgb[2], alpha);
 }
 
-static double widthOf(id capsuleView) { return capsuleView ? sendRect0(capsuleView, sel("frame")).size.width : 0; }
+static id srgb(const double *rgb) { return srgba(rgb, 1.0); }
 
-static void put(id capsuleView, double x, int shown) {
-  if (!capsuleView) return;
-  sendVoidPoint(capsuleView, sel("setFrameOrigin:"), CGPointMake(x, 0));
-  sendVoidBool(capsuleView, sel("setHidden:"), shown ? 0 : 1);
+static double widthOf(id view) { return view ? sendRect0(view, sel("frame")).size.width : 0; }
+
+static void put(id view, double x, int shown) {
+  if (!view) return;
+  sendVoidPoint(view, sel("setFrameOrigin:"), CGPointMake(x, sendRect0(view, sel("frame")).origin.y));
+  sendVoidBool(view, sel("setHidden:"), shown ? 0 : 1);
   if (shown) capsulesDrawn++;
 }
 
-// The tabs and the new card button, as wide as they always are.
-static double leftWidth(void) { return widthOf(tabsCapsule) + capsuleGap + widthOf(newCardCapsule); }
+// The width of views side by side with the row's gaps between; nil ones take
+// no room.
+static double groupWidth(id views[], int count) {
+  double w = 0;
+  int shown = 0;
+  for (int i = 0; i < count; i++) {
+    if (!views[i]) continue;
+    w += (shown++ ? capsuleGap : 0) + widthOf(views[i]);
+  }
+  return w;
+}
 
-// The compact limits and their gap to the theme, or nothing with no limits.
-static double compactWidth(void) { return limitsDrawn > 0 ? widthOf(compactCapsule) + capsuleGap : 0; }
+static double leftWidth(void) {
+  id left[4] = {brandView, fleetCapsule, limitsCapsule, updateCapsule};
+  return groupWidth(left, 4);
+}
 
-// placeCapsules lays the row out in rowWidth: the tabs and the new card button
-// from the left edge, the limits and the theme from the right, in the widest of
-// three forms that leaves a gap between the two groups -- every limit and the
-// theme's label; the compact limits and the theme's label; the compact limits
-// and the theme's icon. The last is the row's minimum, and is what is left when
-// even it does not fit.
+static double groupsWidth(double left, double right) { return left + (left > 0 && right > 0 ? capsuleGap : 0) + right; }
+
+// placeCapsules lays the row out in rowWidth: the brand, the fleet, the limits
+// and the update from the left edge; the theme at the right edge and the
+// counters before it. A row with no room for the counters hides them; that is
+// its minimum, and what is left when even it does not fit.
 static void placeCapsules(double rowWidth) {
   if (!rowDrawn) return;
   // The row's width is the frame's arithmetic in floating point: a row laid out
   // at exactly a form's width still fits it.
   const double slack = 0.01;
-  double full = widthOf(themeCapsule);
-  for (int i = 0; i < limitsDrawn; i++) full += widthOf(limitCapsules[i]) + capsuleGap;
-  int stage = 2;
-  if (leftWidth() + capsuleGap + full <= rowWidth + slack) {
-    stage = 0;
-  } else if (leftWidth() + capsuleGap + compactWidth() + widthOf(themeCapsule) <= rowWidth + slack) {
-    stage = 1;
-  }
-  capsulesDrawn = 0;
-  put(tabsCapsule, 0, 1);
-  put(newCardCapsule, widthOf(tabsCapsule) + capsuleGap, 1);
+  id right[maxCounters + 1];
+  int n = 0;
+  for (int i = 0; i < countersDrawn; i++) right[n++] = counterViews[i];
+  right[n++] = themeCapsule;
+  int counters = groupsWidth(leftWidth(), groupWidth(right, n)) <= rowWidth + slack;
 
-  // From the right edge leftwards: the last limit first, the theme last.
-  double right = rowWidth;
-  for (int i = limitsDrawn - 1; i >= 0; i--) {
-    if (stage == 0) {
-      right -= widthOf(limitCapsules[i]);
-      put(limitCapsules[i], right, 1);
-      right -= capsuleGap;
-    } else {
-      put(limitCapsules[i], 0, 0);
+  capsulesDrawn = 0;
+  id left[4] = {brandView, fleetCapsule, limitsCapsule, updateCapsule};
+  double x = 0;
+  for (int i = 0; i < 4; i++) {
+    if (!left[i]) continue;
+    put(left[i], x, 1);
+    x += widthOf(left[i]) + capsuleGap;
+  }
+  double edge = rowWidth;
+  if (themeCapsule) {
+    edge -= widthOf(themeCapsule);
+    put(themeCapsule, edge, 1);
+    edge -= capsuleGap;
+  }
+  for (int i = countersDrawn - 1; i >= 0; i--) {
+    if (!counters) {
+      put(counterViews[i], 0, 0);
+      continue;
     }
+    edge -= widthOf(counterViews[i]);
+    put(counterViews[i], edge, 1);
+    edge -= capsuleGap;
   }
-  if (stage > 0 && compactCapsule) {
-    right -= widthOf(compactCapsule);
-    put(compactCapsule, right, 1);
-    right -= capsuleGap;
-  } else {
-    put(compactCapsule, 0, 0);
-  }
-  id theme = stage == 2 ? themeIconCapsule : themeCapsule;
-  put(stage == 2 ? themeCapsule : themeIconCapsule, 0, 0);
-  put(theme, right - widthOf(theme), 1);
 }
 
 // --- the app's appearance -------------------------------------------------------
@@ -406,22 +572,268 @@ void fd_capsules_clear(void *container) {
   }
   sendVoid0(old, sel("release"));
   rowDrawn = (id)0;
-  segmentedDrawn = newCardDrawn = themeDrawn = themeIconDrawn = compactLabelDrawn = (id)0;
-  limitsChevronDrawn = compactChevronDrawn = (id)0;
-  tabsCapsule = newCardCapsule = compactCapsule = themeCapsule = themeIconCapsule = (id)0;
-  for (int i = 0; i < maxLimits; i++) limitCapsules[i] = dotsDrawn[i] = (id)0;
-  limitsDrawn = 0;
+  brandView = fleetCapsule = limitsCapsule = updateCapsule = themeCapsule = (id)0;
+  if (limitsMenuDrawn) sendVoid0(limitsMenuDrawn, sel("release"));
+  limitsMenuDrawn = (id)0;
+  brandIconDrawn = brandNameDrawn = brandVersionDrawn = (id)0;
+  fleetDotDrawn = fleetNameDrawn = fleetOpenerDrawn = (id)0;
+  limitsLabelDrawn = busyNameDrawn = busyTextDrawn = limitsOpenerDrawn = (id)0;
+  updateTextDrawn = updateButtonDrawn = themeDrawn = (id)0;
+  for (int i = 0; i < maxLimits; i++) dotsDrawn[i] = (id)0;
+  for (int i = 0; i < maxCounters; i++) counterViews[i] = counterTextsDrawn[i] = counterDotsDrawn[i] = (id)0;
+  limitsDrawn = countersDrawn = 0;
   capsulesDrawn = 0;
   // No row, nothing for the window to keep room for.
   setMinContentWidth(send0((id)container, sel("window")), 0);
   objc_autoreleasePoolPop(pool);
 }
 
-double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, const char **tabLabels, int tabCount,
-                        int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
-                        const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount,
-                        const char *compactText, const char *compactTooltip, const double *compactRGB,
-                        const double *accentRGB, double frameMinWidth) {
+// --- the parts -----------------------------------------------------------------
+
+// The app's icon, its name and its version: no capsule, as the page drew it.
+static id drawBrand(const fd_bar *bar) {
+  id views[3];
+  int n = 0;
+  id app = send0(cls("NSApplication"), sel("sharedApplication"));
+  id icon = send0(app, sel("applicationIconImage"));
+  if (icon && respondsTo(cls("NSImageView"), "imageViewWithImage:")) {
+    brandIconDrawn = send1(cls("NSImageView"), sel("imageViewWithImage:"), icon);
+    sendVoidLong(brandIconDrawn, sel("setImageScaling:"), 3);  // proportionally up or down
+    sendVoidBool(brandIconDrawn, sel("setTranslatesAutoresizingMaskIntoConstraints:"), 0);
+    views[n++] = brandIconDrawn;
+  }
+  brandNameDrawn = styled(bar->brandName, systemFont(14, 0.3), (id)0);
+  views[n++] = brandNameDrawn;
+  brandVersionDrawn = styled(bar->brandVersion, monoFont(11), systemColour("tertiaryLabelColor"));
+  views[n++] = brandVersionDrawn;
+  id content = row(views, n, 8);
+  if (brandIconDrawn) {
+    for (int i = 0; i < 2; i++) {
+      id anchor = send0(brandIconDrawn, sel(i == 0 ? "widthAnchor" : "heightAnchor"));
+      id c = sendDouble1(anchor, sel("constraintEqualToConstant:"), 24);
+      sendVoidBool(c, sel("setActive:"), 1);
+    }
+  }
+  id holder = holderFor(content, 4, capsuleHeight);
+  return holder;
+}
+
+static id drawFleet(const fd_bar *bar) {
+  fleetDotDrawn = styled("■", systemFont(9, 0), srgb(bar->accentRGB));
+  fleetNameDrawn = label(bar->fleetName);
+  id views[3] = {fleetDotDrawn, fleetNameDrawn, label("▾")};
+  id c = capsule(bar->mode, row(views, 3, 7), capsulePadding);
+  fleetOpenerDrawn = coverWithOpener(c, tagFleet, bar->fleetLabel);
+  fleetsDrawn = bar->fleetCount < maxFleets ? bar->fleetCount : maxFleets;
+  for (int i = 0; i < fleetsDrawn; i++) {
+    fleetNamesDrawn[i] = keep(fleetNamesDrawn[i], bar->fleetNames[i]);
+    fleetWaitingDrawn[i] = bar->fleetWaiting[i];
+    fleetCurrentDrawn[i] = bar->fleetCurrent[i];
+  }
+  fleetAllDrawn = keep(fleetAllDrawn, bar->fleetAll);
+  fleetAddDrawn = keep(fleetAddDrawn, bar->fleetAdd);
+  return c;
+}
+
+// The limits' word, a dot per limit in its level's colour -- a level indicator
+// drew nothing on glass -- and the busiest one's name and number in its colour.
+// The whole capsule opens the limits menu.
+static id drawLimits(const fd_bar *bar) {
+  limitsDrawn = bar->limitCount < maxLimits ? bar->limitCount : maxLimits;
+  if (limitsDrawn == 0) return (id)0;
+  id dots[maxLimits];
+  for (int i = 0; i < limitsDrawn; i++) {
+    dotsDrawn[i] = styled("●", systemFont(8, 0), srgb(&bar->limitRGB[3 * i]));
+    dots[i] = dotsDrawn[i];
+  }
+  limitsLabelDrawn = styled(bar->limitsLabel, (id)0, systemColour("secondaryLabelColor"));
+  busyNameDrawn = label(bar->busyName);
+  busyTextDrawn = styled(bar->busyText, monoFont(11.5), srgb(bar->busyRGB));
+  id views[5] = {limitsLabelDrawn, row(dots, limitsDrawn, 3), busyNameDrawn, busyTextDrawn, label("▾")};
+  id c = capsule(bar->mode, row(views, 5, 7), capsulePadding);
+  limitsOpenerDrawn = coverWithOpener(c, tagLimits, bar->limitsTooltip);
+  return c;
+}
+
+// --- the limits menu -------------------------------------------------------------
+
+static const double menuWidth = 320;
+
+// A label at r in a menu item's view, cut at its end; right aligned when asked.
+static id textAt(id view, const char *text, id font, id colour, CGRect r, int right) {
+  id l = styled(text, font, colour);
+  sendVoidLong(l, sel("setLineBreakMode:"), 4);  // truncate the tail
+  if (right) sendVoidLong(l, sel("setAlignment:"), 1);  // NSTextAlignmentRight
+  sendVoidRect(l, sel("setFrame:"), r);
+  sendVoid1(view, sel("addSubview:"), l);
+  return l;
+}
+
+// A plain view's layer filled with colour, resolved in the app's appearance as
+// an opaque capsule's background is.
+static id filled(id view, CGRect r, id colour) {
+  id v = initWithFrame(cls("NSView"), r);
+  sendVoidBool(v, sel("setWantsLayer:"), 1);
+  id layer = send0(v, sel("layer"));
+  sendVoidDouble(layer, sel("setCornerRadius:"), r.size.height / 2);
+  void (^resolve)(void) = ^{
+    ((void (*)(id, SEL, void *))objc_msgSend)(layer, sel("setBackgroundColor:"),
+                                              ((void *(*)(id, SEL))objc_msgSend)(colour, sel("CGColor")));
+  };
+  id appearance = appAppearance();
+  if (appearance && respondsTo(appearance, "performAsCurrentDrawingAppearance:")) {
+    ((void (*)(id, SEL, void (^)(void)))objc_msgSend)(appearance, sel("performAsCurrentDrawingAppearance:"), resolve);
+  } else {
+    resolve();
+  }
+  adopt(view, v);
+  return v;
+}
+
+// An item drawn as view, which it owns.
+static void addViewItem(id menu, id view) {
+  id item = ((id (*)(id, SEL, id, SEL, id))objc_msgSend)(send0(cls("NSMenuItem"), sel("alloc")),
+                                                         sel("initWithTitle:action:keyEquivalent:"), nsstring(""),
+                                                         (SEL)0, nsstring(""));
+  sendVoid1(item, sel("setView:"), view);
+  sendVoid0(view, sel("release"));
+  addItem(menu, item);
+}
+
+// The page's limits table as a system menu: its head, every model with a row
+// per window -- its title, a bar in its colour, when it resets, its number --
+// then when each last spoke and the way to the limits' sources.
+static id limitsMenu(const fd_bar *bar) {
+  id menu = send1(send0(cls("NSMenu"), sel("alloc")), sel("initWithTitle:"), nsstring(""));
+  sendVoidBool(menu, sel("setAutoenablesItems:"), 0);
+  sendVoidDouble(menu, sel("setMinimumWidth:"), menuWidth);
+
+  id head = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 28));
+  textAt(head, bar->menuTitle, systemFont(13, 0.3), (id)0, CGRectMake(14, 5, 150, 18), 0);
+  textAt(head, bar->menuNote, systemFont(11, 0), systemColour("tertiaryLabelColor"), CGRectMake(menuWidth - 164, 6, 150, 16), 1);
+  addViewItem(menu, head);
+
+  for (int m = 0; m < bar->menuModelCount; m++) {
+    id model = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 26));
+    textAt(model, "●", systemFont(9, 0), srgb(&bar->menuModelRGB[3 * m]), CGRectMake(14, 5, 12, 14), 0);
+    id name = textAt(model, bar->menuModelNames[m], systemFont(13, 0.3), (id)0, CGRectMake(28, 4, 120, 18), 0);
+    double nameWidth = fittingSize(name).width;
+    if (nameWidth > 120) nameWidth = 120;
+    sendVoidRect(name, sel("setFrame:"), CGRectMake(28, 4, nameWidth, 18));
+    textAt(model, bar->menuModelKinds[m], systemFont(11, 0), systemColour("secondaryLabelColor"),
+           CGRectMake(36 + nameWidth, 5, menuWidth - 50 - nameWidth, 16), 0);
+    addViewItem(menu, model);
+
+    for (int r = 0; r < bar->menuRowCount; r++) {
+      if (bar->menuRowModel[r] != m) continue;
+      id row = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 38));
+      id colour = srgb(&bar->menuRowRGB[3 * r]);
+      textAt(row, bar->menuRowTitles[r], systemFont(12, 0), systemColour("secondaryLabelColor"), CGRectMake(28, 12, 76, 16), 0);
+      double pct = bar->menuRowPct[r];
+      if (pct >= 0) {
+        if (pct > 100) pct = 100;
+        filled(row, CGRectMake(108, 22, 150, 4), systemColour("quaternaryLabelColor"));
+        if (pct > 0 && colour) filled(row, CGRectMake(108, 22, 150 * pct / 100, 4), colour);
+      }
+      textAt(row, bar->menuRowNotes[r], systemFont(10, 0), systemColour("tertiaryLabelColor"), CGRectMake(108, 4, 150, 14), 0);
+      textAt(row, bar->menuRowTexts[r], monoFont(12), colour, CGRectMake(menuWidth - 62, 12, 48, 16), 1);
+      addViewItem(menu, row);
+    }
+  }
+
+  sendVoid1(menu, sel("addItem:"), send0(cls("NSMenuItem"), sel("separatorItem")));
+  if (bar->menuUpdated && *bar->menuUpdated) {
+    id foot = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 22));
+    textAt(foot, bar->menuUpdated, systemFont(10.5, 0), systemColour("tertiaryLabelColor"), CGRectMake(14, 4, menuWidth - 28, 14), 0);
+    addViewItem(menu, foot);
+  }
+  addItem(menu, menuItem(bar->menuSources, itemSources));
+  return menu;
+}
+
+static id drawUpdate(const fd_bar *bar) {
+  if (!bar->updateText || !*bar->updateText) return (id)0;
+  updateTextDrawn = label(bar->updateText);
+  updateButtonDrawn = ((id (*)(id, SEL, id, id, SEL))objc_msgSend)(
+      cls("NSButton"), sel("buttonWithTitle:target:action:"), nsstring(bar->updateAction), target(), sel("pressed:"));
+  sendVoidLong(updateButtonDrawn, sel("setTag:"), tagUpdate);
+  sendVoidLong(updateButtonDrawn, sel("setControlSize:"), 1);  // small
+  id accent = srgb(bar->accentRGB);
+  if (accent && respondsTo(updateButtonDrawn, "setBezelColor:")) sendVoid1(updateButtonDrawn, sel("setBezelColor:"), accent);
+  id views[3] = {styled("●", systemFont(7, 0), accent), updateTextDrawn, updateButtonDrawn};
+  return capsule(bar->mode, row(views, 3, 7), capsulePadding);
+}
+
+// A counter: no glass, its colour's tint under its dot and text, as the page's
+// pills.
+static id drawCounter(const fd_bar *bar, int i) {
+  const double *rgb = &bar->counterRGB[3 * i];
+  counterHollowDrawn[i] = bar->counterHollow[i];
+  counterDotsDrawn[i] = styled(bar->counterHollow[i] ? "○" : "●", systemFont(8, 0), srgb(rgb));
+  counterTextsDrawn[i] = styled(bar->counterTexts[i], systemFont(12, 0.23), srgb(rgb));
+  id views[2] = {counterDotsDrawn[i], counterTextsDrawn[i]};
+  id pill = holderFor(row(views, 2, 6), pillPadding, pillHeight);
+  sendVoidBool(pill, sel("setWantsLayer:"), 1);
+  id layer = send0(pill, sel("layer"));
+  sendVoidDouble(layer, sel("setCornerRadius:"), pillHeight / 2);
+  id tint = srgba(rgb, 0.14);
+  if (tint) {
+    ((void (*)(id, SEL, void *))objc_msgSend)(layer, sel("setBackgroundColor:"),
+                                              ((void *(*)(id, SEL))objc_msgSend)(tint, sel("CGColor")));
+  }
+  CGRect f = sendRect0(pill, sel("frame"));
+  f.origin.y = (capsuleHeight - pillHeight) / 2;
+  sendVoidRect(pill, sel("setFrame:"), f);
+  return pill;
+}
+
+// The theme as three segments -- light, the system's, dark -- each an SF
+// Symbol where the system has them, its name a tooltip.
+static id drawTheme(const fd_bar *bar) {
+  static const char *symbols[3] = {"sun.max", "display", "moon"};
+  static const char *marks[3] = {"☀", "◐", "☾"};
+  id images = send0(cls("NSMutableArray"), sel("array"));
+  int asImages = respondsTo(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:");
+  for (int i = 0; i < 3 && asImages; i++) {
+    id image = ((id (*)(id, SEL, id, id))objc_msgSend)(cls("NSImage"), sel("imageWithSystemSymbolName:accessibilityDescription:"),
+                                                       nsstring(symbols[i]), nsstring(bar->themeLabels[i]));
+    if (!image) {
+      asImages = 0;
+      break;
+    }
+    sendVoid1(images, sel("addObject:"), image);
+  }
+  if (asImages) {
+    themeDrawn = ((id (*)(id, SEL, id, long, id, SEL))objc_msgSend)(
+        cls("NSSegmentedControl"), sel("segmentedControlWithImages:trackingMode:target:action:"), images, 0, target(),
+        sel("pressed:"));
+  } else {
+    id labels = send0(cls("NSMutableArray"), sel("array"));
+    for (int i = 0; i < 3; i++) sendVoid1(labels, sel("addObject:"), nsstring(marks[i]));
+    themeDrawn = ((id (*)(id, SEL, id, long, id, SEL))objc_msgSend)(
+        cls("NSSegmentedControl"), sel("segmentedControlWithLabels:trackingMode:target:action:"), labels, 0, target(),
+        sel("pressed:"));
+  }
+  sendVoidLong(themeDrawn, sel("setTag:"), tagTheme);
+  for (int i = 0; i < 3; i++) {
+    ((void (*)(id, SEL, id, long))objc_msgSend)(themeDrawn, sel("setToolTip:forSegment:"), nsstring(bar->themeLabels[i]), i);
+  }
+  sendVoidLong(themeDrawn, sel("setSelectedSegment:"), bar->themeSegment);
+  sendVoid1(themeDrawn, sel("setAccessibilityLabel:"), nsstring(bar->themeLabel));
+  // A capsule in the capsule, from macOS 26: with the same room on every side
+  // the two are concentric.
+  double padding = capsulePadding;
+  if (respondsTo(themeDrawn, "setBorderShape:")) {
+    sendVoidLong(themeDrawn, sel("setBorderShape:"), 1);  // NSControlBorderShapeCapsule
+    padding = (capsuleHeight - fittingSize(themeDrawn).height) / 2;
+  }
+  id accent = srgb(bar->accentRGB);
+  if (accent && respondsTo(themeDrawn, "setSelectedSegmentBezelColor:"))
+    sendVoid1(themeDrawn, sel("setSelectedSegmentBezelColor:"), accent);
+  return capsule(bar->mode, themeDrawn, padding);
+}
+
+double fd_capsules_draw(void *container, const fd_bar *bar) {
   void *pool = objc_autoreleasePoolPush();
   id parent = (id)container;
   fd_capsules_clear(container);
@@ -432,7 +844,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   // read is for its screenshot.
   static char said[96];
   char now[96];
-  snprintf(now, sizeof now, "%s, in %s", mode, appearanceName(appAppearance()));
+  snprintf(now, sizeof now, "%s, in %s", bar->mode, appearanceName(appAppearance()));
   if (strcmp(now, said) != 0) {
     strncpy(said, now, sizeof said - 1);
     fprintf(stderr, "fleetdeck-window: the capsules are drawn in %s\n", now);
@@ -450,91 +862,34 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
   }
   adopt(parent, rowView);
 
-  for (int i = 0; i < tabsDrawn; i++) free(tabIDsDrawn[i]);
-  tabsDrawn = tabCount < maxTabs ? tabCount : maxTabs;
-  id labels = send0(cls("NSMutableArray"), sel("array"));
-  for (int i = 0; i < tabsDrawn; i++) {
-    tabIDsDrawn[i] = strdup(tabIDs[i]);
-    sendVoid1(labels, sel("addObject:"), nsstring(tabLabels[i]));
+  brandView = drawBrand(bar);
+  adopt(into, brandView);
+  fleetCapsule = drawFleet(bar);
+  adopt(into, fleetCapsule);
+  limitsCapsule = drawLimits(bar);
+  limitsMenuDrawn = limitsCapsule && bar->menuModelCount > 0 ? limitsMenu(bar) : (id)0;
+  if (limitsCapsule) adopt(into, limitsCapsule);
+  updateCapsule = drawUpdate(bar);
+  if (updateCapsule) adopt(into, updateCapsule);
+  countersDrawn = bar->counterCount < maxCounters ? bar->counterCount : maxCounters;
+  for (int i = 0; i < countersDrawn; i++) {
+    counterViews[i] = drawCounter(bar, i);
+    adopt(into, counterViews[i]);
   }
-
-  segmentedDrawn = ((id (*)(id, SEL, id, long, id, SEL))objc_msgSend)(
-      cls("NSSegmentedControl"), sel("segmentedControlWithLabels:trackingMode:target:action:"), labels,
-      0 /* select one */, target(), sel("pressed:"));
-  sendVoidLong(segmentedDrawn, sel("setTag:"), tagTabs);
-  sendVoidLong(segmentedDrawn, sel("setSelectedSegment:"), selectedTab);
-  // A capsule in the capsule, from macOS 26: left automatic, the control and its
-  // selected segment are rounded rectangles at this size (NSControlBorderShape).
-  // With the same room on every side the two capsules are concentric.
-  double tabsPadding = capsulePadding;
-  if (respondsTo(segmentedDrawn, "setBorderShape:")) {
-    sendVoidLong(segmentedDrawn, sel("setBorderShape:"), 1);  // NSControlBorderShapeCapsule
-    tabsPadding = (capsuleHeight - fittingSize(segmentedDrawn).height) / 2;
-  }
-  // The selected tab in the page's accent, the colour the operator chose.
-  id accent = srgb(accentRGB);
-  if (accent && respondsTo(segmentedDrawn, "setSelectedSegmentBezelColor:"))
-    sendVoid1(segmentedDrawn, sel("setSelectedSegmentBezelColor:"), accent);
-  tabsCapsule = capsule(mode, segmentedDrawn, 0, tabsPadding);
-  adopt(into, tabsCapsule);
-
-  newCardDrawn = button(newCardLabel, tagNewCard);
-  newCardCapsule = capsule(mode, newCardDrawn, 0, capsulePadding);
-  adopt(into, newCardCapsule);
-
-  limitsDrawn = limitCount < maxLimits ? limitCount : maxLimits;
-  for (int i = 0; i < limitsDrawn; i++) {
-    // The level is a dot in its colour, as the page draws it: a level
-    // indicator drew nothing on glass. The number is the text beside it.
-    id dot = label("●");
-    id colour = srgb(&limitRGB[3 * i]);
-    if (colour) sendVoid1(dot, sel("setTextColor:"), colour);
-    dotsDrawn[i] = dot;
-    id views[4] = {dot, label(limitLabels[i]), label(limitTexts[i]), (id)0};
-    int count = 3;
-    if (i == limitsDrawn - 1) views[count++] = label("▾");
-    id content = row(views, count);
-    limitCapsules[i] = capsule(mode, content, 0, capsulePadding);
-    limitsChevronDrawn = coverWithOpener(limitCapsules[i], compactTooltip);
-    adopt(into, limitCapsules[i]);
-  }
-
-  // The limits as one line of text, for a row with no room for the indicators.
-  // The window has no other place for the limits, so this capsule is never
-  // taken away.
-  if (limitsDrawn > 0) {
-    compactLabelDrawn = label(compactText);
-    id colour = srgb(compactRGB);
-    if (colour) sendVoid1(compactLabelDrawn, sel("setTextColor:"), colour);
-    sendVoid1(compactLabelDrawn, sel("setToolTip:"), nsstring(compactTooltip));
-    id views[2] = {compactLabelDrawn, label("▾")};
-    compactCapsule = capsule(mode, row(views, 2), 0, capsulePadding);
-    compactChevronDrawn = coverWithOpener(compactCapsule, compactTooltip);
-    adopt(into, compactCapsule);
-  }
-
-  // A page that keeps the theme among its settings sends none: no theme
-  // capsule then, and the row lays out without it (widthOf and put take nil).
-  if (themeLabel && *themeLabel) {
-    themeDrawn = button(themeLabel, tagTheme);
-    themeCapsule = capsule(mode, themeDrawn, 0, capsulePadding);
-    adopt(into, themeCapsule);
-
-    // The theme with no room for its label: the same press, and the label --
-    // the mode it is in -- is what a pointer or VoiceOver finds on it.
-    themeIconDrawn = button("◐", tagTheme);
-    sendVoid1(themeIconDrawn, sel("setToolTip:"), nsstring(themeLabel));
-    sendVoid1(themeIconDrawn, sel("setAccessibilityLabel:"), nsstring(themeLabel));
-    themeIconCapsule = capsule(mode, themeIconDrawn, 0, capsulePadding);
-    adopt(into, themeIconCapsule);
-  }
+  themeCapsule = drawTheme(bar);
+  adopt(into, themeCapsule);
 
   rowDrawn = rowView;
   placeCapsules(bounds.size.width);
 
-  double rowMin = leftWidth() + capsuleGap + compactWidth() + widthOf(themeIconCapsule);
-  setMinContentWidth(send0(parent, sel("window")), frameMinWidth + rowMin);
-  growToMinContentWidth(send0(parent, sel("window")), frameMinWidth + rowMin);
+  double rowMin = groupsWidth(leftWidth(), widthOf(themeCapsule));
+  // The row runs across the bar from past the window's buttons to its right
+  // margin, the panels under it: the window is as wide as the wider of the
+  // two asks.
+  double rowAsks = sendRect0(parent, sel("frame")).origin.x + rowMin + rowRightMargin;
+  double minWidth = rowAsks > bar->frameMinWidth ? rowAsks : bar->frameMinWidth;
+  setMinContentWidth(send0(parent, sel("window")), minWidth);
+  growToMinContentWidth(send0(parent, sel("window")), minWidth);
 
   objc_autoreleasePoolPop(pool);
   return rowMin;
@@ -544,51 +899,151 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
 
 int fd_test_capsule_count(void) { return capsulesDrawn; }
 
-const char *fd_test_segment_label(int i) {
-  return cstring(((id (*)(id, SEL, long))objc_msgSend)(segmentedDrawn, sel("labelForSegment:"), i));
-}
-
-int fd_test_selected_segment(void) { return (int)sendLong0(segmentedDrawn, sel("selectedSegment")); }
-
-long fd_test_segment_border_shape(void) {
-  if (!segmentedDrawn || !respondsTo(segmentedDrawn, "borderShape")) return -1;
-  return sendLong0(segmentedDrawn, sel("borderShape"));
-}
-
-// The tabs drawn into a bitmap of their own -- the control alone, not the
-// screen -- and where the drawn fill starts in its top row, as a share of the
-// fill's height. Drawn off screen, the control's track has nothing under it and
-// only the selected segment's fill is left: a capsule's top row starts about
-// half its height in, a rounded rectangle's a fifth. -1 when nothing is drawn.
-static double topInsetOf(id control);
-
-double fd_test_selected_segment_top_inset(void) { return segmentedDrawn ? topInsetOf(segmentedDrawn) : -1; }
-
-// The same measure of a stand-in for the tabs: the same labels, selection, size
-// and place, as a rounded rectangle. On a 1x screen the drawn capsule's top row
-// starts nearer its edge than on a 2x one (0.375 against 0.46), so the tabs are
-// held to this reference drawn beside them, not to a number. -1 on a system
-// without border shapes.
-double fd_test_rounded_segment_top_inset(void) {
-  if (!segmentedDrawn || !respondsTo(segmentedDrawn, "setBorderShape:")) return -1;
-  void *pool = objc_autoreleasePoolPush();
-  long count = sendLong0(segmentedDrawn, sel("segmentCount"));
-  id labels = send0(cls("NSMutableArray"), sel("array"));
-  for (long i = 0; i < count; i++) {
-    sendVoid1(labels, sel("addObject:"), ((id (*)(id, SEL, long))objc_msgSend)(segmentedDrawn, sel("labelForSegment:"), i));
+// The parts in order: the brand, the fleet, the limits, the update, each
+// counter, the theme.
+static id slot(int i, const char **name) {
+  const char *n = "";
+  id v = (id)0;
+  if (i == 0) {
+    n = "brand", v = brandView;
+  } else if (i == 1) {
+    n = "fleet", v = fleetCapsule;
+  } else if (i == 2) {
+    n = "limits", v = limitsCapsule;
+  } else if (i == 3) {
+    n = "update", v = updateCapsule;
+  } else if (i < 4 + countersDrawn) {
+    n = "counter", v = counterViews[i - 4];
+  } else if (i == 4 + countersDrawn) {
+    n = "theme", v = themeCapsule;
   }
-  id reference = ((id (*)(id, SEL, id, long, id, SEL))objc_msgSend)(
-      cls("NSSegmentedControl"), sel("segmentedControlWithLabels:trackingMode:target:action:"), labels, 0, (id)0, (SEL)0);
-  sendVoidLong(reference, sel("setSelectedSegment:"), sendLong0(segmentedDrawn, sel("selectedSegment")));
-  sendVoidLong(reference, sel("setBorderShape:"), 2);  // NSControlBorderShapeRoundedRectangle
-  sendVoidRect(reference, sel("setFrame:"), sendRect0(segmentedDrawn, sel("frame")));
-  sendVoid1(send0(segmentedDrawn, sel("superview")), sel("addSubview:"), reference);
-  double out = topInsetOf(reference);
-  sendVoid0(reference, sel("removeFromSuperview"));
-  objc_autoreleasePoolPop(pool);
+  if (name) *name = n;
+  return v;
+}
+
+int fd_test_capsule_slots(void) { return 5 + countersDrawn; }
+
+const char *fd_test_capsule_slot_name(int i) {
+  const char *name;
+  slot(i, &name);
+  return name;
+}
+
+fd_capsule_frame fd_test_capsule_slot_frame(int i) {
+  id v = slot(i, NULL);
+  CGRect r = v ? sendRect0(v, sel("frame")) : CGRectZero;
+  fd_capsule_frame out = {r.origin.x, r.size.width, v && !((signed char (*)(id, SEL))objc_msgSend)(v, sel("isHidden"))};
   return out;
 }
 
+double fd_test_capsule_slot_y(int i) {
+  id v = slot(i, NULL);
+  return v ? sendRect0(v, sel("frame")).origin.y : -1;
+}
+
+double fd_test_capsule_slot_h(int i) {
+  id v = slot(i, NULL);
+  return v ? sendRect0(v, sel("frame")).size.height : -1;
+}
+
+double fd_test_row_width(void) { return rowDrawn ? sendRect0(rowDrawn, sel("bounds")).size.width : -1; }
+
+double fd_test_min_content_width(void *container) {
+  id window = send0((id)container, sel("window"));
+  return window ? sendSize0(window, sel("contentMinSize")).width : -1;
+}
+
+int fd_test_row_passes_through(void *container) {
+  id parent = (id)container;
+  id rowView = ((id (*)(id, SEL, unsigned long))objc_msgSend)(send0(parent, sel("subviews")), sel("objectAtIndex:"), 0);
+  CGRect r = sendRect0(rowView, sel("frame"));
+  // Between the left group and the right one: over the bar.
+  CGPoint gap = CGPointMake(r.origin.x + r.size.width / 2, r.origin.y + r.size.height / 2);
+  return ((id (*)(id, SEL, CGPoint))objc_msgSend)(rowView, sel("hitTest:"), gap) == (id)0;
+}
+
+// "counter3" is counter 3 of what; -1 when what is not one.
+static int indexed(const char *what, const char *prefix) {
+  size_t n = strlen(prefix);
+  if (strncmp(what, prefix, n) != 0 || !what[n]) return -1;
+  return atoi(what + n);
+}
+
+static id textView(const char *what) {
+  if (!strcmp(what, "brandName")) return brandNameDrawn;
+  if (!strcmp(what, "brandVersion")) return brandVersionDrawn;
+  if (!strcmp(what, "fleetName")) return fleetNameDrawn;
+  if (!strcmp(what, "limitsLabel")) return limitsLabelDrawn;
+  if (!strcmp(what, "busyName")) return busyNameDrawn;
+  if (!strcmp(what, "busyText")) return busyTextDrawn;
+  if (!strcmp(what, "updateText")) return updateTextDrawn;
+  int i = indexed(what, "counter");
+  if (i >= 0 && i < countersDrawn) return counterTextsDrawn[i];
+  return (id)0;
+}
+
+const char *fd_test_text(const char *what) {
+  if (!strcmp(what, "limitsTooltip")) return limitsOpenerDrawn ? cstring(send0(limitsOpenerDrawn, sel("toolTip"))) : "";
+  if (!strcmp(what, "fleetLabel")) {
+    return fleetOpenerDrawn ? cstring(send0(fleetOpenerDrawn, sel("accessibilityLabel"))) : "";
+  }
+  if (!strcmp(what, "updateAction")) return updateButtonDrawn ? cstring(send0(updateButtonDrawn, sel("title"))) : "";
+  id v = textView(what);
+  return v ? cstring(send0(v, sel("stringValue"))) : "";
+}
+
+static double greenOf(id colour) {
+  if (!colour) return -1;
+  id srgbSpace = send0(cls("NSColorSpace"), sel("sRGBColorSpace"));
+  id c = send1(colour, sel("colorUsingColorSpace:"), srgbSpace);
+  return c ? sendDouble0(c, sel("greenComponent")) : -1;
+}
+
+double fd_test_green(const char *what) {
+  if (!strcmp(what, "fleetDot")) return fleetDotDrawn ? greenOf(send0(fleetDotDrawn, sel("textColor"))) : -1;
+  if (!strcmp(what, "busyText")) return busyTextDrawn ? greenOf(send0(busyTextDrawn, sel("textColor"))) : -1;
+  int i = indexed(what, "dot");
+  if (i >= 0) return i < limitsDrawn ? greenOf(send0(dotsDrawn[i], sel("textColor"))) : -1;
+  i = indexed(what, "counterTint");
+  if (i >= 0) {
+    if (i >= countersDrawn) return -1;
+    CGColorRef colour = ((CGColorRef(*)(id, SEL))objc_msgSend)(send0(counterViews[i], sel("layer")), sel("backgroundColor"));
+    if (!colour || CGColorGetNumberOfComponents(colour) < 3) return -1;
+    return CGColorGetComponents(colour)[1];
+  }
+  i = indexed(what, "counter");
+  if (i >= 0) return i < countersDrawn ? greenOf(send0(counterTextsDrawn[i], sel("textColor"))) : -1;
+  return -1;
+}
+
+int fd_test_counter_hollow(int i) {
+  return i < countersDrawn && !strcmp(cstring(send0(counterDotsDrawn[i], sel("stringValue"))), "○");
+}
+
+int fd_test_brand_has_icon(void) { return brandIconDrawn && send0(brandIconDrawn, sel("image")) != (id)0; }
+
+int fd_test_theme_segments(void) { return themeDrawn ? (int)sendLong0(themeDrawn, sel("segmentCount")) : 0; }
+int fd_test_theme_selected(void) { return themeDrawn ? (int)sendLong0(themeDrawn, sel("selectedSegment")) : -1; }
+
+const char *fd_test_theme_tooltip(int i) {
+  return cstring(((id (*)(id, SEL, long))objc_msgSend)(themeDrawn, sel("toolTipForSegment:"), i));
+}
+
+int fd_test_theme_segment_is_image(int i) {
+  return ((id (*)(id, SEL, long))objc_msgSend)(themeDrawn, sel("imageForSegment:"), i) != (id)0;
+}
+
+long fd_test_segment_border_shape(void) {
+  if (!themeDrawn || !respondsTo(themeDrawn, "borderShape")) return -1;
+  return sendLong0(themeDrawn, sel("borderShape"));
+}
+
+// The theme's segments drawn into a bitmap of their own -- the control alone,
+// not the screen -- and where the drawn fill starts in its top row, as a share
+// of the fill's height. Drawn off screen, the control's track has nothing under
+// it and only the selected segment's fill is left: a capsule's top row starts
+// about half its height in, a rounded rectangle's a fifth. -1 when nothing is
+// drawn.
 static double topInsetOf(id control) {
   void *pool = objc_autoreleasePoolPush();
   CGRect b = sendRect0(control, sel("bounds"));
@@ -614,86 +1069,34 @@ static double topInsetOf(id control) {
   return out;
 }
 
-// The room between the tabs and the edges of their capsule, on each side.
-fd_capsule_insets fd_test_tabs_insets(void) {
-  fd_capsule_insets out = {-1, -1, -1, -1};
-  if (!segmentedDrawn || !tabsCapsule) return out;
-  CGRect inner = sendRect0(segmentedDrawn, sel("frame"));
-  CGRect outer = sendRect0(tabsCapsule, sel("frame"));
-  out.left = inner.origin.x;
-  out.right = outer.size.width - inner.origin.x - inner.size.width;
-  out.bottom = inner.origin.y;
-  out.top = outer.size.height - inner.origin.y - inner.size.height;
-  return out;
-}
-const char *fd_test_new_card_title(void) { return cstring(send0(newCardDrawn, sel("title"))); }
-const char *fd_test_theme_title(void) { return cstring(send0(themeDrawn, sel("title"))); }
-const char *fd_test_dot_title(int i) { return cstring(send0(dotsDrawn[i], sel("stringValue"))); }
-double fd_test_dot_green(int i) { return sendDouble0(send0(dotsDrawn[i], sel("textColor")), sel("greenComponent")); }
+double fd_test_selected_segment_top_inset(void) { return themeDrawn ? topInsetOf(themeDrawn) : -1; }
 
-// The capsules drawn, in order: the tabs, the new card button, each limit, the
-// compact limits when there are limits, the theme and its icon.
-static id slot(int i, const char **name) {
-  const char *n = "";
-  id v = (id)0;
-  if (i == 0) {
-    n = "tabs", v = tabsCapsule;
-  } else if (i == 1) {
-    n = "newCard", v = newCardCapsule;
-  } else if (i < 2 + limitsDrawn) {
-    n = "limit", v = limitCapsules[i - 2];
-  } else {
-    int rest = i - 2 - limitsDrawn - (compactCapsule ? 1 : 0);
-    if (rest < 0) {
-      n = "compactLimits", v = compactCapsule;
-    } else if (rest == 0) {
-      n = "theme", v = themeCapsule;
-    } else if (rest == 1) {
-      n = "themeIcon", v = themeIconCapsule;
-    }
+// The same measure of a stand-in for the theme's segments: the same images,
+// selection, size and place, as a rounded rectangle. On a 1x screen the drawn
+// capsule's top row starts nearer its edge than on a 2x one (0.375 against
+// 0.46), so the control is held to this reference drawn beside it, not to a
+// number. -1 on a system without border shapes.
+double fd_test_rounded_segment_top_inset(void) {
+  if (!themeDrawn || !respondsTo(themeDrawn, "setBorderShape:")) return -1;
+  void *pool = objc_autoreleasePoolPush();
+  id reference = initWithFrame(cls("NSSegmentedControl"), sendRect0(themeDrawn, sel("frame")));
+  long count = sendLong0(themeDrawn, sel("segmentCount"));
+  sendVoidLong(reference, sel("setSegmentCount:"), count);
+  for (long i = 0; i < count; i++) {
+    id image = ((id (*)(id, SEL, long))objc_msgSend)(themeDrawn, sel("imageForSegment:"), i);
+    if (image) ((void (*)(id, SEL, id, long))objc_msgSend)(reference, sel("setImage:forSegment:"), image, i);
+    id text = ((id (*)(id, SEL, long))objc_msgSend)(themeDrawn, sel("labelForSegment:"), i);
+    if (text) ((void (*)(id, SEL, id, long))objc_msgSend)(reference, sel("setLabel:forSegment:"), text, i);
   }
-  if (name) *name = n;
-  return v;
-}
-
-int fd_test_capsule_slots(void) { return 2 + limitsDrawn + (compactCapsule ? 1 : 0) + 2; }
-
-const char *fd_test_capsule_slot_name(int i) {
-  const char *name;
-  slot(i, &name);
-  return name;
-}
-
-fd_capsule_frame fd_test_capsule_slot_frame(int i) {
-  id v = slot(i, NULL);
-  CGRect r = v ? sendRect0(v, sel("frame")) : CGRectZero;
-  fd_capsule_frame out = {r.origin.x, r.size.width, v && !((signed char (*)(id, SEL))objc_msgSend)(v, sel("isHidden"))};
+  sendVoidLong(reference, sel("setSelectedSegment:"), sendLong0(themeDrawn, sel("selectedSegment")));
+  sendVoidLong(reference, sel("setBorderShape:"), 2);  // NSControlBorderShapeRoundedRectangle
+  sendVoidRect(reference, sel("setFrame:"), sendRect0(themeDrawn, sel("frame")));
+  sendVoid1(send0(themeDrawn, sel("superview")), sel("addSubview:"), reference);
+  double out = topInsetOf(reference);
+  sendVoid0(reference, sel("removeFromSuperview"));
+  sendVoid0(reference, sel("release"));
+  objc_autoreleasePoolPop(pool);
   return out;
-}
-
-double fd_test_row_width(void) { return rowDrawn ? sendRect0(rowDrawn, sel("bounds")).size.width : -1; }
-
-double fd_test_min_content_width(void *container) {
-  id window = send0((id)container, sel("window"));
-  return window ? sendSize0(window, sel("contentMinSize")).width : -1;
-}
-
-const char *fd_test_compact_text(void) { return cstring(send0(compactLabelDrawn, sel("stringValue"))); }
-const char *fd_test_compact_tooltip(void) { return cstring(send0(compactLabelDrawn, sel("toolTip"))); }
-const char *fd_test_theme_icon_title(void) { return cstring(send0(themeIconDrawn, sel("title"))); }
-const char *fd_test_theme_icon_tooltip(void) { return cstring(send0(themeIconDrawn, sel("toolTip"))); }
-
-const char *fd_test_theme_icon_accessibility_label(void) {
-  return cstring(send0(themeIconDrawn, sel("accessibilityLabel")));
-}
-
-int fd_test_row_passes_through(void *container) {
-  id parent = (id)container;
-  id rowView = ((id (*)(id, SEL, unsigned long))objc_msgSend)(send0(parent, sel("subviews")), sel("objectAtIndex:"), 0);
-  CGRect r = sendRect0(rowView, sel("frame"));
-  // Between the new card capsule and the theme: over the board.
-  CGPoint gap = CGPointMake(r.origin.x + r.size.width / 2, r.origin.y + r.size.height / 2);
-  return ((id (*)(id, SEL, CGPoint))objc_msgSend)(rowView, sel("hitTest:"), gap) == (id)0;
 }
 
 static void sendAction(id control) {
@@ -702,89 +1105,125 @@ static void sendAction(id control) {
                                                     send0(control, sel("target")));
 }
 
-void fd_test_press_segment(int i) {
-  sendVoidLong(segmentedDrawn, sel("setSelectedSegment:"), i);
-  sendAction(segmentedDrawn);
+void fd_test_press_theme(int i) {
+  sendVoidLong(themeDrawn, sel("setSelectedSegment:"), i);
+  sendAction(themeDrawn);
 }
 
-void fd_test_press_new_card(void) { sendAction(newCardDrawn); }
-
-const char *fd_test_capsule_slot_appearance(int i) {
-  id wrapper = slot(i, NULL);
-  if (!wrapper) return "";
-  id content = respondsTo(wrapper, "contentView")
-                   ? send0(wrapper, sel("contentView"))
-                   : ((id (*)(id, SEL, unsigned long))objc_msgSend)(send0(wrapper, sel("subviews")),
-                                                                    sel("objectAtIndex:"), 0);
-  return appearanceName(send0(content, sel("appearance")));
+static id controlOf(const char *what) {
+  if (!strcmp(what, "fleet")) return fleetOpenerDrawn;
+  if (!strcmp(what, "limits")) return limitsOpenerDrawn;
+  if (!strcmp(what, "update")) return updateButtonDrawn;
+  if (!strcmp(what, "theme")) return themeDrawn;
+  return (id)0;
 }
 
-const char *fd_test_app_appearance(void) {
-  return appearanceName(send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("appearance")));
+void fd_test_press(const char *what) {
+  id control = controlOf(what);
+  if (control) sendAction(control);
 }
 
-void fd_test_set_app_appearance(const char *name) {
-  id appearance = name && *name ? send1(cls("NSAppearance"), sel("appearanceNamed:"), nsstring(name)) : (id)0;
-  sendVoid1(send0(cls("NSApplication"), sel("sharedApplication")), sel("setAppearance:"), appearance);
-}
-void fd_test_press_theme_icon(void) { sendAction(themeIconDrawn); }
-void fd_test_press_limits(int which) { sendAction(which == 0 ? limitsChevronDrawn : compactChevronDrawn); }
+void fd_test_capture_menus(int on) { captureMenus = on; }
 
-const char *fd_test_limits_accessibility_label(void) {
-  return cstring(send0(compactChevronDrawn, sel("accessibilityLabel")));
+static id capturedItem(int i) {
+  if (!menuCaptured || i < 0 || i >= sendLong0(menuCaptured, sel("numberOfItems"))) return (id)0;
+  return ((id (*)(id, SEL, long))objc_msgSend)(menuCaptured, sel("itemAtIndex:"), i);
 }
 
-double fd_test_capsule_slot_background_brightness(int i) {
-  id wrapper = slot(i, NULL);
-  if (!wrapper) return -1;
-  CGColorRef colour = ((CGColorRef(*)(id, SEL))objc_msgSend)(send0(wrapper, sel("layer")), sel("backgroundColor"));
-  if (!colour) return -1;
-  size_t n = CGColorGetNumberOfComponents(colour);
-  const CGFloat *c = CGColorGetComponents(colour);
-  return n >= 3 ? (c[0] + c[1] + c[2]) / 3 : n >= 1 ? c[0] : -1;
+int fd_test_menu_items(void) { return menuCaptured ? (int)sendLong0(menuCaptured, sel("numberOfItems")) : 0; }
+
+const char *fd_test_menu_item_title(int i) {
+  id item = capturedItem(i);
+  return item ? cstring(send0(item, sel("title"))) : "";
 }
 
-// Whether a capsule's control is drawn inside its glass: a descendant of the
-// contentView of the nearest NSGlassEffectView above it. which is as below.
-int fd_test_capsule_inside_glass(int which) {
-  id control = which == 0 ? segmentedDrawn : which == 1 ? newCardDrawn : themeDrawn;
-  id glassClass = cls("NSGlassEffectView");
-  if (!control || !glassClass) return 0;
-  for (id v = send0(control, sel("superview")); v; v = send0(v, sel("superview"))) {
-    if (((signed char (*)(id, SEL, id))objc_msgSend)(v, sel("isKindOfClass:"), glassClass)) {
-      id content = send0(v, sel("contentView"));
-      return content && ((signed char (*)(id, SEL, id))objc_msgSend)(control, sel("isDescendantOf:"), content) != 0;
-    }
+int fd_test_menu_item_state(int i) {
+  id item = capturedItem(i);
+  return item ? (int)sendLong0(item, sel("state")) : 0;
+}
+
+int fd_test_menu_item_separator(int i) {
+  id item = capturedItem(i);
+  return item && ((signed char (*)(id, SEL))objc_msgSend)(item, sel("isSeparatorItem"));
+}
+
+// The badge's count where there are badges; else the count the title ends in.
+long fd_test_menu_item_waiting(int i) {
+  id item = capturedItem(i);
+  if (!item) return 0;
+  if (respondsTo(item, "badge")) {
+    id badge = send0(item, sel("badge"));
+    return badge ? sendLong0(badge, sel("itemCount")) : 0;
   }
-  return 0;
+  const char *title = cstring(send0(item, sel("title")));
+  const char *open = strrchr(title, '(');
+  return open ? atol(open + 1) : 0;
 }
 
-// A click at the middle of a capsule's control, hit-tested the way the window
-// hit-tests a mouse down: from its content view down. which is 0 for the tabs,
-// 1 for the new card button, 2 for the theme button.
-// A click on the first limit's dot, at the capsule's left, reaches a control
-// that opens the limits menu.
-int fd_test_click_on_limit_dot_opens_limits(void) {
-  if (!dotsDrawn[0]) return 0;
-  id window = send0(dotsDrawn[0], sel("window"));
-  if (!window) return 0;
-  sendVoid0(send0(window, sel("contentView")), sel("layoutSubtreeIfNeeded"));
-  CGRect b = sendRect0(dotsDrawn[0], sel("bounds"));
-  CGPoint mid = CGPointMake(b.origin.x + b.size.width / 2, b.origin.y + b.size.height / 2);
-  CGPoint inWindow =
-      ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(dotsDrawn[0], sel("convertPoint:toView:"), mid, (id)0);
-  id content = send0(window, sel("contentView"));
-  id superview = send0(content, sel("superview"));
-  CGPoint inSuper = superview ? ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(superview, sel("convertPoint:fromView:"),
-                                                                                  inWindow, (id)0)
-                              : inWindow;
-  id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(content, sel("hitTest:"), inSuper);
-  return hit && ((signed char (*)(id, SEL, id))objc_msgSend)(hit, sel("isKindOfClass:"), cls("NSButton")) &&
-         sendLong0(hit, sel("tag")) == tagLimits;
+void fd_test_menu_pick(int i) {
+  id item = capturedItem(i);
+  if (item) menuPicked((id)0, (SEL)0, item);
 }
 
-int fd_test_click_reaches_capsule(int which) {
-  id control = which == 0 ? segmentedDrawn : which == 1 ? newCardDrawn : themeDrawn;
+static double contentHeight(id view) {
+  id window = send0(view, sel("window"));
+  return window ? sendRect0(send0(window, sel("contentView")), sel("bounds")).size.height : 0;
+}
+
+double fd_test_menu_x(void) { return menuCapturedAt.x; }
+double fd_test_menu_y(void) { return menuCapturedUnder ? contentHeight(menuCapturedUnder) - menuCapturedAt.y : -1; }
+
+double fd_test_menu_owner_x(void) {
+  if (!menuCapturedUnder) return -1;
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(menuCapturedUnder, sel("convertRect:toView:"),
+                                                            sendRect0(menuCapturedUnder, sel("bounds")), (id)0);
+  return r.origin.x;
+}
+
+double fd_test_menu_owner_bottom(void) {
+  if (!menuCapturedUnder) return -1;
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(menuCapturedUnder, sel("convertRect:toView:"),
+                                                            sendRect0(menuCapturedUnder, sel("bounds")), (id)0);
+  return contentHeight(menuCapturedUnder) - r.origin.y;
+}
+
+const char *fd_test_menu_item_view_text(int i) {
+  static char out[1024];
+  out[0] = 0;
+  id item = capturedItem(i);
+  id view = item ? send0(item, sel("view")) : (id)0;
+  if (!view) return out;
+  id subviews = send0(view, sel("subviews"));
+  for (long k = 0, n = sendLong0(subviews, sel("count")); k < n; k++) {
+    id v = ((id (*)(id, SEL, unsigned long))objc_msgSend)(subviews, sel("objectAtIndex:"), (unsigned long)k);
+    if (!((signed char (*)(id, SEL, id))objc_msgSend)(v, sel("isKindOfClass:"), cls("NSTextField"))) continue;
+    const char *text = cstring(send0(v, sel("stringValue")));
+    if (!*text) continue;
+    if (out[0]) strncat(out, " | ", sizeof out - strlen(out) - 1);
+    strncat(out, text, sizeof out - strlen(out) - 1);
+  }
+  return out;
+}
+
+fd_capsule_frame fd_test_fleet_in_window(void) {
+  fd_capsule_frame out = {0, 0, 0};
+  if (!fleetCapsule) return out;
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(fleetCapsule, sel("convertRect:toView:"),
+                                                            sendRect0(fleetCapsule, sel("bounds")), (id)0);
+  out.x = r.origin.x, out.w = r.size.width, out.visible = 1;
+  return out;
+}
+
+double fd_test_fleet_bottom_in_window(void) {
+  if (!fleetCapsule) return -1;
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(fleetCapsule, sel("convertRect:toView:"),
+                                                            sendRect0(fleetCapsule, sel("bounds")), (id)0);
+  return contentHeight(fleetCapsule) - r.origin.y;
+}
+
+int fd_test_click_reaches(const char *what) {
+  id control = controlOf(what);
+  if (!control) return 0;
   id window = send0(control, sel("window"));
   if (!window) return 0;
   // Laid out first, as a window on screen is before any click: until then a
@@ -803,4 +1242,48 @@ int fd_test_click_reaches_capsule(int which) {
                               : inWindow;
   id hit = ((id (*)(id, SEL, CGPoint))objc_msgSend)(content, sel("hitTest:"), inSuper);
   return hit && ((signed char (*)(id, SEL, id))objc_msgSend)(hit, sel("isDescendantOf:"), control) != 0;
+}
+
+// Whether a part's control is drawn inside its glass: a descendant of the
+// contentView of the nearest NSGlassEffectView above it.
+int fd_test_inside_glass(const char *what) {
+  id control = controlOf(what);
+  id glassClass = cls("NSGlassEffectView");
+  if (!control || !glassClass) return 0;
+  for (id v = send0(control, sel("superview")); v; v = send0(v, sel("superview"))) {
+    if (((signed char (*)(id, SEL, id))objc_msgSend)(v, sel("isKindOfClass:"), glassClass)) {
+      id content = send0(v, sel("contentView"));
+      return content && ((signed char (*)(id, SEL, id))objc_msgSend)(control, sel("isDescendantOf:"), content) != 0;
+    }
+  }
+  return 0;
+}
+
+const char *fd_test_capsule_slot_appearance(int i) {
+  id wrapper = slot(i, NULL);
+  if (!wrapper) return "";
+  id content = respondsTo(wrapper, "contentView") ? send0(wrapper, sel("contentView"))
+                                                  : send0(send0(wrapper, sel("subviews")), sel("firstObject"));
+  return content ? appearanceName(send0(content, sel("appearance"))) : "";
+}
+
+const char *fd_test_app_appearance(void) {
+  return appearanceName(send0(send0(cls("NSApplication"), sel("sharedApplication")), sel("appearance")));
+}
+
+void fd_test_set_app_appearance(const char *name) {
+  id appearance = name && *name ? send1(cls("NSAppearance"), sel("appearanceNamed:"), nsstring(name)) : (id)0;
+  sendVoid1(send0(cls("NSApplication"), sel("sharedApplication")), sel("setAppearance:"), appearance);
+}
+
+double fd_test_capsule_slot_background_brightness(int i) {
+  id wrapper = slot(i, NULL);
+  if (!wrapper) return -1;
+  id layer = send0(wrapper, sel("layer"));
+  if (!layer) return -1;
+  CGColorRef colour = ((CGColorRef(*)(id, SEL))objc_msgSend)(layer, sel("backgroundColor"));
+  if (!colour) return -1;
+  size_t n = CGColorGetNumberOfComponents(colour);
+  const CGFloat *c = CGColorGetComponents(colour);
+  return n >= 3 ? (c[0] + c[1] + c[2]) / 3 : n >= 1 ? c[0] : -1;
 }

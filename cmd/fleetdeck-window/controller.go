@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"math"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,13 +45,6 @@ type (
 	setFrameMode   struct{ Mode glassMode }
 	reloadBoard    struct{}
 	setDragBand    struct{ Height float64 }
-	// setTopDrag is the top band over the panels; setDragHoles a side page's
-	// controls in it.
-	setTopDrag   struct{ Height float64 }
-	setDragHoles struct {
-		Side  string
-		Holes []rect
-	}
 	// showToolbar is the window's empty toolbar shown or hidden: it places the
 	// buttons out of full screen, and in full screen would only make the strip
 	// a pointer at the top of the screen brings out twice as tall.
@@ -100,12 +95,11 @@ type controller struct {
 	// band is how far down from the top the board's page says nothing is
 	// (topBand): the band the window is dragged by, out of full screen.
 	band float64
-	// rowMin is the capsule row's narrowest form as last drawn (capsuleRow):
-	// the room the frame keeps for it, 0 until the row is drawn.
+	// rowMin is the capsule row's narrowest form as last drawn (capsuleRow),
+	// 0 until the row is drawn.
 	rowMin float64
-	// titlebar is where the title bar's zoom button ends, titlebarCenter the
-	// line its buttons are centred on (titlebar.go).
-	titlebar, titlebarCenter float64
+	// titlebar is where the title bar's zoom button ends (titlebar.go).
+	titlebar float64
 }
 
 // newController frames the panel at panelURL. The window may be opened on a
@@ -221,9 +215,6 @@ func (c *controller) pageLoaded(surface, state string) []effect {
 	out = append(out, c.to(surface, map[string]any{"type": "folded", "folded": c.folded(surface)})...)
 	if surface == "orchestrator" {
 		out = append(out, c.to(surface, map[string]any{"type": "fullscreen", "on": c.fullscreen})...)
-	}
-	if surface == "orchestrator" && c.titlebar > 0 {
-		out = append(out, c.titlebarMessage()...)
 	}
 	return out
 }
@@ -346,12 +337,7 @@ func (c *controller) open(kind, path, short string) []effect {
 func (c *controller) switchFleet(name string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []effect
-	if c.framed {
-		out = append(out, destroySurfaces{})
-	}
-	c.takeDown()
-	return append(out, navigateBoard{URL: c.pageURL(name)})
+	return c.leaveFor(c.pageURL(name))
 }
 
 // panel is a side surface folding or unfolding its panel.
@@ -402,9 +388,9 @@ func (c *controller) resizeTo(side string, start, dx float64) []effect {
 	}
 	width := draggedWidth(side, start, dx, c.width)
 	if side == "sessions" {
-		c.widths.Sessions = c.draggedBesideRow(width, c.widths.Orchestrator, c.widths.OrchestratorFolded)
+		c.widths.Sessions = c.draggedBeside(width, c.widths.Orchestrator, c.widths.OrchestratorFolded)
 	} else {
-		c.widths.Orchestrator = c.draggedBesideRow(width, c.widths.Sessions, c.widths.SessionsFolded)
+		c.widths.Orchestrator = c.draggedBeside(width, c.widths.Sessions, c.widths.SessionsFolded)
 	}
 	return []effect{applyGeometry{G: c.geometry()}}
 }
@@ -451,25 +437,19 @@ func (c *controller) capsules(model json.RawMessage) []effect {
 	return append(out, c.applyGlass()...)
 }
 
-// capsuleRow is the capsule row drawn, with rowMin its narrowest form: the
-// frame keeps that room for it from then on, laid out again when it changes.
+// capsuleRow is the capsule row drawn, with rowMin its narrowest form. The
+// row has the bar to itself (T-226), so the panels do not move for it: the
+// window's minimum width keeps its room (capsules_darwin.c).
 func (c *controller) capsuleRow(rowMin float64) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if rowMin == c.rowMin {
-		return nil
-	}
 	c.rowMin = rowMin
-	if !c.framed {
-		return nil
-	}
-	return append([]effect{applyGeometry{G: c.geometry()}}, c.boardInsets()...)
+	return nil
 }
 
-// geometry is the frame for the window as it is, keeping the capsule row its
-// minimum.
+// geometry is the frame for the window as it is.
 func (c *controller) geometry() geometry {
-	return layoutPastButtons(c.width, c.height, c.widths, c.rowMin, c.buttonsEnd())
+	return layoutPastButtons(c.width, c.height, c.widths, c.buttonsEnd())
 }
 
 // buttonsEnd is where the window's buttons end on the capsule row's line: the
@@ -482,18 +462,10 @@ func (c *controller) buttonsEnd() float64 {
 	return c.titlebar
 }
 
-// draggedBesideRow is a dragged width stopped where the other panel, at its
-// width -- beside the window's buttons, for the orchestrator panel -- and the
-// capsule row's minimum leave no more room.
-func (c *controller) draggedBesideRow(width, other float64, otherFolded bool) float64 {
-	if c.rowMin <= 0 {
-		return width
-	}
-	room := clampPanel(other, c.width, otherFolded)
-	if c.dragging == "sessions" {
-		room = besideButtons(room, c.buttonsEnd())
-	}
-	return math.Min(width, rowRoomFor(c.width, room, c.rowMin))
+// draggedBeside is a dragged width stopped where the other panel, at its
+// width, and the board's island at its narrowest leave no more room.
+func (c *controller) draggedBeside(width, other float64, otherFolded bool) float64 {
+	return math.Min(width, roomBeside(c.width, clampPanel(other, c.width, otherFolded)))
 }
 
 // laidOut is the frame laid out as g. A geometry decided before the capsule row
@@ -517,18 +489,51 @@ func (c *controller) capsuleAction(action string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch action {
-	case "tab:board":
-		return c.to("board", map[string]any{"type": "show", "section": "board"})
-	case "tab:docs":
-		return c.to("board", map[string]any{"type": "show", "section": "docs"})
-	case "newCard":
-		return c.to("board", map[string]any{"type": "newCard"})
-	case "tab:settings":
-		return c.to("board", map[string]any{"type": "show", "section": "settings"})
-	case "limits":
+	case "limits", "limitSources":
+		// limitSources: "Sources…" in the limits capsule's menu, the settings
+		// the limits come from.
+		return c.to("board", map[string]any{"type": action})
+	case "update":
+		// The orchestrator's page asks about text unsent in its terminal before
+		// an update starts, and shows the update's progress over it.
+		return c.to("orchestrator", map[string]any{"type": "update"})
+	case "theme:light", "theme:dark":
+		return c.to("board", map[string]any{"type": "setTheme", "choice": strings.TrimPrefix(action, "theme:")})
+	case "theme:system":
+		// The page's ui.theme has no word for the system's: it is no choice.
+		return c.to("board", map[string]any{"type": "setTheme", "choice": ""})
+	case "fleets":
+		return c.leaveFor(c.baseURL)
+	case "newFleet":
+		// The form lives on the start page; the fragment is what opens it there.
+		return c.leaveFor(c.baseURL + "#new")
+	}
+	if name, ok := strings.CutPrefix(action, "fleet:"); ok && name != "" && name != c.fleet {
+		return c.leaveFor(c.pageURL(name))
+	}
+	// The limits capsule with where it is, its left edge and its bottom in the
+	// window: the menu opens under it (capsules_darwin.c).
+	if at, ok := strings.CutPrefix(action, "limits:"); ok {
+		xs, ys, _ := strings.Cut(at, ",")
+		x, errX := strconv.ParseFloat(xs, 64)
+		y, errY := strconv.ParseFloat(ys, 64)
+		if errX == nil && errY == nil {
+			return c.to("board", map[string]any{"type": "limits", "left": x, "top": y})
+		}
 		return c.to("board", map[string]any{"type": "limits"})
 	}
 	return nil
+}
+
+// leaveFor takes the frame down and puts url in the board: a switch changes
+// all three web views. The caller holds c.mu.
+func (c *controller) leaveFor(url string) []effect {
+	var out []effect
+	if c.framed {
+		out = append(out, destroySurfaces{})
+	}
+	c.takeDown()
+	return append(out, navigateBoard{URL: url})
 }
 
 // boardShowsOwnPage is the window putting a page of its own in the board --
@@ -555,7 +560,7 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	if !changed {
 		return out
 	}
-	out = append(out, c.dragBand(), c.topDrag(), showToolbar{Visible: !fullscreen})
+	out = append(out, c.dragBand(), showToolbar{Visible: !fullscreen})
 	if c.framed {
 		out = append(out, c.to("orchestrator", map[string]any{"type": "fullscreen", "on": fullscreen})...)
 	}
@@ -570,28 +575,6 @@ func (c *controller) topBand(height float64) []effect {
 	defer c.mu.Unlock()
 	c.band = math.Max(0, math.Min(height, boardInsetTop))
 	return []effect{c.dragBand()}
-}
-
-// topDragHeight is the top band's height: the capsule row's strip, with the
-// row's own margin below it as above.
-const topDragHeight = 2*capsuleTop + capsuleHeight
-
-// topDrag is the top band as the window shows it: none in full screen, where
-// there is no window to move.
-func (c *controller) topDrag() effect {
-	if c.fullscreen {
-		return setTopDrag{Height: 0}
-	}
-	return setTopDrag{Height: topDragHeight}
-}
-
-// dragHoles is where a side surface's page has controls in the top band.
-func (c *controller) dragHoles(surface string, holes []rect) []effect {
-	kind, _, ok := parseSurfaceName(surface)
-	if !ok {
-		return nil
-	}
-	return []effect{setDragHoles{Side: kind, Holes: holes}}
 }
 
 // dragBand is the band as the window shows it: none in full screen, where a

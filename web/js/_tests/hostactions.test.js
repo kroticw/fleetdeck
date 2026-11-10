@@ -12,7 +12,11 @@ const TARGETS = [
   "openSession",
   "showSection",
   "toggleNewCard",
+  "toggleLimits",
+  "openLimitSources",
   "cycleTheme",
+  "setTheme",
+  "pressUpdate",
   "applyTheme",
   "setInsets",
   "setGlass",
@@ -22,17 +26,10 @@ const TARGETS = [
   "setTitlebar",
 ];
 
-// The title bar's buttons sit in the orchestrator panel's top corner; its
-// surface starts its header past them and centres the header on their line
-// (cmd/fleetdeck-window/titlebar_test.go).
-test("the orchestrator surface takes where the title bar's buttons end and the line they are centred on", () => {
-  const { send, calls } = setup("orchestrator");
-  send({ type: "titlebar", inset: 79, center: 18 });
-  assert.deepEqual(calls, [["setTitlebar", { inset: 79, center: 18 }]]);
-});
-
-test("the sessions surface and the board ignore the title bar", () => {
-  for (const surface of ["sessions", "board"]) {
+// The panels are under the window's bar (T-226): no page has the title bar's
+// buttons over it, and none takes a word about them.
+test("no surface takes the title bar any more", () => {
+  for (const surface of ["orchestrator", "sessions", "board"]) {
     const { send, calls } = setup(surface);
     send({ type: "titlebar", inset: 79, center: 18 });
     assert.deepEqual(calls, [], surface);
@@ -72,21 +69,66 @@ test("the board no longer cycles the theme for the window", () => {
 
 test("the board keeps clear of the panels by the insets the window sends", () => {
   const { send, calls } = setup("board");
-  send({ type: "insets", top: 64, left: 394, right: 0, contentRight: 356 });
+  send({ type: "insets", top: 52, left: 396, right: 0, contentRight: 358 });
+  assert.deepEqual(calls, [["setInsets", { top: 52, left: 396, right: 0, contentRight: 358 }]]);
+});
+
+// The tabs and the new card button are the board's own head now (T-226): the
+// window sends neither, and a stray one changes nothing.
+test("the board takes no tab or new card from the window", () => {
+  const { send, calls } = setup("board");
   send({ type: "show", section: "docs" });
   send({ type: "newCard" });
-  assert.deepEqual(calls, [["setInsets", { top: 64, left: 394, right: 0, contentRight: 356 }], ["showSection", "docs"], ["toggleNewCard"]]);
+  assert.deepEqual(calls, []);
+});
+
+// The bar's limits capsule says where it is, and the menu opens under it.
+test("the board opens the limits menu where the capsule is", () => {
+  const { send, calls } = setup("board");
+  send({ type: "limits", left: 221.5, top: 42 });
+  send({ type: "limits" });
+  assert.deepEqual(calls, [["toggleLimits", { left: 221.5, top: 42 }], ["toggleLimits", undefined]]);
+});
+
+// "Sources…" in the bar's system menu of limits opens the settings they come
+// from, on the board.
+test("the board opens the limits' sources the bar's menu asks for", () => {
+  const { send, calls } = setup("board");
+  send({ type: "limitSources" });
+  assert.deepEqual(calls, [["openLimitSources"]]);
+  const sessions = setup("sessions");
+  sessions.send({ type: "limitSources" });
+  assert.deepEqual(sessions.calls, []);
+});
+
+// The bar's theme segments: the board saves the choice, "" for the system's.
+test("the board sets the theme the bar chose", () => {
+  const { send, calls } = setup("board");
+  send({ type: "setTheme", choice: "dark" });
+  send({ type: "setTheme", choice: "" });
+  send({ type: "setTheme", choice: "sepia" });
+  assert.deepEqual(calls, [["setTheme", "dark"], ["setTheme", ""]]);
+});
+
+// The bar's update: the orchestrator's page presses its own update, which asks
+// about unsent text in its terminal first.
+test("only the orchestrator surface takes the bar's update press", () => {
+  for (const surface of ["orchestrator", "sessions", "board"]) {
+    const { send, calls } = setup(surface);
+    send({ type: "update" });
+    assert.deepEqual(calls, surface === "orchestrator" ? [["pressUpdate"]] : [], surface);
+  }
 });
 
 test("a side surface ignores what only the board handles", () => {
   const { send, calls } = setup("sessions");
   send({ type: "open", kind: "card", path: "x.md" });
-  send({ type: "show", section: "docs" });
+  send({ type: "setTheme", choice: "dark" });
   send({ type: "theme", choice: "light" });
   assert.deepEqual(calls, [["applyTheme", "light"]]);
 });
 
-test("only the orchestrator surface focuses its terminal and makes room for the window buttons", () => {
+test("only the orchestrator surface focuses its terminal and follows full screen", () => {
   const orchestrator = setup("orchestrator");
   orchestrator.send({ type: "focusTerminal" });
   orchestrator.send({ type: "fullscreen", on: true });

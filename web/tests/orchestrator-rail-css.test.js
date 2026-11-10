@@ -31,10 +31,10 @@ function ruleBody(selector) {
   return found.body;
 }
 
-const FOLDED_HEAD = ':root[data-surface="orchestrator"]:has(.col-orchestrator[data-folded="1"]) #header';
-
+// Folded or not, the orchestrator surface draws no page header in the window:
+// the brand and the fleet are the window's bar (T-226).
 test("the folded orchestrator panel in the window has no head", () => {
-  assert.match(ruleBody(FOLDED_HEAD), /display:\s*none/);
+  assert.match(ruleBody(":root[data-surface] #header"), /display:\s*none/);
 });
 
 // The unfold control is what the strip shows: no rule of the window's hides it
@@ -47,16 +47,6 @@ test("the folded orchestrator strip in the window still shows its unfold control
     }
   }
   assert.doesNotMatch(ruleBody('.col[data-folded="1"] .col-size-unfold'), /display:\s*none/);
-});
-
-// Run 34941628912: with the head hidden the unfold control rose to the strip's
-// top, under the window's close and minimize buttons. Out of full screen the
-// folded strip keeps the header's room above it, the buttons' line twice; in
-// full screen there are no buttons.
-const FOLDED_STRIP = ':root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) .col-orchestrator[data-folded="1"]';
-
-test("the folded orchestrator strip keeps the room the window's buttons take above its unfold control", () => {
-  assert.match(ruleBody(FOLDED_STRIP), /padding-top:\s*calc\(var\(--host-titlebar-center\)\s*\*\s*2\)/);
 });
 
 // Only the window's: a browser tab keeps its header, folded column or not.

@@ -44,17 +44,24 @@ var updateControlWants = map[string]struct {
 	button  bool
 	problem bool
 }{
-	"check-checking":  {"", false, false},
-	"check-latest":    {"v1.0.0", false, false},
-	"check-failed":    {"no such host", false, true},
-	"check-available": {"v1.1.0", true, false},
+	"check-checking": {"", false, false},
+	"check-latest":   {"v1.0.0", false, false},
+	"check-failed":   {"no such host", false, true},
 }
+
+// A version found is the window's bar's to offer (T-226): its frame shows the
+// bar's update capsule, and the panel over the terminal stays for a press.
+const barOffers = "check-available"
 
 // updateControlCheck is what is wrong with the update control the log's
 // orchestrator surface last reported, held to the state the stand opened.
 func updateControlCheck(log string, open []string) []string {
 	var problems []string
 	for _, name := range open {
+		if name == barOffers {
+			problems = append(problems, barUpdateProblems(log)...)
+			continue
+		}
 		want, ok := updateControlWants[name]
 		if !ok {
 			continue
@@ -109,4 +116,19 @@ func updateControlCheck(log string, open []string) []string {
 		}
 	}
 	return problems
+}
+
+// barUpdateProblems is what is wrong with the bar's update capsule in the
+// log's last frame: it is there and shown.
+func barUpdateProblems(log string) []string {
+	frame, _, problems := readControls(log)
+	if frame == nil {
+		return append(problems, "no frame report to find the bar's update capsule in")
+	}
+	for _, c := range frame.Capsules {
+		if c.Name == "update" {
+			return nil
+		}
+	}
+	return []string{fmt.Sprintf("the bar shows no update capsule, which %s shows", barOffers)}
 }

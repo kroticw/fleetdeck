@@ -24,9 +24,10 @@ test("the page's marked ground and a point off the page count as empty", () => {
 
 test("the band ends where something begins, anywhere across the page", () => {
   const banner = el("DIV");
-  // The build banner or the new card form, 56 points down, somewhere in the middle.
-  const at = (x, y) => (y >= 56 && x > 400 && x < 1000 ? banner : BOARD);
-  assert.equal(freeTopHeight(at, 1440), 56);
+  // The build banner or the new card form, 40 points down -- inside the 52 pt
+  // band -- somewhere in the middle.
+  const at = (x, y) => (y >= 40 && x > 400 && x < 1000 ? banner : BOARD);
+  assert.equal(freeTopHeight(at, 1440), 40);
 });
 
 // The new card form drops under the capsules, from the board's top inset less

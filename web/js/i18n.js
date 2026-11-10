@@ -298,6 +298,7 @@ const en = {
   set_error: "Not saved:",
   set_load_error: "The settings could not be read:",
   new_card: "+ card",
+  board_find: "Find card",
   new_card_title: "Card title",
   new_card_zone: "Urgency",
   new_card_executor: "Executor",
@@ -522,6 +523,7 @@ const en = {
   // override (web/js/theme.js's button, rendered by header.js). "auto" is
   // the no-override state — the panel follows the system theme.
   sessions_title: "Sessions",
+  sessions_live: "live",
   // --- fleets (web/js/fleet.js, header.js's switcher, sessions.js's groups) ---
   fleet_switch: "fleets",
   fleet_none: "No fleet",
@@ -902,6 +904,7 @@ const ru = {
   set_error: "Не сохранено:",
   set_load_error: "Настройки не прочитались:",
   new_card: "+ карточка",
+  board_find: "Найти карточку",
   new_card_title: "Заголовок карточки",
   new_card_zone: "Срочность",
   new_card_executor: "Исполнитель",
@@ -1082,6 +1085,7 @@ const ru = {
   terminal_font_reset: "вернуть 12 px (⌘0)",
 
   sessions_title: "Сессии",
+  sessions_live: "живых",
   // --- fleets (web/js/fleet.js, header.js's switcher, sessions.js's groups) ---
   fleet_switch: "флоты",
   fleet_none: "Без флота",

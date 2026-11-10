@@ -24,8 +24,16 @@ export function createLimitsPopover(doc, getSnap, now = () => Date.now(), onSour
   const close = () => {
     node.hidden = true;
   };
-  const toggle = () => {
+  // at is where the bar's limits capsule is, its left edge and its bottom in
+  // the window: the menu opens under it (T-226). Without it the stylesheet's
+  // place stands.
+  const toggle = (at) => {
     node.hidden = !node.hidden;
+    if (!node.hidden && Number.isFinite(at?.left) && Number.isFinite(at?.top)) {
+      node.style.left = `${at.left}px`;
+      node.style.top = `${at.top + 6}px`;
+      node.style.right = "auto";
+    }
     refresh();
   };
   node.addEventListener("click", (event) => {

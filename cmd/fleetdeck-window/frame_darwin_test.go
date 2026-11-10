@@ -10,7 +10,9 @@ import (
 )
 
 var (
-	frameGeometry = layoutFor(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348})
+	// The row past the window's buttons, as a titled window has it: the zoom
+	// button ends about 79 pt in (TestTheZoomButtonEndsAtTheBarsLeft).
+	frameGeometry = layoutPastButtons(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}, 79)
 	frameResult   frameProbe
 )
 
@@ -131,18 +133,14 @@ func TestDraggingThePanelsEdgeChangesItsWidthWithinLimits(t *testing.T) {
 	}
 }
 
-// v0.10.1 on the operator's macOS: with no toolbar the window's buttons sat
-// where a plain title bar puts them, centred 16 pt from the window's top left,
-// on the orchestrator panel's edge 8 pt in, and above the brand. A window with a
-// unified toolbar centres them 26 pt in, which is where the panel's 18 pt corner
-// curves around: the buttons sit concentric in it, as in a floating sidebar. The
-// window says that line to the surface, and the material does not move it.
-func TestTheWindowsButtonsSitConcentricInTheOrchestratorPanelsCorner(t *testing.T) {
+// A window with a unified toolbar centres its buttons 26 pt in from the top
+// left: on the line of the bar's capsules (T-226), whatever the material.
+func TestTheWindowsButtonsSitOnTheBarsLine(t *testing.T) {
 	r := frameResult
 	cx, cy := r.closeButton.X+r.closeButton.W/2, r.closeButton.Y+r.closeButton.H/2
-	want := panelMargin + 18
+	want := capsuleTop + capsuleHeight/2
 	if r.closeButton.W == 0 || math.Abs(cx-want) > 1 || math.Abs(cy-want) > 1 {
-		t.Errorf("the close button is centred at (%v, %v), want (%v, %v) in the orchestrator panel's corner", cx, cy, want, want)
+		t.Errorf("the close button is centred at (%v, %v), want (%v, %v) on the bar's line", cx, cy, want, want)
 	}
 	if math.Abs(r.titlebarCenter-cy) > 0.01 {
 		t.Errorf("the window says its buttons are centred %v pt down, they are at %v", r.titlebarCenter, cy)

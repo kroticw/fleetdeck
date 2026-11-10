@@ -60,12 +60,10 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 	}
 	g.ctl = newController(panelURL, panelWidthsForStand(loadPanelWidths(), standFold), mode)
 	g.frame.setMode(mode)
-	// The top band over the panels, the window's handle until full screen.
-	g.frame.setTopDrag(topDragHeight)
 	logFrameMode(mode)
 	width, height := windowContentSize(w.Window())
 	g.run(g.ctl.resized(width, height, windowIsFullscreen(w.Window())))
-	g.run(g.ctl.titlebarButtons(g.frame.titlebarInset(), g.frame.titlebarCenter()))
+	g.run(g.ctl.titlebarButtons(g.frame.titlebarInset()))
 
 	// A surface's page says where its load is through the same binding the
 	// board's does; the board's own goes to the screen (main.go).
@@ -97,20 +95,6 @@ func newGlassWindow(w webview.WebView, panelURL string, askBoard func(), putUp f
 			return nil, err
 		}
 		g.later(g.ctl.topBand(height))
-		return nil, nil
-	})
-	// A side page's controls in the top band, which presses there reach
-	// (web/js/dragholes.js).
-	g.bind("fleetdeckDragHoles", func(surface string, args json.RawMessage) (any, error) {
-		var boxes []struct{ X, Y, W, H float64 }
-		if err := json.Unmarshal(args, &boxes); err != nil {
-			return nil, err
-		}
-		holes := make([]rect, len(boxes))
-		for i, b := range boxes {
-			holes[i] = rect{X: b.X, Y: b.Y, W: b.W, H: b.H}
-		}
-		g.later(g.ctl.dragHoles(surface, holes))
 		return nil, nil
 	})
 	g.bind("fleetdeckOpen", func(_ string, args json.RawMessage) (any, error) {
@@ -339,7 +323,7 @@ func (g *glassWindow) windowChanged(kind string) {
 		width, height := windowContentSize(g.w.Window())
 		fullscreen := windowIsFullscreen(g.w.Window())
 		g.run(g.ctl.resized(width, height, fullscreen))
-		g.run(g.ctl.titlebarButtons(g.frame.titlebarInset(), g.frame.titlebarCenter()))
+		g.run(g.ctl.titlebarButtons(g.frame.titlebarInset()))
 		if kind == "fullscreen" {
 			if after, ok := g.standFS.changed(fullscreen); ok {
 				verb := "leaves"
@@ -473,9 +457,6 @@ func logFrameMode(m glassMode) {
 }
 
 func (g *glassWindow) reloadBoard() { g.askBoard() }
-
-func (g *glassWindow) setTopDrag(height float64)              { g.frame.setTopDrag(height) }
-func (g *glassWindow) setDragHoles(side string, holes []rect) { g.frame.setDragHoles(side, holes) }
 
 func (g *glassWindow) setDragBand(height float64) {
 	g.frame.setDragBand(height)

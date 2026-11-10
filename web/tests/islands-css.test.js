@@ -40,25 +40,12 @@ test("in a side surface the head rows lie on the glass, with no ground and no ru
   }
 });
 
-// The title bar's buttons float over the orchestrator panel's top corner; the
-// window sends where they end (cmd/fleetdeck-window/titlebar.go). In full
-// screen there are none.
-test("the orchestrator's header starts past the title bar's buttons, except in full screen", () => {
-  assert.match(
-    ruleBody(':root[data-surface="orchestrator"] #header'),
-    /padding-left:\s*max\(calc\(var\(--gap\) \* 2\),\s*var\(--host-inset-titlebar,\s*0px\)\)/,
-  );
-  assert.match(ruleBody(':root[data-surface="orchestrator"][data-fullscreen] #header'), /padding-left:\s*calc\(var\(--gap\) \* 2\)/);
-});
-
-// v0.10.1 on the operator's macOS: the brand and the fleet picker sat lower than
-// the title bar's buttons. The window sends the line the buttons are centred on,
-// from the panel's top; out of full screen the header is twice that tall with no
-// padding above or below, so its row is centred on the same line.
-test("the orchestrator's header row is centred on the title bar's buttons, except in full screen", () => {
-  const body = ruleBody(':root[data-surface="orchestrator"][data-titlebar]:not([data-fullscreen]) #header');
-  assert.match(body, /padding-block:\s*0/);
-  assert.match(body, /min-height:\s*calc\(var\(--host-titlebar-center\) \* 2\)/);
+// The brand, the fleet and the counters are the window's bar (T-226), and the
+// panels are under it: no side surface draws a header of its own, and nothing
+// is placed by the title bar's buttons any more.
+test("in the window no surface draws the page's header", () => {
+  assert.match(ruleBody(":root[data-surface] #header"), /display:\s*none/);
+  assert.equal(/--host-inset-titlebar|--host-titlebar-center|\[data-titlebar\]/.test(stripped), false, "nothing is placed by the title bar's buttons");
 });
 
 test("the orchestrator's terminal is the island's lower part, not a box inside it", () => {
@@ -73,14 +60,13 @@ test("the orchestrator's terminal is the island's lower part, not a box inside i
   assert.match(ruleBody(':root[data-surface="orchestrator"] .o-term .xterm'), /padding:\s*0 10px 6px/);
 });
 
-test("the sessions island has one head: the fold button and the name on a row, the counters under them", () => {
+// The counters are the window's bar now (T-226): the list itself starts under
+// the head, its rows cut off at its own top instead of drawn under the head.
+test("the sessions island has one head: the fold button and the name on a row, the list under them", () => {
   const open = ':root[data-surface="sessions"] .col-sessions:not([data-folded="1"])';
   assert.match(ruleBody(`${open} > .col-size`), /position:\s*fixed/);
   assert.match(ruleBody(`${open} > .slist-head`), /position:\s*fixed/);
-  assert.match(
-    ruleBody(':root[data-surface="sessions"]:has(.col-sessions:not([data-folded="1"])) #header'),
-    /margin-top:\s*var\(--sessions-head\)/,
-  );
+  assert.match(ruleBody(open), /margin-top:\s*var\(--sessions-head\)/);
 });
 
 // A scrollbar-width or scrollbar-color other than auto makes WebKit ignore

@@ -48,10 +48,10 @@ function rules() {
   return out;
 }
 
-const FOLDED_HEAD = ':root[data-surface="sessions"]:has(.col-sessions[data-folded="1"]) #header';
 
+// Folded or not: the counters are the window's bar (T-226).
 test("the folded sessions panel in the window has no head", () => {
-  assert.match(ruleBody(FOLDED_HEAD), /display:\s*none/);
+  assert.match(ruleBody(":root[data-surface] #header"), /display:\s*none/);
 });
 
 // The rail's signals are all that is left once the head is gone: the window's

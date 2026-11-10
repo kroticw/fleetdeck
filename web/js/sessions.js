@@ -463,6 +463,12 @@ function fleetOtherHtml({ name, sessions }) {
 // named nothing at all — the specific gap a live run's screenshot found.
 const HEAD = `<div class="slist-head">${escapeHtml(t("sessions_title"))}</div>`;
 
+// The head with how many of the column's sessions are live, as the design's
+// "Sessions · 4 live" (T-226): the counters are the window's bar now.
+function headHtml(live) {
+  return `<div class="slist-head">${escapeHtml(t("sessions_title"))} <span class="slist-live">${live} ${escapeHtml(t("sessions_live"))}</span></div>`;
+}
+
 // The same fold/unfold strip as the orchestrator column's own — same
 // classes (web/app.css's .col-size rules act on them for whichever column
 // carries them), same i18n keys, same mechanism — mirrored, not copied: this
@@ -656,19 +662,47 @@ export function renderSessions(
   // current: this column is rewritten wholesale on every snapshot, and asking
   // "are we folded right now" here would put a second answer to that question
   // next to the one the stylesheet already has.
+  //
+  // The same markup as last written is not written again: a snapshot arrives
+  // once a second, and a rewrite between a press and its release replaces the
+  // row under the pointer, so the click never happens (T-226). Answers whether
+  // it wrote; the caller wires the new nodes only then.
+  let written = null;
   const setBody = (bodyHtml, foldedHtml = "") => {
+    const html = sizeControlsHtml() + foldedHtml + bodyHtml;
+    if (html === written) return false;
+    written = html;
     // The column scrolls on its own: a row is seen through it.
     const flip = { ...sessionFlipKeys, clipOf: () => root.getBoundingClientRect() };
     const rows = () => [...root.querySelectorAll(".srow")];
     const before = capture(rows(), flip);
-    root.innerHTML = sizeControlsHtml() + foldedHtml + bodyHtml;
+    root.innerHTML = html;
     play(before, rows(), { ...flip, viewport: viewportOf(), reduced: reducedMotion() });
     root.querySelector(".col-size-unfold")?.addEventListener("click", () => resize.width.unfold());
     root.querySelector(".col-size-fold")?.addEventListener("click", () => resize.width.fold());
     for (const mark of root.querySelectorAll(".sfold-mark")) {
       mark.addEventListener("click", () => onSelect(mark.dataset.session));
     }
+    return true;
   };
+
+  // A press in the column holds the snapshots back until it is let go, so the
+  // node pressed is the node released and the click happens. Held at most
+  // HOLD_MS, for a release that never reaches this page.
+  const HOLD_MS = 2000;
+  let held = null;
+  const release = () => {
+    if (held === null) return;
+    clearTimeout(held);
+    held = null;
+    if (editingShort === null) render(lastSnap, lastConnected);
+  };
+  root.addEventListener("pointerdown", () => {
+    clearTimeout(held);
+    held = setTimeout(release, HOLD_MS);
+  });
+  root.ownerDocument?.addEventListener?.("pointerup", release);
+  root.ownerDocument?.addEventListener?.("pointercancel", release);
 
   const render = (snap, connected) => {
     // Before the first successful connection, or after a dropped/unparseable
@@ -800,10 +834,12 @@ export function renderSessions(
     // together below them. Not `all` — that would put another fleet's sessions
     // on a strip whose open form does not list them, and not the other fleets'
     // summary lines either, which are not sessions at all.
-    setBody(
-      HEAD + errorHtml + emptyHtml + startsHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""),
+    // Unchanged, the nodes on screen are the ones already wired below.
+    const wrote = setBody(
+      headHtml(running.length + orderedUnclaimed.length) + errorHtml + emptyHtml + startsHtml + rows(ordered) + unclaimedHtml + goneHtml + others.map(fleetOtherHtml).join(""),
       foldedStripHtml([...sessions, ...unclaimed], stalledNow),
     );
+    if (!wrote) return;
     applyContextWidths(root);
 
     for (const el of root.querySelectorAll(".srow")) {
@@ -916,6 +952,9 @@ export function renderSessions(
           labelError = `${t("label_save_failed")}: ${err.message}`;
         }
       }
+      // The field was put into the row by hand: the markup on screen is no
+      // longer the markup last written, whatever the next render draws.
+      written = null;
       render(lastSnap, lastConnected);
     };
 
@@ -934,7 +973,7 @@ export function renderSessions(
   subscribe((snap, connected) => {
     lastSnap = snap;
     lastConnected = connected;
-    if (editingShort !== null) return;
+    if (editingShort !== null || held !== null) return;
     render(snap, connected);
   });
 

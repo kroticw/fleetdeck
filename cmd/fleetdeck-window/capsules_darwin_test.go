@@ -1,8 +1,7 @@
 package main
 
-// The capsules are drawn once, on the main thread, in TestMain
-// (menu_darwin_test.go), on a window never put on screen; the tests below only
-// read what was found.
+// The bar is drawn once, on the main thread, in TestMain (menu_darwin_test.go),
+// on a window never put on screen; the tests below only read what was found.
 
 import (
 	"encoding/json"
@@ -12,30 +11,262 @@ import (
 	"testing"
 )
 
+// barModel is the bar of the redesign (T-226) as a board in Russian hands it
+// to the window: two fleets, two limits, an update and both counters.
+const barModel = `{"version":1,
+	"brand":{"name":"fleetdeck","version":"1.8.0"},
+	"fleet":{"name":"obsidian","label":"Флот","fleets":[{"name":"obsidian","waiting":1,"current":true},{"name":"work"}],"all":"Все флоты","add":"Завести флот…"},
+	"limitsLabel":"Лимиты",
+	"limits":[{"label":"Claude","text":"42%","level":"cool","color":"#2f9e44"},{"label":"Codex","text":"63%","level":"warm","color":"#d9480f"}],
+	"update":{"text":"Доступна 1.9.0","action":"Обновить"},
+	"counters":[{"text":"1 ждёт ответа","color":"#c2410c"},{"text":"0 остановились","color":"#6b7280","hollow":true}],
+	"theme":{"label":"Тема","choice":"dark","light":"Светлая","system":"Как в системе","dark":"Тёмная"},
+	"accent":"#4f56d9"}`
+
 var (
-	capsulesResult capsulesProbe
-	themeResult    capsuleThemeProbe
-	// noThemeCount is how many capsules a model without a theme is drawn as.
-	noThemeCount int
+	capsulesResult   capsulesProbe
+	limitsMenuResult limitsMenuProbe
+	themeResult      capsuleThemeProbe
+	// plainCount is how many parts a bar with no update and no counters shows.
+	plainCount int
 )
 
 func collectCapsuleResults() {
-	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[{"id":"board","label":"Доска","selected":true},{"id":"docs","label":"Доки","selected":false}],"newCard":{"label":"+ карточка"},"theme":{"label":"тема: авто"},"limits":[{"label":"5ч","text":"37%","level":"cool","color":"#2f9e44"}]}`))
+	m, err := parseCapsuleModel(json.RawMessage(barModel))
 	if err != nil {
 		panic(err)
 	}
 	capsulesResult = probeCapsulesForTest(m)
-	collectCapsuleLayoutResults()
+	withMenu := m
+	withMenu.LimitsMenu = &capsuleLimitsMenu{
+		Title: "Лимиты", Note: "сначала самые занятые", Updated: "обновлено Codex: 1 мин", Sources: "Источники…",
+		Models: []capsuleLimitsModel{{Name: "Codex", Kind: "5 ч и неделя", Color: "#d9480f", Rows: []capsuleLimitsRow{
+			{Title: "5 часов", Text: "63%", Pct: 63, Note: "сброс через 2 ч", Color: "#d9480f"},
+			{Title: "7 дней", Text: "—", Pct: -1, Color: "#8791a0"},
+		}}},
+	}
+	limitsMenuResult = probeLimitsMenuForTest(withMenu)
+	collectCapsuleLayoutResults(m)
 	themeResult = probeCapsuleThemeForTest(m)
-	m.Theme = capsuleLabel{}
-	noThemeCount = probeCapsuleCountForTest(m)
+	m.Update, m.Counters = nil, nil
+	plainCount = probeCapsuleCountForTest(m)
 }
 
-// The theme is a setting of the page now: a model with no theme draws no
-// theme capsule, and the row still lays out.
-func TestAModelWithoutAThemeDrawsNoThemeCapsule(t *testing.T) {
-	if noThemeCount != 3 {
-		t.Fatalf("capsules = %d, want tabs, new card and one limit", noThemeCount)
+// --- the bar's parts ------------------------------------------------------------
+
+func TestTheBarDrawsThePagesModel(t *testing.T) {
+	r := capsulesResult
+	want := map[string]string{
+		"brandName": "fleetdeck", "brandVersion": "1.8.0",
+		"fleetName": "obsidian", "fleetLabel": "Флот",
+		"limitsLabel": "Лимиты", "busyName": "Codex", "busyText": "63%", "limitsTooltip": "Claude: 42%\nCodex: 63%",
+		"updateText": "Доступна 1.9.0", "updateAction": "Обновить",
+		"counter0": "1 ждёт ответа", "counter1": "0 остановились",
+	}
+	if !reflect.DeepEqual(r.texts, want) {
+		t.Fatalf("texts = %v\nwant    %v", r.texts, want)
+	}
+	if got := []string{"brand", "fleet", "limits", "update", "counter", "counter", "theme"}; !reflect.DeepEqual(r.slots, got) {
+		t.Fatalf("parts = %v, want %v", r.slots, got)
+	}
+	if r.capsuleCount != 7 {
+		t.Fatalf("parts shown = %d, want all 7", r.capsuleCount)
+	}
+	if !r.brandIcon {
+		t.Error("the brand shows no app icon")
+	}
+}
+
+func TestABarWithNoUpdateAndNoCountersShowsTheRest(t *testing.T) {
+	if plainCount != 4 {
+		t.Fatalf("parts shown = %d, want the brand, the fleet, the limits and the theme", plainCount)
+	}
+}
+
+// The colours are the page's: the fleet's dot is the accent, each limit a dot
+// in its level's colour -- a level indicator drew nothing on glass -- and the
+// busiest limit's number in its colour. A counter is its colour on a tint of it.
+func TestTheBarsMarksAreInThePagesColours(t *testing.T) {
+	g := capsulesResult.greens
+	for what, hex := range map[string]uint8{"fleetDot": 0x56, "dot0": 0x9e, "dot1": 0x48, "busyText": 0x48, "counter0": 0x41, "counterTint0": 0x41} {
+		if math.Round(g[what]*255) != float64(hex) {
+			t.Errorf("%s: green %.3f, want %#x", what, g[what], hex)
+		}
+	}
+	if !reflect.DeepEqual(capsulesResult.counterHollow, []bool{false, true}) {
+		t.Errorf("hollow dots = %v, want only the stalled counter's", capsulesResult.counterHollow)
+	}
+}
+
+// Every part is centred on the bar's line, the line of the window's buttons.
+func TestEveryPartIsCentredOnTheBarsLine(t *testing.T) {
+	r := capsulesResult
+	for i, name := range r.slots {
+		if mid := r.slotY[i] + r.slotH[i]/2; math.Abs(mid-capsuleHeight/2) > 0.5 {
+			t.Errorf("%s: centred %v into the row, want %v", name, mid, capsuleHeight/2)
+		}
+	}
+}
+
+func TestTheThemeIsThreeSegmentsWithTheChoiceSelected(t *testing.T) {
+	r := capsulesResult
+	if r.themeSegments != 3 || r.themeSelected != 2 {
+		t.Fatalf("segments %d, selected %d; want 3 with the dark one", r.themeSegments, r.themeSelected)
+	}
+	if r.themeTooltips != [3]string{"Светлая", "Как в системе", "Тёмная"} {
+		t.Fatalf("tooltips = %q", r.themeTooltips)
+	}
+	if r.themeImages[0] != r.themeImages[1] || r.themeImages[1] != r.themeImages[2] {
+		t.Fatalf("images = %v: all symbols or all marks", r.themeImages)
+	}
+}
+
+// v0.10.1 on the operator's macOS: the selected tab was a rounded rectangle in
+// its round capsule. From macOS 26 a segmented control has a border shape, and
+// left automatic it draws a rounded rectangle at this size. Asked for a capsule,
+// its selected segment is one too.
+// capsuleOverRoundedInset is how much further in a capsule's top row starts than
+// a rounded rectangle's, at the least: 0.46 against 0.19 on a 2x screen.
+const capsuleOverRoundedInset = 0.05
+
+func TestTheSelectedThemeIsACapsuleInsideItsCapsule(t *testing.T) {
+	r := capsulesResult
+	if r.borderShape < 0 {
+		t.Skip("NSControl.borderShape is not on this system (before macOS 26)")
+	}
+	if r.borderShape != 1 {
+		t.Errorf("the theme's border shape is %d, want 1 (NSControlBorderShapeCapsule)", r.borderShape)
+	}
+	if r.roundedTopInset <= 0 || r.selectedTopInset < r.roundedTopInset+capsuleOverRoundedInset {
+		t.Errorf("the selected segment's fill starts %.2f of its height in at its top, a rounded rectangle's drawn in its place %.2f: want a capsule's, at least %.2f further in", r.selectedTopInset, r.roundedTopInset, capsuleOverRoundedInset)
+	}
+}
+
+// In 1.8.0 the page's fleet menu opened to the right of its button. The bar's
+// opens under the capsule, its left edge on the capsule's.
+func TestTheFleetsMenuOpensUnderItsCapsule(t *testing.T) {
+	r := capsulesResult
+	if math.Abs(r.menuX-r.fleetX) > 0.5 {
+		t.Errorf("the menu's left edge at %v, the capsule's at %v", r.menuX, r.fleetX)
+	}
+	if r.menuY < r.fleetBottom || r.menuY > r.fleetBottom+10 {
+		t.Errorf("the menu's top at %v, want just under the capsule's bottom at %v", r.menuY, r.fleetBottom)
+	}
+}
+
+// The page's limits popover lay in the board's web view, under the
+// orchestrator panel (T-226): the limits capsule opens a system menu of its
+// own, over every panel, under the capsule.
+func TestTheLimitsMenuOpensUnderItsCapsule(t *testing.T) {
+	r := limitsMenuResult
+	if len(r.menu) == 0 {
+		t.Fatal("the limits capsule opened no menu")
+	}
+	if math.Abs(r.menuX-r.ownerX) > 0.5 {
+		t.Errorf("the menu's left edge at %v, the capsule's at %v", r.menuX, r.ownerX)
+	}
+	if r.menuY < r.ownerBottom || r.menuY > r.ownerBottom+10 {
+		t.Errorf("the menu's top at %v, want just under the capsule's bottom at %v", r.menuY, r.ownerBottom)
+	}
+}
+
+func TestTheLimitsMenuIsThePagesTable(t *testing.T) {
+	var views []string
+	for _, item := range limitsMenuResult.menu {
+		if item.view != "" {
+			views = append(views, item.view)
+		}
+	}
+	want := []string{
+		"Лимиты | сначала самые занятые",
+		"● | Codex | 5 ч и неделя",
+		"5 часов | сброс через 2 ч | 63%",
+		"7 дней | —",
+		"обновлено Codex: 1 мин",
+	}
+	if !reflect.DeepEqual(views, want) {
+		t.Fatalf("menu = %q\nwant %q", views, want)
+	}
+	last := limitsMenuResult.menu[len(limitsMenuResult.menu)-1]
+	if last.title != "Источники…" {
+		t.Fatalf("last item = %+v, want Sources…", last)
+	}
+	if !reflect.DeepEqual(limitsMenuResult.presses, []string{"limitSources"}) {
+		t.Fatalf("presses = %v: opening the menu says nothing, Sources… asks for the settings", limitsMenuResult.presses)
+	}
+}
+
+func TestTheFleetsMenuListsEveryFleetThenAllAndAdd(t *testing.T) {
+	m := capsulesResult.menu
+	if len(m) != 5 {
+		t.Fatalf("menu = %+v, want two fleets, a separator, All and Add", m)
+	}
+	if m[0].title != "obsidian" || !m[0].checked || m[0].waiting != 1 {
+		t.Errorf("first = %+v, want obsidian checked with one waiting", m[0])
+	}
+	if m[1].title != "work" || m[1].checked || m[1].waiting != 0 {
+		t.Errorf("second = %+v, want work, unchecked, none waiting", m[1])
+	}
+	if !m[2].separator || m[3].title != "Все флоты" || m[4].title != "Завести флот…" {
+		t.Errorf("tail = %+v", m[2:])
+	}
+}
+
+// The limits press says where its capsule is, its left edge and its bottom in
+// the window, so the page's menu opens under it: in 1.8.0 it opened at the
+// bar's right end.
+func TestAPressInTheBarBecomesTheControllersAction(t *testing.T) {
+	limits := ""
+	for _, c := range capsulesResult.measured.Capsules {
+		if c.Name == "limits" {
+			limits = fmt.Sprintf("limits:%g,%g", c.X, c.Y+c.H)
+		}
+	}
+	want := []string{"fleet:work", "fleets", "newFleet", limits, "update", "theme:dark"}
+	if !reflect.DeepEqual(capsulesResult.presses, want) {
+		t.Fatalf("presses = %v, want %v", capsulesResult.presses, want)
+	}
+}
+
+func TestADrawnAgainRowReplacesTheCapsulesInsteadOfAddingThem(t *testing.T) {
+	if capsulesResult.countAfterRedraw != 7 {
+		t.Fatalf("after a second draw: %d, want the same seven parts in one row", capsulesResult.countAfterRedraw)
+	}
+}
+
+// v0.10.0 drew the capsules' labels under the glass on the operator's macOS 26:
+// the controls lay beside their glass in the row's NSGlassEffectContainerView,
+// which draws its glass in a view above its content. Only a glass's contentView
+// is drawn inside the glass.
+func TestEachCapsuleControlOnGlassIsItsGlassesContent(t *testing.T) {
+	if !frameResult.glassAvailable {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	for _, what := range []string{"fleet", "limits", "update", "theme"} {
+		if !capsulesResult.insideGlass[what] {
+			t.Errorf("%s, drawn on glass, is not its glass's content view: the glass draws over it", what)
+		}
+	}
+}
+
+// A click at the middle of each capsule reaches its control, on a window laid
+// out as one on screen is: before layout a glass's content view has no size,
+// and a hit test stops at the glass. The fleet and the limits are one control
+// from anywhere on them: a chevron alone was too small to hit.
+func TestAClickOnEachCapsuleOnGlassReachesItsControl(t *testing.T) {
+	if !frameResult.glassAvailable {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	for _, what := range []string{"fleet", "limits", "update", "theme"} {
+		if !capsulesResult.clicksReach[what] {
+			t.Errorf("a click at the middle of %s, drawn on glass, does not reach it", what)
+		}
+	}
+}
+
+func TestAClickInTheGapBetweenTheGroupsReachesTheBand(t *testing.T) {
+	if !capsulesResult.rowPassesThrough {
+		t.Fatal("the capsule row's container takes a click between its groups, over the band")
 	}
 }
 
@@ -59,23 +290,26 @@ func TestCapsulesOnGlassKeepTheAppsAppearanceForTheirControls(t *testing.T) {
 	}
 	for i, name := range themeResult.onGlassInDarkApp {
 		if name != "" {
-			t.Errorf("capsule %d's content has an appearance of its own, %q, instead of the app's", i, name)
+			t.Errorf("part %d's content has an appearance of its own, %q, instead of the app's", i, name)
 		}
 	}
 }
 
+// The glass capsules only: the brand has no capsule and a counter's tint is the
+// page's colour.
 func TestOpaqueCapsulesTakeTheirBackgroundFromTheAppsTheme(t *testing.T) {
+	glassy := map[string]bool{"fleet": true, "limits": true, "update": true, "theme": true}
 	for _, c := range []struct {
 		theme  string
 		got    []float64
 		darker bool
 	}{{"dark", themeResult.opaqueInDarkApp, true}, {"light", themeResult.opaqueInLightApp, false}} {
-		if len(c.got) == 0 {
-			t.Fatalf("app %s: no capsules drawn", c.theme)
+		if len(c.got) != len(capsulesResult.slots) {
+			t.Fatalf("app %s: %d parts measured, want %d", c.theme, len(c.got), len(capsulesResult.slots))
 		}
 		for i, b := range c.got {
-			if b < 0 || (b < 0.5) != c.darker {
-				t.Errorf("app %s: capsule %d's background is %.2f light, want it %s", c.theme, i, b, map[bool]string{true: "dark", false: "light"}[c.darker])
+			if name := capsulesResult.slots[i]; glassy[name] && (b < 0 || (b < 0.5) != c.darker) {
+				t.Errorf("app %s: %s's background is %.2f light, want it %s", c.theme, name, b, map[bool]string{true: "dark", false: "light"}[c.darker])
 			}
 		}
 	}
@@ -87,119 +321,13 @@ func TestTheThemeProbeLeavesTheAppsAppearanceAsItFoundIt(t *testing.T) {
 	}
 }
 
-func TestCapsulesDrawThePagesModel(t *testing.T) {
-	r := capsulesResult
-	if r.segmentLabels != [2]string{"Доска", "Доки"} || r.selectedSegment != 0 {
-		t.Fatalf("segments = %v selected %d", r.segmentLabels, r.selectedSegment)
-	}
-	if r.newCardTitle != "+ карточка" || r.themeTitle != "тема: авто" {
-		t.Fatalf("buttons = %q %q", r.newCardTitle, r.themeTitle)
-	}
-	// The limit's level is a dot in its colour before its name: a level
-	// indicator drew nothing on glass on the operator's window.
-	if r.dotTitle != "●" || math.Round(r.dotGreen*255) != 0x9e {
-		t.Fatalf("dot = %q, green %v; want ● in #2f9e44", r.dotTitle, r.dotGreen)
-	}
-	if r.capsuleCount != 4 {
-		t.Fatalf("capsules = %d, want tabs, new card, theme, one limit", r.capsuleCount)
-	}
-}
-
-// v0.10.1 on the operator's macOS: the selected tab was a rounded rectangle in
-// its round capsule. From macOS 26 a segmented control has a border shape, and
-// left automatic it draws a rounded rectangle at this size. Asked for a capsule,
-// its selected segment is one too, and with the same room on every side the two
-// capsules share their centres of curvature.
-// capsuleOverRoundedInset is how much further in a capsule's top row starts than
-// a rounded rectangle's, at the least: 0.46 against 0.19 on a 2x screen.
-const capsuleOverRoundedInset = 0.05
-
-func TestTheSelectedTabIsACapsuleInsideItsCapsule(t *testing.T) {
-	r := capsulesResult
-	if r.segmentBorderShape < 0 {
-		t.Skip("NSControl.borderShape is not on this system (before macOS 26)")
-	}
-	if r.segmentBorderShape != 1 {
-		t.Errorf("the tabs' border shape is %d, want 1 (NSControlBorderShapeCapsule)", r.segmentBorderShape)
-	}
-	if r.roundedTopInset <= 0 || r.selectedTopInset < r.roundedTopInset+capsuleOverRoundedInset {
-		t.Errorf("the selected segment's fill starts %.2f of its height in at its top, a rounded rectangle's drawn in its place %.2f: want a capsule's, at least %.2f further in", r.selectedTopInset, r.roundedTopInset, capsuleOverRoundedInset)
-	}
-}
-
-func TestTheTabsHaveTheSameRoomOnEverySideOfTheirCapsule(t *testing.T) {
-	r := capsulesResult
-	if r.segmentBorderShape < 0 {
-		t.Skip("NSControl.borderShape is not on this system (before macOS 26): the tabs are no capsule to keep concentric")
-	}
-	in := r.tabsInsets
-	for i, side := range []string{"right", "top", "bottom"} {
-		if math.Abs(in[i+1]-in[0]) > 0.5 {
-			t.Errorf("the tabs have %v pt of room on the left and %v on the %s, want the same", in[0], in[i+1], side)
-		}
-	}
-}
-
-func TestADrawnAgainRowReplacesTheCapsulesInsteadOfAddingThem(t *testing.T) {
-	if capsulesResult.countAfterRedraw != 4 {
-		t.Fatalf("after a second draw: %d, want the same four capsules in one row", capsulesResult.countAfterRedraw)
-	}
-}
-
-func TestAPressInTheRowBecomesTheControllersAction(t *testing.T) {
-	if !reflect.DeepEqual(capsulesResult.presses, []string{"tab:docs", "newCard"}) {
-		t.Fatalf("presses = %v", capsulesResult.presses)
-	}
-}
-
-// v0.10.0 drew the capsules' labels under the glass on the operator's macOS 26:
-// the controls lay beside their glass in the row's NSGlassEffectContainerView,
-// which draws its glass in a view above its content. Only a glass's contentView
-// is drawn inside the glass.
-func TestEachCapsuleControlOnGlassIsItsGlassesContent(t *testing.T) {
-	if !frameResult.glassAvailable {
-		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
-	}
-	for which, name := range []string{"the tabs", "the new card button", "the theme button"} {
-		if !capsulesResult.insideGlass[which] {
-			t.Errorf("%s, drawn on glass, is not its glass's content view: the glass draws over it", name)
-		}
-	}
-}
-
-// A click at the middle of each capsule reaches its control, on a window laid
-// out as one on screen is: before layout a glass's content view has no size,
-// and a hit test stops at the glass -- the measurement that once moved the
-// controls out of the glass.
-func TestAClickOnEachCapsuleOnGlassReachesItsControl(t *testing.T) {
-	if !frameResult.glassAvailable {
-		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
-	}
-	for which, name := range []string{"the tabs", "the new card button", "the theme button"} {
-		if !capsulesResult.clicksReach[which] {
-			t.Errorf("a click at the middle of %s, drawn on glass, does not reach it", name)
-		}
-	}
-}
-
-func TestAClickInTheGapBetweenCapsulesReachesTheBoard(t *testing.T) {
-	if !capsulesResult.rowPassesThrough {
-		t.Fatal("the capsule row's container takes a click between capsules, over the board")
-	}
-}
-
 // --- a row in a narrow window ----------------------------------------------------
-
-// v0.10.0 in a 1000 pt window with both panels unfolded: the row was about 246
-// pt, the tabs and the new card button alone about 190, and the capsules from
-// the right edge ran over them -- white empty pills in the dark.
 
 // v0.10.1's first stand, 1000 by 700 with both panels unfolded: the board's
 // layout gave the frame its geometry after the surfaces were created, and so
-// after the row was drawn and had the panels narrowed for it -- the geometry
-// computed before, with no row, put the panels back and the row at 246 pt.
-// Read after the layout, as the stand's screenshot is, and again after a
-// resize, which would have hidden it.
+// after the row was drawn. Read after the layout, as the stand's screenshot is,
+// and again after a resize, which would have hidden it. A 1000 pt window leaves
+// the board's island its minimum only with both panels narrowed.
 func TestOnAStandsPathThePanelsNarrowAndNoCapsuleOverlaps(t *testing.T) {
 	for _, s := range []struct {
 		when string
@@ -215,7 +343,7 @@ func TestOnAStandsPathThePanelsNarrowAndNoCapsuleOverlaps(t *testing.T) {
 			continue
 		}
 		if s.f.orchestrator >= 368 || s.f.sessions >= 348 {
-			t.Errorf("%s: panels %v and %v, want both narrowed for the row", s.when, s.f.orchestrator, s.f.sessions)
+			t.Errorf("%s: panels %v and %v, want both narrowed for the board", s.when, s.f.orchestrator, s.f.sessions)
 		}
 		if s.f.row < s.f.rowMin-0.01 {
 			t.Errorf("%s: row %v, want its minimum %v", s.when, s.f.row, s.f.rowMin)
@@ -229,12 +357,10 @@ func TestOnAStandsPathThePanelsNarrowAndNoCapsuleOverlaps(t *testing.T) {
 	}
 }
 
-// v0.10.1's stands, all six alike (run 34930674108): the panels narrowed for the
-// capsule row, and the board kept the insets of panels at their widths -- 394
-// on the left, 356 on the right -- and ended 61 pt short of the sessions glass.
-// At the start the board heard the insets decided before the row was drawn
-// after the ones decided after it. After every stage the last insets the board
-// heard are those of the native panels as laid out.
+// v0.10.1's stands, all six alike (run 34930674108): the board kept the insets
+// of panels at their widths and ended short of the sessions glass. After every
+// stage the last insets the board heard are those of the native panels as laid
+// out.
 func TestOnAStandsPathTheBoardsLastInsetsMeetTheNativePanelsAfterEveryStage(t *testing.T) {
 	for _, s := range []struct {
 		when string
@@ -287,25 +413,19 @@ func overlapping(capsules []drawnCapsule, rowWidth float64) []string {
 
 var (
 	standResult   capsuleStandProbe
-	layoutModel   capsuleModel
 	layoutResults []capsuleLayoutProbe
 	// resizedResult: drawn at 1440, then the window made 1000 with both panels
 	// unfolded, the capsules not drawn again -- how a window is resized.
 	resizedResult capsuleLayoutProbe
 )
 
-func collectCapsuleLayoutResults() {
-	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"tabs":[{"id":"board","label":"Доска","selected":true},{"id":"docs","label":"Доки","selected":false}],"newCard":{"label":"+ карточка"},"theme":{"label":"тема: авто"},"limits":[{"label":"5ч","text":"42%","level":"cool","color":"#2f9e44"},{"label":"7д","text":"91%","level":"hot","color":"#e03131"}]}`))
-	if err != nil {
-		panic(err)
-	}
-	layoutModel = m
-	for _, width := range []float64{1440, 1000, 800} {
+func collectCapsuleLayoutResults(m capsuleModel) {
+	for _, width := range []float64{1728, 1000, 800} {
 		for _, folded := range []bool{false, true} {
 			layoutResults = append(layoutResults, probeCapsuleLayoutForTest(m, width, 0, folded))
 		}
 	}
-	resizedResult = probeCapsuleLayoutForTest(m, 1000, 1440, false)
+	resizedResult = probeCapsuleLayoutForTest(m, 1000, 1728, false)
 	standResult = probeCapsuleStandForTest(m)
 	foldResults = probeFoldsForTest(m)
 	regrowResults = []capsuleRegrowProbe{probeCapsuleRegrowForTest(m, 1000, 1728), probeCapsuleRegrowForTest(m, 1728, 1000)}
@@ -318,11 +438,9 @@ var regrowResults []capsuleRegrowProbe
 // foldResults: a stand's window in every fold of its panels (probeFoldsForTest).
 var foldResults []foldedStandFrame
 
-// v0.11.0's dev build on macOS 27 (the operator's frame 1374): with the
-// orchestrator panel folded to its strip, the capsule row began 10 pt past the
-// strip, and the Board/Docs tabs lay under the window's buttons, which reach
-// past it. In every fold no capsule shown lies under the close, minimize or
-// zoom button.
+// v0.11.0's dev build on macOS 27 (the operator's frame 1374): the Board/Docs
+// tabs lay under the window's buttons. In every fold no part shown lies under
+// the close, minimize or zoom button.
 func TestNoCapsuleLiesUnderTheWindowsButtonsInAnyFold(t *testing.T) {
 	if len(foldResults) != 5 {
 		t.Fatalf("%d folds measured, want 5", len(foldResults))
@@ -360,8 +478,7 @@ func boxesOverlap(a, b measuredBox) bool {
 // over the sessions panel until a panel's edge was dragged. The row's content
 // view grows in the window's layout pass, after the row has placed its capsules
 // for the new width, and a capsule kept at the row's right edge by its
-// autoresizing moved by that width a second time. A live resize moves the row a
-// point or two at a time and hid it; full screen moves it by hundreds.
+// autoresizing moved by that width a second time.
 func TestARowLaidOutMuchWiderOrNarrowerKeepsItsCapsulesInsideIt(t *testing.T) {
 	if len(regrowResults) == 0 {
 		t.Fatal("no rows laid out again")
@@ -404,31 +521,24 @@ func (p capsuleLayoutProbe) one(t *testing.T, name string) drawnCapsule {
 	t.Helper()
 	found := p.named(name)
 	if len(found) != 1 {
-		t.Fatalf("%v: %d capsules named %s in %+v", p, len(found), name, p.capsules)
+		t.Fatalf("%v: %d parts named %s in %+v", p, len(found), name, p.capsules)
 	}
 	return found[0]
 }
 
-// stage is the form the row is in: 0 every limit and the theme's label, 1 the
-// compact limits and the label, 2 the compact limits and the icon; -1 for any
-// other mix.
-func (p capsuleLayoutProbe) stage(t *testing.T) int {
+// countersShown is whether the row shows its counters: all of them or none.
+func (p capsuleLayoutProbe) countersShown(t *testing.T) bool {
 	t.Helper()
-	limits := p.named("limit")
-	full := len(limits) > 0
-	for _, l := range limits {
-		full = full && l.visible
+	counters := p.named("counter")
+	if len(counters) == 0 {
+		t.Fatalf("%v: no counters drawn", p)
 	}
-	compact, label, icon := p.one(t, "compactLimits").visible, p.one(t, "theme").visible, p.one(t, "themeIcon").visible
-	switch {
-	case full && !compact && label && !icon:
-		return 0
-	case !full && compact && label && !icon:
-		return 1
-	case !full && compact && !label && icon:
-		return 2
+	for _, c := range counters[1:] {
+		if c.visible != counters[0].visible {
+			t.Fatalf("%v: some counters shown and some not: %+v", p, counters)
+		}
 	}
-	return -1
+	return counters[0].visible
 }
 
 // Below the window's minimum even the narrowest row does not fit, with nothing
@@ -446,7 +556,7 @@ func TestAWindowNarrowerThanItsMinimumGrowsToIt(t *testing.T) {
 		}
 	}
 	if p := layoutResults[4]; p.minContentWidth <= 800 {
-		t.Errorf("%v: window minimum %v, want the 800 pt window with both panels unfolded below it", p, p.minContentWidth)
+		t.Errorf("%v: window minimum %v, want the 800 pt window below it", p, p.minContentWidth)
 	}
 }
 
@@ -462,10 +572,12 @@ func TestNoTwoCapsulesInTheRowOverlapAndAllAreInsideIt(t *testing.T) {
 	}
 }
 
-func TestTheTabsAndTheNewCardButtonAreAlwaysWhole(t *testing.T) {
-	wide := layoutResults[1] // 1440, folded: room for everything
+// Only the counters give way: the brand, the fleet, the limits, the update and
+// the theme are shown whole at every width.
+func TestEveryPartButTheCountersIsAlwaysWhole(t *testing.T) {
+	wide := layoutResults[0]
 	for _, p := range allLayouts() {
-		for _, name := range []string{"tabs", "newCard"} {
+		for _, name := range []string{"brand", "fleet", "limits", "update", "theme"} {
 			c, want := p.one(t, name), wide.one(t, name)
 			if !c.visible || c.w != want.w {
 				t.Errorf("%v: %s visible %v, %v wide; want shown at its %v", p, name, c.visible, c.w, want.w)
@@ -474,113 +586,51 @@ func TestTheTabsAndTheNewCardButtonAreAlwaysWhole(t *testing.T) {
 	}
 }
 
-func TestTheLimitsAreShownAtEveryWidthInOneFormOrTheOther(t *testing.T) {
-	for _, p := range allLayouts() {
-		if s := p.stage(t); s < 0 {
-			t.Errorf("%v: limits and theme in no form: %+v", p, p.capsules)
-		}
+// A wide window shows the counters, a narrow one hides them, and a narrower
+// window never shows them where a wider one did not.
+func TestANarrowWindowHidesTheCountersFirst(t *testing.T) {
+	if !layoutResults[0].countersShown(t) {
+		t.Errorf("%v: counters hidden with room for them", layoutResults[0])
 	}
-}
-
-// The limits compact first, the theme after: never the theme's icon beside
-// every limit, and a narrower window never in a wider form.
-func TestANarrowerWindowCompactsTheLimitsBeforeTheTheme(t *testing.T) {
 	for _, folded := range []bool{false, true} {
-		last := -1
+		shown := true
 		for _, p := range layoutResults {
 			if p.folded != folded {
 				continue
 			}
-			s := p.stage(t)
-			if s < last {
-				t.Errorf("%v: form %d, wider than the wider window's %d", p, s, last)
+			s := p.countersShown(t)
+			if s && !shown {
+				t.Errorf("%v: counters shown where a wider window hid them", p)
 			}
-			last = s
+			shown = s
 		}
 	}
-	if s := layoutResults[1].stage(t); s != 0 {
-		t.Errorf("%v: form %d, want every limit with room for it", layoutResults[1], s)
-	}
-	// The window v0.10.0 broke in: no room for the indicators.
-	if s := layoutResults[2].stage(t); s == 0 {
-		t.Errorf("%v: every limit shown in a row with no room for them", layoutResults[2])
+	if layoutResults[4].countersShown(t) {
+		t.Errorf("%v: counters shown in the narrowest window", layoutResults[4])
 	}
 }
 
 func TestAWindowResizedWithoutARedrawTakesTheFormOfItsWidth(t *testing.T) {
-	if got, want := resizedResult.stage(t), layoutResults[2].stage(t); got != want {
-		t.Fatalf("%v: form %d, want %d as drawn at that width", resizedResult, got, want)
+	if got, want := resizedResult.countersShown(t), layoutResults[2].countersShown(t); got != want {
+		t.Fatalf("%v: counters shown %v, want %v as drawn at that width", resizedResult, got, want)
 	}
 }
 
-// The window's minimum content width is the frame around the row -- both
-// panels at their readable width, margins and gaps -- and the row's narrowest
-// form: the tabs, the new card button, the compact limits and the theme's icon,
-// with the row's 8 pt gaps between them.
+// The window's minimum content width is the wider of the frame -- both panels
+// at their readable width, the board's island and the margins -- and the bar's
+// row in its narrowest form from where it starts to the right margin: the left
+// group and the theme, with the row's 8 pt gaps between them.
 func TestTheWindowsMinimumWidthIsTheFrameAndTheNarrowestRow(t *testing.T) {
 	for _, p := range allLayouts() {
-		parts := p.one(t, "tabs").w + 8 + p.one(t, "newCard").w + 8 + p.one(t, "compactLimits").w + 8 + p.one(t, "themeIcon").w
-		if p.rowMin != parts {
+		parts := p.one(t, "brand").w + 8 + p.one(t, "fleet").w + 8 + p.one(t, "limits").w + 8 + p.one(t, "update").w + 8 + p.one(t, "theme").w
+		if math.Abs(p.rowMin-parts) > 1e-9 {
 			t.Errorf("%v: row minimum %v, want %v", p, p.rowMin, parts)
 		}
-		if want := frameMinWidth() + parts; p.minContentWidth != want {
+		if want := math.Max(frameMinWidth(), p.geometry.Capsules.X+parts+panelMargin); math.Abs(p.minContentWidth-want) > 1e-9 {
 			t.Errorf("%v: window minimum %v, want %v", p, p.minContentWidth, want)
 		}
 		if p.minAfterClear != 0 {
 			t.Errorf("%v: minimum after the row is cleared = %v, want none", p, p.minAfterClear)
 		}
-	}
-}
-
-func TestTheFrameKeepsTheRowItsMinimumWhereThePanelsCanNarrow(t *testing.T) {
-	for _, p := range allLayouts() {
-		if p.geometry.Orchestrator.W > minPanelWidth || p.folded {
-			if p.rowWidth < p.rowMin-0.01 {
-				t.Errorf("%v: row %v, narrower than its minimum %v with panels %v and %v", p, p.rowWidth, p.rowMin, p.geometry.Orchestrator.W, p.geometry.Sessions.W)
-			}
-		}
-	}
-}
-
-func TestTheCompactLimitsCapsuleIsTheModelsLine(t *testing.T) {
-	p, want := layoutResults[2], layoutModel.compactLimits()
-	if p.compactText != want.Text || p.compactTooltip != want.Tooltip {
-		t.Fatalf("compact = %q, tooltip %q; want %q, %q", p.compactText, p.compactTooltip, want.Text, want.Tooltip)
-	}
-}
-
-func TestTheThemesIconSaysTheModeAndCyclesItAsTheLabelDoes(t *testing.T) {
-	p := layoutResults[2]
-	if p.themeIconTitle != "◐" {
-		t.Fatalf("icon = %q", p.themeIconTitle)
-	}
-	if p.themeIconTooltip != "тема: авто" || p.themeIconAccessible != "тема: авто" {
-		t.Fatalf("tooltip %q, accessibility label %q; want the theme's label", p.themeIconTooltip, p.themeIconAccessible)
-	}
-	if !reflect.DeepEqual(p.iconPresses, []string{"theme"}) {
-		t.Fatalf("presses = %v", p.iconPresses)
-	}
-}
-
-// The limits open their menu from a real button, in both forms of the row, so
-// a keyboard and VoiceOver reach it as a pointer does.
-func TestTheLimitsChevronOpensTheMenuInEitherForm(t *testing.T) {
-	p, want := layoutResults[2], layoutModel.compactLimits()
-	if !reflect.DeepEqual(p.limitsPresses, []string{"limits", "limits"}) {
-		t.Fatalf("presses = %v", p.limitsPresses)
-	}
-	if p.limitsAccessible != want.Tooltip {
-		t.Fatalf("accessibility label %q; want %q", p.limitsAccessible, want.Tooltip)
-	}
-}
-
-// The limits menu opens from anywhere on a limit's capsule: the chevron alone
-// was too small to hit.
-func TestAClickAnywhereOnALimitsCapsuleOpensTheMenu(t *testing.T) {
-	if !frameResult.glassAvailable {
-		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
-	}
-	if !capsulesResult.limitDotOpens {
-		t.Fatal("a click on a limit's dot does not reach the control that opens the limits menu")
 	}
 }

@@ -16,7 +16,7 @@
 // TOP_BAND_MAX is the tallest the band gets: the board's top inset, the height
 // of the capsule row and the space around it (cmd/fleetdeck-window,
 // geometry.go, boardInsetTop).
-export const TOP_BAND_MAX = 64;
+export const TOP_BAND_MAX = 52;
 
 // Looked at every ROW points down and every COLUMN points across: a control is
 // taller and wider than that.
