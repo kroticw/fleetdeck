@@ -1914,6 +1914,26 @@ main {
   max-width: 80ch;
   margin-top: var(--gap);
   overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+/* The reading type of the design: a firm title, quieter section heads. */
+.reader-body h1,
+.card-doc-body h1 {
+  margin: 2px 0 12px;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+.reader-body h2,
+.card-doc-body h2,
+.reader-body h3,
+.card-doc-body h3 {
+  margin: 18px 0 8px;
+  font-size: 15px;
+  font-weight: 650;
 }
 
 /* --- a card's tabs, and the session that wrote the open one (T-091) -----------
@@ -2796,32 +2816,50 @@ button.review-line-add:hover {
 .doc-cards {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--gap-sm) var(--gap);
+  align-items: center;
+  gap: 6px;
   margin-top: var(--gap);
   font-size: var(--fs-sm);
 }
 
 .doc-cards-title {
-  color: var(--text-muted);
+  margin-right: 4px;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
+/* A card the document belongs to: a chip with its number and title. */
 .doc-card {
   display: inline-flex;
-  align-items: baseline;
-  gap: var(--gap-sm);
-  padding: 0;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
   border: none;
-  background: none;
+  border-radius: 999px;
+  background: var(--neutral-soft);
   font: inherit;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text);
   text-align: left;
   cursor: pointer;
 }
 
+.doc-card:hover {
+  background: var(--accent-soft);
+}
+
+.doc-card .knum {
+  background: none;
+  padding: 0;
+}
+
 .doc-card-title {
-  color: var(--accent);
-  text-decoration: underline;
+  color: inherit;
 }
 
 /* Kanban board.
