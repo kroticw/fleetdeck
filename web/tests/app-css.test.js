@@ -86,7 +86,7 @@ test("the card's number is shaped differently from the session's short id", () =
   // that chip, not the colour, is what a greyscale screen and a screenshot
   // with no hover still tell apart.
   for (const selector of ["\\.knum", "\\.card-num"]) {
-    assert.match(body(selector), /font-family:\s*ui-monospace/, `${selector} must be monospaced: its value gets read out character by character`);
+    assert.match(body(selector), /font-family:\s*var\(--font-mono\)/, `${selector} must be monospaced: its value gets read out character by character`);
     assert.match(body(selector), /background:\s*var\(--/, `${selector} lost the chip that separates it from the session's short id`);
   }
 

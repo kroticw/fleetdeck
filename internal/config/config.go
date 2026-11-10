@@ -113,7 +113,11 @@ type Config struct {
 	Notify             NotifyConfig
 	DaemonPollInterval time.Duration
 	UsageEnabled       bool
-	ServerPort         int
+	// UsageLabels is the operator's word for each model's subscription,
+	// keyed by the model's name in lower case ("claude", "codex"): shown in
+	// the limits menu, since the panel cannot learn what an account is.
+	UsageLabels map[string]string
+	ServerPort  int
 	// StatuslineWrap is the statusline command cmd/fleetdeck-status passes
 	// stdin through to and prints the output of unchanged -- the operator's
 	// own tool (spec: their own liked, pre-existing statusline), read from
@@ -291,7 +295,8 @@ type file struct {
 		PollInterval configDuration `yaml:"poll_interval"`
 	} `yaml:"daemon"`
 	Usage struct {
-		Enabled bool `yaml:"enabled"`
+		Enabled bool              `yaml:"enabled"`
+		Labels  map[string]string `yaml:"labels,omitempty"`
 	} `yaml:"usage"`
 	Server struct {
 		Port int `yaml:"port"`
@@ -321,15 +326,31 @@ type file struct {
 }
 
 // UI is the panel's look, kept in its file so every window and browser tab
-// shows the same: the theme (empty follows the system) and the terminals'
-// type size (zero is the page's default).
+// shows the same: the theme (empty follows the system), the terminals' type
+// size (zero is the page's default), the accent colour (empty is indigo), how
+// much glass the window shows (empty leaves it to the window) and the
+// terminals' ground (empty follows the theme).
 type UI struct {
-	Theme            string `yaml:"theme,omitempty"`
-	TerminalFontSize int    `yaml:"terminal_font_size,omitempty"`
+	Theme              string `yaml:"theme,omitempty"`
+	TerminalFontSize   int    `yaml:"terminal_font_size,omitempty"`
+	Accent             string `yaml:"accent,omitempty"`
+	Glass              string `yaml:"glass,omitempty"`
+	TerminalBackground string `yaml:"terminal_background,omitempty"`
 }
 
 // Themes are ui.theme's values besides empty, which follows the system.
 var Themes = []string{"light", "dark"}
+
+// Accents are ui.accent's values; empty is the first of them.
+var Accents = []string{"indigo", "blue", "teal", "violet", "rose", "graphite"}
+
+// GlassLevels are ui.glass's values besides empty, which shows the glass the
+// window chooses for this macOS.
+var GlassLevels = []string{"reduced", "opaque"}
+
+// TerminalBackgrounds are ui.terminal_background's values besides empty, which
+// follows the theme.
+var TerminalBackgrounds = []string{"dark"}
 
 // The terminals' type size bounds, as web/js/terminalfont.js clamps it.
 const (
@@ -395,6 +416,7 @@ func configToFile(c Config) file {
 	f.Notify.SilenceAfter = configDuration(c.Notify.SilenceAfter)
 	f.Daemon.PollInterval = configDuration(c.DaemonPollInterval)
 	f.Usage.Enabled = c.UsageEnabled
+	f.Usage.Labels = c.UsageLabels
 	f.Server.Port = c.ServerPort
 	f.Statusline.Wrap = c.StatuslineWrap
 	f.Statusline.RateLimitsPath = c.StatuslineRateLimitsPath
@@ -440,6 +462,7 @@ func fileToConfig(f file) Config {
 		},
 		DaemonPollInterval:       time.Duration(f.Daemon.PollInterval),
 		UsageEnabled:             f.Usage.Enabled,
+		UsageLabels:              f.Usage.Labels,
 		ServerPort:               f.Server.Port,
 		StatuslineWrap:           f.Statusline.Wrap,
 		StatuslineRateLimitsPath: f.Statusline.RateLimitsPath,
@@ -620,6 +643,15 @@ func validate(c Config) error {
 	}
 	if t := c.UI.Theme; t != "" && !slices.Contains(Themes, t) {
 		return fmt.Errorf("ui.theme %q is not one of %s (or empty, to follow the system)", t, strings.Join(Themes, ", "))
+	}
+	if a := c.UI.Accent; a != "" && !slices.Contains(Accents, a) {
+		return fmt.Errorf("ui.accent %q is not one of %s", a, strings.Join(Accents, ", "))
+	}
+	if g := c.UI.Glass; g != "" && !slices.Contains(GlassLevels, g) {
+		return fmt.Errorf("ui.glass %q is not one of %s (or empty, to show the window's glass)", g, strings.Join(GlassLevels, ", "))
+	}
+	if b := c.UI.TerminalBackground; b != "" && !slices.Contains(TerminalBackgrounds, b) {
+		return fmt.Errorf("ui.terminal_background %q is not one of %s (or empty, to follow the theme)", b, strings.Join(TerminalBackgrounds, ", "))
 	}
 	if s := c.UI.TerminalFontSize; s != 0 && (s < MinTerminalFontSize || s > MaxTerminalFontSize) {
 		return fmt.Errorf("ui.terminal_font_size must be between %d and %d, got %d", MinTerminalFontSize, MaxTerminalFontSize, s)

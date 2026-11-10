@@ -10,6 +10,7 @@ import { fetchSettings, saveSettings } from "./api.js";
 import { escapeHTML } from "./header.js";
 import { t } from "./i18n.js";
 import { DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE } from "./terminalfont.js";
+import { ACCENTS } from "./theme.js";
 
 // The approval presets the Codex card offers, as the two keys they write.
 const APPROVALS = [
@@ -151,6 +152,7 @@ function panelSection(page) {
   return `<h1 id="settings-panel" class="set-h1 spaced">${h(t("set_nav_panel"))}</h1>
 <section class="set-card set-list">
 ${row(t("set_usage"), t("set_usage_hint"), toggle("usage.enabled", v["usage.enabled"], t("set_usage")))}
+${row(t("set_usage_labels"), t("set_usage_labels_hint"), `<div class="set-inline"><label class="set-inline-label">Claude${text("usage.labels.claude", v["usage.labels.claude"], { placeholder: t("set_usage_label_claude") })}</label><label class="set-inline-label">Codex${text("usage.labels.codex", v["usage.labels.codex"], { placeholder: t("set_usage_label_codex") })}</label></div>`)}
 ${row(t("set_port"), t("set_port_hint"), `<input type="text" inputmode="numeric" class="set-input narrow" data-key="server.port" data-kind="int" value="${h(String(v["server.port"]))}" aria-label="${h(t("set_port"))}">`, { badge: restartBadge(page, "server.port") })}
 ${row(t("set_poll"), t("set_poll_hint"), text("daemon.poll_interval", v["daemon.poll_interval"], { label: t("set_poll"), narrow: true }), { badge: restartBadge(page, "daemon.poll_interval") })}
 <details class="set-advanced"><summary>${h(t("set_advanced"))}</summary>
@@ -173,15 +175,34 @@ function lookSection(page) {
   const size = v["ui.terminal_font_size"] || DEFAULT_FONT_SIZE;
   const step = (n) => Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size + n));
   const fontValue = (n) => (n === DEFAULT_FONT_SIZE ? 0 : n);
+  const accent = ACCENTS.includes(v["ui.accent"]) ? v["ui.accent"] : ACCENTS[0];
+  const swatches = ACCENTS.map(
+    (a) =>
+      `<button type="button" role="radio"${attrs({ "aria-checked": a === accent ? "true" : "false", "data-key": "ui.accent", "data-value": a, "data-kind": "string" })} class="set-swatch${a === accent ? " on" : ""}"><span class="set-swatch-dot" data-accent-swatch="${a}"></span><span class="set-swatch-name">${h(t(`accent_${a}`))}</span></button>`,
+  ).join("");
+  const glasses = [
+    { value: "", label: t("set_glass_full") },
+    { value: "reduced", label: t("set_glass_reduced") },
+    { value: "opaque", label: t("set_glass_opaque") },
+  ];
+  const grounds = [
+    { value: "", label: t("set_term_bg_theme") },
+    { value: "dark", label: t("set_term_bg_dark") },
+  ];
   return `<h1 id="settings-look" class="set-h1 spaced">${h(t("set_nav_look"))}</h1>
 <section class="set-card set-list">
 <div class="set-row"><div class="set-titles"><h2>${h(t("set_theme"))}</h2><span class="set-muted">${h(t("set_theme_hint"))}</span></div>${segmented("ui.theme", t("set_theme"), themes, v["ui.theme"])}</div>
-<div class="set-row last"><div class="set-titles set-grow"><h2>${h(t("set_font"))}</h2><span class="set-muted">${h(t("set_font_hint"))}</span><code class="set-preview" style="font-size: ${size}px">$ fleetdeck runtime --key codex:4317cfac</code></div>
+<div class="set-row set-row-stack"><div class="set-titles"><h2>${h(t("set_accent"))}</h2><span class="set-muted">${h(t("set_accent_hint"))}</span></div><div class="set-swatches" role="radiogroup" aria-label="${h(t("set_accent"))}">${swatches}</div></div>
+<div class="set-row last"><div class="set-titles"><h2>${h(t("set_glass"))}</h2><span class="set-muted">${h(t("set_glass_hint"))}</span></div>${segmented("ui.glass", t("set_glass"), glasses, v["ui.glass"] ?? "")}</div>
+</section>
+<section class="set-card set-list">
+<div class="set-row"><div class="set-titles set-grow"><h2>${h(t("set_font"))}</h2><span class="set-muted">${h(t("set_font_hint"))}</span><code class="set-preview" style="font-size: ${size}px">$ fleetdeck runtime --key codex:4317cfac</code></div>
 <div class="set-stepper">
 <button type="button" class="set-step" data-key="ui.terminal_font_size" data-kind="int" data-value="${fontValue(step(-1))}" aria-label="${h(t("set_font_smaller"))}"${size <= MIN_FONT_SIZE ? " disabled" : ""}>A−</button>
 <button type="button" class="set-step on" data-key="ui.terminal_font_size" data-kind="int" data-value="0" aria-label="${h(`${t("set_font_reset")} ${DEFAULT_FONT_SIZE}`)}">${size}</button>
 <button type="button" class="set-step" data-key="ui.terminal_font_size" data-kind="int" data-value="${fontValue(step(1))}" aria-label="${h(t("set_font_bigger"))}"${size >= MAX_FONT_SIZE ? " disabled" : ""}>A+</button>
 </div></div>
+<div class="set-row last"><div class="set-titles"><h2>${h(t("set_term_bg"))}</h2><span class="set-muted">${h(t("set_term_bg_hint"))}</span></div>${segmented("ui.terminal_background", t("set_term_bg"), grounds, v["ui.terminal_background"] ?? "")}</div>
 </section>`;
 }
 
@@ -299,5 +320,11 @@ export function renderSettings(root, { load = fetchSettings, save = saveSettings
         page = p;
         draw();
       }),
+    // Shows one section, now or, before the values load, when they do.
+    showSection: (id) => {
+      active = id;
+      draw();
+      root.querySelector?.(`#settings-${id}`)?.scrollIntoView?.({ block: "start" });
+    },
   };
 }

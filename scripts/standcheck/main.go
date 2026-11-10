@@ -636,12 +636,18 @@ func buttonProblems(when string, f frameReport) []string {
 // (cmd/fleetdeck-window/geometry.go foldedWidth).
 const foldedStripWidth = 48
 
+// openPanelMin is the narrowest an open panel is (web/js/columnwidth.js
+// MIN_PIXELS). A folded strip is narrower than that, however wide it is: the
+// orchestrator's widens to hold the window's buttons (geometry.go
+// foldedButtonsPad), 81 pt beside a 79 pt row of them.
+const openPanelMin = 220
+
 func orchestratorFolded(f frameReport) bool {
-	return f.Orchestrator.W <= foldedStripWidth+lineSlack
+	return f.Orchestrator.W < openPanelMin
 }
 
 func sessionsFolded(f frameReport) bool {
-	return f.Sessions.W <= foldedStripWidth+lineSlack
+	return f.Sessions.W < openPanelMin
 }
 
 // stripProblems is what is wrong with each folded strip at the end of r: the

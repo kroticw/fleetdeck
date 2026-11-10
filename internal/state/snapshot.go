@@ -305,6 +305,15 @@ type Snapshot struct {
 	// for the page's default.
 	Theme            string `json:"theme,omitempty"`
 	TerminalFontSize int    `json:"terminalFontSize,omitempty"`
+	// Accent, Glass and TerminalBackground are the rest of the look: the
+	// accent preset (empty is indigo), the glass level (empty is the
+	// window's own) and the terminals' ground (empty follows the theme).
+	Accent             string `json:"accent,omitempty"`
+	Glass              string `json:"glass,omitempty"`
+	TerminalBackground string `json:"terminalBackground,omitempty"`
+	// LimitsLabels is the operator's word for each model's subscription
+	// (usage.labels), by the model's name in lower case.
+	LimitsLabels map[string]string `json:"limitsLabels,omitempty"`
 }
 
 // Start is one session being started for a card: the card it is for and when

@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern void *objc_autoreleasePoolPush(void);
+extern void objc_autoreleasePoolPop(void *pool);
+
 // NSModalResponseOK.
 static const long modalResponseOK = 1;
 
@@ -48,4 +51,15 @@ char *fleetdeck_choose_folder(const char *message, const char *prompt) {
   if (!path) return NULL;
   const char *fs = ((const char *(*)(id, SEL))objc_msgSend)(path, sel("fileSystemRepresentation"));
   return fs ? strdup(fs) : NULL;
+}
+
+void fleetdeck_reveal_file(const char *path) {
+  if (!path || !*path) return;
+  void *pool = objc_autoreleasePoolPush();
+  id url = ((id (*)(id, SEL, id))objc_msgSend)(cls("NSURL"), sel("fileURLWithPath:"), nsstring(path));
+  if (url) {
+    id urls = ((id (*)(id, SEL, id))objc_msgSend)(cls("NSArray"), sel("arrayWithObject:"), url);
+    sendObj(send0(cls("NSWorkspace"), sel("sharedWorkspace")), sel("activateFileViewerSelectingURLs:"), urls);
+  }
+  objc_autoreleasePoolPop(pool);
 }

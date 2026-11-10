@@ -337,3 +337,82 @@ test("the list and the document are two islands", async () => {
   assert.ok(root.querySelector(".docs-island")?.classList.contains("docs-list"));
   assert.ok(root.querySelector(".doc-island")?.classList.contains("docs-main"));
 });
+
+// --- the list's order, its filter, Finder and the find bar ---------------------
+
+const DATED = [
+  { path: "/docs/a.md", title: "a.md", root: "/docs", created: "2026-11-02T10:00:00Z" },
+  { path: "/docs/b.md", title: "b.md", root: "/docs", created: "2026-11-05T10:00:00Z" },
+  { path: "/docs/c.md", title: "c.md", root: "/docs", created: "2026-11-04T10:00:00Z" },
+];
+
+test("by task, a card's documents sit under its number and title, the rest under no task", async () => {
+  stubFetch([["/api/docs", ok(DATED)]]);
+  const snap = { cards: [{ path: "/board/cards/T-007-guide.md", id: "T-007", title: "Guide", links: ["a"] }] };
+  renderDocs(root, { subscribe: storeOf(snap), storage: null });
+  await settle();
+
+  const heads = [...root.querySelectorAll(".docs-group-head")].map((h) => h.textContent);
+  assert.match(heads[0], /T-007/);
+  assert.match(heads[1], new RegExp(t("docs_no_task")));
+  assert.deepEqual([...root.querySelectorAll("[data-path]")].map((n) => n.dataset.path), ["/docs/a.md", "/docs/b.md", "/docs/c.md"]);
+});
+
+test("by date the list is one, newest first, and the direction button turns it round", async () => {
+  stubFetch([["/api/docs", ok(DATED)]]);
+  renderDocs(root, { subscribe: storeOf({ cards: [] }), storage: null });
+  await settle();
+
+  fireEvent(root.querySelector('.docs-sort [data-sort="date"]'), "click");
+  const order = () => [...root.querySelectorAll("[data-path]")].map((n) => n.dataset.path);
+  assert.deepEqual(order(), ["/docs/b.md", "/docs/c.md", "/docs/a.md"]);
+  assert.equal(root.querySelectorAll(".docs-group-head").length, 0);
+  fireEvent(root.querySelector(".docs-order"), "click");
+  assert.deepEqual(order(), ["/docs/a.md", "/docs/c.md", "/docs/b.md"]);
+});
+
+test("the filter keeps only the documents whose title has what was typed", async () => {
+  stubFetch([["/api/docs", ok(DOCS)]]);
+  renderDocs(root, { subscribe: storeOf({ cards: [] }), storage: null });
+  await settle();
+
+  const filter = root.querySelector(".docs-filter");
+  filter.value = "INSTALL";
+  fireEvent(filter, "input");
+  assert.deepEqual([...root.querySelectorAll("[data-path]")].map((n) => n.dataset.path), ["/docs/guide/install.md"]);
+});
+
+test("an open document shows its path, and Finder when the window offers it", async () => {
+  stubFetch([
+    ["/api/docs/content", ok({ path: "/docs/index.md", body: "# Handbook\n" })],
+    ["/api/docs", ok(DOCS)],
+  ]);
+  const revealed = [];
+  globalThis.fleetdeckReveal = (path) => revealed.push(path);
+  try {
+    renderDocs(root, { subscribe: storeOf({ cards: [] }), storage: null });
+    await settle();
+    fireEvent(root.querySelector('[data-path="/docs/index.md"]'), "click");
+    await settle();
+
+    assert.equal(root.querySelector(".docs-path").textContent, "/docs/index.md");
+    fireEvent(root.querySelector(".docs-reveal"), "click");
+    assert.deepEqual(revealed, ["/docs/index.md"]);
+  } finally {
+    delete globalThis.fleetdeckReveal;
+  }
+});
+
+test("in a browser there is no Finder button, and the document has a find bar", async () => {
+  stubFetch([
+    ["/api/docs/content", ok({ path: "/docs/index.md", body: "# Handbook\n" })],
+    ["/api/docs", ok(DOCS)],
+  ]);
+  renderDocs(root, { subscribe: storeOf({ cards: [] }), storage: null });
+  await settle();
+  fireEvent(root.querySelector('[data-path="/docs/index.md"]'), "click");
+  await settle();
+
+  assert.equal(root.querySelector(".docs-reveal"), null);
+  assert.ok(root.querySelector(".docs-main .find-bar"), "the document has no find bar");
+});

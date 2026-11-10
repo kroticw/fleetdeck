@@ -58,6 +58,52 @@ async function base64(file) {
 // A datalist is named by id, and a page can hold two forms at once.
 let formCount = 0;
 
+// segmented is a row of choices of which one is on, a radio group of buttons.
+// It holds its choice as `value`, the way the <select> it replaced did, so the
+// form reads and restores it the same way.
+function segmented(className, label, items, initial) {
+  const group = el("div", `${className} newcard-seg`);
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-label", label);
+  let current = initial;
+  const buttons = items.map(({ value, text, dot }) => {
+    const button = el("button", "newcard-seg-option");
+    button.setAttribute("type", "button");
+    button.setAttribute("role", "radio");
+    button.dataset.value = value;
+    if (dot) {
+      const mark = el("span", `newcard-seg-dot zone-${value}`);
+      mark.setAttribute("aria-hidden", "true");
+      button.append(mark);
+    }
+    button.append(el("span", "newcard-seg-text", text));
+    button.addEventListener("click", () => {
+      group.value = value;
+    });
+    group.append(button);
+    return button;
+  });
+  const paint = () => {
+    for (const button of buttons) button.setAttribute("aria-checked", String(button.dataset.value === current));
+  };
+  Object.defineProperty(group, "value", {
+    get: () => current,
+    set: (value) => {
+      current = value;
+      paint();
+    },
+  });
+  paint();
+  return group;
+}
+
+// field is a caption over the control it names.
+function field(className, caption, ...controls) {
+  const box = el("div", `newcard-field ${className}`);
+  box.append(el("span", "newcard-caption", caption), ...controls);
+  return box;
+}
+
 /**
  * createNewCard appends the "new card" form and its note to host, and hands
  * back the two ways it is opened. `create` is the write, `pick` the folder
@@ -86,21 +132,19 @@ export function createNewCard(host, {
   description.setAttribute("placeholder", t("new_card_desc"));
   description.setAttribute("aria-label", t("new_card_desc"));
 
-  // The zone is the card's urgency, not its stage. Labelled in words and
-  // wrapped in its label rather than named by aria-label alone: the operator
-  // read the bare identifiers as stages and looked for the board's columns
-  // among them. Each option shows the dictionary's word and sends the
-  // schema's identifier, which is what the card's zone field must hold.
-  const zoneLabel = el("label", "newcard-zone-label");
-  zoneLabel.appendChild(el("span", "newcard-zone-caption", t("new_card_zone")));
-  const zone = el("select", "newcard-zone");
-  for (const name of ZONES) {
-    const option = el("option", "", t(`zone_${name}`));
-    option.value = name;
-    zone.appendChild(option);
-  }
-  zone.value = DEFAULT_ZONE;
-  zoneLabel.appendChild(zone);
+  // The zone is the card's urgency, not its stage. Captioned in words: the
+  // operator read the bare identifiers as stages and looked for the board's
+  // columns among them. Each choice shows the dictionary's word and the zone's
+  // dot, and holds the schema's identifier, which is what the card's zone
+  // field must hold.
+  const zone = segmented(
+    "newcard-zone",
+    t("new_card_zone"),
+    ZONES.map((name) => ({ value: name, text: t(`zone_${name}`), dot: true })),
+    DEFAULT_ZONE,
+  );
+  const zoneLabel = el("div", "newcard-field newcard-zone-label");
+  zoneLabel.append(el("span", "newcard-caption newcard-zone-caption", t("new_card_zone")), zone);
 
   // Kept after a card is made: the next one is usually for the same checkout.
   const repo = el("input", "newcard-repo");
@@ -118,25 +162,33 @@ export function createNewCard(host, {
 
   // Who works the card. Offered only when Codex is set up; an unoffered
   // choice sends nothing and the board's default (Claude) applies.
-  const executor = el("select", "newcard-executor");
-  executor.setAttribute("aria-label", t("new_card_executor"));
-  for (const name of ["claude", "codex"]) {
-    const option = el("option", "", t(`executor_${name}`));
-    option.value = name;
-    executor.appendChild(option);
-  }
-  executor.hidden = true;
+  const executor = segmented(
+    "newcard-executor",
+    t("new_card_executor"),
+    ["claude", "codex"].map((name) => ({ value: name, text: t(`executor_${name}`) })),
+    "claude",
+  );
+  const executorField = el("div", "newcard-field newcard-executor-field");
+  executorField.append(el("span", "newcard-caption", t("new_card_executor")), executor);
+  executorField.hidden = true;
 
-  const repoRow = el("div", "newcard-repo-row");
-  repoRow.append(zoneLabel, executor, repo, repos, pickButton);
+  const repoBox = el("div", "newcard-repo-box");
+  repoBox.append(el("span", "newcard-repo-home", "~/"), repo, repos);
+  const repoLine = el("div", "newcard-repo-line");
+  repoLine.append(repoBox, pickButton);
+  const repoRow = field("newcard-repo-row", t("new_card_repo_caption"), repoLine);
+  const choices = el("div", "newcard-choices");
+  choices.append(zoneLabel, executorField);
 
   const createButton = el("button", "newcard-create btn btn-primary", t("new_card_create"));
   createButton.setAttribute("type", "button");
+  const cancelButton = el("button", "newcard-cancel btn", t("new_card_cancel"));
+  cancelButton.setAttribute("type", "button");
   const closeButton = el("button", "newcard-close btn btn-icon", "×");
   closeButton.setAttribute("type", "button");
   closeButton.setAttribute("aria-label", t("new_card_cancel"));
   const head = el("div", "newcard-head");
-  head.append(title, closeButton);
+  head.append(el("h2", "newcard-heading", t("new_card_heading")), closeButton);
 
   // Claude Code refuses to start in a folder it was never trusted in, and the
   // panel cannot see that trust: it says what to do instead.
@@ -178,9 +230,18 @@ export function createNewCard(host, {
 
   const error = el("div", "newcard-error");
   const actions = el("div", "newcard-actions");
-  actions.append(error, createButton);
+  actions.append(error, el("span", "newcard-footnote", t("new_card_footnote")), cancelButton, createButton);
 
-  form.append(head, description, filesRow, repoRow, hint, actions);
+  form.append(
+    head,
+    field("newcard-title-field", t("new_card_title_caption"), title),
+    field("newcard-desc-field", t("new_card_desc_caption"), description),
+    filesRow,
+    repoRow,
+    hint,
+    choices,
+    actions,
+  );
 
   // What stays said after the form has closed: a card that reached the board
   // and not its history.
@@ -208,6 +269,7 @@ export function createNewCard(host, {
     opener = document.activeElement ?? null;
     const offer = executors();
     executor.hidden = !offer.codex;
+    executorField.hidden = !offer.codex;
     if (!keepExecutor) executor.value = offer.default === "codex" && offer.codex ? "codex" : "claude";
     repos.replaceChildren(
       ...boardRepos(cards()).map((name) => {
@@ -321,6 +383,7 @@ export function createNewCard(host, {
     note.hidden = true;
   });
   closeButton.addEventListener("click", close);
+  cancelButton.addEventListener("click", close);
   const submitOnEnter = (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault?.();

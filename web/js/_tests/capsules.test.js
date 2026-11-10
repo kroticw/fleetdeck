@@ -31,3 +31,14 @@ test("a limit with no number says so instead of a zero", () => {
   const m = capsuleModel({ section: "board", limits: [{ label: "7д", pct: null, level: "off" }], t, colors });
   assert.equal(m.limits[0].text, "—");
 });
+
+// The window tints its selected tab with the accent and goes opaque on the
+// operator's "no transparency"; a model without them asks for neither.
+test("the capsules carry the accent and the wish for no transparency", () => {
+  const m = capsuleModel({ section: "board", limits: [], t, colors, accent: "#4f56d9", opaque: true });
+  assert.equal(m.accent, "#4f56d9");
+  assert.equal(m.opaque, true);
+  const plain = capsuleModel({ section: "board", limits: [], t, colors });
+  assert.equal(plain.accent, undefined);
+  assert.equal(plain.opaque, undefined);
+});

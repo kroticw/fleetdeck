@@ -523,14 +523,18 @@ func (k *Keeper) runOwn(ctx context.Context) bool {
 		limits = k.StartLimitsNow()
 	}
 	answerCtx, cancel := context.WithTimeout(ctx, limits.Answer)
-	answered := make(chan error, 1)
-	go func() { answered <- WaitAnswer(answerCtx, k.URL) }()
+	// The answer travels as a struct: draining it after the process exited is
+	// waiting for the goroutine, not ignoring an error.
+	type answer struct{ err error }
+	answered := make(chan answer, 1)
+	go func() { answered <- answer{WaitAnswer(answerCtx, k.URL)} }()
 	select {
 	case <-p.Exited():
 		cancel()
 		<-answered
 		return k.afterExit(ctx, p, started, false)
-	case err := <-answered:
+	case a := <-answered:
+		err := a.err
 		cancel()
 		if ctx.Err() != nil {
 			return true

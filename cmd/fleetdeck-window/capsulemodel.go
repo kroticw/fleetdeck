@@ -17,6 +17,11 @@ type capsuleModel struct {
 	NewCard capsuleLabel `json:"newCard"`
 	Theme   capsuleLabel `json:"theme"`
 	Limits  []capsuleCap `json:"limits"`
+	// Accent is the page's accent, #rrggbb: the selected tab's colour.
+	Accent string `json:"accent,omitempty"`
+	// Opaque is the operator's "no transparency" glass setting: the window
+	// goes opaque as it does under Reduce Transparency.
+	Opaque bool `json:"opaque,omitempty"`
 }
 
 type capsuleTab struct {

@@ -65,17 +65,17 @@ test("contrast is WCAG's ratio of relative luminances", () => {
 // and the worse of the two is reported.
 test("a capsule on glass is measured against the worst ground under it", () => {
   const body = node({ style: { backgroundColor: "rgba(0, 0, 0, 0)" } });
-  const picker = node({
+  const pencil = node({
     parent: body,
     style: { backgroundColor: "rgba(255, 255, 255, 0.09)", color: "rgb(193, 199, 207)", borderTopLeftRadius: "999px" },
     rect: { top: 14, left: 120, width: 140, height: 24 },
   });
-  const report = controlsReport(fakeWindow({ elements: { ".o-pick-select": picker }, body }), "orchestrator");
+  const report = controlsReport(fakeWindow({ elements: { ".o-name-edit": pencil }, body }), "orchestrator");
   assert.equal(report.surface, "orchestrator");
   assert.equal(report.report, "controls");
   assert.equal(report.glass, "glass");
   const [control] = report.controls;
-  assert.equal(control.name, "picker");
+  assert.equal(control.name, "editPencil");
   assert.equal(control.height, 24);
   assert.equal(control.radius, 999);
   assert.equal(control.fillAlpha, 0.09);
@@ -147,8 +147,8 @@ test("a control not on screen is not reported, and a disabled one says so", () =
   const body = node();
   const hidden = node({ parent: body, rect: { top: 0, left: 0, width: 0, height: 0 } });
   const bigger = node({ parent: body, disabled: true, style: { borderTopLeftRadius: "999px" } });
-  const report = controlsReport(fakeWindow({ elements: { ".fleet-menu-list": hidden, ".term-font-bigger": bigger }, body }), "orchestrator");
-  assert.deepEqual(report.controls.map((c) => c.name), ["fontBigger"]);
+  const report = controlsReport(fakeWindow({ elements: { ".fleet-menu-list": hidden, ".col-size-fold": bigger }, body }), "orchestrator");
+  assert.deepEqual(report.controls.map((c) => c.name), ["fold"]);
   assert.equal(report.controls[0].disabled, true);
 });
 
@@ -203,15 +203,15 @@ test("opacity on a control or above it is part of how see-through it is and how 
 
 test("the board and the orchestrator surface report their own controls only", () => {
   const body = node();
-  const elements = { ".o-pick-select": node({ parent: body }), ".newcard-title": node({ parent: body }), ".col-size-unfold": node({ parent: body }) };
+  const elements = { ".o-name-edit": node({ parent: body }), ".newcard-title": node({ parent: body }), ".col-size-unfold": node({ parent: body }) };
   assert.deepEqual(controlsReport(fakeWindow({ elements, body }), "board").controls.map((c) => c.name), ["newCardTitle"]);
-  assert.deepEqual(controlsReport(fakeWindow({ elements, body }), "orchestrator").controls.map((c) => c.name), ["picker"]);
+  assert.deepEqual(controlsReport(fakeWindow({ elements, body }), "orchestrator").controls.map((c) => c.name), ["editPencil"]);
 });
 
 test("the window hears the controls once laid out, and again only when they change", () => {
   const body = node();
-  const picker = node({ parent: body, style: { borderTopLeftRadius: "999px" } });
-  const win = fakeWindow({ elements: { ".o-pick-select": picker }, body });
+  const pencil = node({ parent: body, style: { borderTopLeftRadius: "999px" } });
+  const win = fakeWindow({ elements: { ".o-name-edit": pencil }, body });
   const heard = [];
   const again = watchControls(win, "orchestrator", (report) => heard.push(report));
   win.frames.shift()();
@@ -219,7 +219,7 @@ test("the window hears the controls once laid out, and again only when they chan
   again();
   win.frames.shift()();
   assert.equal(heard.length, 1, "the same controls again are not heard again");
-  picker.style.borderTopLeftRadius = "4px";
+  pencil.style.borderTopLeftRadius = "4px";
   win.listeners.resize();
   win.frames.shift()();
   assert.equal(heard.length, 2);

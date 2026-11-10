@@ -43,6 +43,13 @@ type (
 	setFrameMode   struct{ Mode glassMode }
 	reloadBoard    struct{}
 	setDragBand    struct{ Height float64 }
+	// setTopDrag is the top band over the panels; setDragHoles a side page's
+	// controls in it.
+	setTopDrag   struct{ Height float64 }
+	setDragHoles struct {
+		Side  string
+		Holes []rect
+	}
 	// showToolbar is the window's empty toolbar shown or hidden: it places the
 	// buttons out of full screen, and in full screen would only make the strip
 	// a pointer at the top of the screen brings out twice as tall.
@@ -64,9 +71,13 @@ var sideSurfaces = []string{"orchestrator", "sessions"}
 type controller struct {
 	mu sync.Mutex
 
-	baseURL    string
-	widths     panelWidths
-	glass      glassMode
+	baseURL string
+	widths  panelWidths
+	glass   glassMode
+	// system is the glass the system allows; pageOpaque the operator's
+	// setting asking for none. glass is the two together.
+	system     glassMode
+	pageOpaque bool
 	width      float64
 	height     float64
 	fullscreen bool
@@ -107,7 +118,7 @@ func newController(panelURL string, widths panelWidths, glass glassMode) *contro
 		u.RawQuery, u.Fragment = "", ""
 		base = u.String()
 	}
-	return &controller{baseURL: base, widths: widths, glass: glass, loads: map[string]*pageWatch{}, now: time.Now}
+	return &controller{baseURL: base, widths: widths, glass: glass, system: glass, loads: map[string]*pageWatch{}, now: time.Now}
 }
 
 func (c *controller) pageURL(fleet string) string {
@@ -424,7 +435,20 @@ func (c *controller) theme(choice string) []effect {
 
 // capsules is the board's model for the capsule row, drawn as it is.
 func (c *controller) capsules(model json.RawMessage) []effect {
-	return []effect{setCapsules{Model: model}}
+	out := []effect{setCapsules{Model: model}}
+	var wish struct {
+		Opaque bool `json:"opaque"`
+	}
+	if json.Unmarshal(model, &wish) != nil {
+		return out
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if wish.Opaque == c.pageOpaque {
+		return out
+	}
+	c.pageOpaque = wish.Opaque
+	return append(out, c.applyGlass()...)
 }
 
 // capsuleRow is the capsule row drawn, with rowMin its narrowest form: the
@@ -531,7 +555,7 @@ func (c *controller) resized(width, height float64, fullscreen bool) []effect {
 	if !changed {
 		return out
 	}
-	out = append(out, c.dragBand(), showToolbar{Visible: !fullscreen})
+	out = append(out, c.dragBand(), c.topDrag(), showToolbar{Visible: !fullscreen})
 	if c.framed {
 		out = append(out, c.to("orchestrator", map[string]any{"type": "fullscreen", "on": fullscreen})...)
 	}
@@ -548,6 +572,28 @@ func (c *controller) topBand(height float64) []effect {
 	return []effect{c.dragBand()}
 }
 
+// topDragHeight is the top band's height: the capsule row's strip, with the
+// row's own margin below it as above.
+const topDragHeight = 2*capsuleTop + capsuleHeight
+
+// topDrag is the top band as the window shows it: none in full screen, where
+// there is no window to move.
+func (c *controller) topDrag() effect {
+	if c.fullscreen {
+		return setTopDrag{Height: 0}
+	}
+	return setTopDrag{Height: topDragHeight}
+}
+
+// dragHoles is where a side surface's page has controls in the top band.
+func (c *controller) dragHoles(surface string, holes []rect) []effect {
+	kind, _, ok := parseSurfaceName(surface)
+	if !ok {
+		return nil
+	}
+	return []effect{setDragHoles{Side: kind, Holes: holes}}
+}
+
 // dragBand is the band as the window shows it: none in full screen, where a
 // window is not moved.
 func (c *controller) dragBand() effect {
@@ -557,9 +603,21 @@ func (c *controller) dragBand() effect {
 	return setDragBand{Height: c.band}
 }
 
+// glassChanged is the system's glass changing (Reduce Transparency).
 func (c *controller) glassChanged(mode glassMode) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.system = mode
+	return c.applyGlass()
+}
+
+// applyGlass frames the window in the system's glass, or opaque while the
+// page asks for it, and tells every surface. Called with c.mu held.
+func (c *controller) applyGlass() []effect {
+	mode := c.system
+	if c.pageOpaque {
+		mode = glassModeOpaque
+	}
 	c.glass = mode
 	out := append([]effect{setFrameMode{Mode: mode}}, c.glassMessage("board")...)
 	for _, side := range sideSurfaces {

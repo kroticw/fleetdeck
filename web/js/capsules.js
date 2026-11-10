@@ -5,7 +5,7 @@
 // strings and no colours of its own: the board hands it this model, in the
 // language and theme the page is in, and hands it again whenever it changes.
 
-export function capsuleModel({ section, limits, t, colors }) {
+export function capsuleModel({ section, limits, t, colors, accent, opaque }) {
   return {
     version: 1,
     tabs: [
@@ -20,5 +20,7 @@ export function capsuleModel({ section, limits, t, colors }) {
       level,
       color: colors[level],
     })),
+    ...(accent ? { accent } : {}),
+    ...(opaque ? { opaque: true } : {}),
   };
 }

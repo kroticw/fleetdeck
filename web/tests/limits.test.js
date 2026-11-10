@@ -48,13 +48,12 @@ test("limits: an old Codex reading is stale whatever Claude's error says", () =>
   assert.equal(fresh[1].level, "warm");
 });
 
-test("limits: the window capsules carry one entry per provider", () => {
+// A row of capsules cannot grow with the models: the window's capsule names the
+// busiest, and its menu lists them all (web/tests/limitslist.test.js).
+test("limits: the window capsule carries the busiest provider", () => {
   assert.deepEqual(
     header.limitsOf({ limits: claude, codexLimits: codex }, now).map((l) => [l.label, l.pct]),
-    [
-      ["Claude", 51],
-      ["Codex", 64],
-    ],
+    [["Codex", 64]],
   );
 });
 

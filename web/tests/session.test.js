@@ -24,7 +24,7 @@ import {
   asText,
   frame,
 } from "./terminal-fakes.js";
-import { KEYS, renderSession } from "../js/session.js";
+import { renderSession } from "../js/session.js";
 // The panel's own dictionary, not a copy of its strings: what is pinned below is
 // that the label the operator reads comes from a key that exists, in whichever
 // language this machine runs in.
@@ -771,31 +771,6 @@ test("what the operator types into the terminal goes into the socket as bytes", 
   assert.equal(asText(typed[0]), "ls -la\r");
 });
 
-test("every key button sends its escape sequence into the socket, and nothing through POST .../keys", async () => {
-  // POST .../keys opens an attach of its own on every press, and an attach
-  // resizes the session: with a live terminal open that would be a resize per
-  // key. The buttons go through the one connection the terminal already holds.
-  installTerminal();
-  stubFetch(answer({ body: [] }));
-  const panel = await mount();
-  ready(sockets[0]);
-
-  // transcript is Ctrl+O: Claude Code's own view of the whole conversation, and
-  // the same key again takes it back to the prompt.
-  const expected = { escape: "", up: "[A", down: "[B", enter: "\r", transcript: "" };
-  // Every button, and no fewer: a row lost from KEYS would otherwise shrink this
-  // loop rather than fail it.
-  assert.deepEqual(KEYS.map((k) => k.id).sort(), Object.keys(expected).sort(), "the key buttons are not the four this checks");
-  for (const key of KEYS) {
-    await panel.click(`[data-key=${key.id}]`);
-    const sent = asText(sockets[0].sent[sockets[0].sent.length - 1]);
-    assert.equal(sent, expected[key.id], `${key.id} must send its bytes`);
-    assert.notEqual(sent, key.id);
-    assert.notEqual(sent, key.label);
-  }
-  assert.equal(calls.filter((c) => String(c.url).includes("/keys")).length, 0, "no key went out as a request");
-});
-
 test("a terminal that cannot type says so as soon as it opens, and typing sends nothing", async () => {
   const terminals = installTerminal();
   stubFetch(answer({ body: [] }));
@@ -807,17 +782,16 @@ test("a terminal that cannot type says so as soon as it opens, and typing sends 
   assert.equal(notice.textContent, t("terminal_read_only"));
 
   terminals[0].type("x");
-  await panel.click("[data-key=enter]");
   assert.equal(keystrokes(sockets[0]).length, 0, "nothing went into a session through a terminal without a key");
   assert.equal(panel.errorText(), t("terminal_read_only"), "and the refusal is on screen");
 });
 
-test("a key pressed before the terminal is connected is refused where it can be seen", async () => {
-  installTerminal();
+test("a key typed before the terminal is connected is refused where it can be seen", async () => {
+  const terminals = installTerminal();
   stubFetch(answer({ body: [] }));
   const panel = await mount();
 
-  await panel.click("[data-key=enter]");
+  terminals[0].type("\r");
   assert.equal(sockets[0].sent.length, 0, "not even the token: the socket never opened");
   assert.equal(panel.errorText(), t("terminal_not_connected"));
 });
@@ -963,63 +937,16 @@ test("a missing WebSocket or terminal library is a visible error, and opens noth
   assert.notEqual(panel.errorText(), "");
 });
 
-// --- the two classes of control, and which is which ------------------------
+// --- no key row ----------------------------------------------------------------
 //
-// The operator's first look at this panel produced one sentence: "непонятно
-// зачем нужны эти кнопки" — it is not clear what these buttons are for, about a
-// bare `Esc ↑ ↓ Enter ✕` row in the top-right corner of the header. That corner
-// is where every window on his machine puts controls that act on the window,
-// and four of those five buttons do not: they press a key inside a Claude Code
-// session running somewhere else, which no undo reaches. The tests below are
-// what stops that row from coming back.
-
-test("the keys carry a label saying where the press lands", async () => {
-  // Four bare glyphs say nothing about their destination. The label is the only
-  // thing on screen that does, so it is not allowed to be absent, empty, or the
-  // untranslated name of its own dictionary key.
+// Keys go into the terminal the way a keyboard sends them; the panel draws no
+// row of buttons that press them.
+test("the panel draws no key row under its terminal", async () => {
   installTerminal();
   stubFetch(answer({ body: [] }));
   const panel = await mount();
-
-  assert.equal(panel.root.querySelectorAll("[data-key]").length, KEYS.length, "every key is drawn");
-  const label = panel.root.querySelector(".s-keys-label");
-  assert.notEqual(label, null, "the key row has no label at all");
-  assert.equal(label.textContent, t("keys_to_session"), "the label is not the panel's own string");
-  assert.notEqual(label.textContent, "keys_to_session", "the label fell through to its own key name");
-  assert.notEqual(label.textContent.trim(), "");
-});
-
-test("the transcript key is named in words and says what it opens", async () => {
-  // Every other key's glyph says which key it is. This one is a control
-  // character with no glyph, and what it does — the whole conversation, not only
-  // the screen — is the reason it is there.
-  installTerminal();
-  stubFetch(answer({ body: [] }));
-  const panel = await mount();
-
-  const button = panel.root.querySelector("[data-key=transcript]");
-  assert.notEqual(button, null, "there is no transcript key");
-  assert.equal(button.textContent, t("key_transcript"));
-  assert.notEqual(button.textContent, "key_transcript", "the label fell through to its own key name");
-  assert.equal(button.title, t("key_transcript_hint"));
-  assert.ok(panel.root.querySelector(".s-keys").contains(button), "the transcript key is not with the other keys");
-});
-
-test("the close button is not one of the keys, and the keys are not in the header", async () => {
-  // ✕ closes this panel and nothing leaves the machine; the four keys land in
-  // somebody's running work. Drawn as one row of five they read as one set, and
-  // the operator read them as exactly that.
-  installTerminal();
-  stubFetch(answer({ body: [] }));
-  const panel = await mount();
-
-  const head = panel.root.querySelector(".s-head");
-  const keys = panel.root.querySelector(".s-keys");
-  assert.notEqual(head.querySelector(".s-close"), null, "the close button belongs to the header");
-  assert.equal(head.querySelectorAll("[data-key]").length, 0, "no session key sits in the header row");
-  assert.notEqual(keys, null, "the keys have no group of their own");
-  assert.equal(keys.querySelector(".s-close"), null, "the close button is inside the key group");
-  assert.equal(head.contains(keys), false, "the key group is still nested in the header");
+  assert.equal(panel.root.querySelector(".s-keys"), null);
+  assert.equal(panel.root.querySelectorAll("[data-key]").length, 0);
 });
 
 // --- which session this panel is pointing at -------------------------------
@@ -1112,68 +1039,6 @@ async function withFontStorage(entries, body) {
   }
 }
 
-// Looked for inside the header, so buttons anywhere else are not found.
-const headFontButtons = (root) => {
-  const head = root.querySelector(".s-head");
-  return {
-    group: head?.querySelector(".term-font") ?? null,
-    smaller: head?.querySelector(".term-font-smaller") ?? null,
-    reset: head?.querySelector(".term-font-reset") ?? null,
-    bigger: head?.querySelector(".term-font-bigger") ?? null,
-  };
-};
-
-test("the header has the font buttons, ahead of the session's name", async () => {
-  installTerminal();
-  stubFetch(answer({ body: [] }));
-  const panel = await mount();
-
-  const head = panel.root.querySelector(".s-head");
-  const { group } = headFontButtons(panel.root);
-  assert.ok(group, "the header has no font buttons");
-  assert.ok(head.children.indexOf(group) < head.children.indexOf(head.querySelector(".s-who")), "the buttons are not ahead of the name");
-  for (const b of group.children) assert.ok(String(b.className).split(" ").includes("s-font-btn"));
-});
-
-test("the font buttons are in the page before the terminal is built", async () => {
-  const terminals = installTerminal();
-  const Built = globalThis.Terminal;
-  let buttonsAtBuild = null;
-  globalThis.Terminal = class extends Built {
-    constructor(options) {
-      super(options);
-      buttonsAtBuild = Boolean(headFontButtons(dom.document.body).group);
-    }
-  };
-  stubFetch(answer({ body: [] }));
-  await mount();
-
-  assert.equal(terminals.length, 1, "the panel built no terminal");
-  assert.equal(buttonsAtBuild, true, "the buttons came after the terminal was built, and push its pane down after it was fitted");
-});
-
-test("the font buttons show the panel's own size and press its terminal", async () => {
-  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "20", "fleetdeck-terminal-font-screen": "10" }, async (map) => {
-    const terminals = installTerminal();
-    stubFetch(answer({ body: [] }));
-    const panel = await mount();
-    const terminal = terminals.at(-1);
-    const { smaller, reset, bigger } = headFontButtons(panel.root);
-    assert.equal(reset.textContent, "10 px");
-
-    fireEvent(bigger, "click");
-    assert.equal(terminal.options.fontSize, 11);
-    assert.equal(map.get("fleetdeck-terminal-font-screen"), "11");
-    assert.equal(map.get("fleetdeck-terminal-font-orchestrator"), "20", "the panel's button changed the column's size");
-    assert.equal(reset.textContent, "11 px");
-
-    fireEvent(smaller, "click");
-    fireEvent(smaller, "click");
-    assert.equal(terminal.options.fontSize, 9);
-    assert.equal(smaller.disabled, true, "A− at 9 px looked like it would do something");
-  });
-});
-
 // The panel keeps the size of its type under its own key, not the orchestrator
 // column's: the two are different widths, and what a bigger type costs is
 // columns. The column's entry is set too, so reading it shows.
@@ -1195,11 +1060,32 @@ test("the panel's terminal is the size remembered for it, and Cmd+- changes that
   });
 });
 
-// E layout, S1: the sheet keeps the session panel's header as it is, font
-// buttons first and close last; only its look changes.
-test("the session head keeps its order: font buttons, name, close", async () => {
+// The head names the session and ends with close; the type size is a setting.
+test("the session head has no font buttons: name first, close last", async () => {
   const { root, stop } = await mount();
   const head = root.querySelector(".s-head").children.map((node) => String(node.className).split(" ").at(-1));
-  assert.deepEqual(head, ["term-font", "s-who", "s-close"]);
+  assert.equal(head.includes("term-font"), false);
+  assert.equal(head.at(-1), "s-close");
   stop();
+});
+
+// The head as drawn in the design: the session's mark, its name with its state
+// as a badge, the model and folder under it, then what it cost and how full its
+// context is. All of it follows the snapshot.
+test("the session head carries the mark, the state, the model and folder, the cost and the context", async () => {
+  installTerminal();
+  stubFetch(answer({ body: [] }));
+  const session = { name: "fleetdeck server", model: "Opus 5.5", cwd: "/Users/someone/opensource/fleetdeck", costUSD: 3.214, context: { tokens: 28000, window: 200000 } };
+  const panel = await mount({ store: fakeStore(listed(session)) });
+  const head = panel.root.querySelector(".s-head");
+
+  assert.ok(head.querySelector(".s-avatar").textContent.length > 0, "the head has no mark");
+  assert.equal(head.querySelector(".s-meta").textContent, "Opus 5.5 · ~/opensource/fleetdeck");
+  assert.equal(head.querySelector(".s-cost").textContent, "$3.21");
+  assert.equal(head.querySelector(".s-ctx").textContent, "14%");
+  assert.equal(head.querySelector(".s-state").dataset.state, "working");
+
+  await panel.store.emit(listed({ ...session, state: "idle", costUSD: 4 }));
+  assert.equal(head.querySelector(".s-state").dataset.state, "idle");
+  assert.equal(head.querySelector(".s-cost").textContent, "$4.00");
 });

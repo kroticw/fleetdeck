@@ -36,8 +36,7 @@ func goodPanel(name, glass string) control {
 
 func goodOrchestratorControls(glass string) controlsReport {
 	return controlsReport{Surface: "orchestrator", Report: "controls", Glass: glass, Controls: []control{
-		goodCapsule("editPencil", glass), goodCapsule("picker", glass), goodCapsule("fontSmaller", glass),
-		goodCapsule("fontSize", glass), goodCapsule("fontBigger", glass), goodCapsule("fold", glass),
+		goodCapsule("editPencil", glass), goodCapsule("fold", glass),
 		goodCapsule("fleetButton", glass), goodPanel("fleetList", glass),
 	}}
 }
@@ -91,7 +90,7 @@ func TestCapsulesThatKeepTheirPropertiesAreNoProblem(t *testing.T) {
 func TestACapsuleOfTheWrongOpacityForTheMaterialIsAProblem(t *testing.T) {
 	o := goodOrchestratorControls("glass")
 	o.Controls[1].FillAlpha = 1
-	wantProblem(t, controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), bothOpen), "picker", "see-through")
+	wantProblem(t, controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), bothOpen), "fold", "see-through")
 
 	b := goodBoardControls("opaque")
 	b.Controls[1].FillAlpha = 0.52
@@ -100,7 +99,7 @@ func TestACapsuleOfTheWrongOpacityForTheMaterialIsAProblem(t *testing.T) {
 
 func TestACapsuleThatIsNotRoundIsAProblem(t *testing.T) {
 	o := goodOrchestratorControls("glass")
-	o.Controls[6].Radius = 4
+	o.Controls[2].Radius = 4
 	wantProblem(t, controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), bothOpen), "fleetButton", "capsule")
 }
 
@@ -117,7 +116,7 @@ func TestAFloatingPanelNotFrostedOnGlassOrBlurredWithNoGlassIsAProblem(t *testin
 	wantProblem(t, controlsCheck(controlsLog(t, "glass", goodOrchestratorControls("glass"), b), bothOpen), "newCard", "blur")
 
 	o := goodOrchestratorControls("opaque")
-	o.Controls[7].Backdrop, o.Controls[7].FillAlpha = "blur(24px) saturate(160%)", 0.8
+	o.Controls[3].Backdrop, o.Controls[3].FillAlpha = "blur(24px) saturate(160%)", 0.8
 	problems := controlsCheck(controlsLog(t, "opaque", o, goodBoardControls("opaque")), bothOpen)
 	wantProblem(t, problems, "fleetList", "blur")
 	wantProblem(t, problems, "fleetList", "solid")
@@ -128,10 +127,10 @@ func TestAFloatingPanelNotFrostedOnGlassOrBlurredWithNoGlassIsAProblem(t *testin
 func TestTextUnderFourAndAHalfToOneIsAProblemUnlessDisabled(t *testing.T) {
 	o := goodOrchestratorControls("glass")
 	o.Controls[1].Contrast = 3.9
-	wantProblem(t, controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), bothOpen), "picker", "3.9")
+	wantProblem(t, controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), bothOpen), "fold", "3.9")
 
 	o = goodOrchestratorControls("glass")
-	o.Controls[4].Contrast, o.Controls[4].Disabled = 1.6, true
+	o.Controls[1].Contrast, o.Controls[1].Disabled = 1.6, true
 	if got := controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), bothOpen); len(got) != 0 {
 		t.Fatalf("problems %q, want none: a disabled control is not read", got)
 	}
@@ -140,7 +139,7 @@ func TestTextUnderFourAndAHalfToOneIsAProblemUnlessDisabled(t *testing.T) {
 // What the stand opened has to be reported, or nothing was held to anything.
 func TestWhatTheStandOpenedButDidNotReportIsAProblem(t *testing.T) {
 	o := goodOrchestratorControls("glass")
-	o.Controls = o.Controls[:7]
+	o.Controls = o.Controls[:3]
 	b := goodBoardControls("glass")
 	b.Controls = nil
 	problems := controlsCheck(controlsLog(t, "glass", o, b), bothOpen)
@@ -208,9 +207,9 @@ func TestADimmedDisabledCapsuleIsNoProblem(t *testing.T) {
 
 func TestTheIslandsHeadCapsulesHaveToBeReported(t *testing.T) {
 	o := goodOrchestratorControls("glass")
-	o.Controls = []control{goodCapsule("fontSize", "glass")}
+	o.Controls = []control{goodCapsule("fold", "glass")}
 	problems := controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), nil)
-	for _, name := range []string{"editPencil", "picker", "fleetButton"} {
+	for _, name := range []string{"editPencil", "fleetButton"} {
 		wantProblem(t, problems, name)
 	}
 }

@@ -341,7 +341,7 @@ test("a pinned session the daemon stops listing lets its terminal go, and has it
   await c.push({ orchestratorSession: "abc", sessions: [structuredClone(PIN.sessions[1])] });
   assert.equal(c.ptys()[0].closedWith?.code, 1000, "a session that is not listed kept its terminal");
   assert.equal(c.root.querySelector(".o-term"), null);
-  assert.equal(text(c, ".o-screen-empty"), t("session_not_listed"), "the column does not say why it is empty");
+  assert.equal(text(c, ".o-screen-empty-text"), t("session_not_listed"), "the column does not say why it is empty");
 
   await c.push(structuredClone(PIN));
   assert.equal(c.ptys().length, 2, "the session came back and its terminal did not");
@@ -353,10 +353,10 @@ test("with nothing pinned there is no terminal, and the column says so — never
   const c = await column({ orchestratorSession: "", sessions: structuredClone(PIN.sessions) });
 
   assert.equal(c.ptys().length, 0, "a terminal was opened with nothing pinned");
-  assert.equal(text(c, ".o-screen-empty"), t("no_orchestrator_thread"));
-  // The only session-shaped things anywhere in the column are the dropdown's
-  // own <option>s — nothing clickable, nothing that opens another view.
-  assert.equal(c.root.querySelectorAll("button[data-short], a[data-short]").length, 0);
+  assert.equal(text(c, ".o-screen-empty-text"), t("no_orchestrator_thread"));
+  // Nothing session-shaped anywhere in the column: nothing clickable, nothing
+  // that opens another view. Appointing one is the wizard's.
+  assert.equal(c.root.querySelectorAll("button[data-short], a[data-short], select").length, 0);
 });
 
 // A folded column is not where the session is read, and what it attached with
@@ -383,16 +383,12 @@ test("a connection being retried and a choice that was not saved are on screen t
   const c = await column(structuredClone(PIN));
   ready(c.ptys()[0]);
   c.ptys()[0].serverClose(1006);
-  routes["/api/config"] = () => answer({ status: 503, statusText: "config is read-only", body: { error: "config is read-only" } });
 
-  const select = c.root.querySelector(".o-pick-select");
-  select.value = "zzz";
-  fireEvent(select, "change");
-  await settle();
-  await settle();
+  // A key typed while the connection is down is the operator's error.
+  c.terminals.at(-1).type("y");
 
   assert.ok(text(c, ".o-error-stream").includes(t("terminal_reconnecting")), "the retry lost its row");
-  assert.ok(text(c, ".o-error-action").includes(t("orchestrator_pin_failed")), "the failed choice lost its row");
+  assert.ok(text(c, ".o-error-action").includes(t("terminal_not_connected")), "the refused key lost its row");
   assert.equal(c.root.querySelectorAll(".o-error").length, 2);
 });
 
@@ -510,21 +506,24 @@ test("the view signature tells a missing brief, a foreign one and a sound one ap
   assert.equal(signatures.size, 3, "two of the three brief states redraw as the same column");
 });
 
-// Requirement 5 of the first-run wizard's card: the wizard can be run again,
-// and the column the orchestrator lives in is where a person looks for it —
-// pinned or not, since "nothing pinned" is exactly when it is wanted.
-test("the column's head leads to the orchestrator wizard, pinned or not", async () => {
-  for (const snapshot of [structuredClone(PIN), { ...structuredClone(PIN), orchestratorSession: "" }]) {
-    const c = await column(snapshot);
-    const link = c.root.querySelector("a.o-wizard");
-    assert.ok(link, "no way to the wizard from the column");
-    assert.equal(link.getAttribute("href"), "/setup.html");
-    assert.equal(link.textContent, t("orchestrator_wizard"));
-    assert.equal(link.getAttribute("title"), t("orchestrator_wizard_hint"));
-    current.stop();
-    current.dom.restore();
-    current = null;
-  }
+// Requirement 5 of the first-run wizard's card: the wizard can be run again.
+// The head no longer moves the pin, so the wizard is where a column with
+// nothing to show sends a person; a column showing its orchestrator does not
+// offer to replace it.
+test("an empty column leads to the orchestrator wizard, a pinned one does not offer it", async () => {
+  const c = await column({ ...structuredClone(PIN), orchestratorSession: "" });
+  const link = c.root.querySelector(".o-screen-empty a.o-wizard");
+  assert.ok(link, "no way to the wizard from the empty column");
+  assert.equal(link.getAttribute("href"), "/setup.html");
+  assert.equal(link.textContent, t("orchestrator_wizard"));
+  assert.equal(link.getAttribute("title"), t("orchestrator_wizard_hint"));
+  current.stop();
+  current.dom.restore();
+  current = null;
+
+  const pinned = await column(structuredClone(PIN));
+  assert.equal(pinned.root.querySelector("a.o-wizard"), null, "a pinned column offered to replace its orchestrator");
+  assert.equal(pinned.root.querySelector("select"), null, "the head still carries a picker");
 });
 
 test("in a fleet's tab the wizard is that fleet's", async () => {
@@ -532,7 +531,7 @@ test("in a fleet's tab the wizard is that fleet's", async () => {
   // that fleet's orchestrator; opened from fleet B's tab it must be B's.
   globalThis.location.search = "?fleet=B";
   try {
-    const c = await column(structuredClone(PIN));
+    const c = await column({ ...structuredClone(PIN), orchestratorSession: "" });
     assert.equal(c.root.querySelector("a.o-wizard").getAttribute("href"), "/setup.html?fleet=B");
     current.stop();
     current.dom.restore();
@@ -540,6 +539,17 @@ test("in a fleet's tab the wizard is that fleet's", async () => {
   } finally {
     delete globalThis.location.search;
   }
+});
+
+// The head says who the orchestrator is: its mark, its name over its model and
+// folder, and the context it has used.
+test("the head shows the orchestrator's mark, model and folder", async () => {
+  const withMeta = structuredClone(PIN);
+  withMeta.sessions[0].model = "opus";
+  withMeta.sessions[0].cwd = "/Users/someone/fleetdeck";
+  const c = await column(withMeta);
+  assert.ok(text(c, ".o-avatar").length > 0, "no mark for the orchestrator");
+  assert.equal(text(c, ".o-meta"), "opus · ~/fleetdeck");
 });
 
 test("a connection error goes with the terminal it was about", async () => {
@@ -590,11 +600,11 @@ test("a key the terminal could not send is the operator's error, not the connect
 
 test("the empty column's sentence follows the pin as it changes", async () => {
   const c = await column({ orchestratorSession: "abc", sessions: [] });
-  assert.equal(text(c, ".o-screen-empty"), t("session_not_listed"), "precondition");
+  assert.equal(text(c, ".o-screen-empty-text"), t("session_not_listed"), "precondition");
 
   await c.push({ orchestratorSession: "", sessions: [] });
 
-  assert.equal(text(c, ".o-screen-empty"), t("no_orchestrator_thread"), "the sentence about the old pin stayed");
+  assert.equal(text(c, ".o-screen-empty-text"), t("no_orchestrator_thread"), "the sentence about the old pin stayed");
 });
 
 test("the column's terminal is given the page's links", async () => {
@@ -617,100 +627,7 @@ test("putting the column away leaves no socket and nothing armed", async () => {
   assert.equal(c.ptys().length, 1, "a column put away still answered a snapshot");
 });
 
-// --- assigning the orchestrator through the dropdown, not a screen of its own ---
-//
-// The operator's own complaint: a full-screen session picker used to replace
-// this whole column, offering a second, confusable way to do what clicking a
-// session in the task list on the right already does. It is gone; a plain
-// <select> in the head does the one thing that is not already available
-// elsewhere — saying which session the orchestrator is — without ever
-// leaving the column.
-
-test("choosing the empty option in the dropdown clears the pin", async () => {
-  const c = await column(structuredClone(PIN));
-  const select = c.root.querySelector(".o-pick-select");
-  assert.ok(select, "an operator must not be locked into the session they picked");
-  assert.equal(select.value, "abc", "the dropdown starts on the true pin");
-
-  const patches = [];
-  routes["/api/config"] = (url, init) => {
-    patches.push(JSON.parse(init.body));
-    return saved();
-  };
-
-  select.value = "";
-  fireEvent(select, "change");
-  await settle();
-  await settle();
-
-  assert.deepEqual(patches, [{ orchestratorSession: "" }], "the pin is cleared, so a reload does not lock them in again");
-  assert.ok(c.root.querySelector(".o-screen"), "the column never left its own view to do it");
-});
-
-test("when the write fails, the dropdown reverts to what is actually pinned and says so", async () => {
-  const c = await column(structuredClone(PIN));
-  const select = c.root.querySelector(".o-pick-select");
-  routes["/api/config"] = () => answer({ status: 503, statusText: "config is read-only", body: { error: "config is read-only" } });
-
-  select.value = "";
-  fireEvent(select, "change");
-  await settle();
-  await settle();
-
-  assert.ok(c.root.querySelector(".o-error-action"), "the failure to save it is not hidden");
-  // The configuration never actually changed, so the very next draw() reads
-  // the true pin back and the dropdown reverts to it — no separate "still
-  // really pinned" mark to maintain, the selected option already is the
-  // truth.
-  assert.equal(select.value, "abc", "the dropdown shows what is actually pinned, not what was merely clicked");
-
-  // The next snapshot still carries the old pin; it must not read as a
-  // change and must not disturb the terminal.
-  await c.push(structuredClone(PIN));
-  assert.equal(select.value, "abc");
-  assert.equal(c.ptys().length, 1, "a choice that was not saved moved the terminal anyway");
-});
-
-test("choosing a session in the dropdown pins it, without leaving the column", async () => {
-  const c = await column({ orchestratorSession: "", sessions: structuredClone(PIN.sessions) });
-  let pinnedTo = null;
-  routes["/api/config"] = (url, init) => {
-    pinnedTo = JSON.parse(init.body).orchestratorSession;
-    return saved();
-  };
-
-  const select = c.root.querySelector(".o-pick-select");
-  assert.ok(select, "the dropdown is offered even with nothing pinned yet");
-  const options = [...select.options].map((o) => o.value);
-  assert.ok(options.includes("abc") && options.includes("zzz"), "it offers the fleet's own sessions");
-
-  select.value = "abc";
-  fireEvent(select, "change");
-  await settle();
-  await settle();
-
-  assert.equal(pinnedTo, "abc", "picking pins that session");
-  assert.ok(c.root.querySelector(".o-screen"), "the column was never replaced by a separate screen to do it");
-});
-
-test("a session named as markup reaches the dropdown as text, not as an element", async () => {
-  // The fleet is open (spec 3.1): a session name is not this codebase's text.
-  // The dropdown's options are built with createElement and textContent, so a
-  // name spelled as a tag is a label that reads like a tag — there is no
-  // parser between it and the DOM.
-  const hostile = {
-    orchestratorSession: "",
-    sessions: [{ short: 'q"><img src=x onerror=alert(1)>', name: "<script>alert(1)</script>", sessionId: "u-1" }],
-  };
-  const c = await column(hostile);
-  const select = c.root.querySelector(".o-pick-select");
-  const option = [...select.options].find((o) => o.value === 'q"><img src=x onerror=alert(1)>');
-  assert.ok(option, "the session is offered");
-  assert.equal(option.textContent, "<script>alert(1)</script>", "the name is the label, verbatim and inert");
-  assert.equal(option.children.length, 0, "no element was created from it");
-});
-
-test("a hostile label reaches .o-name and the dropdown only as text", async () => {
+test("a hostile label reaches .o-name only as text", async () => {
   const hostile = 'q"><img src=x onerror=alert(1)>';
   const withLabel = structuredClone(PIN);
   withLabel.sessions[0].label = hostile;
@@ -718,11 +635,6 @@ test("a hostile label reaches .o-name and the dropdown only as text", async () =
   const name = c.root.querySelector(".o-name");
   assert.equal(name.textContent, hostile, "the label wins over the name, verbatim and inert");
   assert.equal(name.children.length, 0, "no element was created from it");
-
-  const select = c.root.querySelector(".o-pick-select");
-  const option = [...select.options].find((o) => o.value === "abc");
-  assert.equal(option.textContent, hostile, "the dropdown prefers the same label");
-  assert.equal(option.children.length, 0);
 });
 
 // --- editing the pinned session's own name in place ---
@@ -1022,130 +934,16 @@ test("the column's terminal is the size remembered for the column, and Cmd+= cha
   }
 });
 
-// --- the font buttons -------------------------------------------------------
+// --- the type size ---------------------------------------------------------
 //
-// A−, the size, A+ in the strip of the column's own controls, on the side the
-// fold button is on — the side facing the centre. They press the terminal's
-// stepFont, the function Cmd+= goes through, and they are there before the
-// terminal is: a row that grows under a terminal makes its pane shorter, and
-// that reshapes the session.
-
-async function withFontStorage(entries, body) {
-  const previous = Object.hasOwn(globalThis, "localStorage") ? globalThis.localStorage : undefined;
-  const map = new Map(Object.entries(entries));
-  globalThis.localStorage = {
-    getItem: (k) => (map.has(k) ? map.get(k) : null),
-    setItem: (k, v) => map.set(k, String(v)),
-    removeItem: (k) => map.delete(k),
-  };
-  try {
-    await body(map);
-  } finally {
-    if (previous === undefined) delete globalThis.localStorage;
-    else globalThis.localStorage = previous;
-  }
-}
-
-// Looked for inside the strip, so buttons that ended up anywhere else in the
-// column are not found at all.
-const fontButtons = (root) => {
-  const strip = root.querySelector(".col-size");
-  return {
-    group: strip?.querySelector(".term-font") ?? null,
-    smaller: strip?.querySelector(".term-font-smaller") ?? null,
-    reset: strip?.querySelector(".term-font-reset") ?? null,
-    bigger: strip?.querySelector(".term-font-bigger") ?? null,
-  };
-};
-
-test("the column's font buttons sit in its strip of column controls, right before the fold button", async () => {
+// The terminal's size is a setting (Settings, Appearance) and the Cmd+= keys;
+// the column draws no buttons for it.
+test("the column offers no font buttons: the size is a setting", async () => {
   const c = await column(structuredClone(PIN));
+  assert.equal(c.root.querySelector(".term-font"), null);
   const strip = c.root.querySelector(".col-size");
-  const { group } = fontButtons(c.root);
-
-  assert.ok(group, "the column's strip has no font buttons");
-  assert.equal(group.parentNode, strip);
   const order = strip.children.map((n) => String(n.className));
-  const at = order.findIndex((name) => name.split(" ").includes("term-font"));
-  assert.ok(order[at + 1].split(" ").includes("col-size-fold"), `strip order ${JSON.stringify(order)}`);
-  for (const b of group.children) assert.ok(String(b.className).split(" ").includes("col-size-btn"), "the buttons do not look like the strip's own");
-});
-
-test("the column's buttons show the column's size and press the column's terminal", async () => {
-  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "16", "fleetdeck-terminal-font-screen": "10" }, async (map) => {
-    const c = await column(structuredClone(PIN));
-    const terminal = c.terminals.at(-1);
-    const { reset, bigger, smaller } = fontButtons(c.root);
-    assert.equal(reset.textContent, "16 px");
-
-    fireEvent(bigger, "click");
-
-    assert.equal(terminal.options.fontSize, 17, "A+ did not reach the column's terminal");
-    assert.equal(map.get("fleetdeck-terminal-font-orchestrator"), "17");
-    assert.equal(map.get("fleetdeck-terminal-font-screen"), "10");
-    assert.equal(reset.textContent, "17 px", "the buttons kept claiming the old size");
-
-    fireEvent(smaller, "click");
-    fireEvent(smaller, "click");
-    assert.equal(terminal.options.fontSize, 15);
-
-    fireEvent(reset, "click");
-    assert.equal(terminal.options.fontSize, 12);
-    assert.equal(reset.disabled, true, "at 12 px there is nothing to put back");
-  });
-});
-
-test("a size changed by the keys is shown on the column's buttons too", async () => {
-  await withFontStorage({}, async () => {
-    const c = await column(structuredClone(PIN));
-    const terminal = c.terminals.at(-1);
-
-    terminal.keyHandler({ type: "keydown", key: "=", metaKey: true, preventDefault() {} });
-
-    assert.equal(fontButtons(c.root).reset.textContent, "13 px");
-  });
-});
-
-test("at the end of the range the column's button for that end is off", async () => {
-  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "24" }, async () => {
-    const c = await column(structuredClone(PIN));
-    const { smaller, bigger } = fontButtons(c.root);
-    assert.equal(bigger.disabled, true, "A+ at 24 px looked like it would do something");
-    assert.equal(smaller.disabled, false);
-  });
-  await withFontStorage({ "fleetdeck-terminal-font-orchestrator": "9" }, async () => {
-    const c = await column(structuredClone(PIN));
-    const { smaller, bigger } = fontButtons(c.root);
-    assert.equal(smaller.disabled, true, "A− at 9 px looked like it would do something");
-    assert.equal(bigger.disabled, false);
-  });
-});
-
-test("the column's buttons are there before its terminal is, and the same ones after", async () => {
-  const c = await column({ orchestratorSession: "", sessions: PIN.sessions });
-  const before = fontButtons(c.root);
-  const rowsBefore = c.root.children.length;
-  assert.ok(before.group, "with nothing pinned the strip has no font buttons, so they would appear later");
-  assert.deepEqual([before.smaller.disabled, before.reset.disabled, before.bigger.disabled], [true, true, true], "buttons with no terminal to size looked usable");
-
-  await c.push(structuredClone(PIN));
-  assert.ok(c.terminals.length > 0, "the pin did not open a terminal");
-
-  const after = fontButtons(c.root);
-  assert.equal(after.group, before.group, "the buttons were rebuilt when the terminal came");
-  assert.equal(c.root.children.length, rowsBefore, "a row was added above the terminal when it came");
-  assert.equal(after.reset.disabled, true, "at 12 px there is nothing to put back");
-  assert.equal(after.bigger.disabled, false, "the column's terminal came and its buttons stayed off");
-});
-
-test("a column whose terminal goes away turns its buttons off", async () => {
-  const c = await column(structuredClone(PIN));
-  assert.equal(fontButtons(c.root).bigger.disabled, false);
-
-  await c.push({ orchestratorSession: "", sessions: PIN.sessions });
-
-  const { smaller, reset, bigger } = fontButtons(c.root);
-  assert.deepEqual([smaller.disabled, reset.disabled, bigger.disabled], [true, true, true]);
+  assert.deepEqual(order.map((n) => n.split(" ").find((x) => x.startsWith("col-size-") && x !== "col-size-btn")), ["col-size-unfold", "col-size-fold"]);
 });
 
 // Last on purpose: closing the socket leaves the real store in its reconnect

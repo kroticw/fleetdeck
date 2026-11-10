@@ -404,6 +404,9 @@ func main() {
 	if err := w.Bind(chooseFolderBindingName, chooseFolder); err != nil {
 		log.Printf("fleetdeck-window: the setup page will offer no folder chooser: %v", err)
 	}
+	if err := w.Bind(revealBindingName, revealFile); err != nil {
+		log.Printf("fleetdeck-window: the documents will offer no Finder button: %v", err)
+	}
 	if err := w.Bind(noticeBindingName, notices.page); err != nil {
 		log.Printf("fleetdeck-window: a panel of another build will be shown without a word: %v", err)
 	}

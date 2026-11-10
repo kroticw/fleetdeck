@@ -193,6 +193,15 @@ export const sessionFlipKeys = {
   groupOf: () => "sessions",
 };
 
+// The words a row says its state in, by the state its dot is drawn in.
+const STATE_WORDS = {
+  waiting: "dock_state_waiting",
+  stalled: "dock_state_stalled",
+  starting: "session_state_starting",
+  idle: "session_state_idle",
+  working: "dock_state_working",
+};
+
 export function rowHtml(s, stalledNow, starting) {
   const waiting = isWaiting(s);
   const stalled = Boolean(stalledNow);
@@ -293,17 +302,21 @@ export function rowHtml(s, stalledNow, starting) {
     ? `<button type="button" class="btn btn-icon btn-sm label-edit-btn" data-session-id="${escapeHtml(s.sessionId)}" aria-label="${escapeHtml(t("edit_label"))}" title="${escapeHtml(t("edit_label"))}">✎</button>`
     : "";
 
+  // The state as the dot's colour and as a word the operator reads: waiting
+  // and stalled first, then a start, then what the daemon says it is doing.
+  const rowState = waiting ? "waiting" : stalled ? "stalled" : starting ? "starting" : s.state === "idle" ? "idle" : "working";
+
   return `
-    <article class="${classes.join(" ")}" data-short="${escapeHtml(s.short)}">
+    <article class="${classes.join(" ")}" data-short="${escapeHtml(s.short)}" data-state="${rowState}">
       <div class="srow-head">
         <span class="sname">${escapeHtml(name)}</span>
         ${editBtn}
         ${badge}
+        ${costHtml}
       </div>
       <div class="smeta">
-        <span class="sstate">${escapeHtml(s.state || "")}</span>
+        <span class="sstate">${escapeHtml(t(STATE_WORDS[rowState]))}</span>
         <span class="ssilent">${escapeHtml(silentLabel(s.silentFor))}</span>
-        ${costHtml}
       </div>
       ${startingSlowHtml(starting)}
       ${reasonHtml}

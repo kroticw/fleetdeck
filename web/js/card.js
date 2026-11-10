@@ -30,6 +30,9 @@ import { CARD_TAB, renderTabs, tabsOf } from "./cardtabs.js";
 import { authorOf, authorState } from "./docauthor.js";
 import { createCardDock } from "./carddock.js";
 import { closeCrossHTML, reviewIconHTML } from "./icon.js";
+import { createFindBar } from "./findbar.js";
+import { liveStates } from "./board.js";
+import { revealer } from "./reveal.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
 // Progress is a list of strings because that is what the write route takes and
@@ -184,7 +187,14 @@ export function renderCard(root, path, onClose, options = {}) {
   grip.hidden = true;
   dock.hidden = true;
   stage.dataset.dock = "bottom";
-  stage.append(pane, grip, dock);
+  // Cmd+F in a document's tab: the bar sits over the pane, searching the
+  // document's body (web/js/findbar.js).
+  const findBar = createFindBar({
+    target: () => pane.querySelector(".card-doc-body"),
+    active: () => !root.hidden && Boolean(pane.querySelector(".card-doc-body")),
+  });
+  const reveal = revealer();
+  stage.append(findBar.element, pane, grip, dock);
   root.replaceChildren(headHost, tabsHost, stage);
   // The author's session next to the open tab (web/js/carddock.js). The panel's
   // options reach it as they are: how to go to the orchestrator
@@ -254,9 +264,11 @@ export function renderCard(root, path, onClose, options = {}) {
 
   const fieldControl = (field, values, value) => {
     const wrap = el("label", "card-field");
-    wrap.append(el("span", "card-field-name", field));
+    wrap.append(el("span", "card-field-name", t(`card_field_${field}`)));
     const select = document.createElement("select");
     select.dataset.field = field;
+    // The stage's dot beside the value, in its board column's colour (app.css).
+    if (field === "stage") wrap.dataset.stage = value;
     // A card holding a value the board does not allow still has to be shown as
     // it is. Offering only the legal values would silently present one of them
     // as the card's own.
@@ -281,7 +293,7 @@ export function renderCard(root, path, onClose, options = {}) {
   // — written as ~ it read back as YAML's null, and the field went blank.
   const repoControl = (value) => {
     const wrap = el("label", "card-field");
-    wrap.append(el("span", "card-field-name", "repo"));
+    wrap.append(el("span", "card-field-name", t("card_field_repo")));
     const input = document.createElement("input");
     input.type = "text";
     input.className = "card-repo";
@@ -401,6 +413,16 @@ export function renderCard(root, path, onClose, options = {}) {
     if (row) head.append(row);
     const author = authorOf(doc, card);
     if (author) head.append(authorLine(author));
+    // Where the document lives, and Finder beside it in the window.
+    const file = el("div", "card-doc-file");
+    file.append(el("span", "card-doc-path", doc.path));
+    if (reveal) {
+      const button = el("button", "btn btn-sm card-doc-reveal", t("docs_reveal"));
+      button.type = "button";
+      button.addEventListener("click", () => reveal(doc.path));
+      file.append(button);
+    }
+    head.append(file);
 
     const state = bodies.get(doc.path);
     if (!state || state.loading) return [head, el("p", "card-doc-loading", t("card_doc_loading"))];
@@ -489,6 +511,11 @@ export function renderCard(root, path, onClose, options = {}) {
       // No terminal to open either, so no jump — the words say why there is
       // none, instead of a control that would open nothing.
       meta.append(el("span", "card-session-stopped", t("session_stopped")));
+    }
+    // A live session's state, as the board's badge says it (board.js).
+    const liveState = card.session && !orphan && !stopped ? liveStates(snap).get(card.session) : null;
+    if (liveState) {
+      meta.append(el("span", `kbadge kbadge-${liveState} card-session-state`, t(`dock_state_${liveState}`)));
     }
     if (meta.children.length > 0) nodes.push(meta);
 
@@ -631,6 +658,7 @@ export function renderCard(root, path, onClose, options = {}) {
       known,
       orphan,
       stopped,
+      live: card?.session ? liveStates(latest).get(card.session) ?? null : null,
       backlinks: backlinks.map((c) => [c.path, c.title]),
       documents: docs === null ? null : documents.map((d) => d.path),
       broken,
@@ -661,6 +689,8 @@ export function renderCard(root, path, onClose, options = {}) {
     headHost.replaceChildren(headNode);
     paintTabs();
     pane.replaceChildren(...(open?.doc ? docPane(open.doc, card, cards, known) : cardNodes));
+    if (open?.doc) findBar.refresh();
+    else findBar.close();
     const field = typing ? root.querySelector("input[data-field=repo]") : null;
     if (field) {
       // The operator is still typing: the new field takes up the draft where
@@ -727,7 +757,15 @@ export function renderCard(root, path, onClose, options = {}) {
   // the session as it always did. An Escape from anywhere else closes the card
   // and goes on to its own target, as it did before.
   const onKey = (event) => {
+    // Taken here, the panel's capture listener, so the docs tab under the
+    // sheet does not open its own bar too.
+    if (findBar.onKey(event)) {
+      event.stopPropagation?.();
+      return;
+    }
     if (event.key !== "Escape") return;
+    // Escape in the find bar closes the bar (its own listener), not the card.
+    if (event.target?.closest?.(".find-bar")) return;
     // The card's own docked terminal (T-091) is where the operator answers the
     // document's author: Escape there is the session's -- AskUserQuestion's
     // "Esc to cancel", or interrupting a turn -- and the card stays open.

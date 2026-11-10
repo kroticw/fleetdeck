@@ -573,3 +573,14 @@ func TestTheLimitsChevronOpensTheMenuInEitherForm(t *testing.T) {
 		t.Fatalf("accessibility label %q; want %q", p.limitsAccessible, want.Tooltip)
 	}
 }
+
+// The limits menu opens from anywhere on a limit's capsule: the chevron alone
+// was too small to hit.
+func TestAClickAnywhereOnALimitsCapsuleOpensTheMenu(t *testing.T) {
+	if !frameResult.glassAvailable {
+		t.Skip("NSGlassEffectView is not on this system: the capsules are not on glass")
+	}
+	if !capsulesResult.limitDotOpens {
+		t.Fatal("a click on a limit's dot does not reach the control that opens the limits menu")
+	}
+}

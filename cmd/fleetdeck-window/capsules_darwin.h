@@ -18,7 +18,7 @@ double fd_capsules_draw(void *container, const char *mode, const char **tabIDs, 
                         int selectedTab, const char *newCardLabel, const char *themeLabel, const char **limitLabels,
                         const char **limitTexts, const double *limitValues, const double *limitRGB, int limitCount,
                         const char *compactText, const char *compactTooltip, const double *compactRGB,
-                        double frameMinWidth);
+                        const double *accentRGB, double frameMinWidth);
 
 // fd_capsules_clear takes every capsule out of container: no panel page, no row,
 // and no minimum width for the window.
@@ -67,6 +67,7 @@ void fd_test_press_theme_icon(void);
 // which: 0 the chevron on the last limit, 1 the one on the compact limits.
 void fd_test_press_limits(int which);
 const char *fd_test_limits_accessibility_label(void);
+int fd_test_click_on_limit_dot_opens_limits(void);
 int fd_test_click_reaches_capsule(int which);
 int fd_test_capsule_inside_glass(int which);
 

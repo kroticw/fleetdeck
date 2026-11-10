@@ -16,10 +16,6 @@ const hundredth = (n) => Math.round(n * 100) / 100;
 const CONTROLS = {
   orchestrator: [
     { name: "editPencil", selector: ".o-name-edit" },
-    { name: "picker", selector: ".o-pick-select" },
-    { name: "fontSmaller", selector: ".term-font-smaller" },
-    { name: "fontSize", selector: ".term-font-reset" },
-    { name: "fontBigger", selector: ".term-font-bigger" },
     { name: "fold", selector: ".col-size-fold" },
     { name: "fleetButton", selector: ".fleet-menu-button" },
     { name: "fleetList", selector: ".fleet-menu-list" },

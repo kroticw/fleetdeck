@@ -59,6 +59,8 @@ var settings = map[string]setting{
 	"notify.enabled.card_blocked":     {kindBool, false},
 	"notify.silence_after":            {kindString, false},
 	"usage.enabled":                   {kindBool, false},
+	"usage.labels.claude":             {kindString, false},
+	"usage.labels.codex":              {kindString, false},
 	"server.port":                     {kindInt, true},
 	"daemon.poll_interval":            {kindString, true},
 	"agent.command":                   {kindList, true},
@@ -67,6 +69,9 @@ var settings = map[string]setting{
 	"statusline.rate_limits_path":     {kindString, true},
 	"ui.theme":                        {kindString, false},
 	"ui.terminal_font_size":           {kindInt, false},
+	"ui.accent":                       {kindString, false},
+	"ui.glass":                        {kindString, false},
+	"ui.terminal_background":          {kindString, false},
 }
 
 // settingValues is c as the settings page reads it, one value per key.
@@ -90,6 +95,8 @@ func settingValues(c config.Config) map[string]any {
 		"notify.enabled.card_blocked":     c.Notify.CardBlocked,
 		"notify.silence_after":            durationText(c.Notify.SilenceAfter),
 		"usage.enabled":                   c.UsageEnabled,
+		"usage.labels.claude":             c.UsageLabels["claude"],
+		"usage.labels.codex":              c.UsageLabels["codex"],
 		"server.port":                     c.ServerPort,
 		"daemon.poll_interval":            durationText(c.DaemonPollInterval),
 		"agent.command":                   slices.Clone(c.Agent.Command),
@@ -98,6 +105,9 @@ func settingValues(c config.Config) map[string]any {
 		"statusline.rate_limits_path":     c.StatuslineRateLimitsPath,
 		"ui.theme":                        c.UI.Theme,
 		"ui.terminal_font_size":           c.UI.TerminalFontSize,
+		"ui.accent":                       c.UI.Accent,
+		"ui.glass":                        c.UI.Glass,
+		"ui.terminal_background":          c.UI.TerminalBackground,
 	}
 }
 

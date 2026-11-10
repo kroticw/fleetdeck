@@ -15,8 +15,11 @@ const (
 	boardInsetTop   = 64.0
 	boardGapLeft    = 18.0
 	foldedWidth     = 48.0
-	minPanelWidth   = 220.0 // web/js/columnwidth.js MIN_PIXELS
-	maxPanelShare   = 0.6   // web/js/columnwidth.js MAX_PERCENT
+	// foldedButtonsPad is the room a folded orchestrator strip keeps past the
+	// window's buttons, which it holds.
+	foldedButtonsPad = 10.0
+	minPanelWidth    = 220.0 // web/js/columnwidth.js MIN_PIXELS
+	maxPanelShare    = 0.6   // web/js/columnwidth.js MAX_PERCENT
 )
 
 type rect struct{ X, Y, W, H float64 }
@@ -96,6 +99,10 @@ func layoutWithRow(width, height float64, w panelWidths, rowMin float64) geometr
 func layoutPastButtons(width, height float64, w panelWidths, rowMin, buttonsEnd float64) geometry {
 	ow := clampPanel(w.Orchestrator, width, w.OrchestratorFolded)
 	sw := clampPanel(w.Sessions, width, w.SessionsFolded)
+	// A folded orchestrator strip holds the window's buttons.
+	if w.OrchestratorFolded && buttonsEnd > 0 {
+		ow = math.Max(ow, buttonsEnd+foldedButtonsPad-panelMargin)
+	}
 	ow, sw = narrowForRow(width, ow, sw, w, rowMin, buttonsEnd)
 	// Each panel's limit is 60% of the window, so two of them can ask for more
 	// than it has: the sessions panel gets at most what the orchestrator panel
@@ -140,9 +147,12 @@ func narrowForRow(width, ow, sw float64, w panelWidths, rowMin, buttonsEnd float
 
 // besideButtons is the room an orchestrator panel ow wide takes from the
 // capsule row with the window's buttons ending buttonsEnd from the window's
-// left edge: the panel's width, or as far as the buttons reach past its margin.
+// left edge: the panel's width, or the folded strip that holds the buttons.
 func besideButtons(ow, buttonsEnd float64) float64 {
-	return math.Max(ow, buttonsEnd-panelMargin)
+	if buttonsEnd <= 0 {
+		return ow
+	}
+	return math.Max(ow, buttonsEnd+foldedButtonsPad-panelMargin)
 }
 
 // rowRoomFor is the widest a panel may be dragged to beside the other panel at

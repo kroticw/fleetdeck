@@ -106,3 +106,36 @@ func TestTheLookIsReadAndWrittenBackAndCheckedAtLoad(t *testing.T) {
 		}
 	}
 }
+
+// The accent, the glass and the terminals' ground are the look too: read,
+// written back, and refused at load when they name nothing the page knows.
+func TestTheAccentGlassAndTerminalGroundAreReadAndChecked(t *testing.T) {
+	c, err := loadText(t, "board:\n    path: /b\nui:\n    accent: rose\n    glass: reduced\n    terminal_background: dark\n")
+	want := UI{Accent: "rose", Glass: "reduced", TerminalBackground: "dark"}
+	if err != nil || c.UI != want {
+		t.Fatalf("UI = %+v, err %v", c.UI, err)
+	}
+	if back, _ := saveAndReload(t, c); back.UI != want {
+		t.Fatalf("round trip gave %+v", back.UI)
+	}
+	for _, bad := range []string{"ui:\n    accent: pink\n", "ui:\n    glass: frosted\n", "ui:\n    terminal_background: light\n"} {
+		if _, err := loadText(t, "board:\n    path: /b\n"+bad); err == nil {
+			t.Fatalf("%q was accepted", bad)
+		}
+	}
+}
+
+// Each model's subscription is the operator's word for it, shown in the limits
+// menu: the panel cannot learn that an account is "Max" or "ChatGPT Pro".
+func TestTheLimitsLabelsAreReadAndKeptByModel(t *testing.T) {
+	c, err := loadText(t, "board:\n    path: /b\nusage:\n    enabled: true\n    labels:\n        claude: подписка Max\n        codex: ChatGPT Pro\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UsageLabels["claude"] != "подписка Max" || c.UsageLabels["codex"] != "ChatGPT Pro" {
+		t.Fatalf("labels = %v", c.UsageLabels)
+	}
+	if back, _ := saveAndReload(t, c); back.UsageLabels["codex"] != "ChatGPT Pro" {
+		t.Fatalf("round trip gave %v", back.UsageLabels)
+	}
+}

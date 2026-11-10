@@ -113,3 +113,19 @@ test("settings: an unset Codex model is its own option, and the default model ca
   assert.match(html, /<option value="" selected>по умолчанию Codex — gpt-6\.1-sol<\/option>|<option value="" selected>Codex default — gpt-6\.1-sol<\/option>/);
   assert.match(html, /<option value="gpt-6\.1-sol">gpt-6\.1-sol<\/option>/);
 });
+
+// The limits menu's Sources button opens the panel section, even when the
+// settings have not loaded yet.
+test("settings: a section asked for before the values load is the one drawn", async () => {
+  const root = { classList: { add() {} }, innerHTML: "", scrollTop: 0, addEventListener() {}, querySelector: () => null };
+  const view = renderSettings(root, { load: async () => page(), save: async () => page() });
+  view.showSection("panel");
+  await settle();
+  assert.match(root.innerHTML, /class="set-nav-link on" data-section="panel"/);
+});
+
+test("settings: each model's subscription label is a field beside the limits switch", () => {
+  const html = settingsHTML(page({ "usage.labels.claude": "подписка Max", "usage.labels.codex": "" }));
+  assert.match(html, /data-key="usage.labels.claude" value="подписка Max"/);
+  assert.match(html, /data-key="usage.labels.codex" value=""/);
+});

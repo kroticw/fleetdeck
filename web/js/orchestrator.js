@@ -1,12 +1,12 @@
 import { subscribe, get } from "./store.js";
-import { setOrchestratorSession, setSessionLabel } from "./api.js";
+import { setSessionLabel } from "./api.js";
 import { t } from "./i18n.js";
 import { ORCHESTRATOR_KEYS } from "./columnwidth.js";
 import { mountColumnResize } from "./columnresize.js";
 import { createLiveTerminal } from "./liveterminal.js";
 import { belongsTo, withFleet, fleetFromSearch } from "./fleet.js";
 import { FONT_KEYS } from "./terminalfont.js";
-import { buildFontControls } from "./fontcontrols.js";
+import { sessionMark } from "./initials.js";
 
 // The orchestrator is not one session among many: it is the standing place of
 // conversation, so it keeps its own column.
@@ -121,6 +121,13 @@ export function pickerLabel(session) {
   return session.label || session.name || session.short;
 }
 
+// metaLine is the line under the name: the model and the folder the session
+// works in, the home directory written as ~.
+export function metaLine(session) {
+  const cwd = String(session.cwd ?? "").replace(/^\/(Users|home)\/[^/]+/, "~");
+  return [session.model, cwd].filter(Boolean).join(" · ");
+}
+
 // viewSignature is everything this column actually shows, and nothing else.
 // The daemon pushes a snapshot every couple of seconds and almost none of them
 // change anything here — another session's progress moved, a context percentage
@@ -147,7 +154,7 @@ export function viewSignature(snap, connected) {
     brief: briefWarning(snap),
     sessions: pickableSessions(sessions, snap?.fleet).map((s) => [s.short, s.name ?? "", s.label ?? ""]),
     session: session
-      ? [session.short, session.name ?? "", session.label ?? "", session.sessionId, contextPercent(session.context)]
+      ? [session.short, session.name ?? "", session.label ?? "", session.sessionId, contextPercent(session.context), session.model ?? "", session.cwd ?? ""]
       : null,
   });
 }
@@ -197,10 +204,6 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
   // and a repaint of the whole screen.
   let live = null;
   let terminalFor = null;
-  // The font buttons in the strip (web/js/fontcontrols.js), painted from what
-  // the terminal says about its size.
-  let fontButtons = null;
-
   // Set while the pinned session's own name is being edited in place. draw()
   // must not touch .o-name while this is true: it has been replaced by an
   // input for the duration, and a person is typing into it.
@@ -305,15 +308,8 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     // nothing is a bad way to reach it: a column dragged to nothing has no edge
     // left to grab.
     //
-    // The terminal's font buttons sit here too, beside the fold button and on
-    // its side of the strip — the side facing the centre, which .col-size-left
-    // already decides. Built with the frame, before any terminal exists: the
-    // strip is the same height with them as without, and nothing is added
-    // above the terminal when it comes, so they never make its pane shorter.
-    fontButtons = buildFontControls({ onStep: (step) => live?.stepFont(step), buttonClass: "col-size-btn" });
     strip.append(
       button("col-size-btn col-size-unfold", "»", t("column_unfold"), () => width.unfold()),
-      fontButtons.node,
       button("col-size-btn col-size-fold", "«", t("column_fold"), () => width.fold()),
     );
     return strip;
@@ -325,7 +321,11 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     root.appendChild(buildWidthControls());
 
     const head = el("div", "o-head");
-    head.append(el("span", "o-name", ""));
+    const mark = el("span", "o-avatar", "");
+    mark.setAttribute("aria-hidden", "true");
+    const who = el("div", "o-who");
+    who.append(el("span", "o-name", ""), el("span", "o-meta", ""));
+    head.append(mark, who);
     // Always visible, never only on hover: a control that only shows itself
     // to a pointer already hovering it does not exist for a person who has
     // not found it yet — the exact way the theme button's own plain text
@@ -335,44 +335,7 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     editBtn.setAttribute("aria-label", t("edit_label"));
     editBtn.setAttribute("title", t("edit_label"));
     editBtn.addEventListener("click", startEditingLabel);
-    head.append(editBtn);
-
-    // The one control for saying which session is the orchestrator: a plain
-    // <select>, not a screen of its own. Choosing an option changes the pin in
-    // place — the previous picker replaced this whole column with a list of
-    // every session, which was a second, confusable way to do exactly what
-    // clicking a session in the task list on the right already does. Its own
-    // options are synced in draw(), never rebuilt here: this frame is only
-    // ever built once.
-    const pickSelect = document.createElement("select");
-    pickSelect.className = "o-pick-select";
-    pickSelect.setAttribute("aria-label", t("pick_orchestrator"));
-    pickSelect.title = t("pick_orchestrator");
-    pickSelect.addEventListener("change", async () => {
-      const nextShort = pickSelect.value;
-      try {
-        await setOrchestratorSession(nextShort);
-        actionError = "";
-      } catch (err) {
-        // The write failed, so the configuration still names whichever
-        // session was actually pinned before — the very next draw() reads
-        // that back and sets the select's value to it, reverting the
-        // choice on screen without any separate "still really pinned"
-        // state to track: the selected option already is the truth.
-        actionError = `${t("orchestrator_pin_failed")}: ${err.message}`;
-      }
-      draw();
-    });
-    head.append(pickSelect);
-
-    // The picker above only moves the pin. Appointing — the working order
-    // sent to the session, then the pin — is the wizard's, and this is where
-    // it is run again: the first-run page at its orchestrator step.
-    const wizard = el("a", "o-wizard", t("orchestrator_wizard"));
-    // The wizard of this tab's fleet (see fleet.js).
-    wizard.setAttribute("href", withFleet("/setup.html", fleetFromSearch(globalThis.location?.search ?? "")));
-    wizard.setAttribute("title", t("orchestrator_wizard_hint"));
-    head.append(wizard);
+    who.querySelector(".o-name").after(editBtn);
 
     root.appendChild(head);
 
@@ -448,20 +411,18 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     input.addEventListener("blur", () => finish(true));
   };
 
-  // syncSelectOptions rebuilds the dropdown's <option> children only when the
-  // set actually differs from what is on screen, so a redraw cannot disturb an
-  // open dropdown a person happens to be looking at for no reason.
-  const syncSelectOptions = (select, wanted) => {
-    const have = [...select.options].map((o) => [o.value, o.textContent]);
-    if (JSON.stringify(have) === JSON.stringify(wanted)) return;
-    select.replaceChildren(
-      ...wanted.map(([value, label]) => {
-        const opt = document.createElement("option");
-        opt.value = value;
-        opt.textContent = label;
-        return opt;
-      }),
-    );
+  // The screen with no orchestrator to show: why, and the wizard that appoints
+  // one -- with the picker gone from the head, the one way to pin a session.
+  const emptyScreen = (message) => {
+    const box = el("div", "o-screen-empty");
+    const title = el("span", "o-screen-empty-title", t("not_pinned"));
+    const text = el("span", "o-screen-empty-text", message);
+    const wizard = el("a", "btn btn-primary o-wizard", t("orchestrator_wizard"));
+    // The wizard of this tab's fleet (see fleet.js).
+    wizard.setAttribute("href", withFleet("/setup.html", fleetFromSearch(globalThis.location?.search ?? "")));
+    wizard.setAttribute("title", t("orchestrator_wizard_hint"));
+    box.append(title, text, wizard);
+    return box;
   };
 
   const stopTerminal = () => {
@@ -494,7 +455,6 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
           paintRows();
         },
         standing: paintRows,
-        fontSize: (size) => fontButtons?.paint(size),
       },
     });
     terminalFor = short;
@@ -517,9 +477,9 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
     }
     if (!session) {
       const message = short ? t("session_not_listed") : t("no_orchestrator_thread");
-      const shown = screen.querySelector(".o-screen-empty");
+      const shown = screen.querySelector(".o-screen-empty-text");
       if (shown) setText(shown, message);
-      else screen.replaceChildren(el("div", "o-screen-empty", message));
+      else screen.replaceChildren(emptyScreen(message));
     }
     paintRows();
   };
@@ -548,25 +508,25 @@ export function renderOrchestrator(root, { timers = globalThis, links = null } =
       setText(head.querySelector(".o-name"), session ? pickerLabel(session) : t("not_pinned"));
     }
 
+    const avatar = head.querySelector(".o-avatar");
+    setText(avatar, session ? sessionMark(session) : "");
+    setText(head.querySelector(".o-meta"), session ? metaLine(session) : "");
+
     const pct = session ? contextPercent(session.context) : null;
     const ctx = head.querySelector(".o-ctx");
     if (pct === null) {
       if (ctx) ctx.remove();
+      head.querySelector(".o-ctx-bar")?.remove();
     } else if (ctx) {
       setText(ctx, `${pct}%`);
+      head.querySelector(".o-ctx-bar i").style.width = `${Math.min(100, pct)}%`;
     } else {
-      head.appendChild(el("span", "o-ctx", `${pct}%`));
+      const bar = el("span", "o-ctx-bar", "");
+      const fill = el("i", "", "");
+      fill.style.width = `${Math.min(100, pct)}%`;
+      bar.append(fill);
+      head.append(el("span", "o-ctx", `${pct}%`), bar);
     }
-
-    // The dropdown's options mirror the daemon's own pickable session list;
-    // its value mirrors the truth in the snapshot, never a locally-held
-    // choice. A failed write (see buildFrame's change handler) leaves that
-    // truth unchanged, so setting the value from `short` here — after the
-    // failure, same as before it — is what reverts the control to what is
-    // actually pinned, with nothing extra to track.
-    const select = head.querySelector(".o-pick-select");
-    syncSelectOptions(select, [["", t("not_pinned")], ...pickableSessions(sessions, snap?.fleet).map((s) => [s.short, pickerLabel(s)])]);
-    if (select.value !== short) select.value = short;
 
     // A pin with no session behind it — nothing pinned, or the daemon no
     // longer lists the pinned one — has nothing to write a label against.

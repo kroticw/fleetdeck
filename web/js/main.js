@@ -21,10 +21,12 @@ import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } 
 import { rememberFleet, switchFleet } from "./fleet.js";
 import { t } from "./i18n.js";
 import { readHost, callHost } from "./host.js";
+import { watchDragHoles } from "./dragholes.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
-import { applyTheme, currentTheme, initTheme, setConfiguredTheme } from "./theme.js";
+import { applyTheme, currentTheme, initTheme, setConfiguredLook, setConfiguredTheme } from "./theme.js";
+import { refreshTerminalThemes } from "./liveterminal.js";
 import { renderSettings } from "./settings.js";
 import { setConfiguredFontSize, setFontSizeWriter } from "./terminalfont.js";
 import { saveSettings } from "./api.js";
@@ -36,9 +38,18 @@ import { createLimitsPopover } from "./limitsmenu.js";
 // column's overlays, hidden, until opening goes through the window.
 const host = readHost(window);
 const regions = regionsFor(host);
+// The glass shown is the window's (it knows the macOS and the accessibility
+// settings), unless the look asks for none: then the page is opaque wherever
+// it runs.
+let windowGlass = host?.glass;
+function showGlass() {
+  if (!host) return;
+  const level = document.documentElement.getAttribute("data-glass-level");
+  document.documentElement.dataset.glass = level === "opaque" ? "opaque" : windowGlass;
+}
 if (host) {
   document.documentElement.dataset.surface = host.surface;
-  document.documentElement.dataset.glass = host.glass;
+  showGlass();
 }
 const center = regions.has("center");
 const kept = {
@@ -251,6 +262,8 @@ if (headerParts.length > 0) {
 } else {
   initTheme();
 }
+// The remembered look is on the page now; the glass follows it.
+showGlass();
 // One web view checks the build: in the window, the board. Its reload is the
 // window's, which reloads all three, and its reload ceiling stays in one place.
 if (regions.has("build")) renderBuildBanner(document.getElementById("build-banner"), subscribe);
@@ -274,18 +287,26 @@ if (regions.has("orchestrator")) {
 // size come with every snapshot, and the settings section's answer applies
 // them at once, before the next snapshot. The board tells the window, whose
 // own appearance and other surfaces follow the theme.
-function followLook(theme, fontSize) {
-  if (setConfiguredTheme(theme) && host?.surface === "board") {
+function followLook(theme, fontSize, look) {
+  const themeChanged = setConfiguredTheme(theme);
+  if (themeChanged && host?.surface === "board") {
     callHost(window, "fleetdeckTheme", currentTheme() ?? "auto");
     publishCapsules();
   }
+  const lookChanged = setConfiguredLook(look);
+  if (lookChanged) {
+    showGlass();
+    if (host?.surface === "board") publishCapsules();
+  }
+  if (themeChanged || lookChanged) refreshTerminalThemes();
   setConfiguredFontSize(fontSize);
 }
 function followSettings(page) {
-  followLook(page.values["ui.theme"], page.values["ui.terminal_font_size"]);
+  const v = page.values;
+  followLook(v["ui.theme"], v["ui.terminal_font_size"], { accent: v["ui.accent"], glass: v["ui.glass"], terminalBackground: v["ui.terminal_background"] });
 }
 subscribe((snap) => {
-  if (snap) followLook(snap.theme ?? "", snap.terminalFontSize ?? 0);
+  if (snap) followLook(snap.theme ?? "", snap.terminalFontSize ?? 0, { accent: snap.accent, glass: snap.glass, terminalBackground: snap.terminalBackground });
 });
 // A step at a terminal (A−/A+, Cmd+=) is the panel's size: written once the
 // steps stop, so a run of presses is one write.
@@ -311,6 +332,8 @@ setFontSizeWriter((size) => {
 // documentation directories configured would otherwise ask for them — and take
 // the server's 404 — before the operator had opened that section at all.
 let sections = null;
+// The settings section once built: the limits menu opens one of its sections.
+let settingsView = null;
 if (regions.has("center")) {
   sections = createSections(document.getElementById("tabs"), [
     { id: "board", label: t("tab_board"), root: document.getElementById("board") },
@@ -324,7 +347,9 @@ if (regions.has("center")) {
       id: "settings",
       label: t("tab_settings"),
       root: document.getElementById("settings"),
-      onFirstShow: () => renderSettings(document.getElementById("settings"), { onSaved: followSettings }),
+      onFirstShow: () => {
+        settingsView = renderSettings(document.getElementById("settings"), { onSaved: followSettings });
+      },
     },
   ]);
 
@@ -349,7 +374,17 @@ function publishCapsules() {
   const style = getComputedStyle(document.documentElement);
   const token = (name) => style.getPropertyValue(name).trim();
   const colors = { cool: token("--ok"), warm: token("--attn"), hot: token("--danger"), stale: token("--text-muted"), off: token("--text-faint") };
-  const model = capsuleModel({ section, limits: limitsOf(get() ?? {}, Date.now()), t, colors });
+  // The accent the window tints its selected tab with, and the operator's
+  // "no transparency", which the window takes for its own frame too.
+  const accent = token("--accent");
+  const model = capsuleModel({
+    section,
+    limits: limitsOf(get() ?? {}, Date.now()),
+    t,
+    colors,
+    accent: /^#[0-9a-f]{6}$/i.test(accent) ? accent : undefined,
+    opaque: document.documentElement.dataset.glassLevel === "opaque",
+  });
   const json = JSON.stringify(model);
   if (json === capsulesSent) return;
   capsulesSent = json;
@@ -363,6 +398,11 @@ subscribe(publishCapsules);
 if (host) {
   const page = document.documentElement;
   const column = document.getElementById(host.surface);
+  // A side panel's controls in the window's top strip, which the window drags
+  // by everywhere else.
+  if (host.surface === "orchestrator" || host.surface === "sessions") {
+    watchDragHoles(document, (holes) => callHost(window, "fleetdeckDragHoles", holes));
+  }
   // On a CI stand only: the board's scrolling, in the window's log.
   const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
@@ -427,7 +467,14 @@ if (host) {
   }
   // The window's limits capsule opens this menu: the header's table, under
   // the capsule row, kept current with each snapshot while it is open.
-  const limitsPopover = host.surface === "board" ? createLimitsPopover(document, get) : null;
+  // Its Sources button: the settings' panel section, where the limits are switched on.
+  const openLimitSources = () => {
+    sections?.show("settings");
+    section = "settings";
+    publishCapsules();
+    settingsView?.showSection("panel");
+  };
+  const limitsPopover = host.surface === "board" ? createLimitsPopover(document, get, undefined, openLimitSources) : null;
   if (limitsPopover) subscribe(() => limitsPopover.refresh());
   wireHostActions(window, host, {
     openCard: (path) => terminalLinks.open(path),
@@ -451,7 +498,8 @@ if (host) {
       reportBoardScroll?.();
     },
     setGlass: (glass) => {
-      page.dataset.glass = glass;
+      windowGlass = glass;
+      showGlass();
     },
     setFolded: (folded) => {
       panelFolded = folded;

@@ -36,11 +36,15 @@ func TestSettingsAreWrittenAndAppliedAtOnce(t *testing.T) {
 	_, err := s.write(context.Background(), map[string]any{
 		"workers.effort": "xhigh", "executors.codex.enabled": true, "default_executor": "codex",
 		"ui.terminal_font_size": float64(14), "notify.silence_after": "45m", "agent.command": []any{"/opt/claude", "--x"},
+		"ui.accent": "violet", "ui.glass": "opaque", "ui.terminal_background": "dark",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	live := s.collector.Config()
+	if live.UI.Accent != "violet" || live.UI.Glass != "opaque" || live.UI.TerminalBackground != "dark" {
+		t.Fatalf("look = %+v", live.UI)
+	}
 	if live.Workers.Effort != "xhigh" || !live.Codex.Enabled || live.DefaultExecutor != executor.Codex || live.UI.TerminalFontSize != 14 ||
 		live.Notify.SilenceAfter != 45*time.Minute || len(live.Agent.Command) != 2 || live.OrchestratorSession != "pinned" {
 		t.Fatalf("live = %+v", live)
@@ -82,5 +86,31 @@ func TestDurationsReadAsTheyAreWritten(t *testing.T) {
 		if got := durationText(d); got != want {
 			t.Errorf("%s = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// The subscription labels are written from the settings page, one key per
+// model, and an emptied field takes its label out of the file.
+func TestTheLimitsLabelsAreWrittenFromTheSettingsPage(t *testing.T) {
+	s, p := settingsFixture(t)
+	if _, err := s.write(context.Background(), map[string]any{"usage.labels.claude": "подписка Max", "usage.labels.codex": "ChatGPT Pro"}); err != nil {
+		t.Fatal(err)
+	}
+	if live := s.collector.Config(); live.UsageLabels["claude"] != "подписка Max" || live.UsageLabels["codex"] != "ChatGPT Pro" {
+		t.Fatalf("labels = %v", live.UsageLabels)
+	}
+	page, err := s.page(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := page.(settingsPage).Values; v["usage.labels.claude"] != "подписка Max" {
+		t.Fatalf("page values = %v", v["usage.labels.claude"])
+	}
+	if _, err := s.write(context.Background(), map[string]any{"usage.labels.codex": ""}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	if strings.Contains(string(raw), "codex: ChatGPT Pro") || !strings.Contains(string(raw), "claude: подписка Max") {
+		t.Fatalf("file:\n%s", raw)
 	}
 }

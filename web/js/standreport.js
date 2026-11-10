@@ -212,6 +212,13 @@ export function probeColumnScroll(win, board, report) {
   let renders = 0;
   const column = () => board.querySelector(`:scope > .kcol[data-stage="${PROBED_STAGE}"]`);
   const observer = new win.MutationObserver(() => {
+    // Folded to a strip by default: unfolded first, as an operator would,
+    // and the board draws it again.
+    const unfold = board.querySelector(`:scope > .kcol-folded[data-stage="${PROBED_STAGE}"] .kcol-unfold`);
+    if (unfold) {
+      unfold.click();
+      return;
+    }
     const c = column();
     if (!asked) {
       if (!c || c.scrollHeight <= c.clientHeight) return;

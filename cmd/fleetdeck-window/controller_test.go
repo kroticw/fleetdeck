@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -695,5 +696,62 @@ func TestDraggingAPanelInANarrowWindowStopsWhereTheRowNeedsItsMinimum(t *testing
 	want := 1000 - 2*panelMargin - capsuleGapLeft - capsuleGapRight - 360 - 348
 	if len(saved) == 0 || saved[0] != (saveWidths{W: panelWidths{Orchestrator: want, Sessions: 348}}) {
 		t.Fatalf("on release: %#v, want the orchestrator saved at %v", saved, want)
+	}
+}
+
+// The glass setting "no transparency" makes the window opaque as Reduce
+// Transparency does, and lifting it gives the window back to the system.
+func TestThePagesOpaqueSettingRebuildsTheFrameAsReducedTransparencyDoes(t *testing.T) {
+	c := loadedFrame()
+	opaque := []effect{
+		setCapsules{Model: json.RawMessage(`{"version":1,"opaque":true}`)},
+		setFrameMode{Mode: glassModeOpaque},
+		sendTo{Surface: "board", Message: map[string]any{"type": "glass", "glass": "opaque"}},
+		sendTo{Surface: "orchestrator", Message: map[string]any{"type": "glass", "glass": "opaque"}},
+		sendTo{Surface: "sessions", Message: map[string]any{"type": "glass", "glass": "opaque"}},
+	}
+	if got := c.capsules(json.RawMessage(`{"version":1,"opaque":true}`)); !reflect.DeepEqual(got, opaque) {
+		t.Fatalf("asking for opaque: effects = %#v", got)
+	}
+	// The same wish again changes nothing.
+	if got := c.capsules(json.RawMessage(`{"version":1,"opaque":true,"accent":"#000000"}`)); len(got) != 1 {
+		t.Fatalf("an unchanged wish rebuilt the frame: %#v", got)
+	}
+	// While the page asks, the system turning transparency back on keeps it opaque.
+	if got := c.glassChanged(glassModeGlass); got[0] != (setFrameMode{Mode: glassModeOpaque}) {
+		t.Fatalf("the system overrode the page: %#v", got)
+	}
+	got := c.capsules(json.RawMessage(`{"version":1}`))
+	if len(got) < 2 || got[1] != (setFrameMode{Mode: glassModeGlass}) {
+		t.Fatalf("lifting the wish: effects = %#v", got)
+	}
+}
+
+func TestTheTopBandGoesInFullScreenAndComesBack(t *testing.T) {
+	c := loadedFrame()
+	has := func(effects []effect, want effect) bool {
+		for _, e := range effects {
+			if reflect.DeepEqual(e, want) {
+				return true
+			}
+		}
+		return false
+	}
+	if got := c.resized(1512, 982, true); !has(got, setTopDrag{Height: 0}) {
+		t.Fatalf("into full screen: %#v", got)
+	}
+	if got := c.resized(1512, 982, false); !has(got, setTopDrag{Height: topDragHeight}) {
+		t.Fatalf("out of full screen: %#v", got)
+	}
+}
+
+func TestAPanelsControlsInTheTopBandAreItsSides(t *testing.T) {
+	c := loadedFrame()
+	holes := []rect{{X: 1, Y: 2, W: 3, H: 4}}
+	if got := c.dragHoles("sessions@0", holes); !reflect.DeepEqual(got, []effect{setDragHoles{Side: "sessions", Holes: holes}}) {
+		t.Fatalf("effects = %#v", got)
+	}
+	if got := c.dragHoles("board", holes); got != nil {
+		t.Fatalf("the board has no holes in the top band: %#v", got)
 	}
 }

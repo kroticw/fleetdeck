@@ -29,50 +29,121 @@
  * run surfaced: a board of finished work read as a wall of errors.
  */
 
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/vendor/fonts/InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/vendor/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+}
+
 :root {
   color-scheme: light dark;
 
-  /* Surfaces, back to front. */
-  --bg: #f5f6f8;
+  /* The accent preset (config ui.accent, data-accent on <html>): a light and a
+     dark value, the theme picks one. Indigo when nothing is chosen. */
+  --accent-light: #4f56d9;
+  --accent-dark: #8b93ff;
+
+  --bg: #ececf1;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-hover: #edeff2;
-  --border: #dde1e7;
-  --border-strong: #c2c8d1;
-  --shadow: rgb(20 22 26 / 16%);
+  --surface-hover: #f1f1f4;
+  --border: #e4e4e9;
+  --border-strong: #d0d0d7;
+  --shadow: rgb(20 22 28 / 14%);
+  --text: #15161a;
+  --text-muted: #4a4d55;
+  --text-faint: #60636b;
+  --accent: var(--accent-light);
+  --accent-strong: color-mix(in oklab, var(--accent-light) 84%, black);
+  --danger: #c81e1e;
+  --attn: #b45309;
+  --ok: #15803d;
+  --col: rgb(20 22 28 / 3.5%);
+  --card: #ffffff;
+  --card-edge: rgb(20 22 28 / 9%);
+  --field: rgb(255 255 255 / 80%);
+  --track: rgb(20 22 28 / 10%);
+  --neutral-soft: rgb(20 22 28 / 6%);
+  --code-bg: rgb(20 22 28 / 4.5%);
+  --soft: 10%;
+  --hl: rgb(250 204 21 / 38%);
+  --hl-current: #f59e0b;
+  --hl-current-text: #1a1203;
+  --term-bg: #fbfbfc;
+  --term-fg: #1b1c20;
+  --wall: radial-gradient(55% 55% at 10% 15%, color-mix(in srgb, var(--accent) 32%, transparent), transparent 70%), radial-gradient(45% 45% at 90% 8%, rgb(251 146 160 / 30%), transparent 70%), radial-gradient(55% 50% at 72% 100%, rgb(110 231 183 / 30%), transparent 70%), #e7e8ee;
+  --on-glass-muted: #4a4d55;
+  --glass-control: rgb(255 255 255 / 66%);
+  --glass-control-hover: rgb(255 255 255 / 86%);
+  --glass-control-edge: rgb(20 22 28 / 10%);
+  --glass-control-highlight: rgb(255 255 255 / 92%);
+  --surface-on-glass: rgb(255 255 255 / 74%);
+  --island-shadow: 0 0 0 0.5px rgb(20 22 28 / 8%), 0 10px 30px rgb(20 22 28 / 8%);
+  --sheet-shadow: 0 0 0 0.5px rgb(20 22 28 / 10%), 0 24px 64px rgb(20 22 28 / 22%);
+  --sheet-scrim: rgb(20 22 28 / 16%);
+  --dialog-scrim: rgb(20 22 28 / 28%);
 
-  /* Text, most to least prominent. */
-  --text: #1a1d22;
-  --text-muted: #5b6470;
-  --text-faint: #8791a0;
-
-  /* The app's own accent — used for focus, links, the active tab, and the
-     "planned" zone. Teal rather than the blue every dashboard reaches for,
-     and kept out of the danger/attn family so it never reads as an alert. */
-  --accent: #1f7a72;
-  --accent-strong: #15645d;
-
-  /* Severity, exactly three steps. */
-  --danger: #c92a2a;
-  --attn: #a15c00;
-  --ok: #2f9e44;
-
-  /* Kanban zone accents. Urgent and unplanned deliberately reuse --danger
-     and --attn — a zone is a planning-priority signal, not a session-state
-     one, but "red/amber means look here" is one visual language the whole
-     page should speak, not two that happen to agree by coincidence.
-     Planned uses the app's own accent (on the roadmap, not on fire); nice-
-     to-have and the fallback for an unrecognised zone are both --text-muted:
-     low priority and unknown priority read the same until proven otherwise. */
+  /* Kanban zone accents. Urgent and unplanned reuse --danger and --attn: "red
+     or amber means look here" is one language for the whole page. Planned is
+     the accent (on the roadmap, not on fire); nice-to-have and an unknown zone
+     are faint. A zone is a small dot on a card, never a stripe. */
   --zone-urgent: var(--danger);
   --zone-unplanned: var(--attn);
-  --zone-planned: var(--accent-strong);
+  --zone-planned: var(--accent);
   --zone-nice: var(--text-faint);
   --zone-none: var(--border-strong);
 
+  /* Signal tints: the ground of a badge, a waiting row, a note. Each is its
+     signal at --soft strength, so a theme or an accent change carries them. */
+  --accent-soft: color-mix(in srgb, var(--accent) var(--soft), transparent);
+  --attn-soft: color-mix(in srgb, var(--attn) var(--soft), transparent);
+  --attn-edge: color-mix(in srgb, var(--attn) 32%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) var(--soft), transparent);
+  --danger-edge: color-mix(in srgb, var(--danger) 30%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) var(--soft), transparent);
+
+  /* Type: Inter for the interface, JetBrains Mono for numbers, ids, code and
+     terminals (web/vendor/fonts). */
+  --font-ui: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
   /* Radii and shadow, one scale each. */
-  --radius-sm: 4px;
-  --radius: 8px;
+  --radius-sm: 6px;
+  --radius: 10px;
 
   /* Spacing rhythm. Everything else in this file is one of these three or a
      literal multiple of --gap; nothing invents its own px value. */
@@ -80,44 +151,61 @@
   --gap: 8px;
   --gap-lg: 16px;
 
-  /* Type scale, in rem off the 14px root below — fixed steps so nesting two
-     "smaller" rules can no longer compound into something smaller than any
-     step actually calls for, which is what the em-based sizes this replaced
-     were doing throughout the file. */
-  --fs-2xs: 0.75rem;
-  --fs-xs: 0.85rem;
-  --fs-sm: 0.95rem;
-  --fs-md: 1.15rem;
+  /* Type scale, in rem off the root below: fixed steps so nesting two
+     "smaller" rules never compounds into something smaller than any step. */
+  --fs-2xs: 0.6875rem;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 1.0625rem;
 
   /* Button scale (the .btn block): three heights, a side padding and a type
      size each. Small is the least a pointer can hit reliably; large stands
      beside a form's fields and matches them. Which step a button takes is its
      container's to say, through the three --btn-* values below. */
-  --btn-h-sm: 24px;
-  --btn-h: 30px;
+  --btn-h-sm: 26px;
+  --btn-h: 32px;
   --btn-h-lg: 36px;
   --btn-height: var(--btn-h);
-  --btn-pad: calc(var(--gap) * 1.5);
-  --btn-font: var(--fs-xs);
-
-  /* The fleetdeck window's E layout (the block at the end of this file): what
-     sits on glass, the opaque islands content is drawn in, and the sheet a card,
-     a session or a document opens as over the board. */
-  --on-glass-muted: #434a54;
-  --glass-control: rgb(255 255 255 / 52%);
-  --glass-control-hover: rgb(255 255 255 / 74%);
-  --glass-control-edge: rgb(20 22 26 / 11%);
-  --glass-control-highlight: rgb(255 255 255 / 70%);
-  --surface-on-glass: rgb(255 255 255 / 80%);
-  --island-shadow: 0 1px 2px rgb(20 22 26 / 8%), 0 4px 14px rgb(20 22 26 / 9%);
-  --sheet-shadow: 0 2px 6px rgb(20 22 26 / 10%), 0 18px 48px rgb(20 22 26 / 24%);
-  --sheet-scrim: rgb(20 22 26 / 22%);
-  /* A dialog holds the work until it is answered, and its scrim says so: the
-     darker of the two in every theme, with no blur beside it (the .dialog
-     block says why it must not have one). */
-  --dialog-scrim: rgb(20 22 26 / 52%);
-  --radius-lg: 12px;
+  --btn-pad: calc(var(--gap) * 1.75);
+  --btn-font: var(--fs-sm);
+  --radius-lg: 14px;
   --radius-xl: 18px;
+}
+
+:root[data-accent="indigo"],
+[data-accent-swatch="indigo"] {
+  --accent-light: #4f56d9;
+  --accent-dark: #8b93ff;
+}
+
+:root[data-accent="blue"],
+[data-accent-swatch="blue"] {
+  --accent-light: #1f6feb;
+  --accent-dark: #5aa2ff;
+}
+
+:root[data-accent="teal"],
+[data-accent-swatch="teal"] {
+  --accent-light: #0f766e;
+  --accent-dark: #2dd4bf;
+}
+
+:root[data-accent="violet"],
+[data-accent-swatch="violet"] {
+  --accent-light: #7c3aed;
+  --accent-dark: #b794ff;
+}
+
+:root[data-accent="rose"],
+[data-accent-swatch="rose"] {
+  --accent-light: #d6336c;
+  --accent-dark: #ff7a9a;
+}
+
+:root[data-accent="graphite"],
+[data-accent-swatch="graphite"] {
+  --accent-light: #18191c;
+  --accent-dark: #ecedef;
 }
 
 /* A control panel read for hours at a stretch does not need a 16px browser
@@ -139,79 +227,104 @@ html {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --bg: #14161a;
-    --surface: #1b1e24;
-    --surface-raised: #21252c;
-    --surface-hover: #292e36;
-    --border: #2c313a;
-    --border-strong: #3c4149;
+    --bg: #0b0c10;
+    --surface: #111216;
+    --surface-raised: #18191e;
+    --surface-hover: #1f2126;
+    --border: #222429;
+    --border-strong: #30333a;
     --shadow: rgb(0 0 0 / 45%);
-
-    --text: #e7e9ec;
-    --text-muted: #9aa1ac;
-    --text-faint: #6b7280;
-
-    --accent: #34a99a;
-    --accent-strong: #4fc4b5;
-
-    --danger: #e5484d;
-    --attn: #d88a15;
-    --ok: #3fb950;
-
-    --on-glass-muted: #c1c7cf;
-    --glass-control: rgb(255 255 255 / 9%);
-    --glass-control-hover: rgb(255 255 255 / 16%);
-    --glass-control-edge: rgb(255 255 255 / 15%);
-    --glass-control-highlight: rgb(255 255 255 / 10%);
-    --surface-on-glass: rgb(27 30 36 / 80%);
-    --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
-    --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
-    --sheet-scrim: rgb(0 0 0 / 48%);
-    --dialog-scrim: rgb(0 0 0 / 68%);
+    --text: #f0f1f3;
+    --text-muted: #aaaeb6;
+    --text-faint: #8d929b;
+    --accent: var(--accent-dark);
+    --accent-strong: color-mix(in oklab, var(--accent-dark) 82%, white);
+    --danger: #f87171;
+    --attn: #f5b03c;
+    --ok: #4ade80;
+    --col: rgb(255 255 255 / 3.5%);
+    --card: #1a1b20;
+    --card-edge: rgb(255 255 255 / 8%);
+    --field: rgb(255 255 255 / 5%);
+    --track: rgb(255 255 255 / 10%);
+    --neutral-soft: rgb(255 255 255 / 7%);
+    --code-bg: rgb(0 0 0 / 32%);
+    --soft: 15%;
+    --hl: rgb(245 176 60 / 28%);
+    --hl-current: #f5b03c;
+    --hl-current-text: #1a1203;
+    --term-bg: #0c0d11;
+    --term-fg: #e6e7ea;
+    --wall: radial-gradient(55% 55% at 10% 15%, color-mix(in srgb, var(--accent) 42%, transparent), transparent 70%), radial-gradient(45% 45% at 90% 8%, rgb(168 85 247 / 28%), transparent 70%), radial-gradient(55% 50% at 72% 100%, rgb(56 189 248 / 22%), transparent 70%), #0a0b10;
+    --on-glass-muted: #aaaeb6;
+    --glass-control: rgb(255 255 255 / 8%);
+    --glass-control-hover: rgb(255 255 255 / 14%);
+    --glass-control-edge: rgb(255 255 255 / 10%);
+    --glass-control-highlight: rgb(255 255 255 / 8%);
+    --surface-on-glass: rgb(30 32 40 / 72%);
+    --island-shadow: inset 0 1px 0 rgb(255 255 255 / 4%), 0 10px 36px rgb(0 0 0 / 30%);
+    --sheet-shadow: 0 0 0 1px rgb(255 255 255 / 6%), 0 24px 64px rgb(0 0 0 / 55%);
+    --sheet-scrim: rgb(5 6 8 / 42%);
+    --dialog-scrim: rgb(5 6 8 / 58%);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #14161a;
-  --surface: #1b1e24;
-  --surface-raised: #21252c;
-  --surface-hover: #292e36;
-  --border: #2c313a;
-  --border-strong: #3c4149;
+  --bg: #0b0c10;
+  --surface: #111216;
+  --surface-raised: #18191e;
+  --surface-hover: #1f2126;
+  --border: #222429;
+  --border-strong: #30333a;
   --shadow: rgb(0 0 0 / 45%);
-
-  --text: #e7e9ec;
-  --text-muted: #9aa1ac;
-  --text-faint: #6b7280;
-
-  --accent: #34a99a;
-  --accent-strong: #4fc4b5;
-
-  --danger: #e5484d;
-  --attn: #d88a15;
-  --ok: #3fb950;
-
-  --on-glass-muted: #c1c7cf;
-  --glass-control: rgb(255 255 255 / 9%);
-  --glass-control-hover: rgb(255 255 255 / 16%);
-  --glass-control-edge: rgb(255 255 255 / 15%);
-  --glass-control-highlight: rgb(255 255 255 / 10%);
-  --surface-on-glass: rgb(27 30 36 / 80%);
-  --island-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 28%);
-  --sheet-shadow: 0 0 0 1px var(--border), 0 18px 48px rgb(0 0 0 / 55%);
-  --sheet-scrim: rgb(0 0 0 / 48%);
-  --dialog-scrim: rgb(0 0 0 / 68%);
+  --text: #f0f1f3;
+  --text-muted: #aaaeb6;
+  --text-faint: #8d929b;
+  --accent: var(--accent-dark);
+  --accent-strong: color-mix(in oklab, var(--accent-dark) 82%, white);
+  --danger: #f87171;
+  --attn: #f5b03c;
+  --ok: #4ade80;
+  --col: rgb(255 255 255 / 3.5%);
+  --card: #1a1b20;
+  --card-edge: rgb(255 255 255 / 8%);
+  --field: rgb(255 255 255 / 5%);
+  --track: rgb(255 255 255 / 10%);
+  --neutral-soft: rgb(255 255 255 / 7%);
+  --code-bg: rgb(0 0 0 / 32%);
+  --soft: 15%;
+  --hl: rgb(245 176 60 / 28%);
+  --hl-current: #f5b03c;
+  --hl-current-text: #1a1203;
+  --term-bg: #0c0d11;
+  --term-fg: #e6e7ea;
+  --wall: radial-gradient(55% 55% at 10% 15%, color-mix(in srgb, var(--accent) 42%, transparent), transparent 70%), radial-gradient(45% 45% at 90% 8%, rgb(168 85 247 / 28%), transparent 70%), radial-gradient(55% 50% at 72% 100%, rgb(56 189 248 / 22%), transparent 70%), #0a0b10;
+  --on-glass-muted: #aaaeb6;
+  --glass-control: rgb(255 255 255 / 8%);
+  --glass-control-hover: rgb(255 255 255 / 14%);
+  --glass-control-edge: rgb(255 255 255 / 10%);
+  --glass-control-highlight: rgb(255 255 255 / 8%);
+  --surface-on-glass: rgb(30 32 40 / 72%);
+  --island-shadow: inset 0 1px 0 rgb(255 255 255 / 4%), 0 10px 36px rgb(0 0 0 / 30%);
+  --sheet-shadow: 0 0 0 1px rgb(255 255 255 / 6%), 0 24px 64px rgb(0 0 0 / 55%);
+  --sheet-scrim: rgb(5 6 8 / 42%);
+  --dialog-scrim: rgb(5 6 8 / 58%);
 }
 
 :root[data-theme="light"] {
-  /* The system may still be dark here — this only re-affirms color-scheme
-     so native form controls (the usage <meter>s, <select>s) render with
-     light chrome even when the OS itself is set to dark. Every custom
-     property above already equals the bare :root value in that case, so
-     nothing else needs restating. */
+  /* The system may still be dark here: this re-affirms color-scheme so native
+     form controls render with light chrome. Every custom property above already
+     equals the bare :root value in that case. */
   color-scheme: light;
+}
+
+/* The terminals' ground (config ui.terminal_background, data-terminal-bg):
+   always dark, whatever the theme. */
+:root[data-terminal-bg="dark"] {
+  --term-bg: #0c0d11;
+  --term-fg: #e6e7ea;
 }
 
 * {
@@ -226,7 +339,7 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
 }
@@ -364,13 +477,20 @@ body {
 #header .brand {
   font-weight: 600;
   color: var(--text);
+  /* One line, whatever the column leaves it past the window's buttons: wrapped,
+     the header grew to two lines and left the buttons' line (the redesign's
+     stand, 28 pt against 26). */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The commit beside the brand: there to be glanced at, not read, so it stays
    quiet. The full picture is in the brand's title. */
 #header .build-rev {
   font-weight: 400;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85em;
   color: var(--text-faint);
 }
@@ -887,29 +1007,93 @@ main {
  * the flex container declared above; everything here lays out what gets
  * rendered inside it. */
 
+/* The head says who the orchestrator is: its mark, its name (with the pencil
+   that renames it) over its model and folder, and the context it has used. */
 .o-head {
   flex: none;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--gap);
-  padding: var(--gap);
-  font-weight: 600;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 12px 10px;
   border-bottom: 1px solid var(--border);
 }
 
+.o-avatar {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+}
+
+.o-avatar:empty {
+  display: none;
+}
+
+.o-who {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto;
+  align-items: center;
+  column-gap: 6px;
+}
+
 .o-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.o-meta {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.o-meta:empty {
+  display: none;
+}
+
 .o-ctx {
   flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
   font-weight: 400;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+.o-ctx::before {
+  content: "ctx ";
+}
+
+.o-ctx-bar {
+  flex: none;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.o-ctx-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--text-muted);
 }
 
 .o-error {
@@ -1003,11 +1187,27 @@ main {
 
 /* Nothing pinned, or a pin the daemon does not list: quiet, because neither
  * is a failure, and different words for the two because they are different
- * facts. */
+ * facts; with the wizard that appoints one. */
 .o-screen-empty {
-  padding: var(--gap);
-  opacity: 0.7;
-  font-style: italic;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+.o-screen-empty-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.o-screen-empty-text {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .col-center {
@@ -1073,27 +1273,42 @@ main {
   font-weight: 600;
 }
 
+/* A row: a dot in the state's colour, the name with the cost beside it, the
+   state as a word with how long, the reason when a person is needed, and the
+   context used. A row waiting for an answer is tinted with the attention
+   colour; a stalled one is outlined, quieter. */
 .srow {
-  margin: var(--gap) var(--gap) 0;
-  border: 1px solid var(--border);
-  background: var(--surface-hover);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+  --row-dot: var(--accent);
+  --row-halo: var(--accent-soft);
+  margin: 4px var(--gap) 0;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 13px;
+  padding: 10px;
   cursor: pointer;
 }
 
 .srow:hover {
-  border-color: var(--border-strong);
+  background: var(--neutral-soft);
+}
+
+.srow[data-state="waiting"] {
+  --row-dot: var(--attn);
+  --row-halo: var(--attn-soft);
+}
+
+.srow[data-state="stalled"],
+.srow[data-state="idle"] {
+  --row-dot: var(--text-faint);
+  --row-halo: var(--neutral-soft);
 }
 
 .srow-waiting {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-hover));
-  border-color: var(--danger);
-  border-width: 2px;
+  background: var(--attn-soft);
+  border-color: var(--attn-edge);
 }
 
 .srow-stalled {
-  background: var(--surface);
   border-color: var(--border-strong);
   border-style: dashed;
 }
@@ -1105,7 +1320,28 @@ main {
   gap: 8px;
 }
 
+.srow-head::before {
+  content: "";
+  flex: none;
+  align-self: flex-start;
+  margin-top: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--row-dot);
+  box-shadow: 0 0 0 3px var(--row-halo);
+}
+
+.srow .scost {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+}
+
 .sname {
+  font-size: var(--fs-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1120,20 +1356,19 @@ main {
 .sbadge {
   flex: none;
   font-size: var(--fs-2xs);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
+/* The row's tint and its state word already say it waits: no badge too. */
 .sbadge-waiting {
-  background: var(--danger);
-  color: #fff;
+  display: none;
 }
 
 .sbadge-stalled {
-  background: var(--border-strong);
-  color: var(--text);
+  background: var(--neutral-soft);
+  color: var(--text-muted);
 }
 
 /* A session being started for a card (T-159): the daemon lists nothing until
@@ -1194,10 +1429,16 @@ main {
 
 .smeta {
   display: flex;
-  gap: 8px;
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  margin-top: 2px;
+  gap: 6px;
+  padding-left: 15px;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  margin-top: 6px;
+}
+
+.sstate {
+  font-weight: 600;
+  color: var(--row-dot);
 }
 
 /* A session's reason, clipped to three lines with an ellipsis, full text in
@@ -1213,9 +1454,11 @@ main {
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  margin-top: 4px;
+  padding-left: 15px;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--text);
+  margin-top: 6px;
   overflow-wrap: anywhere;
 }
 
@@ -1237,7 +1480,7 @@ main {
 }
 
 .scard {
-  margin-top: 4px;
+  margin: 6px 0 0 15px;
   font-size: var(--fs-2xs);
   color: var(--text-muted);
 }
@@ -1245,7 +1488,8 @@ main {
 .ctx {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding-left: 15px;
   font-size: var(--fs-2xs);
   margin-top: 6px;
 }
@@ -1257,9 +1501,9 @@ main {
 
 .ctx-track {
   flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
+  height: 3px;
+  border-radius: 2px;
+  background: var(--track);
   overflow: hidden;
   display: inline-block;
 }
@@ -1271,7 +1515,7 @@ main {
 }
 
 .ctx-cool .ctx-fill {
-  background: var(--ok);
+  background: var(--text-muted);
 }
 
 .ctx-warm .ctx-fill {
@@ -1284,7 +1528,8 @@ main {
 
 .ctx-pct {
   flex: none;
-  color: var(--text-muted);
+  font-family: var(--font-mono);
+  color: var(--text-faint);
 }
 
 .est {
@@ -1381,36 +1626,64 @@ main {
 .card-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--gap);
-  margin: var(--gap) 0;
+  gap: 10px;
+  margin: 16px 0 14px;
 }
 
+/* A field is its caption above its control, as in the new-card dialog. */
 .card-field {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  gap: 5px;
+  width: 150px;
   font-size: var(--fs-sm);
 }
 
+.card-field:last-child {
+  flex: 1 1 240px;
+}
+
 .card-field-name {
-  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .card-field select,
 .card-field input {
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0 12px;
   font: inherit;
+  font-size: 13px;
   color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 2px 4px;
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.card-field input {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* The stage's dot before its value, as in the design. */
+.card-field[data-stage] select {
+  padding-left: 26px;
+  background-image: radial-gradient(circle, var(--stage-dot, var(--text-faint)) 3px, transparent 3.5px);
+  background-repeat: no-repeat;
+  background-position: 9px center;
+  background-size: 8px 8px;
 }
 
 .card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--gap);
-  margin-bottom: var(--gap);
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
   font-size: var(--fs-sm);
 }
 
@@ -1427,11 +1700,15 @@ main {
    board both are --text-muted, and the parity holds there the other way. */
 .card-num {
   flex: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   color: var(--text);
-  background: var(--surface-hover);
-  border-radius: var(--radius-sm);
-  padding: 0 var(--gap-sm);
+  background: var(--neutral-soft);
+  border-radius: 999px;
+  padding: 0 9px;
 }
 
 /* No number, said in words rather than left as a gap — see .knum-none. */
@@ -1444,7 +1721,18 @@ main {
 }
 
 .card-session {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* The session's chip opens it: an arrow out, as in the design. */
+.card-session.card-session-link::after {
+  content: "↗";
+  font-family: var(--font-ui);
 }
 
 /* A dead session is not, on its own, an incident — see the file header — and
@@ -1459,8 +1747,25 @@ main {
    session is calmer still — paused work, not lost work — and looks the same. */
 .card-session-dead,
 .card-session-stopped {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
   color: var(--text-muted);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.card-session-dead::before,
+.card-session-stopped::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .card-error,
@@ -1521,9 +1826,20 @@ main {
 
 .card-session-link {
   cursor: pointer;
-  text-decoration: underline dotted;
+  text-decoration: none;
   color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+}
+
+.card-session.card-session-link {
+  background: var(--neutral-soft);
+  padding: 0 9px;
+  border-radius: 999px;
+}
+
+.card-session.card-session-link:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* A link to a card that does not exist. It carries no data-link attribute, so it
@@ -1536,18 +1852,44 @@ main {
 }
 
 .card-backlinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   margin-top: var(--gap-lg);
   font-size: var(--fs-sm);
 }
 
-.card-backlinks-title {
-  margin: 0 0 4px;
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
+/* The captions of the docs and backlinks rows read as the fields' captions. */
+.card-backlinks-title,
+.card-docs-title {
+  margin: 0 4px 0 0;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
-.card-backlink {
-  display: block;
+/* Each link out of the card is a chip, as in the design. */
+.card-backlink,
+.card-doc {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.card-backlink:hover,
+.card-doc:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* A card's documents: the reports and design docs its [[links]] name
@@ -1555,27 +1897,23 @@ main {
  * scrolling the body. A card with none draws no block at all.
  */
 .card-docs {
-  margin-bottom: var(--gap);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm);
-}
-
-.card-docs-title {
-  margin: 0 0 4px;
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-}
-
-.card-doc {
-  display: block;
-  overflow-wrap: anywhere;
 }
 
 /* A link in the card that opens nothing: listed with the reason, as text and
  * not a control, and styled like a missing link in the body.
  */
 .card-doc-missing {
-  display: block;
+  display: inline;
   overflow-wrap: anywhere;
+  font-size: 12px;
   color: var(--text-faint);
 }
 
@@ -1598,6 +1936,26 @@ main {
   max-width: 80ch;
   margin-top: var(--gap);
   overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+/* The reading type of the design: a firm title, quieter section heads. */
+.reader-body h1,
+.card-doc-body h1 {
+  margin: 2px 0 12px;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+.reader-body h2,
+.card-doc-body h2,
+.reader-body h3,
+.card-doc-body h3 {
+  margin: 18px 0 8px;
+  font-size: 15px;
+  font-weight: 650;
 }
 
 /* --- a card's tabs, and the session that wrote the open one (T-091) -----------
@@ -1742,6 +2100,7 @@ main {
 }
 
 .card-stage {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -1854,7 +2213,7 @@ main {
 
 .card-dock-id {
   flex: none;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 /* The session's name, beside its id. Any length, so it clips rather than
@@ -2087,9 +2446,10 @@ main {
 }
 
 .review-base {
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  margin: 0 0 var(--gap);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  margin: 0 0 10px;
 }
 
 .review-uncommitted {
@@ -2104,7 +2464,7 @@ main {
 
 .review-uncommitted-path {
   display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .review-commit-hint {
@@ -2140,7 +2500,7 @@ main {
   margin-bottom: var(--gap-lg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--code-bg);
   box-shadow: var(--island-shadow);
   overflow: clip;
 }
@@ -2150,11 +2510,12 @@ main {
   top: 0;
   z-index: 1;
   margin: 0;
-  padding: var(--gap-sm) var(--gap);
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-hover);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--fs-sm);
+  background: var(--col);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -2170,17 +2531,17 @@ main {
 .review-line {
   display: flex;
   align-items: stretch;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
   line-height: 1.6;
 }
 
 .review-line-add {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  background: var(--ok-soft);
 }
 
 .review-line-del {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: var(--danger-soft);
 }
 
 /* Lit under the pointer and while a drag covers it: an image over the row's
@@ -2250,8 +2611,9 @@ button.review-line-add:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  background: var(--surface-hover);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: none;
+  border-block: 1px solid var(--border);
+  font-family: var(--font-mono);
   font-size: var(--review-code-size, calc(var(--fs-sm) * 1.18));
   line-height: 1.6;
 }
@@ -2276,15 +2638,19 @@ button.review-line-add:hover {
 }
 
 .review-line-comments {
-  margin: 0 var(--gap) var(--gap-sm);
+  margin: 6px 12px 8px calc(8ch + 16px);
 }
 
+/* A comment is a raised island over the code, as in the design. */
 .review-comment {
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: var(--gap-sm) var(--gap);
+  border-radius: 12px;
+  padding: 10px 12px;
   margin: 4px 0;
-  font-size: var(--fs-sm);
+  background: var(--surface-raised);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* A comment whose line is no longer today's — see the state words in
@@ -2306,14 +2672,27 @@ button.review-line-add:hover {
 }
 
 .review-comment-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
+}
+
+.review-comment-state,
+.review-comment-resolved {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
 }
 
 .review-comment-state {
+  background: var(--attn-soft);
   color: var(--attn);
 }
 
 .review-comment-resolved {
+  background: var(--ok-soft);
   color: var(--ok);
 }
 
@@ -2322,7 +2701,7 @@ button.review-line-add:hover {
   padding: var(--gap-sm);
   border-radius: var(--radius-sm);
   background: var(--surface-hover);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .review-comment-body {
@@ -2331,18 +2710,32 @@ button.review-line-add:hover {
 }
 
 .review-reply {
-  border-top: 1px solid var(--border);
-  padding-top: var(--gap-sm);
+  padding: 8px 10px;
   margin-top: var(--gap-sm);
+  border-radius: 9px;
+  background: var(--ok-soft);
 }
 
 .review-reply-status {
-  color: var(--text-muted);
+  color: var(--ok);
+  font-size: 11.5px;
   font-weight: 600;
 }
 
+/* Only a fix is green: a refusal or a question back reads as a plain note. */
+.review-reply-declined,
+.review-reply-question,
+.review-reply-raw {
+  background: var(--neutral-soft);
+}
+
+.review-reply-declined .review-reply-status,
+.review-reply-question .review-reply-status {
+  color: var(--text-muted);
+}
+
 .review-reply-commit {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   margin-left: var(--gap-sm);
 }
 
@@ -2375,7 +2768,7 @@ button.review-line-add:hover {
 .review-detached-where {
   display: block;
   margin-top: var(--gap-sm);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-sm);
 }
 
@@ -2446,32 +2839,50 @@ button.review-line-add:hover {
 .doc-cards {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--gap-sm) var(--gap);
+  align-items: center;
+  gap: 6px;
   margin-top: var(--gap);
   font-size: var(--fs-sm);
 }
 
 .doc-cards-title {
-  color: var(--text-muted);
+  margin-right: 4px;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
+/* A card the document belongs to: a chip with its number and title. */
 .doc-card {
   display: inline-flex;
-  align-items: baseline;
-  gap: var(--gap-sm);
-  padding: 0;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
   border: none;
-  background: none;
+  border-radius: 999px;
+  background: var(--neutral-soft);
   font: inherit;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text);
   text-align: left;
   cursor: pointer;
 }
 
+.doc-card:hover {
+  background: var(--accent-soft);
+}
+
+.doc-card .knum {
+  background: none;
+  padding: 0;
+}
+
 .doc-card-title {
-  color: var(--accent);
-  text-decoration: underline;
+  color: inherit;
 }
 
 /* Kanban board.
@@ -2626,109 +3037,210 @@ button.review-line-add:hover {
 
 .kcol h5 {
   margin: 0 0 2px;
+  padding: 0 4px 2px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: var(--fs-2xs);
+  gap: var(--gap);
+  font-size: var(--fs-sm);
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
+  color: var(--text);
+}
+
+/* The stage's dot before its name: the signal each stage carries. */
+.kcol h5::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--stage-dot, var(--text-faint));
+}
+
+.kcol[data-stage="active"],
+.card-field[data-stage="active"] {
+  --stage-dot: var(--accent);
+}
+
+.kcol[data-stage="review"],
+.card-field[data-stage="review"] {
+  --stage-dot: var(--attn);
+}
+
+.kcol[data-stage="blocked"],
+.card-field[data-stage="blocked"] {
+  --stage-dot: var(--danger);
+}
+
+.kcol[data-stage="done"],
+.card-field[data-stage="done"] {
+  --stage-dot: var(--ok);
 }
 
 .kcount {
-  margin-left: auto;
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
+  font-weight: 400;
   color: var(--text-faint);
 }
 
+/* The fold control at the end of an open column's heading, and the strip a
+   folded column becomes: its dot, its name read downwards and its count. The
+   strip is still the column, so a card can be dropped on it. */
+.kcol-fold {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.kcol-fold::before {
+  content: "›";
+  display: block;
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.kcol-fold:hover,
+.kcol-unfold:hover {
+  background: var(--neutral-soft);
+  color: var(--text);
+}
+
+#board > .kcol-folded {
+  flex: 0 0 44px;
+  min-width: 44px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.kcol-unfold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.kcol-unfold::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--stage-dot, var(--text-faint));
+}
+
+.kcol-unfold-name {
+  writing-mode: vertical-rl;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.kcol-unfold .kcount {
+  writing-mode: vertical-rl;
+}
+
+/* A card: a rounded tile with its title, a row of identifiers led by the
+   zone's dot, the session's state as a badge with the progress beside it, and
+   a thin bar. The zone is never a stripe: a dot says it without taking a side
+   of the card. */
 .kcard {
-  border-left: 3px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  border: 1px solid var(--card-edge);
+  border-radius: 12px;
+  padding: 10px 11px 11px;
+  background: var(--card);
 }
 
 .zone-urgent {
-  border-left-color: var(--zone-urgent);
+  --zone-dot: var(--zone-urgent);
 }
 
 .zone-unplanned {
-  border-left-color: var(--zone-unplanned);
+  --zone-dot: var(--zone-unplanned);
 }
 
 .zone-planned {
-  border-left-color: var(--zone-planned);
+  --zone-dot: var(--zone-planned);
 }
 
 .zone-niceToHave {
-  border-left-color: var(--zone-nice);
+  --zone-dot: var(--zone-nice);
 }
 
 .zone-none {
-  border-left-color: var(--zone-none);
+  --zone-dot: var(--zone-none);
+}
+
+.kzone {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--zone-dot, var(--zone-none));
 }
 
 .ktitle {
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 550;
+  line-height: 1.4;
   color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   /* break-word, not anywhere: anywhere also counts as a break opportunity
      inside the flex-sizing algorithm itself, so a narrow .kcol shrinks
-     eagerly and wraps titles one or two words at a time, sometimes mid-word,
-     because the layout never has to prove a whole word won't fit before
-     breaking it. break-word only splits a word when the line would
-     otherwise overflow -- real titles, which are prose with plenty of
-     spaces, wrap at word boundaries the way a reader expects; only a single
-     token wider than the column would ever break mid-word. */
+     eagerly and wraps titles one or two words at a time, sometimes mid-word.
+     break-word only splits a word when the line would otherwise overflow. */
   overflow-wrap: break-word;
 }
 
-/* The service row under the title: the card's own number and the short id of
-   the session working it. Neither is the card's name, so both live below the
-   title and both stay small; the row wraps because a dead or stopped session
-   spells out its state here and a narrow column cannot hold that beside a
-   number. The 2px the session line used to carry itself now belongs to the
-   row, so the two boxes sit on one baseline instead of one nudging the other
-   down. */
+/* The service row under the title: the zone's dot, the card's own number and
+   the short id of the session working it. */
 .kmeta {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--gap-sm);
-  margin-top: 2px;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
 }
 
 /* The card's number, and the one rule it has to obey: it cannot be mistaken
    for the session's short id sitting beside it. The two are different
-   identifiers with different lifetimes — the card's is permanent and is what
-   gets said out loud, the session's changes with every run — and an operator
-   naming the wrong one gets nowhere.
-   They are told apart by shape, not by colour: same size, same grey, but the
-   number sits in a quiet chip and is monospaced, so it reads as a label
-   attached to the card and survives a screenshot, a greyscale screen and a
-   person who never hovers over anything. Monospace is not decoration here
-   either — this string gets read out character by character, and 0/O and
-   1/l trading places is exactly the failure that costs a second attempt. */
+   identifiers with different lifetimes: the card's is permanent and is what
+   gets said out loud, the session's changes with every run. They are told
+   apart by shape, not by colour: the number sits in a quiet chip and is
+   monospaced, so it survives a screenshot and a greyscale screen. */
 .knum {
   flex: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   color: var(--text-muted);
-  background: var(--surface-hover);
-  border-radius: var(--radius-sm);
-  padding: 0 var(--gap-sm);
+  background: var(--neutral-soft);
+  border-radius: 5px;
+  padding: 1px 5px;
 }
 
 /* A card with no number: a word in the number's place, and deliberately not
-   shaped like a number — no chip, no monospace, italic. An empty space here
-   reads as a panel that lost the number; a chip with a dash in it reads as a
-   number nobody can make out. This says the card has none, which is the fact,
-   and the title attribute says why. */
+   shaped like a number: no chip, no monospace, italic. */
 .knum-none {
-  font-family: inherit;
+  font-family: var(--font-ui);
   font-style: italic;
   color: var(--text-faint);
   background: none;
@@ -2737,46 +3249,87 @@ button.review-line-add:hover {
 
 .ksession {
   font-size: var(--fs-2xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
-/* A dead session, on a card in any other stage, still needs a person's
-   attention: something was pointed at a session that is gone and nobody
-   has said what to do about it. .kcard-orphan and .ksession-dead alone
-   (no further class on the card) are the "still needs a look" case and
-   stay --attn. The muted case below is layered on top of that, for the
-   one stage where a dead session is not news. */
-.ksession-dead {
-  color: var(--attn);
+/* The session's state as a word in its signal's colour, and the progress as a
+   number at the other end of the row. */
+.kstate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.kbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
+  color: var(--badge, var(--text-muted));
+  background: var(--badge-ground, var(--neutral-soft));
+}
+
+.kbadge::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.kbadge-working {
+  --badge: var(--accent);
+  --badge-ground: var(--accent-soft);
+}
+
+.kbadge-waiting {
+  --badge: var(--attn);
+  --badge-ground: var(--attn-soft);
+}
+
+.kbadge-dead {
+  --badge: var(--danger);
+  --badge-ground: var(--danger-soft);
+}
+
+/* A dead session on a card already done is the normal end of a task, not an
+   open question: there it is quiet. */
+.kcol[data-stage="done"] .kbadge-dead {
+  --badge: var(--text-muted);
+  --badge-ground: var(--neutral-soft);
+}
+
+.kpct {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+}
+
+.ksession-dead {
+  color: var(--text-faint);
 }
 
 .kcard-orphan {
-  background: color-mix(in srgb, var(--attn) 10%, var(--surface));
-  border-color: color-mix(in srgb, var(--attn) 30%, var(--border));
+  border-color: var(--danger-edge);
 }
 
-/* The fix for the live-run finding: a dead session on a card already in the
-   "done" column is the normal end of a task, not an open question — the
-   work finished and the session that did it ended with it. Scoped to
-   .kcol[data-stage="done"] rather than to the card's own state, since
-   "done" is what makes a dead session unremarkable; the same card orphaned
-   in any other column is still --attn above. */
 .kcol[data-stage="done"] .kcard-orphan {
-  background: var(--surface);
-  border-color: var(--border);
+  border-color: var(--card-edge);
 }
 
 .kcol[data-stage="done"] .ksession-dead {
-  color: var(--text-muted);
-  font-weight: 400;
+  color: var(--text-faint);
 }
 
 .kcard-broken {
-  border-left-color: var(--danger);
-  border-left-style: dashed;
-  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
-  border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
+  border-style: dashed;
+  border-color: var(--danger-edge);
+  background: color-mix(in srgb, var(--danger) 6%, var(--card));
 }
 
 .kbroken {
@@ -2787,10 +3340,9 @@ button.review-line-add:hover {
 }
 
 .kprog {
-  height: 4px;
+  height: 3px;
   border-radius: 2px;
-  margin-top: 6px;
-  background: var(--border);
+  background: var(--track);
   overflow: hidden;
 }
 
@@ -2798,7 +3350,24 @@ button.review-line-add:hover {
   display: block;
   height: 100%;
   width: 0;
-  background: var(--accent);
+  border-radius: 2px;
+  background: var(--bar, var(--text-muted));
+}
+
+.kcard:has(.kbadge-working) {
+  --bar: var(--accent);
+}
+
+.kcard:has(.kbadge-waiting) {
+  --bar: var(--attn);
+}
+
+.kcard:has(.kbadge-dead) {
+  --bar: var(--danger);
+}
+
+.kcol[data-stage="done"] .kcard {
+  --bar: var(--ok);
 }
 
 /* Centre-column sections (web/js/sections.js) and the documentation section
@@ -2954,7 +3523,6 @@ button.review-line-add:hover {
   font-weight: 600;
 }
 
-
 /* A window over the board, centred by margin: auto between four zero edges,
    about 60% of the room each way and never more than the room less a margin. */
 .newcard {
@@ -2991,7 +3559,6 @@ button.review-line-add:hover {
   resize: none;
 }
 
-.newcard-repo-row,
 .newcard-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3069,18 +3636,118 @@ button.review-line-add:hover {
   justify-content: flex-end;
 }
 
-.newcard-zone-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
+/* The form reads top to bottom as the redesign draws it: a heading, captioned
+   fields, the files, the repository, the urgency and the executor side by
+   side, then a footnote and the two actions. */
+.newcard-heading {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 680;
+  letter-spacing: -0.01em;
 }
 
-.newcard-zone,
-.newcard-executor {
+.newcard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.newcard-caption {
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.newcard-desc-field {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.newcard-desc-field .newcard-desc {
+  flex: 1 1 auto;
+}
+
+.newcard-repo-line {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.newcard-repo-box {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.newcard-repo-box .newcard-repo {
+  flex: 1 1 auto;
+}
+
+.newcard-repo-home {
+  position: absolute;
+  left: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.newcard-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.newcard-zone-label {
+  color: var(--text-muted);
+}
+
+.newcard-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+}
+
+.newcard-seg-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
   font: inherit;
   font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.newcard-seg-option[aria-checked="true"] {
+  background: var(--glass-control-hover);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+.newcard-seg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--zone-dot, var(--zone-none));
+}
+
+.newcard-footnote {
+  flex: 1 1 auto;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
 }
 
 .newcard-error {
@@ -3178,37 +3845,227 @@ button.review-line-add:hover {
 }
 
 .docs-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   cursor: pointer;
   border: none;
   background: none;
-  color: var(--text-muted);
+  color: var(--text);
   font: inherit;
-  font-size: var(--fs-sm);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.35;
   text-align: left;
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  border-radius: 10px;
   overflow-wrap: anywhere;
+}
+
+.docs-entry-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.docs-date {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-faint);
 }
 
 .docs-entry:hover {
   background: var(--surface-hover);
-  color: var(--text);
 }
 
 .docs-entry.on {
+  background: var(--glass-control-hover);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+/* Over the list: the title filter, then the order. */
+.docs-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.docs-filter {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.docs-sort-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.docs-sort {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--track);
+}
+
+.docs-sort-option {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.docs-sort-option[aria-checked="true"] {
+  background: var(--glass-control-hover);
   color: var(--text);
   font-weight: 600;
-  background: var(--surface-hover);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+.docs-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docs-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A card's heading over its documents: number, title, how many. */
+.docs-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.docs-group-id,
+.docs-group-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.docs-group-count {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.docs-group-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* The open document and, over it, the cards linking to it. A column of its own
  * so the body keeps the scroll and the row above it never scrolls away. */
 .docs-main {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Where the open document lives, with Finder beside it in the window. */
+.docs-file,
+.card-doc-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.docs-path,
+.card-doc-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* The find bar (web/js/findbar.js): a frosted pill at the document's top
+ * right, over the text. */
+.find-bar {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: 12px;
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
+}
+
+.find-bar[hidden] {
+  display: none;
+}
+
+/* With the bar open the document moves down from under it, as in the design. */
+.find-bar:not([hidden]) + .docs-cards,
+.find-bar:not([hidden]) + .card-pane {
+  margin-top: 40px;
+}
+
+.find-input {
+  width: 140px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.find-count {
+  min-width: 4ch;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+::highlight(find-hit) {
+  background-color: var(--hl);
+}
+
+::highlight(find-current) {
+  background-color: var(--hl-current);
+  color: var(--hl-current-text);
 }
 
 .docs-cards .doc-cards {
@@ -3378,6 +4235,110 @@ button.review-line-add:hover {
   color: var(--text);
 }
 
+/* The head as drawn: the mark, the name with its state, the model and folder
+ * under them, then the cost and the context at the right. */
+.session-panel .s-head {
+  gap: 10px;
+  margin: calc(-1 * var(--gap-lg)) calc(-1 * var(--gap-lg)) 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-panel .s-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.session-panel .s-who-box {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-panel .s-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.session-panel .s-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+
+.session-panel .s-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.session-panel .s-state[data-state="waiting"] {
+  background: var(--attn-soft);
+  color: var(--attn);
+}
+
+.session-panel .s-state[data-state="idle"] {
+  background: var(--neutral-soft);
+  color: var(--text-muted);
+}
+
+.session-panel .s-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.session-panel .s-cost,
+.session-panel .s-ctx {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.session-panel .s-cost:empty,
+.session-panel .s-ctx:empty {
+  display: none;
+}
+
+.session-panel .s-ctx::before {
+  content: "ctx ";
+}
+
+.session-panel .s-head .s-close {
+  margin-left: 0;
+}
+
 /* The cards this session has worked on, oldest first, above its terminal.
  *
  * One line, whatever it holds. A row above a terminal that changes height takes
@@ -3407,7 +4368,12 @@ button.review-line-add:hover {
 
 .session-panel .s-cards-label {
   flex: none;
-  color: var(--text-muted);
+  align-self: center;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .session-panel .s-cards-none,
@@ -3429,15 +4395,19 @@ button.review-line-add:hover {
   align-items: baseline;
   gap: 6px;
   max-width: 28em;
-  padding: 1px 8px;
-  font-size: var(--fs-xs);
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  background: var(--neutral-soft);
+  border: none;
+  border-radius: 999px;
 }
 
 .session-panel .s-card-id {
+  font-family: var(--font-mono);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -3497,7 +4467,7 @@ button.review-line-add:hover {
 #session-panel .xterm-viewport,
 #card-panel .xterm-viewport,
 #orchestrator .xterm-viewport {
-  background-color: var(--surface);
+  background-color: var(--term-bg);
 }
 
 /* Errors sit under the terminal, where a person is already looking — never on
@@ -3562,7 +4532,6 @@ button.review-line-add:hover {
   text-align: right;
 }
 
-
 /* A notice is not a failure and must not look like one: what the terminal says
  * about itself — that it cannot type, that it could not measure its pane — is a
  * standing fact, and colouring it like an error teaches the operator to read the
@@ -3583,26 +4552,42 @@ button.review-line-add:hover {
  * button does not have by default. Everything else it inherits.
  */
 
+/* The row says "ctx 14%" at the bar's end, as the orchestrator's head does:
+   the word before the bar is for a screen reader. */
 .ctx-label {
-  color: var(--text-muted);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.ctx-pct::before {
+  content: "ctx ";
 }
 
 /* Only what a <button> needs that the existing .scard rule above does not give
  * it. Its margin, size and colour are already set there and are not repeated
  * here: two rules for one selector saying overlapping things is how a
  * stylesheet stops being readable. */
+/* The card a session works, as a chip at the row's foot. */
 .scard {
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
   border: 0;
-  background: none;
+  border-radius: 999px;
+  background: var(--neutral-soft);
   font: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
 .scard:hover,
 .scard:focus-visible {
   color: var(--text);
-  text-decoration: underline;
 }
 
 /* The card's number on the session list's button wears the board's chip
@@ -3680,22 +4665,6 @@ button.review-line-add:hover {
  * already does. Its value is always the true pin (see orchestrator.js's
  * draw()), so there is no separate "still really pinned" mark to style the
  * way the picker once needed one: the selected option already says so. */
-.o-pick-select {
-  flex: none;
-  font: inherit;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 1px 4px;
-  max-width: 40%;
-}
-
-.o-pick-select:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
 
 .label-edit-btn {
   flex: none;
@@ -4060,17 +5029,28 @@ body.is-resizing {
 /* The setup page (setup.html, web/js/setup.js): one column of text and one row
    of controls, for a panel that has no configuration yet. */
 .setup {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: var(--gap-lg);
+  /* The card is as tall as its steps; the page scrolls, the card does not
+     shrink into the window and spill its own content. */
+  flex: none;
+  box-sizing: border-box;
+  max-width: min(620px, calc(100% - 32px));
+  margin: 40px auto;
+  padding: 30px;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: 18px;
+  border-radius: 26px;
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
 }
 
 .setup-title {
-  font-size: var(--fs-md);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   margin: 0;
 }
 
@@ -4327,18 +5307,12 @@ body.is-resizing {
   font-size: var(--fs-sm);
 }
 
-/* The way to the orchestrator wizard from the orchestrator column's head. */
+/* The way to the orchestrator wizard from an empty orchestrator column: a
+   button, placed only. */
 .o-wizard {
-  flex: none;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
   white-space: nowrap;
+  text-decoration: none;
 }
-
-.o-wizard:hover {
-  color: var(--text);
-}
-
 
 /* The start page (start.html, web/js/start.js): the screen the application
    opens on. One column of the same width as the wizard's, because it is the
@@ -4355,12 +5329,18 @@ body.is-resizing {
 }
 
 .start {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: var(--gap-lg);
+  box-sizing: border-box;
+  max-width: min(560px, calc(100% - 32px));
+  margin: 40px auto;
+  padding: 28px;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: 18px;
+  border-radius: 26px;
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
 }
 
@@ -4368,14 +5348,15 @@ body.is-resizing {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--gap);
-  padding: calc(var(--gap-lg) * 2) 0 var(--gap);
+  gap: 10px;
+  padding: 0;
   text-align: center;
 }
 
 .start-title {
-  font-size: var(--fs-md);
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   margin: 0;
 }
 
@@ -4383,7 +5364,7 @@ body.is-resizing {
   margin: 0;
   line-height: 1.5;
   color: var(--text-muted);
-  font-size: var(--fs-sm);
+  font-size: 14px;
 }
 
 /* Said, rather than shown as a machine with no fleets: an empty list and a
@@ -4405,7 +5386,7 @@ body.is-resizing {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: 6px;
 }
 
 /* A listed fleet's row carries its delete button beside the entry, which keeps
@@ -4432,15 +5413,15 @@ body.is-resizing {
   text-align: left;
   font: inherit;
   color: var(--text);
-  padding: var(--gap) var(--gap-lg);
+  padding: 12px 12px 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border-radius: 14px;
+  background: var(--col);
   cursor: pointer;
 }
 
 .start-fleet:hover {
-  background: var(--surface-hover);
+  background: var(--neutral-soft);
 }
 
 .start-fleet-head {
@@ -4452,14 +5433,20 @@ body.is-resizing {
 }
 
 .start-fleet-name {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
 }
 
 /* The fleet the panel was last opened in. A mark on a row, never a decision:
    the page opens nothing by itself (web/js/fleet.js rememberedFleet). */
 .start-fleet-last {
-  font-size: var(--fs-xs);
-  color: var(--accent-strong);
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--accent);
 }
 
 .start-fleet-meta {
@@ -4510,11 +5497,10 @@ body.is-resizing {
 
 .start-footer {
   margin: 0;
-  padding-top: var(--gap-lg);
-  border-top: 1px solid var(--border);
   color: var(--text-faint);
-  font-size: var(--fs-xs);
+  font-size: 12px;
   line-height: 1.5;
+  text-align: center;
 }
 
 /* The application's icon (web/js/icon.js). Both variants are in the markup and
@@ -4568,26 +5554,54 @@ body.is-resizing {
  * The look is shared with .srow through the grouped selector below rather
  * than copied, so a change to the row's shape reaches both.
  */
+/* A stopped session, one line under its group's heading: a hollow dot, the
+   name over its last state, and the button that brings it back at the end. The
+   group's heading already says "stopped", so the row does not repeat it. */
 .sgone {
-  margin: var(--gap) var(--gap) 0;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+  position: relative;
+  margin: 0 var(--gap);
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  padding: 7px 10px;
 }
 
-.sgone-stopped {
-  border-left: 3px solid var(--border-strong);
+.sgone-stopped:has(.sresume) {
+  padding-right: 96px;
+}
+
+.sgone .srow-head::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  margin-top: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 1.5px solid var(--text-faint);
+}
+
+.sgone .sname {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.sgone .smeta {
+  margin-top: 1px;
+}
+
+.sgone .sstate {
+  font-weight: 400;
+  color: var(--text-faint);
 }
 
 .sgone-dead {
-  border-style: dashed;
   opacity: 0.75;
 }
 
 .sbadge-stopped {
-  background: var(--border-strong);
-  color: var(--text);
+  display: none;
 }
 
 .sbadge-gone {
@@ -4607,12 +5621,14 @@ body.is-resizing {
    were: on a row with one control, anything else that took on a border and a
    surface would read as a second one. */
 .sresume {
-  margin-top: 6px;
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
 }
 
 .sresume-btn {
   font-weight: 600;
-  color: var(--accent-strong);
 }
 
 /* Pressed and working. The resume does not answer until the session is up or
@@ -4646,7 +5662,7 @@ body.is-resizing {
    orphaned: the session exists and the work is paused, which is the whole
    point of telling this apart from .kcard-orphan above. */
 .kcard-stopped {
-  border-left: 3px solid var(--border-strong);
+  --bar: var(--text-faint);
 }
 
 .ksession-stopped {
@@ -4671,9 +5687,37 @@ body.is-resizing {
   background: transparent;
 }
 
-/* The board is the ground the glass samples, not glass itself. */
+/* The board is the ground the glass samples, not glass itself: the window's
+   wall, tinted by the accent, so the panels over it read as glass. */
 :root[data-surface="board"][data-glass] body {
+  background: var(--wall);
+}
+
+:root[data-surface="board"][data-glass="opaque"] body {
   background: var(--bg);
+}
+
+/* The open room between the panels is one island the columns lie in. It is
+   drawn behind the box that scrolls, so the geometry the window measures stays
+   the box's (web/tests/app-css.test.js). */
+:root[data-surface="board"] .col-center::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--host-inset-top, 64px) - 10px);
+  left: calc(var(--host-inset-left, 394px) - 12px);
+  right: calc(var(--host-inset-content-right, 356px) + 10px);
+  bottom: 10px;
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
+  pointer-events: none;
+  /* Under every child, positioned or not: a positioned pseudo-element paints
+     over the column's plain blocks (the docs list was drawn over). */
+  z-index: -1;
+}
+
+:root[data-surface="board"] .col-center {
+  isolation: isolate;
 }
 
 /* No glass, no edge of glass: an opaque side surface is drawn with the border a
@@ -4778,7 +5822,7 @@ body.is-resizing {
 
 :root[data-surface="orchestrator"] .o-term {
   border-radius: 0;
-  background: var(--surface);
+  background: var(--term-bg);
   box-shadow: none;
 }
 
@@ -4927,36 +5971,24 @@ body.is-resizing {
   white-space: nowrap;
 }
 
+/* On the sessions glass a row is the glass itself, lit under the pointer; a
+   waiting row keeps its tint and a stalled one its outline. */
 :root[data-surface="sessions"] .srow,
 :root[data-surface="sessions"] .sgone {
-  margin: 10px 10px 0;
-  border: none;
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--island-shadow);
+  margin: 4px 8px 0;
 }
 
-/* Waiting and stalled carry meaning; the island rule above must not wash them
-   out. */
 :root[data-surface="sessions"] .srow-waiting {
-  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
-  box-shadow: inset 0 0 0 2px var(--danger), var(--island-shadow);
-}
-
-:root[data-surface="sessions"] .srow-stalled {
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
-  box-shadow: inset 0 0 0 1px var(--on-glass-muted);
-}
-
-:root[data-surface="sessions"] .sgone-stopped {
-  box-shadow: inset 3px 0 0 var(--border-strong), var(--island-shadow);
+  background: var(--attn-soft);
+  box-shadow: inset 0 0 0 1px var(--attn-edge);
 }
 
 /* The board: no column chrome, and the tabs and the new card button are the
    window's capsules. The new card form stays: the capsule opens it, and it
    drops down under the capsules. */
 :root[data-surface="board"] .col-center {
-  background: var(--bg);
+  position: relative;
+  background: transparent;
   border: none;
   border-radius: 0;
 }
@@ -5028,6 +6060,7 @@ body.is-resizing {
    and the cards' shadows inside the box. A scrolling box clips what is past its
    edge, so the columns no longer run on under the sessions glass. */
 :root[data-surface="board"] #board {
+  position: relative;
   margin-left: calc(var(--host-inset-left, 394px) - var(--gap-lg));
   margin-right: var(--host-inset-content-right, 356px);
   padding-top: var(--host-inset-top, 64px);
@@ -5053,11 +6086,15 @@ body.is-resizing {
   height: 8px;
 }
 
+/* A column is a tinted panel on the island: opaque, so its heading can stay
+   on the column's own ground (--bg here) while the cards pass under it. */
 :root[data-surface="board"] .kcol {
+  --bg: color-mix(in srgb, var(--text) 3.5%, var(--surface));
   flex: 0 0 214px;
-  background: transparent;
+  background: var(--bg);
   border: none;
-  padding: 0;
+  border-radius: var(--radius-lg);
+  padding: 10px 8px 8px;
   gap: var(--gap);
   scrollbar-width: auto;
   scrollbar-color: auto;
@@ -5086,41 +6123,10 @@ body.is-resizing {
   background: var(--bg);
 }
 
-/* The zone stripe is a shadow rather than a border, so the card keeps its
-   rounded island shape on every side. */
+/* A card in the window is the base tile; in the light theme it lifts off its
+   column by a hairline shadow. */
 :root[data-surface="board"] .kcard {
-  border: none;
-  border-radius: 10px;
-  padding: 8px 10px 8px 13px;
-  box-shadow: inset 3px 0 0 var(--zone-stripe, transparent), var(--island-shadow);
-}
-
-:root[data-surface="board"] .zone-urgent {
-  --zone-stripe: var(--zone-urgent);
-}
-
-:root[data-surface="board"] .zone-unplanned {
-  --zone-stripe: var(--zone-unplanned);
-}
-
-:root[data-surface="board"] .zone-planned {
-  --zone-stripe: var(--zone-planned);
-}
-
-:root[data-surface="board"] .zone-niceToHave {
-  --zone-stripe: var(--zone-nice);
-}
-
-:root[data-surface="board"] .zone-none {
-  --zone-stripe: var(--zone-none);
-}
-
-:root[data-surface="board"] .kcard-stopped {
-  --zone-stripe: var(--border-strong);
-}
-
-:root[data-surface="board"] .kcard-broken {
-  --zone-stripe: var(--danger);
+  box-shadow: 0 1px 2px rgb(20 22 28 / 5%);
 }
 
 /* K1, S1, D1: the card, the session and the document open as a sheet over the
@@ -5202,15 +6208,6 @@ body.is-resizing {
  * A browser tab has no data-surface and keeps its bordered fields; its buttons
  * are .btn capsules there too. */
 
-:root[data-surface="orchestrator"] .o-pick-select {
-  min-height: 24px;
-  padding: 2px 10px;
-  border: none;
-  border-radius: 999px;
-  background-color: var(--glass-control);
-  box-shadow: inset 0 0 0 0.5px var(--glass-control-edge), inset 0 1px 0 var(--glass-control-highlight);
-}
-
 :root[data-surface="board"] .newcard-title,
 :root[data-surface="board"] .newcard-repo,
 :root[data-surface="board"] .newcard-zone,
@@ -5225,7 +6222,6 @@ body.is-resizing {
 }
 
 /* A disabled capsule is not lit under the pointer. */
-:root[data-surface="orchestrator"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"] .newcard-repo:hover:not(:disabled),
 :root[data-surface="board"] .newcard-zone:hover:not(:disabled),
@@ -5258,18 +6254,19 @@ body.is-resizing {
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-/* The closed select is drawn by the page, its chevron in the text's colour; the
-   list it opens stays the system's menu. */
-:root[data-surface="orchestrator"] .o-pick-select,
-:root[data-surface="board"] .newcard-zone,
-:root[data-surface="board"] .newcard-executor {
-  -webkit-appearance: none;
-  appearance: none;
-  padding-right: 26px;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
+/* The zone and the executor: a capsule holding its choices, the chosen one
+   lit. */
+:root[data-surface="board"] .newcard-seg {
+  min-height: 0;
+  padding: 3px;
+}
+
+/* The repository's field starts from the home directory, said before the
+   path. */
+:root[data-surface="board"] .newcard-repo-box .newcard-repo {
+  padding-left: 34px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
 }
 
 /* The fleet menu's list hangs from the header's right edge, not from the
@@ -5300,7 +6297,6 @@ body.is-resizing {
 
 /* No glass: solid capsules with the border a column's controls have, and
    nothing blurred. */
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select,
 :root[data-surface="board"][data-glass="opaque"] .newcard-title,
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo,
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone,
@@ -5309,7 +6305,6 @@ body.is-resizing {
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-:root[data-surface="orchestrator"][data-glass="opaque"] .o-pick-select:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-title:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-repo:hover:not(:disabled),
 :root[data-surface="board"][data-glass="opaque"] .newcard-zone:hover:not(:disabled),
@@ -5407,22 +6402,28 @@ body.is-resizing {
 }
 
 .dialog {
-  width: min(400px, 100%);
+  width: min(480px, 100%);
   max-height: calc(100vh - 4 * var(--gap-lg));
   overflow: auto;
-  padding: var(--gap-lg);
+  padding: 20px;
   border: none;
-  border-radius: var(--radius-lg);
+  border-radius: 22px;
   background-color: var(--surface-on-glass);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  backdrop-filter: blur(24px) saturate(160%);
-  box-shadow: var(--sheet-shadow);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
 }
 
 /* Wide is the form's width, narrow the question's. */
 .dialog[data-size="wide"] {
   width: min(560px, 100%);
+}
+
+/* A form's labels and fields are read at full strength, not as a question's
+ * explanation. */
+.dialog[data-size="wide"] .dialog-body {
+  color: var(--text);
 }
 
 .dialog-head {
@@ -5434,7 +6435,8 @@ body.is-resizing {
 
 .dialog-title {
   margin: 0;
-  font-size: var(--fs-md);
+  font-size: 16px;
+  font-weight: 680;
 }
 
 .dialog-close {
@@ -5450,14 +6452,16 @@ body.is-resizing {
   display: grid;
   gap: var(--gap);
   margin-top: var(--gap);
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
 }
 
 .dialog-foot {
   display: flex;
   justify-content: flex-end;
-  gap: var(--gap);
-  margin-top: var(--gap-lg);
+  gap: 8px;
+  margin-top: 14px;
 }
 
 .dialog-foot:empty {
@@ -5578,14 +6582,26 @@ body.is-resizing {
 .limits-popover {
   z-index: 3;
   box-sizing: border-box;
-  width: 380px;
+  width: 420px;
+  max-height: min(640px, calc(100vh - 80px));
+  overflow-y: auto;
   padding: 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 14px;
-  background: var(--surface-raised);
+  border: none;
+  border-radius: var(--radius-xl);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
+}
+
+:root[data-glass="opaque"] .limits-menu,
+:root[data-glass="opaque"] .limits-popover {
+  background-color: var(--surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .limits-menu {
@@ -5605,43 +6621,107 @@ body.is-resizing {
   max-width: calc(100vw - var(--host-inset-left, 0px) - var(--host-inset-content-right, 0px) - 2 * var(--gap));
 }
 
-.limits-grid {
-  display: grid;
-  grid-template-columns: 80px minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px 12px;
-  align-items: center;
+/* The menu: a heading, then every model as a card, the busiest first. */
+.limits-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  margin-bottom: 10px;
 }
 
-.limits-col {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
+.limits-heading {
+  flex: 1;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.limits-order {
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+}
+
+.limits-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.limits-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px;
+  border-radius: 13px;
+  background: var(--col);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.limits-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.limits-card .limits-dot {
+  width: 8px;
+  height: 8px;
+  color: var(--limits-level, var(--text-faint));
 }
 
 .limits-name {
+  font-weight: 650;
+}
+
+.limits-kind {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
   font-weight: 600;
 }
 
-.limits-cell {
+/* A window: its name, the bar with when it resets under it, the percentage. */
+.limits-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-xs);
+}
+
+.limits-window {
+  color: var(--text-muted);
+}
+
+.limits-meter {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.limits-pct {
+  font-family: var(--font-mono);
+  text-align: right;
   color: var(--text);
 }
 
-.limits-cell.limits-warm .limits-pct,
-.limits-cell.limits-hot .limits-pct {
+.limits-row.limits-warm .limits-pct,
+.limits-row.limits-hot .limits-pct {
   color: var(--limits-level);
 }
 
-.limits-cell.limits-off {
+.limits-none {
+  grid-column: 2 / -1;
   color: var(--text-faint);
 }
 
 .limits-bar {
   height: 5px;
   border-radius: 3px;
-  background: var(--border-strong);
+  background: var(--track);
   overflow: hidden;
 }
 
@@ -5649,95 +6729,183 @@ body.is-resizing {
   display: block;
   height: 100%;
   border-radius: 3px;
-  background: var(--limits-level);
+  background: var(--limits-level, var(--text-muted));
 }
 
-.limits-cell.limits-cool {
+.limits-row.limits-cool,
+.limits-card.limits-cool {
   --limits-level: var(--ok);
 }
-.limits-cell.limits-warm {
+
+.limits-row.limits-warm,
+.limits-card.limits-warm {
   --limits-level: var(--attn);
 }
-.limits-cell.limits-hot {
+
+.limits-row.limits-hot,
+.limits-card.limits-hot {
   --limits-level: var(--danger);
 }
-.limits-cell.limits-stale {
+
+.limits-row.limits-stale,
+.limits-card.limits-stale {
   --limits-level: var(--text-muted);
 }
 
 .limits-reset {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-size: var(--fs-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.limits-ages {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
+/* An API key: what is left of what was paid in, and what today cost. */
+.limits-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: var(--fs-xs);
+}
+
+.limits-balance-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.limits-amount {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.limits-of {
+  color: var(--text-faint);
+}
+
+/* The subscription, in the operator's words (usage.labels), at the card's
+ * right. */
+.limits-source {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Under the cards: when each model last spoke, and the way to the settings. */
+.limits-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.limits-ages {
+  flex: 1 1 auto;
+  color: var(--text-faint);
+  font-size: var(--fs-2xs);
+}
+
+.limits-sources {
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.limits-sources:hover {
+  text-decoration: underline;
 }
 
 /* The settings section (web/js/settings.js), drawn to the settings design,
  * variant A: sizes and, in the dark theme, colours are the design's own. */
 
 :root {
-  --set-card: #ffffff;
-  --set-line: #dde1e7;
-  --set-track: #eef0f3;
-  --set-selected: #ffffff;
-  --set-selected-text: #14161a;
-  --set-control-text: #4b5260;
-  --set-input-line: #cdd2da;
-  --set-muted: #5f6672;
-  --set-on: #2f6fd6;
-  --set-off: #cdd2da;
+  --set-card: var(--col);
+  --set-line: var(--border);
+  --set-track: var(--neutral-soft);
+  --set-selected: var(--glass-control-hover);
+  --set-selected-text: var(--text);
+  --set-control-text: var(--text-muted);
+  --set-input-line: var(--border);
+  --set-muted: var(--text-muted);
+  --set-on: var(--accent);
+  --set-off: var(--track);
   --set-off-knob: #ffffff;
-  --set-ok: #1f8a57;
-  --set-badge-bg: #fbeed5;
-  --set-badge-text: #8a5a00;
-  --set-code-bg: #f4f5f7;
+  --set-ok: var(--ok);
+  --set-badge-bg: var(--attn-soft);
+  --set-badge-text: var(--attn);
+  --set-code-bg: var(--code-bg);
+}
+
+/* A row whose control is wider than a line: its titles above, the control
+ * under them. */
+.set-row.set-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* The accent swatches: each dot wears its own preset (the presets above name
+ * [data-accent-swatch] too), the picked one ringed in its colour. */
+.set-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.set-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: 82px;
+  padding: 10px 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.set-swatch:hover {
+  background: var(--neutral-soft);
+}
+
+.set-swatch.on {
+  border-color: var(--border-strong);
+  background: var(--neutral-soft);
+  font-weight: 650;
+}
+
+.set-swatch-dot {
+  --swatch: var(--accent-light);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--swatch);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --set-card: #1f2125;
-    --set-line: #33363c;
-    --set-track: #26282d;
-    --set-selected: #3a3d45;
-    --set-selected-text: #ffffff;
-    --set-control-text: #c9ccd1;
-    --set-input-line: #383b42;
-    --set-muted: #a3a8b0;
-    --set-on: #3f7be0;
-    --set-off: #3a3d45;
-    --set-off-knob: #c9ccd1;
-    --set-ok: #4cc38a;
-    --set-badge-bg: #3a2e17;
-    --set-badge-text: #f0c27a;
-    --set-code-bg: #141518;
+  :root:not([data-theme="light"]) .set-swatch-dot {
+    --swatch: var(--accent-dark);
   }
 }
 
-:root[data-theme="dark"] {
-  --set-card: #1f2125;
-  --set-line: #33363c;
-  --set-track: #26282d;
-  --set-selected: #3a3d45;
-  --set-selected-text: #ffffff;
-  --set-control-text: #c9ccd1;
-  --set-input-line: #383b42;
-  --set-muted: #a3a8b0;
-  --set-on: #3f7be0;
-  --set-off: #3a3d45;
-  --set-off-knob: #c9ccd1;
-  --set-ok: #4cc38a;
-  --set-badge-bg: #3a2e17;
-  --set-badge-text: #f0c27a;
-  --set-code-bg: #141518;
+:root[data-theme="dark"] .set-swatch-dot {
+  --swatch: var(--accent-dark);
+}
+
+.set-swatch.on .set-swatch-dot {
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--swatch);
 }
 
 #settings {
@@ -5925,7 +7093,7 @@ body.is-resizing {
 
 textarea.set-input {
   resize: vertical;
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .set-segmented {
@@ -6058,7 +7226,7 @@ textarea.set-input {
 }
 
 .set-preview {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   color: var(--set-control-text);
   background: var(--set-code-bg);
   padding: 6px 8px;
@@ -6127,3 +7295,4 @@ textarea.set-input {
     flex-wrap: wrap;
   }
 }
+

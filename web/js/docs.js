@@ -25,10 +25,13 @@
 import { renderMarkdown } from "./markdown.js";
 import { markScrollablesWithin, watchScrollables } from "./scrollable.js";
 import { subscribe as storeSubscribe } from "./store.js";
-import { cardsLinkingTo, documentBody } from "./docnames.js";
+import { cardsByDocument, cardsLinkingTo, documentBody } from "./docnames.js";
 import { docCardsRow } from "./doccards.js";
 import { t } from "./i18n.js";
 import { inFleet } from "./api.js";
+import { docGroups, shortDate } from "./docsort.js";
+import { createFindBar } from "./findbar.js";
+import { revealer } from "./reveal.js";
 
 // The documentation section has no cards to resolve wiki links against, so every
 // link in a document renders as one that does not work. Shared and frozen: it is
@@ -85,9 +88,25 @@ export async function fetchDoc(path) {
  * to the open document is followed. options.subscribe replaces the store, for a
  * test; nothing in the application passes it.
  */
+const SORT_KEY = "fleetdeck-docs-sort";
+
+// The order the operator last picked, "task:new" by default.
+function readSort(storage) {
+  let saved = "";
+  try {
+    saved = storage?.getItem(SORT_KEY) ?? "";
+  } catch {
+    saved = "";
+  }
+  const [by, dir] = saved.split(":");
+  return { by: by === "date" ? "date" : "task", newestFirst: dir !== "old" };
+}
+
 export function renderDocs(root, options = {}) {
   const subscribe = options.subscribe ?? storeSubscribe;
   const onOpenCard = options.onOpenCard ?? null;
+  const storage = options.storage === undefined ? globalThis.localStorage : options.storage;
+  const reveal = revealer();
 
   // The list and the body are two elements with two lifetimes, and that is the
   // point. The list is rebuilt only when the set of documents changes, so
@@ -96,12 +115,52 @@ export function renderDocs(root, options = {}) {
   // docs-island and doc-island are the fleetdeck window's two islands (web/app.css,
   // E layout); a browser tab has no rule for them.
   const nav = el("nav", "docs-list docs-island");
+  // Over the list: the filter by title, then the order -- by task or by date,
+  // and which end first.
+  const sort = readSort(storage);
+  const filter = el("input", "docs-filter");
+  filter.type = "search";
+  filter.placeholder = t("docs_filter");
+  filter.setAttribute("aria-label", t("docs_filter"));
+  const sortGroup = el("div", "docs-sort");
+  sortGroup.setAttribute("role", "radiogroup");
+  sortGroup.setAttribute("aria-label", t("docs_sort"));
+  const sortButtons = ["task", "date"].map((by) => {
+    const b = el("button", "docs-sort-option", t(by === "task" ? "docs_by_task" : "docs_by_date"));
+    b.type = "button";
+    b.setAttribute("role", "radio");
+    b.dataset.sort = by;
+    return b;
+  });
+  sortGroup.append(...sortButtons);
+  const orderButton = el("button", "btn btn-sm docs-order");
+  orderButton.type = "button";
+  const tools = el("div", "docs-tools");
+  const sortRow = el("div", "docs-sort-row");
+  sortRow.append(sortGroup, orderButton);
+  tools.append(filter, sortRow);
+  const listBox = el("div", "docs-entries");
+  nav.append(tools, listBox);
+
   // The cards linking to the open document sit over its body in a slot of their
   // own, so redrawing them never touches the body. An empty slot takes no room.
   const cardsSlot = el("div", "docs-cards");
+  // Where the open document lives on disk, with Finder beside it in the window.
+  const fileRow = el("div", "docs-file");
+  fileRow.hidden = true;
+  const pathLine = el("span", "docs-path", "");
+  fileRow.append(pathLine);
+  if (reveal) {
+    const revealButton = el("button", "btn btn-sm docs-reveal", t("docs_reveal"));
+    revealButton.type = "button";
+    revealButton.addEventListener("click", () => selected && reveal(selected));
+    fileRow.append(revealButton);
+  }
   const article = el("article", "docs-body");
+  const findBar = createFindBar({ target: () => article, active: () => Boolean(selected) && !root.closest?.("[hidden]") });
   const main = el("div", "docs-main doc-island");
-  main.append(cardsSlot, article);
+  main.append(findBar.element, cardsSlot, fileRow, article);
+  document.addEventListener?.("keydown", (event) => findBar.onKey(event));
   const box = el("div", "docs");
   box.append(nav, main);
   root.replaceChildren(box);
@@ -110,6 +169,8 @@ export function renderDocs(root, options = {}) {
   let docs = [];
   let cards = [];
   let paintedCards = null;
+  let listError = "";
+  let paintedGroups = null;
   // Which open is the newest. An answer carrying an older token belongs to a
   // document the operator has already navigated away from, and painting it would
   // put one document's text under another one's highlighted entry.
@@ -141,43 +202,111 @@ export function renderDocs(root, options = {}) {
       // than at the call site so no future painter can forget it.
       markScrollablesWithin(article, ".md-table, pre");
       watchScrollables(article, ".md-table, pre");
+      findBar.refresh();
       return;
     }
     article.replaceChildren(el("p", "docs-empty", content?.text ?? t("pick_doc")));
   };
 
-  const paintList = (list, listError) => {
-    docs = list;
-    paintCards();
+  // Which card each document belongs to, built once per change of the cards
+  // or the documents rather than asked per document on every snapshot.
+  let cardIndex = new Map();
+  const reindex = () => {
+    cardIndex = cardsByDocument(cards, docs);
+  };
+  const cardOf = (doc) => cardIndex.get(doc.path) ?? null;
+
+  const paintSortControls = () => {
+    for (const b of sortButtons) b.setAttribute("aria-checked", String(b.dataset.sort === sort.by));
+    orderButton.textContent = t(sort.newestFirst ? "docs_newest" : "docs_oldest");
+    orderButton.title = t(sort.newestFirst ? "docs_newest_hint" : "docs_oldest_hint");
+  };
+
+  // The list itself, in the picked order. Redrawn only when what it shows
+  // changed: the snapshot that may move a document to another card arrives
+  // every couple of seconds, and a rebuilt list drops the hover and focus.
+  const paintEntries = () => {
     if (listError) {
       // Replaces the list, and only the list: one document refusing to open says
       // nothing about the others, so that failure goes to the body instead.
-      nav.replaceChildren(el("p", "docs-error", listError));
+      listBox.replaceChildren(el("p", "docs-error", listError));
+      paintedGroups = null;
       return;
     }
-    if (list.length === 0) {
-      nav.replaceChildren(el("p", "docs-empty", t("docs_empty")));
+    if (docs.length === 0) {
+      listBox.replaceChildren(el("p", "docs-empty", t("docs_empty")));
+      paintedGroups = null;
       return;
     }
-    nav.replaceChildren(
-      ...list.map((doc) => {
-        // A button rather than an href-less <a>: an anchor with no href is not
-        // focusable, is not in the tab order and is not announced as a link, so
-        // it would look like a link and work only for a mouse.
-        const entry = el("button", "docs-entry", doc.title);
-        entry.setAttribute("type", "button");
-        entry.dataset.path = doc.path;
-        return entry;
+    const needle = filter.value.trim().toLocaleLowerCase();
+    const shown = needle ? docs.filter((d) => String(d.title).toLocaleLowerCase().includes(needle)) : docs;
+    const groups = docGroups(shown, cardOf, sort);
+    const signature = JSON.stringify(groups.map((g) => [g.card?.path ?? g.card ?? "", g.card?.title, g.items.map((d) => [d.path, d.title, d.created])]));
+    if (signature === paintedGroups) return;
+    paintedGroups = signature;
+    // Headings only where they tell groups apart: one group of loose documents
+    // needs none.
+    const headed = sort.by === "task" && groups.some((g) => g.card);
+    listBox.replaceChildren(
+      ...groups.map((group) => {
+        const box = el("div", "docs-group");
+        if (headed) {
+          const head = el("div", "docs-group-head");
+          if (group.card) {
+            if (group.card.id) head.append(el("span", "docs-group-id", group.card.id));
+            head.append(el("span", "docs-group-title", group.card.title || group.card.path));
+          } else {
+            head.append(el("span", "docs-group-title", t("docs_no_task")));
+          }
+          head.append(el("span", "docs-group-count", String(group.items.length)));
+          box.append(head);
+        }
+        for (const doc of group.items) {
+          // A button rather than an href-less <a>: an anchor with no href is not
+          // focusable, is not in the tab order and is not announced as a link, so
+          // it would look like a link and work only for a mouse.
+          const entry = el("button", "docs-entry");
+          entry.setAttribute("type", "button");
+          entry.dataset.path = doc.path;
+          entry.append(el("span", "docs-entry-title", doc.title), el("span", "docs-date", shortDate(doc.created)));
+          box.append(entry);
+        }
+        return box;
       }),
     );
     markSelected();
   };
+
+  const paintList = (list, error) => {
+    docs = list;
+    listError = error;
+    reindex();
+    paintCards();
+    paintEntries();
+  };
+
+  const setSort = (next) => {
+    Object.assign(sort, next);
+    try {
+      storage?.setItem(SORT_KEY, `${sort.by}:${sort.newestFirst ? "new" : "old"}`);
+    } catch {
+      // A storage that refuses keeps the order for this page only.
+    }
+    paintSortControls();
+    paintEntries();
+  };
+  for (const b of sortButtons) b.addEventListener("click", () => setSort({ by: b.dataset.sort }));
+  orderButton.addEventListener("click", () => setSort({ newestFirst: !sort.newestFirst }));
+  filter.addEventListener("input", paintEntries);
+  paintSortControls();
 
   const open = async (path) => {
     const mine = (token += 1);
     selected = path;
     markSelected();
     paintCards();
+    pathLine.textContent = path;
+    fileRow.hidden = false;
     paintBody({ text: t("doc_opening") });
     try {
       const body = await fetchDoc(path);
@@ -203,7 +332,9 @@ export function renderDocs(root, options = {}) {
   // The section lives as long as the page, so this subscription is never undone.
   subscribe((snap) => {
     cards = snap?.cards ?? [];
+    reindex();
     paintCards();
+    paintEntries();
   });
 
   (async () => {
