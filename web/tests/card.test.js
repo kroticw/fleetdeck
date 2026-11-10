@@ -1618,3 +1618,35 @@ test("a document's tab shows its path, Finder in the window, and a find bar Cmd+
     delete globalThis.fleetdeckReveal;
   }
 });
+
+// The design's meta row: after the session's chip, its state as the board's
+// badge -- working, or waiting for an answer.
+test("a live session's state is a badge beside its chip, as on the board", () => {
+  const { root } = open(snapshot(), FLEET_UI);
+  const badge = root.querySelector(".card-meta").querySelector(".card-session-state");
+  assert.ok(badge, "no state beside the session");
+  assert.equal(badge.className, "kbadge kbadge-working card-session-state");
+  assert.equal(badge.textContent, t("dock_state_working"));
+
+  const waiting = snapshot();
+  waiting.sessions[0].state = "blocked";
+  waiting.sessions[0].needs = "question";
+  const again = open(waiting, FLEET_UI).root.querySelector(".card-session-state");
+  assert.equal(again.className, "kbadge kbadge-waiting card-session-state");
+});
+
+test("the state badge follows the session while the card stays open", () => {
+  const { root, store } = open(snapshot(), FLEET_UI);
+  const next = snapshot();
+  next.sessions[0].state = "blocked";
+  next.sessions[0].needs = "question";
+  store.push(next);
+  assert.equal(root.querySelector(".card-session-state").className, "kbadge kbadge-waiting card-session-state");
+});
+
+// The stage field wears its stage's dot, the board column's colour.
+test("the stage field names its stage for the dot beside its value", () => {
+  const { root } = open(withStage(snapshot(), FLEET_UI, "review"), FLEET_UI);
+  const field = root.querySelector('select[data-field="stage"]').parentElement;
+  assert.equal(field.dataset.stage, "review");
+});

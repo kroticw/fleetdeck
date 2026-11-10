@@ -331,6 +331,8 @@ setFontSizeWriter((size) => {
 // documentation directories configured would otherwise ask for them — and take
 // the server's 404 — before the operator had opened that section at all.
 let sections = null;
+// The settings section once built: the limits menu opens one of its sections.
+let settingsView = null;
 if (regions.has("center")) {
   sections = createSections(document.getElementById("tabs"), [
     { id: "board", label: t("tab_board"), root: document.getElementById("board") },
@@ -344,7 +346,9 @@ if (regions.has("center")) {
       id: "settings",
       label: t("tab_settings"),
       root: document.getElementById("settings"),
-      onFirstShow: () => renderSettings(document.getElementById("settings"), { onSaved: followSettings }),
+      onFirstShow: () => {
+        settingsView = renderSettings(document.getElementById("settings"), { onSaved: followSettings });
+      },
     },
   ]);
 
@@ -462,7 +466,7 @@ if (host) {
     sections?.show("settings");
     section = "settings";
     publishCapsules();
-    document.querySelector('#settings .set-nav-link[data-section="panel"]')?.click();
+    settingsView?.showSection("panel");
   };
   const limitsPopover = host.surface === "board" ? createLimitsPopover(document, get, undefined, openLimitSources) : null;
   if (limitsPopover) subscribe(() => limitsPopover.refresh());

@@ -1662,6 +1662,15 @@ main {
   font-size: 12.5px;
 }
 
+/* The stage's dot before its value, as in the design. */
+.card-field[data-stage] select {
+  padding-left: 26px;
+  background-image: radial-gradient(circle, var(--stage-dot, var(--text-faint)) 3px, transparent 3.5px);
+  background-repeat: no-repeat;
+  background-position: 9px center;
+  background-size: 8px 8px;
+}
+
 .card-meta {
   display: flex;
   flex-wrap: wrap;
@@ -3040,19 +3049,23 @@ button.review-line-add:hover {
   background: var(--stage-dot, var(--text-faint));
 }
 
-.kcol[data-stage="active"] {
+.kcol[data-stage="active"],
+.card-field[data-stage="active"] {
   --stage-dot: var(--accent);
 }
 
-.kcol[data-stage="review"] {
+.kcol[data-stage="review"],
+.card-field[data-stage="review"] {
   --stage-dot: var(--attn);
 }
 
-.kcol[data-stage="blocked"] {
+.kcol[data-stage="blocked"],
+.card-field[data-stage="blocked"] {
   --stage-dot: var(--danger);
 }
 
-.kcol[data-stage="done"] {
+.kcol[data-stage="done"],
+.card-field[data-stage="done"] {
   --stage-dot: var(--ok);
 }
 

@@ -319,5 +319,11 @@ export function renderSettings(root, { load = fetchSettings, save = saveSettings
         page = p;
         draw();
       }),
+    // Shows one section, now or, before the values load, when they do.
+    showSection: (id) => {
+      active = id;
+      draw();
+      root.querySelector?.(`#settings-${id}`)?.scrollIntoView?.({ block: "start" });
+    },
   };
 }

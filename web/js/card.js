@@ -31,6 +31,7 @@ import { authorOf, authorState } from "./docauthor.js";
 import { createCardDock } from "./carddock.js";
 import { closeCrossHTML, reviewIconHTML } from "./icon.js";
 import { createFindBar } from "./findbar.js";
+import { liveStates } from "./board.js";
 import { revealer } from "./reveal.js";
 
 // The two field vocabularies, exactly as internal/board/write.go accepts them.
@@ -266,6 +267,8 @@ export function renderCard(root, path, onClose, options = {}) {
     wrap.append(el("span", "card-field-name", t(`card_field_${field}`)));
     const select = document.createElement("select");
     select.dataset.field = field;
+    // The stage's dot beside the value, in its board column's colour (app.css).
+    if (field === "stage") wrap.dataset.stage = value;
     // A card holding a value the board does not allow still has to be shown as
     // it is. Offering only the legal values would silently present one of them
     // as the card's own.
@@ -509,6 +512,11 @@ export function renderCard(root, path, onClose, options = {}) {
       // none, instead of a control that would open nothing.
       meta.append(el("span", "card-session-stopped", t("session_stopped")));
     }
+    // A live session's state, as the board's badge says it (board.js).
+    const liveState = card.session && !orphan && !stopped ? liveStates(snap).get(card.session) : null;
+    if (liveState) {
+      meta.append(el("span", `kbadge kbadge-${liveState} card-session-state`, t(`dock_state_${liveState}`)));
+    }
     if (meta.children.length > 0) nodes.push(meta);
 
     // The card's documents, right under its number, where they are seen without
@@ -650,6 +658,7 @@ export function renderCard(root, path, onClose, options = {}) {
       known,
       orphan,
       stopped,
+      live: card?.session ? liveStates(latest).get(card.session) ?? null : null,
       backlinks: backlinks.map((c) => [c.path, c.title]),
       documents: docs === null ? null : documents.map((d) => d.path),
       broken,
