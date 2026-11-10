@@ -26,12 +26,11 @@ test("a stand's page is asked to open the new card form", () => {
   assert.deepEqual(readHost(win({ stand: true, standOpen: "newcard" })).open, ["newcard"]);
 });
 
-// T-070: the new card form and the fleet menu's list are drawn as frosted glass,
-// and a stand's frame shows both open at once: one on the board, the other on
-// the orchestrator island, clear of each other.
-test("a stand's page is asked to open the fleet menu, alone or with the new card form", () => {
-  assert.deepEqual(readHost(win({ stand: true, standOpen: "fleetmenu" })).open, ["fleetmenu"]);
-  assert.deepEqual(readHost(win({ stand: true, standOpen: "newcard,fleetmenu" })).open, ["newcard", "fleetmenu"]);
+// The fleet's menu is the window's bar's, a system menu (T-226): no page has
+// one for a stand to open.
+test("a stand's page is not asked to open a fleet menu it no longer has", () => {
+  assert.equal(readHost(win({ stand: true, standOpen: "fleetmenu" })).open, undefined);
+  assert.equal(readHost(win({ stand: true, standOpen: "newcard,fleetmenu" })).open, undefined, "a list with a name not known is not followed");
 });
 
 // T-079: the band the window is dragged by went to nothing the moment a sheet

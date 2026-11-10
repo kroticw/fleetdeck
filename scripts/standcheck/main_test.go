@@ -139,13 +139,12 @@ func TestACapsuleOverTheOrchestratorPanelIsAProblem(t *testing.T) {
 	wantProblem(t, check(logOf(t, f, goodBoard(false), goodHeader(false)), 0), "tabs", "orchestrator panel")
 }
 
-// v0.10.1 out of full screen: the buttons centred 16 pt in, on the panel's edge.
-func TestButtonsOnThePanelsEdgeAreAProblem(t *testing.T) {
+// v0.10.1 out of full screen: the buttons centred 16 pt in. They belong on the
+// bar's line, 26 pt in from the window's top left (T-226).
+func TestButtonsOffTheBarsLineAreAProblem(t *testing.T) {
 	f := goodFrame(false)
 	f.Close = box{X: 9, Y: 9, W: 14, H: 14}
-	h := goodHeader(false)
-	h.HeaderRowCenter, h.BrandCenter = 8, 8
-	wantProblem(t, check(logOf(t, f, goodBoard(false), h), 0), "close button", "corner")
+	wantProblem(t, check(logOf(t, f, goodBoard(false), goodHeader(false)), 0), "close button", "bar's line")
 }
 
 // Coming out of full screen must put the buttons back where they were.
@@ -346,43 +345,26 @@ func TestButtonsOffTheirPlaceAfterFullScreenAreAProblem(t *testing.T) {
 	wantProblem(t, check(log, 1), "after full screen", "close button")
 }
 
-// v0.10.1: the brand and the fleet picker sat lower than the buttons.
-func TestAHeaderRowOffTheButtonsLineIsAProblem(t *testing.T) {
-	h := goodHeader(false)
-	h.HeaderRowCenter, h.BrandCenter = 22, 22
-	problems := check(logOf(t, goodFrame(false), goodBoard(false), h), 0)
-	wantProblem(t, problems, "header row")
-	wantProblem(t, problems, "brand")
+// v0.10.1: the brand and the fleet picker sat lower than the buttons. They are
+// the bar's capsules now, each on the buttons' line (T-226).
+func TestABarCapsuleOffTheButtonsLineIsAProblem(t *testing.T) {
+	f := goodFrame(false)
+	f.Capsules = append([]capsule(nil), f.Capsules...)
+	f.Capsules[1].Y = 14
+	wantProblem(t, check(logOf(t, f, goodBoard(false), goodHeader(false)), 0), "newCard", "centred 30 pt down")
 }
 
-// T-070: the fleet menu button is a capsule beside the brand, and a capsule
-// taller than the brand's line can sit off the buttons' line with the brand on it.
-func TestAFleetMenuButtonOffTheButtonsLineIsAProblem(t *testing.T) {
-	h := goodHeader(false)
-	h.FleetCenter = at(22)
-	wantProblem(t, check(logOf(t, goodFrame(false), goodBoard(false), h), 0), "fleet menu")
-}
-
-// A header drawn before its fleet menu has no fleet menu to hold to the line.
-func TestAHeaderWithNoFleetMenuYetIsNotHeldToOne(t *testing.T) {
-	h := goodHeader(false)
-	h.FleetCenter = nil
-	if got := check(logOf(t, goodFrame(false), goodBoard(false), h), 0); len(got) != 0 {
-		t.Fatalf("problems %q, want none", got)
+// In full screen there are no buttons to hold the bar to.
+func TestTheBarInFullScreenIsNotHeldToButtonsItDoesNotHave(t *testing.T) {
+	fs := goodFrame(true)
+	fs.Capsules = append([]capsule(nil), fs.Capsules...)
+	fs.Capsules[0].Y = 20
+	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), fs, goodBoard(true), goodFrame(false), goodBoard(false))
+	for _, p := range check(log, 1) {
+		if strings.Contains(p, "pt down") {
+			t.Fatalf("problem %q: in full screen there are no buttons", p)
+		}
 	}
-}
-
-func TestAHeaderInFullScreenIsNotHeldToButtonsItDoesNotHave(t *testing.T) {
-	fsHeader := goodHeader(true)
-	fsHeader.HeaderRowCenter, fsHeader.BrandCenter = 30, 30
-	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), goodFrame(true), goodBoard(true), fsHeader, goodFrame(false), goodBoard(false))
-	if got := check(log, 1); len(got) != 0 {
-		t.Fatalf("problems %q, want none: in full screen there are no buttons", got)
-	}
-}
-
-func TestNoHeaderReportIsAProblem(t *testing.T) {
-	wantProblem(t, check(logOf(t, goodFrame(false), goodBoard(false)), 0), "header")
 }
 
 // v0.10.1: the selected tab a rounded rectangle in its capsule.
@@ -391,7 +373,7 @@ func TestARoundedSelectedTabIsAProblem(t *testing.T) {
 	f.SegmentBorderShape, f.SelectedTopInset = 0, 0.19
 	problems := check(logOf(t, f, goodBoard(false), goodHeader(false)), 0)
 	wantProblem(t, problems, "border shape")
-	wantProblem(t, problems, "selected tab", "0.19", "rounded rectangle's in its place 0.19")
+	wantProblem(t, problems, "selected segment", "0.19", "rounded rectangle's in its place 0.19")
 }
 
 // On the 1x runner (run 34932941637) a capsule measured 0.375, and 0.29 once
@@ -414,7 +396,7 @@ func TestARoundedSelectedTabInOrAfterFullScreenIsAProblem(t *testing.T) {
 	after.SegmentBorderShape = 2
 	log := logOf(t, goodFrame(false), goodBoard(false), goodHeader(false), in, goodBoard(true), after, goodBoard(false))
 	problems := check(log, 1)
-	wantProblem(t, problems, "in full screen 1", "selected tab")
+	wantProblem(t, problems, "in full screen 1", "selected segment")
 	wantProblem(t, problems, "after full screen 1", "border shape is 2")
 }
 

@@ -17,7 +17,7 @@ import (
 // beside it and then moved below once its terminal has attached. "check-*"
 // hold the update control beside the brand in a state of Check for Updates…:
 // checking, nothing newer, no answer, and a version found.
-var standOpenNames = []string{"newcard", "fleetmenu", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip", "check-checking", "check-latest", "check-failed", "check-available"}
+var standOpenNames = []string{"newcard", "session", "carddoc-bottom", "carddoc-right", "carddoc-rail", "carddoc-flip", "check-checking", "check-latest", "check-failed", "check-available"}
 
 // On a stand, and only there, the window takes a few settings from its
 // environment that a person's window never has. A variable set without the
@@ -36,7 +36,7 @@ const (
 	// appearance cannot be relied on to reach a window started after it
 	// changed.
 	standAppearanceEnv = "FLEETDECK_STAND_APPEARANCE"
-	// Any of standOpenNames, comma-separated ("newcard", "fleetmenu", ...): the
+	// Any of standOpenNames, comma-separated ("newcard", "session", ...): the
 	// board opens its new card form and the first session the panel lists, the
 	// orchestrator surface its fleet menu, as they load, so a stand shows them
 	// open without anyone pressing anything. A session open is what took

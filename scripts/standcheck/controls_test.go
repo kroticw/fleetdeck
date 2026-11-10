@@ -74,7 +74,7 @@ func controlsLogOf(t *testing.T, f frameReport, reports ...controlsReport) strin
 	return log
 }
 
-var bothOpen = []string{"newcard", "fleetmenu"}
+var bothOpen = []string{"newcard"}
 
 func TestCapsulesThatKeepTheirPropertiesAreNoProblem(t *testing.T) {
 	for _, glass := range []string{"glass", "vibrancy", "opaque"} {
@@ -143,7 +143,6 @@ func TestWhatTheStandOpenedButDidNotReportIsAProblem(t *testing.T) {
 	b := goodBoardControls("glass")
 	b.Controls = nil
 	problems := controlsCheck(controlsLog(t, "glass", o, b), bothOpen)
-	wantProblem(t, problems, "fleetList")
 	wantProblem(t, problems, "newCard")
 	if got := controlsCheck(controlsLog(t, "glass", o, b), nil); len(got) != 0 {
 		t.Fatalf("problems %q, want none: the stand opened nothing", got)
@@ -209,8 +208,12 @@ func TestTheIslandsHeadCapsulesHaveToBeReported(t *testing.T) {
 	o := goodOrchestratorControls("glass")
 	o.Controls = []control{goodCapsule("fold", "glass")}
 	problems := controlsCheck(controlsLog(t, "glass", o, goodBoardControls("glass")), nil)
-	for _, name := range []string{"editPencil", "fleetButton"} {
-		wantProblem(t, problems, name)
+	wantProblem(t, problems, "editPencil")
+	// The fleet's menu is the window's bar's now, a system menu (T-226).
+	for _, p := range problems {
+		if strings.Contains(p, "fleetButton") {
+			t.Fatalf("problem %q: the page has no fleet button to report", p)
+		}
 	}
 }
 

@@ -51,20 +51,16 @@ const (
 )
 
 const (
-	// The orchestrator panel's corner radius (cmd/fleetdeck-window/frame_darwin.c).
-	panelRadius = 18
 	// The board's inset past the orchestrator panel
 	// (cmd/fleetdeck-window/geometry.go boardGapLeft); the board's own box
 	// starts inside it.
 	boardGapLeft = 18
 )
 
-// Slack: sub-point layout for an edge, a point for a line, two for a line of
-// text, whose box is the font's.
+// Slack: sub-point layout for an edge, a point for a line.
 const (
-	edgeSlack  = 0.5
-	lineSlack  = 1
-	brandSlack = 2
+	edgeSlack = 0.5
+	lineSlack = 1
 	// A folded strip's round unfold control is at least this wide and tall.
 	minUnfoldTarget = 36
 	// A capsule's top row starts further in than a rounded rectangle's drawn
@@ -344,10 +340,8 @@ func check(log string, trips int) []string {
 		problems = append(problems, underButtonProblems(when, f)...)
 		problems = append(problems, dragBandProblems(when, f)...)
 		problems = append(problems, l.stripProblems(when, r, true)...)
-		// A folded orchestrator strip shows no header, only its unfold mark,
-		// with the buttons in the corner over it.
-		if i == 0 && !orchestratorFolded(f) {
-			problems = append(problems, headerProblems(f, l.headers)...)
+		if i == 0 {
+			problems = append(problems, barLineProblems(f)...)
 		}
 	}
 	switch {
@@ -605,12 +599,12 @@ func tabProblems(when string, f frameReport) []string {
 	}
 	var out []string
 	if f.SegmentBorderShape != 1 {
-		out = append(out, fmt.Sprintf("%sthe tabs' border shape is %d, want 1 (a capsule)", when, f.SegmentBorderShape))
+		out = append(out, fmt.Sprintf("%sthe theme segments' border shape is %d, want 1 (a capsule)", when, f.SegmentBorderShape))
 	}
 	if f.RoundedTopInset <= 0 {
-		out = append(out, when+"no rounded rectangle measured to hold the selected tab against")
+		out = append(out, when+"no rounded rectangle measured to hold the selected segment against")
 	} else if f.SelectedTopInset < f.RoundedTopInset+capsuleOverRoundedInset {
-		out = append(out, fmt.Sprintf("%sthe selected tab's fill starts %.2f of its height in at its top, a rounded rectangle's in its place %.2f: want a capsule's, at least %.2f further in", when, f.SelectedTopInset, f.RoundedTopInset, capsuleOverRoundedInset))
+		out = append(out, fmt.Sprintf("%sthe selected segment's fill starts %.2f of its height in at its top, a rounded rectangle's in its place %.2f: want a capsule's, at least %.2f further in", when, f.SelectedTopInset, f.RoundedTopInset, capsuleOverRoundedInset))
 	}
 	return out
 }
@@ -625,9 +619,11 @@ func buttonProblems(when string, f frameReport) []string {
 	if !ok {
 		return []string{when + "no close button measured out of full screen"}
 	}
-	wx, wy := f.Orchestrator.X+panelRadius, f.Orchestrator.Y+panelRadius
-	if math.Abs(cx-wx) > lineSlack || math.Abs(cy-wy) > lineSlack {
-		return []string{fmt.Sprintf("%sthe close button is centred at (%v, %v), want (%v, %v), concentric in the orchestrator panel's corner", when, cx, cy, wx, wy)}
+	// On the bar's line, as far in from the window's left as down from its top
+	// (T-226): the buttons are in the bar, not over a panel.
+	line := f.Row.Y + f.Row.H/2
+	if math.Abs(cx-line) > lineSlack || math.Abs(cy-line) > lineSlack {
+		return []string{fmt.Sprintf("%sthe close button is centred at (%v, %v), want (%v, %v), on the bar's line", when, cx, cy, line, line)}
 	}
 	return nil
 }
@@ -792,31 +788,18 @@ func underButtonProblems(when string, f frameReport) []string {
 	return out
 }
 
-func headerProblems(f frameReport, headers []headerReport) []string {
+// barLineProblems is each capsule of the bar off the line the window's buttons
+// are centred on, out of full screen (T-226). v0.10.1 had the brand and the
+// fleet picker lower than the buttons; they are the bar's capsules now.
+func barLineProblems(f frameReport) []string {
 	_, cy, ok := closeCentre(f)
 	if !ok {
 		return nil
 	}
-	var header *headerReport
-	for i := len(headers) - 1; i >= 0; i-- {
-		if !headers[i].FullScreen {
-			header = &headers[i]
-			break
-		}
-	}
-	if header == nil {
-		return []string{"no header report from the orchestrator surface out of full screen"}
-	}
 	var out []string
-	if row := f.Orchestrator.Y + header.HeaderRowCenter; math.Abs(row-cy) > lineSlack {
-		out = append(out, fmt.Sprintf("the orchestrator's header row is centred %v pt down, the window's buttons %v", row, cy))
-	}
-	if brand := f.Orchestrator.Y + header.BrandCenter; math.Abs(brand-cy) > brandSlack {
-		out = append(out, fmt.Sprintf("the brand is centred %v pt down, the window's buttons %v", brand, cy))
-	}
-	if header.FleetCenter != nil {
-		if fleet := f.Orchestrator.Y + *header.FleetCenter; math.Abs(fleet-cy) > brandSlack {
-			out = append(out, fmt.Sprintf("the fleet menu button is centred %v pt down, the window's buttons %v", fleet, cy))
+	for _, c := range f.Capsules {
+		if mid := c.Y + c.H/2; math.Abs(mid-cy) > lineSlack {
+			out = append(out, fmt.Sprintf("the bar's %s is centred %v pt down, the window's buttons %v", c.Name, mid, cy))
 		}
 	}
 	return out

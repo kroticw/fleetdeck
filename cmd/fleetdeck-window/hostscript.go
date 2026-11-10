@@ -20,7 +20,7 @@ import (
 var hostOnStand bool
 
 // hostStandOpen is what a stand's surfaces open as they load (standOpenEnv):
-// "newcard", "fleetmenu", both comma-separated, or nothing. Read only when
+// "newcard", "session", ... comma-separated, or nothing. Read only when
 // hostOnStand.
 var hostStandOpen string
 

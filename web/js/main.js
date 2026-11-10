@@ -249,16 +249,15 @@ if (regions.has("sessions")) {
 const headerParts = regions.has("header") ? HEADER_PARTS : HEADER_PARTS.filter((part) => regions.has(part));
 let header = null;
 if (headerParts.length > 0) {
-  // A stand's frame with the fleet menu open (web/js/host.js, open).
-  const openMenu = host?.open?.includes("fleetmenu") ?? false;
-  // And one with the update control held in a state of Check for Updates….
+  // A stand's frame with the update control held in a state of Check for
+  // Updates….
   const standUpdate = STAND_UPDATE[host?.open?.find((name) => Object.hasOwn(STAND_UPDATE, name))] ?? null;
   // In the orchestrator surface the update control is a panel over the top of
   // its terminal: the brand row of a narrow column has no room for it.
   const updateAt = host?.surface === "orchestrator"
     ? { column: () => document.getElementById("orchestrator"), term: () => document.querySelector("#orchestrator .o-term") }
     : null;
-  header = renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, openMenu, standUpdate, updateAt });
+  header = renderHeader(document.getElementById("header"), { switchFleet: routes.switchFleet, parts: headerParts, standUpdate, updateAt });
 } else {
   initTheme();
 }
@@ -388,6 +387,10 @@ if (host?.surface === "board" && typeof window[UPDATE_BINDING] === "function") {
     publishCapsules();
   };
   window[PROGRESS_FUNCTION] = took;
+  // A stand's frame of a version found: the bar's update capsule is what shows
+  // it (scripts/standcheck, barUpdateProblems).
+  const standOffer = STAND_UPDATE[host.open?.find((name) => Object.hasOwn(STAND_UPDATE, name))];
+  if (standOffer) took(standOffer);
   if (typeof window[KNOWN_BINDING] === "function") {
     Promise.resolve(window[KNOWN_BINDING]()).then((report) => {
       if (report?.step === "available") took(report);
