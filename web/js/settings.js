@@ -152,6 +152,7 @@ function panelSection(page) {
   return `<h1 id="settings-panel" class="set-h1 spaced">${h(t("set_nav_panel"))}</h1>
 <section class="set-card set-list">
 ${row(t("set_usage"), t("set_usage_hint"), toggle("usage.enabled", v["usage.enabled"], t("set_usage")))}
+${row(t("set_usage_labels"), t("set_usage_labels_hint"), `<div class="set-inline"><label class="set-inline-label">Claude${text("usage.labels.claude", v["usage.labels.claude"], { placeholder: t("set_usage_label_claude") })}</label><label class="set-inline-label">Codex${text("usage.labels.codex", v["usage.labels.codex"], { placeholder: t("set_usage_label_codex") })}</label></div>`)}
 ${row(t("set_port"), t("set_port_hint"), `<input type="text" inputmode="numeric" class="set-input narrow" data-key="server.port" data-kind="int" value="${h(String(v["server.port"]))}" aria-label="${h(t("set_port"))}">`, { badge: restartBadge(page, "server.port") })}
 ${row(t("set_poll"), t("set_poll_hint"), text("daemon.poll_interval", v["daemon.poll_interval"], { label: t("set_poll"), narrow: true }), { badge: restartBadge(page, "daemon.poll_interval") })}
 <details class="set-advanced"><summary>${h(t("set_advanced"))}</summary>

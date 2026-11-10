@@ -88,3 +88,29 @@ func TestDurationsReadAsTheyAreWritten(t *testing.T) {
 		}
 	}
 }
+
+// The subscription labels are written from the settings page, one key per
+// model, and an emptied field takes its label out of the file.
+func TestTheLimitsLabelsAreWrittenFromTheSettingsPage(t *testing.T) {
+	s, p := settingsFixture(t)
+	if _, err := s.write(context.Background(), map[string]any{"usage.labels.claude": "подписка Max", "usage.labels.codex": "ChatGPT Pro"}); err != nil {
+		t.Fatal(err)
+	}
+	if live := s.collector.Config(); live.UsageLabels["claude"] != "подписка Max" || live.UsageLabels["codex"] != "ChatGPT Pro" {
+		t.Fatalf("labels = %v", live.UsageLabels)
+	}
+	page, err := s.page(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := page.(settingsPage).Values; v["usage.labels.claude"] != "подписка Max" {
+		t.Fatalf("page values = %v", v["usage.labels.claude"])
+	}
+	if _, err := s.write(context.Background(), map[string]any{"usage.labels.codex": ""}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	if strings.Contains(string(raw), "codex: ChatGPT Pro") || !strings.Contains(string(raw), "claude: подписка Max") {
+		t.Fatalf("file:\n%s", raw)
+	}
+}

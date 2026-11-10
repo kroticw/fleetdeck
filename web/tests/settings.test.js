@@ -123,3 +123,9 @@ test("settings: a section asked for before the values load is the one drawn", as
   await settle();
   assert.match(root.innerHTML, /class="set-nav-link on" data-section="panel"/);
 });
+
+test("settings: each model's subscription label is a field beside the limits switch", () => {
+  const html = settingsHTML(page({ "usage.labels.claude": "подписка Max", "usage.labels.codex": "" }));
+  assert.match(html, /data-key="usage.labels.claude" value="подписка Max"/);
+  assert.match(html, /data-key="usage.labels.codex" value=""/);
+});
