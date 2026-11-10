@@ -4,6 +4,7 @@ import { markScrollable, watchSelf } from "./scrollable.js";
 // The card's number, drawn the same way here and in the session list.
 import { cardNumberHTML } from "./cardnumber.js";
 import { capture, play, reducedMotion, viewportOf } from "./flip.js";
+import { isStalled, isWaiting } from "./needs.js";
 
 const STAGES = ["new", "active", "review", "blocked", "done"];
 
@@ -44,7 +45,34 @@ function clampProgress(progress) {
 // store with its whole history, one resume away. A stopped card is marked as
 // paused; only a session that cannot come back, or one that is in no list at
 // all, orphans the card that names it.
-function cardHTML(c, orphanPaths, stoppedPaths) {
+// liveStates is each live session's state as a card's badge says it, by short
+// id: waiting for an answer before stalled before working, the order a person
+// needs to know them in.
+export function liveStates(snap) {
+  const live = new Map();
+  for (const s of snap?.sessions ?? []) {
+    if (!s.short) continue;
+    live.set(s.short, isWaiting(s) ? "waiting" : isStalled(s) ? "stalled" : "working");
+  }
+  return live;
+}
+
+const BADGE_WORD = {
+  working: "dock_state_working",
+  waiting: "dock_state_waiting",
+  stalled: "dock_state_stalled",
+  stopped: "dock_state_stopped",
+  dead: "session_dead",
+};
+
+// stateHTML is the badge with the session's state and the progress as a
+// number; a card with no session has neither.
+function stateHTML(c, state) {
+  if (!state) return "";
+  return `<div class="kstate"><span class="kbadge kbadge-${state}">${escapeHTML(t(BADGE_WORD[state]))}</span><span class="kpct">${clampProgress(c.progress ?? 0)}%</span></div>`;
+}
+
+function cardHTML(c, orphanPaths, stoppedPaths, live = new Map()) {
   const path = escapeHTML(c.path);
   if (c.parseError) {
     return `
@@ -62,13 +90,15 @@ function cardHTML(c, orphanPaths, stoppedPaths) {
   if (c.session) {
     const sessionId = escapeHTML(c.session);
     if (dead) {
-      sessionHTML = `<div class="ksession ksession-dead">${sessionId} — ${escapeHTML(t("session_dead"))}</div>`;
+      sessionHTML = `<span class="ksession ksession-dead">${sessionId}</span>`;
     } else if (stopped) {
-      sessionHTML = `<div class="ksession ksession-stopped">${sessionId} — ${escapeHTML(t("session_stopped"))}</div>`;
+      sessionHTML = `<span class="ksession ksession-stopped">${sessionId}</span>`;
     } else {
-      sessionHTML = `<div class="ksession">${sessionId}</div>`;
+      sessionHTML = `<span class="ksession">${sessionId}</span>`;
     }
   }
+  const state = !c.session ? "" : dead ? "dead" : stopped ? "stopped" : live.get(c.session) ?? "";
+  const bar = c.session || (c.progress ?? 0) > 0 ? `<div class="kprog"><i data-progress="${clampProgress(c.progress ?? 0)}"></i></div>` : "";
 
   const mark = dead ? " kcard-orphan" : stopped ? " kcard-stopped" : "";
   // data-stage is what a drop writes against: the stage this card was drawn
@@ -80,9 +110,10 @@ function cardHTML(c, orphanPaths, stoppedPaths) {
   return `
     <article class="kcard ${zoneClass(c.zone)}${mark}${stateClass(c)}" data-path="${path}" data-stage="${escapeHTML(c.stage ?? "")}"${c.session ? ` data-session="${escapeHTML(c.session)}"` : ""} draggable="${c.pending ? "false" : "true"}">
       <div class="ktitle">${title}</div>
-      <div class="kmeta">${cardNumberHTML(c.id)}${sessionHTML}</div>
+      <div class="kmeta"><span class="kzone" aria-hidden="true"></span>${cardNumberHTML(c.id)}${sessionHTML}</div>
       ${statusHTML(c)}
-      <div class="kprog"><i data-progress="${clampProgress(c.progress)}"></i></div>
+      ${stateHTML(c, state)}
+      ${bar}
     </article>`;
 }
 
@@ -121,7 +152,46 @@ function ghostHTML(g) {
 // column would promise a card that lands in new anyway.
 const ADD_STAGE = "new";
 
-export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new Set(), ghosts = []) {
+// The columns a person can fold into a strip, and which are folded: done, the
+// column of every card ever finished, is folded until opened. The choice is the
+// browser's, kept across reloads; a storage that throws keeps the default.
+const FOLDABLE = new Set(["done"]);
+const FOLD_KEY = "fleetdeck-board-folded";
+
+export function foldedStages(storage = globalThis.localStorage) {
+  try {
+    const kept = storage?.getItem(FOLD_KEY);
+    if (kept !== null && kept !== undefined) return new Set(JSON.parse(kept).filter((s) => FOLDABLE.has(s)));
+  } catch {
+    // Fall through to the default.
+  }
+  return new Set(FOLDABLE);
+}
+
+export function toggleFolded(stage, storage = globalThis.localStorage) {
+  const folded = foldedStages(storage);
+  if (folded.has(stage)) folded.delete(stage);
+  else if (FOLDABLE.has(stage)) folded.add(stage);
+  try {
+    storage?.setItem(FOLD_KEY, JSON.stringify([...folded]));
+  } catch {
+    // Folded for this page only.
+  }
+  return folded;
+}
+
+function foldedColumnHTML(label, stage, count) {
+  return `
+    <div class="kcol kcol-folded" data-stage="${escapeHTML(stage)}">
+      <button type="button" class="kcol-unfold" data-stage="${escapeHTML(stage)}" aria-expanded="false" aria-label="${escapeHTML(`${t("column_unfold")} ${label}`)}"><span class="kcol-unfold-name">${escapeHTML(label)}</span><span class="kcount">${count}</span></button>
+    </div>`;
+}
+
+export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new Set(), ghosts = [], live = new Map(), folded = false) {
+  if (folded) return foldedColumnHTML(label, stage, cards.length);
+  const fold = FOLDABLE.has(stage)
+    ? `<button type="button" class="kcol-fold" data-stage="${escapeHTML(stage)}" aria-expanded="true" aria-label="${escapeHTML(`${t("column_fold")} ${label}`)}"></button>`
+    : "";
   // An empty column is a real drop target, not dead space -- it must never
   // become unreachable -- but it has nothing that needs reading, so it has
   // no reason to claim the same width as a column carrying thirty cards.
@@ -136,10 +206,10 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
       : "";
   return `
     <div class="kcol${empty ? " kcol-empty" : ""}" data-stage="${escapeHTML(stage)}">
-      <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span></h5>
+      <h5>${escapeHTML(label)} <span class="kcount">${cards.length}</span>${fold}</h5>
       ${add}
       ${ghosts.map(ghostHTML).join("")}
-      ${cards.map((c) => cardHTML(c, orphanPaths, stoppedPaths)).join("")}
+      ${cards.map((c) => cardHTML(c, orphanPaths, stoppedPaths, live)).join("")}
     </div>`;
 }
 
@@ -176,10 +246,12 @@ export function render(root, snap) {
   const other = cards.filter((c) => !STAGES.includes(c.stage));
 
   const ghosts = snap?.creating ?? [];
+  const live = liveStates(snap);
+  const folded = foldedStages();
   const columns = STAGES.map((stage, i) =>
-    columnHTML(stage, stage, known[i], orphanPaths, stoppedPaths, stage === ADD_STAGE ? ghosts : []),
+    columnHTML(stage, stage, known[i], orphanPaths, stoppedPaths, stage === ADD_STAGE ? ghosts : [], live, folded.has(stage)),
   ).join("");
-  const otherColumn = columnHTML("other", "other", other, orphanPaths, stoppedPaths);
+  const otherColumn = columnHTML("other", "other", other, orphanPaths, stoppedPaths, [], live);
 
   // In the fleetdeck window a column scrolls on its own (web/app.css), and the
   // panel's snapshot comes every second: columns drawn anew are at their top,
@@ -377,6 +449,12 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   root.addEventListener("click", (ev) => {
     if (ev.target.closest(".kcol-add")) {
       onAddCard?.();
+      return;
+    }
+    const fold = ev.target.closest(".kcol-fold, .kcol-unfold");
+    if (fold) {
+      toggleFolded(fold.dataset.stage);
+      draw();
       return;
     }
     const card = ev.target.closest(".kcard");

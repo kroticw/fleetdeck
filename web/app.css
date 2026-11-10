@@ -2733,109 +2733,206 @@ button.review-line-add:hover {
 
 .kcol h5 {
   margin: 0 0 2px;
+  padding: 0 4px 2px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: var(--fs-2xs);
+  gap: var(--gap);
+  font-size: var(--fs-sm);
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
+  color: var(--text);
+}
+
+/* The stage's dot before its name: the signal each stage carries. */
+.kcol h5::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--stage-dot, var(--text-faint));
+}
+
+.kcol[data-stage="active"] {
+  --stage-dot: var(--accent);
+}
+
+.kcol[data-stage="review"] {
+  --stage-dot: var(--attn);
+}
+
+.kcol[data-stage="blocked"] {
+  --stage-dot: var(--danger);
+}
+
+.kcol[data-stage="done"] {
+  --stage-dot: var(--ok);
 }
 
 .kcount {
-  margin-left: auto;
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
+  font-weight: 400;
   color: var(--text-faint);
 }
 
+/* The fold control at the end of an open column's heading, and the strip a
+   folded column becomes: its dot, its name read downwards and its count. The
+   strip is still the column, so a card can be dropped on it. */
+.kcol-fold {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.kcol-fold::before {
+  content: "›";
+  display: block;
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.kcol-fold:hover,
+.kcol-unfold:hover {
+  background: var(--neutral-soft);
+  color: var(--text);
+}
+
+#board > .kcol-folded {
+  flex: 0 0 44px;
+  min-width: 44px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.kcol-unfold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.kcol-unfold::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--stage-dot, var(--text-faint));
+}
+
+.kcol-unfold-name {
+  writing-mode: vertical-rl;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.kcol-unfold .kcount {
+  writing-mode: vertical-rl;
+}
+
+/* A card: a rounded tile with its title, a row of identifiers led by the
+   zone's dot, the session's state as a badge with the progress beside it, and
+   a thin bar. The zone is never a stripe: a dot says it without taking a side
+   of the card. */
 .kcard {
-  border-left: 3px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  border: 1px solid var(--card-edge);
+  border-radius: 12px;
+  padding: 10px 11px 11px;
+  background: var(--card);
 }
 
 .zone-urgent {
-  border-left-color: var(--zone-urgent);
+  --zone-dot: var(--zone-urgent);
 }
 
 .zone-unplanned {
-  border-left-color: var(--zone-unplanned);
+  --zone-dot: var(--zone-unplanned);
 }
 
 .zone-planned {
-  border-left-color: var(--zone-planned);
+  --zone-dot: var(--zone-planned);
 }
 
 .zone-niceToHave {
-  border-left-color: var(--zone-nice);
+  --zone-dot: var(--zone-nice);
 }
 
 .zone-none {
-  border-left-color: var(--zone-none);
+  --zone-dot: var(--zone-none);
+}
+
+.kzone {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--zone-dot, var(--zone-none));
 }
 
 .ktitle {
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 550;
+  line-height: 1.4;
   color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   /* break-word, not anywhere: anywhere also counts as a break opportunity
      inside the flex-sizing algorithm itself, so a narrow .kcol shrinks
-     eagerly and wraps titles one or two words at a time, sometimes mid-word,
-     because the layout never has to prove a whole word won't fit before
-     breaking it. break-word only splits a word when the line would
-     otherwise overflow -- real titles, which are prose with plenty of
-     spaces, wrap at word boundaries the way a reader expects; only a single
-     token wider than the column would ever break mid-word. */
+     eagerly and wraps titles one or two words at a time, sometimes mid-word.
+     break-word only splits a word when the line would otherwise overflow. */
   overflow-wrap: break-word;
 }
 
-/* The service row under the title: the card's own number and the short id of
-   the session working it. Neither is the card's name, so both live below the
-   title and both stay small; the row wraps because a dead or stopped session
-   spells out its state here and a narrow column cannot hold that beside a
-   number. The 2px the session line used to carry itself now belongs to the
-   row, so the two boxes sit on one baseline instead of one nudging the other
-   down. */
+/* The service row under the title: the zone's dot, the card's own number and
+   the short id of the session working it. */
 .kmeta {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--gap-sm);
-  margin-top: 2px;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
 }
 
 /* The card's number, and the one rule it has to obey: it cannot be mistaken
    for the session's short id sitting beside it. The two are different
-   identifiers with different lifetimes — the card's is permanent and is what
-   gets said out loud, the session's changes with every run — and an operator
-   naming the wrong one gets nowhere.
-   They are told apart by shape, not by colour: same size, same grey, but the
-   number sits in a quiet chip and is monospaced, so it reads as a label
-   attached to the card and survives a screenshot, a greyscale screen and a
-   person who never hovers over anything. Monospace is not decoration here
-   either — this string gets read out character by character, and 0/O and
-   1/l trading places is exactly the failure that costs a second attempt. */
+   identifiers with different lifetimes: the card's is permanent and is what
+   gets said out loud, the session's changes with every run. They are told
+   apart by shape, not by colour: the number sits in a quiet chip and is
+   monospaced, so it survives a screenshot and a greyscale screen. */
 .knum {
   flex: none;
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   color: var(--text-muted);
-  background: var(--surface-hover);
-  border-radius: var(--radius-sm);
-  padding: 0 var(--gap-sm);
+  background: var(--neutral-soft);
+  border-radius: 5px;
+  padding: 1px 5px;
 }
 
 /* A card with no number: a word in the number's place, and deliberately not
-   shaped like a number — no chip, no monospace, italic. An empty space here
-   reads as a panel that lost the number; a chip with a dash in it reads as a
-   number nobody can make out. This says the card has none, which is the fact,
-   and the title attribute says why. */
+   shaped like a number: no chip, no monospace, italic. */
 .knum-none {
-  font-family: inherit;
+  font-family: var(--font-ui);
   font-style: italic;
   color: var(--text-faint);
   background: none;
@@ -2844,46 +2941,87 @@ button.review-line-add:hover {
 
 .ksession {
   font-size: var(--fs-2xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
-/* A dead session, on a card in any other stage, still needs a person's
-   attention: something was pointed at a session that is gone and nobody
-   has said what to do about it. .kcard-orphan and .ksession-dead alone
-   (no further class on the card) are the "still needs a look" case and
-   stay --attn. The muted case below is layered on top of that, for the
-   one stage where a dead session is not news. */
-.ksession-dead {
-  color: var(--attn);
+/* The session's state as a word in its signal's colour, and the progress as a
+   number at the other end of the row. */
+.kstate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.kbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
+  color: var(--badge, var(--text-muted));
+  background: var(--badge-ground, var(--neutral-soft));
+}
+
+.kbadge::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.kbadge-working {
+  --badge: var(--accent);
+  --badge-ground: var(--accent-soft);
+}
+
+.kbadge-waiting {
+  --badge: var(--attn);
+  --badge-ground: var(--attn-soft);
+}
+
+.kbadge-dead {
+  --badge: var(--danger);
+  --badge-ground: var(--danger-soft);
+}
+
+/* A dead session on a card already done is the normal end of a task, not an
+   open question: there it is quiet. */
+.kcol[data-stage="done"] .kbadge-dead {
+  --badge: var(--text-muted);
+  --badge-ground: var(--neutral-soft);
+}
+
+.kpct {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+}
+
+.ksession-dead {
+  color: var(--text-faint);
 }
 
 .kcard-orphan {
-  background: color-mix(in srgb, var(--attn) 10%, var(--surface));
-  border-color: color-mix(in srgb, var(--attn) 30%, var(--border));
+  border-color: var(--danger-edge);
 }
 
-/* The fix for the live-run finding: a dead session on a card already in the
-   "done" column is the normal end of a task, not an open question — the
-   work finished and the session that did it ended with it. Scoped to
-   .kcol[data-stage="done"] rather than to the card's own state, since
-   "done" is what makes a dead session unremarkable; the same card orphaned
-   in any other column is still --attn above. */
 .kcol[data-stage="done"] .kcard-orphan {
-  background: var(--surface);
-  border-color: var(--border);
+  border-color: var(--card-edge);
 }
 
 .kcol[data-stage="done"] .ksession-dead {
-  color: var(--text-muted);
-  font-weight: 400;
+  color: var(--text-faint);
 }
 
 .kcard-broken {
-  border-left-color: var(--danger);
-  border-left-style: dashed;
-  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
-  border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
+  border-style: dashed;
+  border-color: var(--danger-edge);
+  background: color-mix(in srgb, var(--danger) 6%, var(--card));
 }
 
 .kbroken {
@@ -2894,10 +3032,9 @@ button.review-line-add:hover {
 }
 
 .kprog {
-  height: 4px;
+  height: 3px;
   border-radius: 2px;
-  margin-top: 6px;
-  background: var(--border);
+  background: var(--track);
   overflow: hidden;
 }
 
@@ -2905,7 +3042,24 @@ button.review-line-add:hover {
   display: block;
   height: 100%;
   width: 0;
-  background: var(--accent);
+  border-radius: 2px;
+  background: var(--bar, var(--text-muted));
+}
+
+.kcard:has(.kbadge-working) {
+  --bar: var(--accent);
+}
+
+.kcard:has(.kbadge-waiting) {
+  --bar: var(--attn);
+}
+
+.kcard:has(.kbadge-dead) {
+  --bar: var(--danger);
+}
+
+.kcol[data-stage="done"] .kcard {
+  --bar: var(--ok);
 }
 
 /* Centre-column sections (web/js/sections.js) and the documentation section
@@ -4778,9 +4932,30 @@ body.is-resizing {
   background: transparent;
 }
 
-/* The board is the ground the glass samples, not glass itself. */
+/* The board is the ground the glass samples, not glass itself: the window's
+   wall, tinted by the accent, so the panels over it read as glass. */
 :root[data-surface="board"][data-glass] body {
+  background: var(--wall);
+}
+
+:root[data-surface="board"][data-glass="opaque"] body {
   background: var(--bg);
+}
+
+/* The open room between the panels is one island the columns lie in. It is
+   drawn behind the box that scrolls, so the geometry the window measures stays
+   the box's (web/tests/app-css.test.js). */
+:root[data-surface="board"] .col-center::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--host-inset-top, 64px) - 10px);
+  left: calc(var(--host-inset-left, 394px) - 12px);
+  right: calc(var(--host-inset-content-right, 356px) + 10px);
+  bottom: 10px;
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--island-shadow);
+  pointer-events: none;
 }
 
 /* No glass, no edge of glass: an opaque side surface is drawn with the border a
@@ -5063,7 +5238,8 @@ body.is-resizing {
    window's capsules. The new card form stays: the capsule opens it, and it
    drops down under the capsules. */
 :root[data-surface="board"] .col-center {
-  background: var(--bg);
+  position: relative;
+  background: transparent;
   border: none;
   border-radius: 0;
 }
@@ -5135,6 +5311,7 @@ body.is-resizing {
    and the cards' shadows inside the box. A scrolling box clips what is past its
    edge, so the columns no longer run on under the sessions glass. */
 :root[data-surface="board"] #board {
+  position: relative;
   margin-left: calc(var(--host-inset-left, 394px) - var(--gap-lg));
   margin-right: var(--host-inset-content-right, 356px);
   padding-top: var(--host-inset-top, 64px);
@@ -5160,11 +5337,15 @@ body.is-resizing {
   height: 8px;
 }
 
+/* A column is a tinted panel on the island: opaque, so its heading can stay
+   on the column's own ground (--bg here) while the cards pass under it. */
 :root[data-surface="board"] .kcol {
+  --bg: color-mix(in srgb, var(--text) 3.5%, var(--surface));
   flex: 0 0 214px;
-  background: transparent;
+  background: var(--bg);
   border: none;
-  padding: 0;
+  border-radius: var(--radius-lg);
+  padding: 10px 8px 8px;
   gap: var(--gap);
   scrollbar-width: auto;
   scrollbar-color: auto;
@@ -5193,41 +5374,10 @@ body.is-resizing {
   background: var(--bg);
 }
 
-/* The zone stripe is a shadow rather than a border, so the card keeps its
-   rounded island shape on every side. */
+/* A card in the window is the base tile; in the light theme it lifts off its
+   column by a hairline shadow. */
 :root[data-surface="board"] .kcard {
-  border: none;
-  border-radius: 10px;
-  padding: 8px 10px 8px 13px;
-  box-shadow: inset 3px 0 0 var(--zone-stripe, transparent), var(--island-shadow);
-}
-
-:root[data-surface="board"] .zone-urgent {
-  --zone-stripe: var(--zone-urgent);
-}
-
-:root[data-surface="board"] .zone-unplanned {
-  --zone-stripe: var(--zone-unplanned);
-}
-
-:root[data-surface="board"] .zone-planned {
-  --zone-stripe: var(--zone-planned);
-}
-
-:root[data-surface="board"] .zone-niceToHave {
-  --zone-stripe: var(--zone-nice);
-}
-
-:root[data-surface="board"] .zone-none {
-  --zone-stripe: var(--zone-none);
-}
-
-:root[data-surface="board"] .kcard-stopped {
-  --zone-stripe: var(--border-strong);
-}
-
-:root[data-surface="board"] .kcard-broken {
-  --zone-stripe: var(--danger);
+  box-shadow: 0 1px 2px rgb(20 22 28 / 5%);
 }
 
 /* K1, S1, D1: the card, the session and the document open as a sheet over the
