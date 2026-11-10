@@ -165,6 +165,7 @@ func TestEmbeddedFSContainsExpectedFiles(t *testing.T) {
 		"js/sections.js":       true,
 		"js/docs.js":           true,
 		"js/docsort.js":        true,
+		"js/dragholes.js":      true,
 		"js/findbar.js":        true,
 		"js/reveal.js":         true,
 		"js/session.js":        true,

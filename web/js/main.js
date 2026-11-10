@@ -21,6 +21,7 @@ import { renderBuildBanner, pageStorage, rememberOpenSession, takeOpenSession } 
 import { rememberFleet, switchFleet } from "./fleet.js";
 import { t } from "./i18n.js";
 import { readHost, callHost } from "./host.js";
+import { watchDragHoles } from "./dragholes.js";
 import { regionsFor, layoutReport } from "./surfaces.js";
 import { wireHostActions } from "./hostactions.js";
 import { routesFor } from "./hostroutes.js";
@@ -397,6 +398,11 @@ subscribe(publishCapsules);
 if (host) {
   const page = document.documentElement;
   const column = document.getElementById(host.surface);
+  // A side panel's controls in the window's top strip, which the window drags
+  // by everywhere else.
+  if (host.surface === "orchestrator" || host.surface === "sessions") {
+    watchDragHoles(document, (holes) => callHost(window, "fleetdeckDragHoles", holes));
+  }
   // On a CI stand only: the board's scrolling, in the window's log.
   const boardEl = host.stand && host.surface === "board" ? document.getElementById("board") : null;
   const reportBoardScroll = boardEl ? watchBoardScroll(window, boardEl, (report) => callHost(window, "fleetdeckStandReport", report)) : null;
