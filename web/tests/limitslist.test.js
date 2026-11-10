@@ -6,7 +6,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { installDOM } from "./fake-dom.js";
+import { installDOM, fireEvent } from "./fake-dom.js";
 
 let dom;
 let header;
@@ -51,4 +51,30 @@ test("limits list: an API key shows its balance and today's spend, not a percent
 test("limits list: the capsule names the busiest model only", () => {
   assert.deepEqual(header.limitsOf({ limits: claude, codexLimits: codex, providers: [gemini, router] }, now), [{ label: "Codex", pct: 64, level: "warm" }]);
   assert.deepEqual(header.limitsOf({}, now), [{ label: "Claude", pct: null, level: "off" }]);
+});
+
+test("limits list: each model carries the operator's label for its subscription", () => {
+  const table = header.limitsTableHTML({ limits: claude, codexLimits: codex, limitsLabels: { claude: "подписка Max" } }, now);
+  const card = table.slice(table.indexOf("Claude"));
+  assert.match(card.slice(0, card.indexOf("</section>")), /<span class="limits-source">подписка Max<\/span>/);
+  assert.doesNotMatch(table.slice(table.indexOf("Codex"), table.indexOf("Claude")), /limits-source/, "a model with no label shows none");
+});
+
+test("limits list: the window's menu ends with the way to the settings the limits come from", () => {
+  assert.match(header.limitsTableHTML({ limits: claude }, now, { sources: true }), /<button type="button" class="limits-sources"[^>]*>/);
+  assert.doesNotMatch(header.limitsTableHTML({ limits: claude }, now), /limits-sources/, "a menu with nowhere to go shows no button");
+});
+
+test("limits list: the window's Sources button opens the settings and closes the menu", async () => {
+  const { createLimitsPopover } = await import("../js/limitsmenu.js");
+  let opened = 0;
+  const popover = createLimitsPopover(dom.document, () => ({ limits: claude }), () => now, () => (opened += 1));
+  popover.toggle();
+  const node = dom.document.body.querySelector(".limits-popover");
+  const button = dom.element("button");
+  button.className = "limits-sources";
+  node.appendChild(button);
+  fireEvent(button, "click");
+  assert.equal(opened, 1);
+  assert.equal(node.hidden, true);
 });

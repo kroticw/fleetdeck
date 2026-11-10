@@ -6763,10 +6763,43 @@ body.is-resizing {
   color: var(--text-faint);
 }
 
-.limits-ages {
+/* The subscription, in the operator's words (usage.labels), at the card's
+ * right. */
+.limits-source {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Under the cards: when each model last spoke, and the way to the settings. */
+.limits-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 10px;
+}
+
+.limits-ages {
+  flex: 1 1 auto;
   color: var(--text-faint);
   font-size: var(--fs-2xs);
+}
+
+.limits-sources {
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.limits-sources:hover {
+  text-decoration: underline;
 }
 
 /* The settings section (web/js/settings.js), drawn to the settings design,

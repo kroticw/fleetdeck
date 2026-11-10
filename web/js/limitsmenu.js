@@ -7,7 +7,9 @@
 import { limitsTableHTML } from "./header.js";
 import { t } from "./i18n.js";
 
-export function createLimitsPopover(doc, getSnap, now = () => Date.now()) {
+// onSources opens the settings the limits come from; the menu shows its
+// button only when given one.
+export function createLimitsPopover(doc, getSnap, now = () => Date.now(), onSources = null) {
   const node = doc.createElement("div");
   node.className = "limits-popover";
   node.setAttribute("role", "dialog");
@@ -17,7 +19,7 @@ export function createLimitsPopover(doc, getSnap, now = () => Date.now()) {
 
   const refresh = () => {
     if (node.hidden) return;
-    node.innerHTML = limitsTableHTML(getSnap() ?? {}, now());
+    node.innerHTML = limitsTableHTML(getSnap() ?? {}, now(), { sources: Boolean(onSources) });
   };
   const close = () => {
     node.hidden = true;
@@ -26,6 +28,11 @@ export function createLimitsPopover(doc, getSnap, now = () => Date.now()) {
     node.hidden = !node.hidden;
     refresh();
   };
+  node.addEventListener("click", (event) => {
+    if (!onSources || !event.target?.closest?.(".limits-sources")) return;
+    close();
+    onSources();
+  });
   doc.addEventListener("keydown", (event) => {
     if (event.key === "Escape") close();
   });

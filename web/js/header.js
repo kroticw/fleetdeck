@@ -323,8 +323,10 @@ function summarised(base, windows) {
 }
 
 export function providerLimits(snap, nowMs) {
+  // The operator's word for each subscription (usage.labels), by name.
+  const sourceOf = (name) => snap.limitsLabels?.[String(name).toLowerCase()] ?? "";
   const account = (name, limits, stale) =>
-    summarised({ name, kind: "windows", fetchedAt: limits?.fetchedAt ?? null }, [
+    summarised({ name, kind: "windows", fetchedAt: limits?.fetchedAt ?? null, source: sourceOf(name) }, [
       windowOf("5h", limits?.fiveHour, stale),
       windowOf("7d", limits?.sevenDay, stale),
     ]);
@@ -332,7 +334,7 @@ export function providerLimits(snap, nowMs) {
   if (snap.codexLimits) list.push(account("Codex", snap.codexLimits, isCodexLimitsStale(snap, nowMs)));
   for (const p of snap.providers ?? []) {
     const stale = p.fetchedAt ? nowMs - new Date(p.fetchedAt).getTime() > RATE_LIMITS_AGE_WORTH_SHOWING_MS : false;
-    const base = { name: String(p.name ?? ""), kind: p.kind === "balance" ? "balance" : "windows", fetchedAt: p.fetchedAt ?? null, balance: p.balance ?? null };
+    const base = { name: String(p.name ?? ""), kind: p.kind === "balance" ? "balance" : "windows", fetchedAt: p.fetchedAt ?? null, balance: p.balance ?? null, source: sourceOf(p.name ?? "") };
     list.push(summarised(base, (p.windows ?? []).map((w) => windowOf(w.id, w, stale))));
   }
   return list;
@@ -397,20 +399,25 @@ function balanceHTML(p) {
 
 // limitsTableHTML is the menu: every model as a card, the busiest first, each
 // with the windows it has or its balance, then when each last spoke.
-export function limitsTableHTML(snap, nowMs) {
+// sources adds the way to the settings the limits come from, for the window's
+// popover, which knows how to open them.
+export function limitsTableHTML(snap, nowMs, { sources = false } = {}) {
   const providers = busiestFirst(providerLimits(snap, nowMs));
   const cards = providers
     .map((p) => {
       const body = p.kind === "balance" ? balanceHTML(p) : p.windows.map((w) => windowRowHTML(p, w)).join("");
       const kind = kindLabel(p);
-      return `<section class="limits-card limits-${p.level}"><div class="limits-card-head"><span class="limits-dot limits-${p.level}" aria-hidden="true"></span><span class="limits-name">${escapeHTML(p.name)}</span>${kind ? `<span class="limits-kind">${escapeHTML(kind)}</span>` : ""}</div>${body}</section>`;
+      return `<section class="limits-card limits-${p.level}"><div class="limits-card-head"><span class="limits-dot limits-${p.level}" aria-hidden="true"></span><span class="limits-name">${escapeHTML(p.name)}</span>${kind ? `<span class="limits-kind">${escapeHTML(kind)}</span>` : ""}${p.source ? `<span class="limits-source">${escapeHTML(p.source)}</span>` : ""}</div>${body}</section>`;
     })
     .join("");
   const ages = providers
     .filter((p) => p.fetchedAt)
     .map((p) => `${escapeHTML(p.name)}: ${escapeHTML(humanAge(p.fetchedAt))}`)
     .join(" · ");
-  return `<div class="limits-head"><span class="limits-heading">${escapeHTML(t("limits_title"))}</span><span class="limits-order">${escapeHTML(t("limits_busiest_first"))}</span></div><div class="limits-list">${cards}</div>${ages ? `<div class="limits-ages">${escapeHTML(t("limits_updated"))} ${ages}</div>` : ""}`;
+  const agesHTML = ages ? `<span class="limits-ages">${escapeHTML(t("limits_updated"))} ${ages}</span>` : "";
+  const sourcesHTML = sources ? `<button type="button" class="limits-sources">${escapeHTML(t("limits_sources"))}</button>` : "";
+  const foot = agesHTML || sourcesHTML ? `<div class="limits-foot">${agesHTML}${sourcesHTML}</div>` : "";
+  return `<div class="limits-head"><span class="limits-heading">${escapeHTML(t("limits_title"))}</span><span class="limits-order">${escapeHTML(t("limits_busiest_first"))}</span></div><div class="limits-list">${cards}</div>${foot}`;
 }
 
 // The header's parts, in the order the header draws them. A browser tab draws

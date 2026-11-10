@@ -457,7 +457,14 @@ if (host) {
   }
   // The window's limits capsule opens this menu: the header's table, under
   // the capsule row, kept current with each snapshot while it is open.
-  const limitsPopover = host.surface === "board" ? createLimitsPopover(document, get) : null;
+  // Its Sources button: the settings' panel section, where the limits are switched on.
+  const openLimitSources = () => {
+    sections?.show("settings");
+    section = "settings";
+    publishCapsules();
+    document.querySelector('#settings .set-nav-link[data-section="panel"]')?.click();
+  };
+  const limitsPopover = host.surface === "board" ? createLimitsPopover(document, get, undefined, openLimitSources) : null;
   if (limitsPopover) subscribe(() => limitsPopover.refresh());
   wireHostActions(window, host, {
     openCard: (path) => terminalLinks.open(path),
