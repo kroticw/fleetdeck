@@ -1061,11 +1061,10 @@ test("the panel's terminal is the size remembered for it, and Cmd+- changes that
 });
 
 // The head names the session and ends with close; the type size is a setting.
-test("the session head has no font buttons: name first, close last", async () => {
+test("the session head is the mark, the name, the cost, the context and close, in that order, with no font buttons", async () => {
   const { root, stop } = await mount();
   const head = root.querySelector(".s-head").children.map((node) => String(node.className).split(" ").at(-1));
-  assert.equal(head.includes("term-font"), false);
-  assert.equal(head.at(-1), "s-close");
+  assert.deepEqual(head, ["s-avatar", "s-who-box", "s-cost", "s-ctx", "s-close"]);
   stop();
 });
 
