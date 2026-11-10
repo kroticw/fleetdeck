@@ -6117,22 +6117,28 @@ body.is-resizing {
 }
 
 .dialog {
-  width: min(400px, 100%);
+  width: min(480px, 100%);
   max-height: calc(100vh - 4 * var(--gap-lg));
   overflow: auto;
-  padding: var(--gap-lg);
+  padding: 20px;
   border: none;
-  border-radius: var(--radius-lg);
+  border-radius: 22px;
   background-color: var(--surface-on-glass);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  backdrop-filter: blur(24px) saturate(160%);
-  box-shadow: var(--sheet-shadow);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
 }
 
 /* Wide is the form's width, narrow the question's. */
 .dialog[data-size="wide"] {
   width: min(560px, 100%);
+}
+
+/* A form's labels and fields are read at full strength, not as a question's
+ * explanation. */
+.dialog[data-size="wide"] .dialog-body {
+  color: var(--text);
 }
 
 .dialog-head {
@@ -6144,7 +6150,8 @@ body.is-resizing {
 
 .dialog-title {
   margin: 0;
-  font-size: var(--fs-md);
+  font-size: 16px;
+  font-weight: 680;
 }
 
 .dialog-close {
@@ -6160,14 +6167,16 @@ body.is-resizing {
   display: grid;
   gap: var(--gap);
   margin-top: var(--gap);
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
 }
 
 .dialog-foot {
   display: flex;
   justify-content: flex-end;
-  gap: var(--gap);
-  margin-top: var(--gap-lg);
+  gap: 8px;
+  margin-top: 14px;
 }
 
 .dialog-foot:empty {
