@@ -1582,3 +1582,39 @@ test("a document rewritten while its tab is open is read again when the docs rev
 
   assert.match(root.querySelector(".card-doc-body").innerHTML, /Final/);
 });
+
+test("a document's tab shows its path, Finder in the window, and a find bar Cmd+F opens", async () => {
+  const revealed = [];
+  globalThis.fleetdeckReveal = (path) => revealed.push(path);
+  try {
+    const { root } = open(withDocuments(snapshot()), FLEET_UI, {
+      listDocs: async () => DOCS,
+      fetchDoc: async () => "# Report\n\nThe questions.\n",
+    });
+    await settle();
+    const bar = root.querySelector(".find-bar");
+    assert.ok(bar, "the card has no find bar");
+    let prevented = false;
+    fireDocumentEvent(dom.document, "keydown", { key: "f", metaKey: true, preventDefault: () => (prevented = true) });
+    assert.equal(bar.hidden, true, "Cmd+F on the card's own tab has no document to search");
+    assert.equal(prevented, false);
+
+    fireEvent(root.querySelectorAll(".card-tab")[1], "click");
+    await settle();
+    const pane = root.querySelector(".card-pane");
+    assert.equal(pane.querySelector(".card-doc-path").textContent, DOCS[0].path);
+    fireEvent(pane.querySelector(".card-doc-reveal"), "click");
+    assert.deepEqual(revealed, [DOCS[0].path]);
+
+    fireDocumentEvent(dom.document, "keydown", { key: "f", metaKey: true, preventDefault: () => (prevented = true) });
+    assert.equal(bar.hidden, false);
+    assert.equal(prevented, true);
+    // Escape in the bar closes the bar, not the card.
+    fireDocumentEvent(dom.document, "keydown", { key: "Escape", target: bar.querySelector(".find-input") });
+    fireEvent(bar.querySelector(".find-input"), "keydown", { key: "Escape" });
+    assert.equal(bar.hidden, true);
+    assert.equal(root.hidden, false);
+  } finally {
+    delete globalThis.fleetdeckReveal;
+  }
+});

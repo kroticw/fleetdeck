@@ -2078,6 +2078,7 @@ main {
 }
 
 .card-stage {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -3818,37 +3819,227 @@ button.review-line-add:hover {
 }
 
 .docs-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   cursor: pointer;
   border: none;
   background: none;
-  color: var(--text-muted);
+  color: var(--text);
   font: inherit;
-  font-size: var(--fs-sm);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.35;
   text-align: left;
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  border-radius: 10px;
   overflow-wrap: anywhere;
+}
+
+.docs-entry-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.docs-date {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-faint);
 }
 
 .docs-entry:hover {
   background: var(--surface-hover);
-  color: var(--text);
 }
 
 .docs-entry.on {
+  background: var(--glass-control-hover);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+/* Over the list: the title filter, then the order. */
+.docs-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.docs-filter {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.docs-sort-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.docs-sort {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--track);
+}
+
+.docs-sort-option {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.docs-sort-option[aria-checked="true"] {
+  background: var(--glass-control-hover);
   color: var(--text);
   font-weight: 600;
-  background: var(--surface-hover);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+.docs-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docs-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A card's heading over its documents: number, title, how many. */
+.docs-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.docs-group-id,
+.docs-group-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.docs-group-count {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.docs-group-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* The open document and, over it, the cards linking to it. A column of its own
  * so the body keeps the scroll and the row above it never scrolls away. */
 .docs-main {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Where the open document lives, with Finder beside it in the window. */
+.docs-file,
+.card-doc-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.docs-path,
+.card-doc-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* The find bar (web/js/findbar.js): a frosted pill at the document's top
+ * right, over the text. */
+.find-bar {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: 12px;
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
+}
+
+.find-bar[hidden] {
+  display: none;
+}
+
+/* With the bar open the document moves down from under it, as in the design. */
+.find-bar:not([hidden]) + .docs-cards,
+.find-bar:not([hidden]) + .card-pane {
+  margin-top: 40px;
+}
+
+.find-input {
+  width: 140px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.find-count {
+  min-width: 4ch;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+::highlight(find-hit) {
+  background-color: var(--hl);
+}
+
+::highlight(find-current) {
+  background-color: var(--hl-current);
+  color: var(--hl-current-text);
 }
 
 .docs-cards .doc-cards {
@@ -5471,6 +5662,13 @@ body.is-resizing {
   background: var(--surface);
   box-shadow: var(--island-shadow);
   pointer-events: none;
+  /* Under every child, positioned or not: a positioned pseudo-element paints
+     over the column's plain blocks (the docs list was drawn over). */
+  z-index: -1;
+}
+
+:root[data-surface="board"] .col-center {
+  isolation: isolate;
 }
 
 /* No glass, no edge of glass: an opaque side surface is drawn with the border a
