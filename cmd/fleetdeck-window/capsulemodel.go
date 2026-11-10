@@ -14,14 +14,17 @@ import (
 // right the bar has the brand, the fleet, the limits and an update when there
 // is one; at its right the counters and the theme (the redesign, T-226).
 type capsuleModel struct {
-	Version     int            `json:"version"`
-	Brand       capsuleBrand   `json:"brand"`
-	Fleet       capsuleFleet   `json:"fleet"`
-	LimitsLabel string         `json:"limitsLabel"`
-	Limits      []capsuleCap   `json:"limits"`
-	Update      *capsuleUpdate `json:"update,omitempty"`
-	Counters    []capsulePill  `json:"counters"`
-	Theme       capsuleTheme   `json:"theme"`
+	Version     int          `json:"version"`
+	Brand       capsuleBrand `json:"brand"`
+	Fleet       capsuleFleet `json:"fleet"`
+	LimitsLabel string       `json:"limitsLabel"`
+	Limits      []capsuleCap `json:"limits"`
+	// LimitsMenu is what the limits capsule opens: a system menu over every
+	// panel. Without it the press goes to the page.
+	LimitsMenu *capsuleLimitsMenu `json:"limitsMenu,omitempty"`
+	Update     *capsuleUpdate     `json:"update,omitempty"`
+	Counters   []capsulePill      `json:"counters"`
+	Theme      capsuleTheme       `json:"theme"`
 	// Accent is the page's accent, #rrggbb: the fleet's dot and the update.
 	Accent string `json:"accent,omitempty"`
 	// Opaque is the operator's "no transparency" glass setting: the window
@@ -55,6 +58,34 @@ type capsuleCap struct {
 	Text  string `json:"text"`
 	Level string `json:"level"`
 	Color string `json:"color"`
+}
+
+// capsuleLimitsMenu is the page's limits table as a menu (web/js/header.js
+// limitsMenuOf): a head, every model with a row per window, when each last
+// spoke and the way to the limits' sources.
+type capsuleLimitsMenu struct {
+	Title   string               `json:"title"`
+	Note    string               `json:"note"`
+	Models  []capsuleLimitsModel `json:"models"`
+	Updated string               `json:"updated"`
+	Sources string               `json:"sources"`
+}
+
+type capsuleLimitsModel struct {
+	Name  string             `json:"name"`
+	Kind  string             `json:"kind"`
+	Color string             `json:"color"`
+	Rows  []capsuleLimitsRow `json:"rows"`
+}
+
+// capsuleLimitsRow is one window or a balance: Pct is -1 where there is no
+// number, and no bar is drawn.
+type capsuleLimitsRow struct {
+	Title string  `json:"title"`
+	Text  string  `json:"text"`
+	Pct   float64 `json:"pct"`
+	Note  string  `json:"note"`
+	Color string  `json:"color"`
 }
 
 type capsuleUpdate struct {

@@ -13,6 +13,7 @@ const TARGETS = [
   "showSection",
   "toggleNewCard",
   "toggleLimits",
+  "openLimitSources",
   "cycleTheme",
   "setTheme",
   "pressUpdate",
@@ -87,6 +88,17 @@ test("the board opens the limits menu where the capsule is", () => {
   send({ type: "limits", left: 221.5, top: 42 });
   send({ type: "limits" });
   assert.deepEqual(calls, [["toggleLimits", { left: 221.5, top: 42 }], ["toggleLimits", undefined]]);
+});
+
+// "Sources…" in the bar's system menu of limits opens the settings they come
+// from, on the board.
+test("the board opens the limits' sources the bar's menu asks for", () => {
+  const { send, calls } = setup("board");
+  send({ type: "limitSources" });
+  assert.deepEqual(calls, [["openLimitSources"]]);
+  const sessions = setup("sessions");
+  sessions.send({ type: "limitSources" });
+  assert.deepEqual(sessions.calls, []);
 });
 
 // The bar's theme segments: the board saves the choice, "" for the system's.

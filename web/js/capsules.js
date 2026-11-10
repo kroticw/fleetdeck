@@ -13,7 +13,9 @@ import { buildLabel } from "./buildcheck.js";
 // version on offer, or ""; counts how many sessions wait, how many stalled and
 // how many never said; theme "light", "dark" or null for the system's; colors
 // the levels' colours and attn and muted.
-export function capsuleModel({ build, fleet, fleets, limits, update, counts, theme, t, colors, accent, opaque }) {
+// limitsMenu is header.js's limitsMenuOf: the window's menu under the limits
+// capsule. A percentage the menu has no number for is -1 to the window.
+export function capsuleModel({ build, fleet, fleets, limits, limitsMenu, update, counts, theme, t, colors, accent, opaque }) {
   const counter = (n, word, color) => ({ text: `${n} ${word}`, color });
   const waitingNumber = `${counts.waiting}${counts.unknown > 0 ? "+?" : ""}`;
   return {
@@ -33,6 +35,22 @@ export function capsuleModel({ build, fleet, fleets, limits, update, counts, the
       level,
       color: colors[level],
     })),
+    ...(limitsMenu
+      ? {
+          limitsMenu: {
+            title: t("limits_title"),
+            note: t("limits_busiest_first"),
+            models: limitsMenu.models.map((m) => ({
+              name: m.name,
+              kind: m.kind,
+              color: colors[m.level],
+              rows: m.rows.map((r) => ({ title: r.title, text: r.text, pct: r.pct ?? -1, note: r.note, color: colors[r.level] })),
+            })),
+            updated: limitsMenu.updated,
+            sources: t("limits_sources"),
+          },
+        }
+      : {}),
     ...(update ? { update: { text: t("update_available").replace("{version}", update), action: t("update_button") } } : {}),
     counters: [
       counter(waitingNumber, t("waiting_count"), counts.waiting > 0 ? colors.attn : colors.muted),

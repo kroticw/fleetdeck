@@ -53,6 +53,27 @@ func TestACapsuleModelKeepsThePagesWordsAndColours(t *testing.T) {
 	}
 }
 
+// The limits capsule's system menu (T-226): every model and its windows.
+func TestACapsuleModelCarriesTheLimitsMenu(t *testing.T) {
+	m, err := parseCapsuleModel(json.RawMessage(`{"version":1,"limitsMenu":{"title":"Лимиты","note":"сначала самые занятые",
+		"models":[{"name":"Codex","kind":"5 ч и неделя","color":"#a15c00","rows":[{"title":"5 часов","text":"63%","pct":63,"note":"сброс через 2 ч","color":"#a15c00"},{"title":"7 дней","text":"—","pct":-1,"note":"","color":"#8791a0"}]}],
+		"updated":"обновлено Codex: 1 мин","sources":"Источники…"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	menu := m.LimitsMenu
+	if menu == nil || menu.Title != "Лимиты" || menu.Sources != "Источники…" || menu.Updated != "обновлено Codex: 1 мин" || len(menu.Models) != 1 {
+		t.Fatalf("menu = %+v", menu)
+	}
+	rows := menu.Models[0].Rows
+	if len(rows) != 2 || rows[0] != (capsuleLimitsRow{Title: "5 часов", Text: "63%", Pct: 63, Note: "сброс через 2 ч", Color: "#a15c00"}) || rows[1].Pct != -1 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if plain, _ := parseCapsuleModel(json.RawMessage(`{"version":1}`)); plain.LimitsMenu != nil {
+		t.Fatal("no menu in the page's model is no menu")
+	}
+}
+
 func TestNoUpdateIsNoUpdateCapsule(t *testing.T) {
 	m, err := parseCapsuleModel(json.RawMessage(`{"version":1}`))
 	if err != nil {

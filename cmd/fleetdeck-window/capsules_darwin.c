@@ -84,7 +84,7 @@ static id sendDouble1(id recv, SEL s, double v) { return ((id (*)(id, SEL, doubl
 
 enum { tagFleet = 1, tagLimits = 2, tagUpdate = 3, tagTheme = 4 };
 // Menu items: a fleet's index, or one of these.
-enum { itemAll = -1, itemAdd = -2 };
+enum { itemAll = -1, itemAdd = -2, itemSources = -3 };
 
 #define maxLimits 8
 #define maxCounters 4
@@ -171,10 +171,20 @@ static void pressWith(const char *prefix, const char *rest) {
   fleetdeckCapsulePressed(action);
 }
 
-// The limits press with where the capsule is: "limits:<left>,<bottom>", in
-// points from the window content's top left. The page's menu opens under the
-// capsule (web/js/limitsmenu.js); in 1.8.0 it opened at the bar's right end.
+// The limits capsule's menu as the last draw built it, or nil for a page that
+// sent none; kept while the row is.
+static id limitsMenuDrawn;
+static void showMenuUnder(id menu, id under);
+
+// The limits press opens the capsule's system menu under it, over every panel:
+// the page's popover lay in the board's web view, under the orchestrator panel
+// (T-226). A page that sent no menu gets the press with where the capsule is,
+// "limits:<left>,<bottom>", in points from the window content's top left.
 static void pressLimits(void) {
+  if (limitsMenuDrawn && limitsCapsule) {
+    showMenuUnder(limitsMenuDrawn, limitsCapsule);
+    return;
+  }
   if (!limitsCapsule || !send0(limitsCapsule, sel("window"))) {
     fleetdeckCapsulePressed((char *)"limits");
     return;
@@ -216,6 +226,8 @@ static void menuPicked(id self, SEL _cmd, id item) {
     fleetdeckCapsulePressed((char *)"fleets");
   } else if (tag == itemAdd) {
     fleetdeckCapsulePressed((char *)"newFleet");
+  } else if (tag == itemSources) {
+    fleetdeckCapsulePressed((char *)"limitSources");
   } else if (tag >= 0 && tag < fleetsDrawn) {
     pressWith("fleet:", fleetNamesDrawn[tag]);
   }
@@ -237,7 +249,7 @@ static id target(void) {
 // The tests keep the menu instead of showing it: a shown menu runs its own loop
 // until it is dismissed.
 static int captureMenus;
-static id menuCaptured;
+static id menuCaptured, menuCapturedUnder;
 static CGPoint menuCapturedAt;
 
 static id menuItem(const char *title, long tag) {
@@ -282,26 +294,27 @@ static id fleetMenu(void) {
   return menu;
 }
 
-// The menu opens under the fleet's capsule, its left edge on the capsule's: in
-// 1.8.0 the page's menu opened at the right of its button.
-static CGPoint underFleet(void) {
-  CGRect b = sendRect0(fleetCapsule, sel("bounds"));
-  int flipped = ((signed char (*)(id, SEL))objc_msgSend)(fleetCapsule, sel("isFlipped")) != 0;
-  return CGPointMake(0, flipped ? b.size.height + 6 : -6);
+// A menu opens under its capsule, its left edge on the capsule's: in 1.8.0 the
+// page's menus opened at the right of their buttons.
+static void showMenuUnder(id menu, id under) {
+  CGRect b = sendRect0(under, sel("bounds"));
+  int flipped = ((signed char (*)(id, SEL))objc_msgSend)(under, sel("isFlipped")) != 0;
+  CGPoint at = CGPointMake(0, flipped ? b.size.height + 6 : -6);
+  if (captureMenus) {
+    if (menuCaptured) sendVoid0(menuCaptured, sel("release"));
+    menuCaptured = send0(menu, sel("retain"));
+    menuCapturedUnder = under;
+    menuCapturedAt = ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(under, sel("convertPoint:toView:"), at, (id)0);
+    return;
+  }
+  ((signed char (*)(id, SEL, id, CGPoint, id))objc_msgSend)(menu, sel("popUpMenuPositioningItem:atLocation:inView:"),
+                                                            (id)0, at, under);
 }
 
 static void showFleetMenu(void) {
   if (!fleetCapsule) return;
   id menu = fleetMenu();
-  CGPoint at = underFleet();
-  if (captureMenus) {
-    if (menuCaptured) sendVoid0(menuCaptured, sel("release"));
-    menuCaptured = menu;
-    menuCapturedAt = ((CGPoint(*)(id, SEL, CGPoint, id))objc_msgSend)(fleetCapsule, sel("convertPoint:toView:"), at, (id)0);
-    return;
-  }
-  ((signed char (*)(id, SEL, id, CGPoint, id))objc_msgSend)(menu, sel("popUpMenuPositioningItem:atLocation:inView:"),
-                                                            (id)0, at, fleetCapsule);
+  showMenuUnder(menu, fleetCapsule);
   sendVoid0(menu, sel("release"));
 }
 
@@ -560,6 +573,8 @@ void fd_capsules_clear(void *container) {
   sendVoid0(old, sel("release"));
   rowDrawn = (id)0;
   brandView = fleetCapsule = limitsCapsule = updateCapsule = themeCapsule = (id)0;
+  if (limitsMenuDrawn) sendVoid0(limitsMenuDrawn, sel("release"));
+  limitsMenuDrawn = (id)0;
   brandIconDrawn = brandNameDrawn = brandVersionDrawn = (id)0;
   fleetDotDrawn = fleetNameDrawn = fleetOpenerDrawn = (id)0;
   limitsLabelDrawn = busyNameDrawn = busyTextDrawn = limitsOpenerDrawn = (id)0;
@@ -638,6 +653,102 @@ static id drawLimits(const fd_bar *bar) {
   id c = capsule(bar->mode, row(views, 5, 7), capsulePadding);
   limitsOpenerDrawn = coverWithOpener(c, tagLimits, bar->limitsTooltip);
   return c;
+}
+
+// --- the limits menu -------------------------------------------------------------
+
+static const double menuWidth = 320;
+
+// A label at r in a menu item's view, cut at its end; right aligned when asked.
+static id textAt(id view, const char *text, id font, id colour, CGRect r, int right) {
+  id l = styled(text, font, colour);
+  sendVoidLong(l, sel("setLineBreakMode:"), 4);  // truncate the tail
+  if (right) sendVoidLong(l, sel("setAlignment:"), 1);  // NSTextAlignmentRight
+  sendVoidRect(l, sel("setFrame:"), r);
+  sendVoid1(view, sel("addSubview:"), l);
+  return l;
+}
+
+// A plain view's layer filled with colour, resolved in the app's appearance as
+// an opaque capsule's background is.
+static id filled(id view, CGRect r, id colour) {
+  id v = initWithFrame(cls("NSView"), r);
+  sendVoidBool(v, sel("setWantsLayer:"), 1);
+  id layer = send0(v, sel("layer"));
+  sendVoidDouble(layer, sel("setCornerRadius:"), r.size.height / 2);
+  void (^resolve)(void) = ^{
+    ((void (*)(id, SEL, void *))objc_msgSend)(layer, sel("setBackgroundColor:"),
+                                              ((void *(*)(id, SEL))objc_msgSend)(colour, sel("CGColor")));
+  };
+  id appearance = appAppearance();
+  if (appearance && respondsTo(appearance, "performAsCurrentDrawingAppearance:")) {
+    ((void (*)(id, SEL, void (^)(void)))objc_msgSend)(appearance, sel("performAsCurrentDrawingAppearance:"), resolve);
+  } else {
+    resolve();
+  }
+  adopt(view, v);
+  return v;
+}
+
+// An item drawn as view, which it owns.
+static void addViewItem(id menu, id view) {
+  id item = ((id (*)(id, SEL, id, SEL, id))objc_msgSend)(send0(cls("NSMenuItem"), sel("alloc")),
+                                                         sel("initWithTitle:action:keyEquivalent:"), nsstring(""),
+                                                         (SEL)0, nsstring(""));
+  sendVoid1(item, sel("setView:"), view);
+  sendVoid0(view, sel("release"));
+  addItem(menu, item);
+}
+
+// The page's limits table as a system menu: its head, every model with a row
+// per window -- its title, a bar in its colour, when it resets, its number --
+// then when each last spoke and the way to the limits' sources.
+static id limitsMenu(const fd_bar *bar) {
+  id menu = send1(send0(cls("NSMenu"), sel("alloc")), sel("initWithTitle:"), nsstring(""));
+  sendVoidBool(menu, sel("setAutoenablesItems:"), 0);
+  sendVoidDouble(menu, sel("setMinimumWidth:"), menuWidth);
+
+  id head = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 28));
+  textAt(head, bar->menuTitle, systemFont(13, 0.3), (id)0, CGRectMake(14, 5, 150, 18), 0);
+  textAt(head, bar->menuNote, systemFont(11, 0), systemColour("tertiaryLabelColor"), CGRectMake(menuWidth - 164, 6, 150, 16), 1);
+  addViewItem(menu, head);
+
+  for (int m = 0; m < bar->menuModelCount; m++) {
+    id model = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 26));
+    textAt(model, "●", systemFont(9, 0), srgb(&bar->menuModelRGB[3 * m]), CGRectMake(14, 5, 12, 14), 0);
+    id name = textAt(model, bar->menuModelNames[m], systemFont(13, 0.3), (id)0, CGRectMake(28, 4, 120, 18), 0);
+    double nameWidth = fittingSize(name).width;
+    if (nameWidth > 120) nameWidth = 120;
+    sendVoidRect(name, sel("setFrame:"), CGRectMake(28, 4, nameWidth, 18));
+    textAt(model, bar->menuModelKinds[m], systemFont(11, 0), systemColour("secondaryLabelColor"),
+           CGRectMake(36 + nameWidth, 5, menuWidth - 50 - nameWidth, 16), 0);
+    addViewItem(menu, model);
+
+    for (int r = 0; r < bar->menuRowCount; r++) {
+      if (bar->menuRowModel[r] != m) continue;
+      id row = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 38));
+      id colour = srgb(&bar->menuRowRGB[3 * r]);
+      textAt(row, bar->menuRowTitles[r], systemFont(12, 0), systemColour("secondaryLabelColor"), CGRectMake(28, 12, 76, 16), 0);
+      double pct = bar->menuRowPct[r];
+      if (pct >= 0) {
+        if (pct > 100) pct = 100;
+        filled(row, CGRectMake(108, 22, 150, 4), systemColour("quaternaryLabelColor"));
+        if (pct > 0 && colour) filled(row, CGRectMake(108, 22, 150 * pct / 100, 4), colour);
+      }
+      textAt(row, bar->menuRowNotes[r], systemFont(10, 0), systemColour("tertiaryLabelColor"), CGRectMake(108, 4, 150, 14), 0);
+      textAt(row, bar->menuRowTexts[r], monoFont(12), colour, CGRectMake(menuWidth - 62, 12, 48, 16), 1);
+      addViewItem(menu, row);
+    }
+  }
+
+  sendVoid1(menu, sel("addItem:"), send0(cls("NSMenuItem"), sel("separatorItem")));
+  if (bar->menuUpdated && *bar->menuUpdated) {
+    id foot = initWithFrame(cls("NSView"), CGRectMake(0, 0, menuWidth, 22));
+    textAt(foot, bar->menuUpdated, systemFont(10.5, 0), systemColour("tertiaryLabelColor"), CGRectMake(14, 4, menuWidth - 28, 14), 0);
+    addViewItem(menu, foot);
+  }
+  addItem(menu, menuItem(bar->menuSources, itemSources));
+  return menu;
 }
 
 static id drawUpdate(const fd_bar *bar) {
@@ -756,6 +867,7 @@ double fd_capsules_draw(void *container, const fd_bar *bar) {
   fleetCapsule = drawFleet(bar);
   adopt(into, fleetCapsule);
   limitsCapsule = drawLimits(bar);
+  limitsMenuDrawn = limitsCapsule && bar->menuModelCount > 0 ? limitsMenu(bar) : (id)0;
   if (limitsCapsule) adopt(into, limitsCapsule);
   updateCapsule = drawUpdate(bar);
   if (updateCapsule) adopt(into, updateCapsule);
@@ -1059,7 +1171,39 @@ static double contentHeight(id view) {
 }
 
 double fd_test_menu_x(void) { return menuCapturedAt.x; }
-double fd_test_menu_y(void) { return fleetCapsule ? contentHeight(fleetCapsule) - menuCapturedAt.y : -1; }
+double fd_test_menu_y(void) { return menuCapturedUnder ? contentHeight(menuCapturedUnder) - menuCapturedAt.y : -1; }
+
+double fd_test_menu_owner_x(void) {
+  if (!menuCapturedUnder) return -1;
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(menuCapturedUnder, sel("convertRect:toView:"),
+                                                            sendRect0(menuCapturedUnder, sel("bounds")), (id)0);
+  return r.origin.x;
+}
+
+double fd_test_menu_owner_bottom(void) {
+  if (!menuCapturedUnder) return -1;
+  CGRect r = ((CGRect(*)(id, SEL, CGRect, id))objc_msgSend)(menuCapturedUnder, sel("convertRect:toView:"),
+                                                            sendRect0(menuCapturedUnder, sel("bounds")), (id)0);
+  return contentHeight(menuCapturedUnder) - r.origin.y;
+}
+
+const char *fd_test_menu_item_view_text(int i) {
+  static char out[1024];
+  out[0] = 0;
+  id item = capturedItem(i);
+  id view = item ? send0(item, sel("view")) : (id)0;
+  if (!view) return out;
+  id subviews = send0(view, sel("subviews"));
+  for (long k = 0, n = sendLong0(subviews, sel("count")); k < n; k++) {
+    id v = ((id (*)(id, SEL, unsigned long))objc_msgSend)(subviews, sel("objectAtIndex:"), (unsigned long)k);
+    if (!((signed char (*)(id, SEL, id))objc_msgSend)(v, sel("isKindOfClass:"), cls("NSTextField"))) continue;
+    const char *text = cstring(send0(v, sel("stringValue")));
+    if (!*text) continue;
+    if (out[0]) strncat(out, " | ", sizeof out - strlen(out) - 1);
+    strncat(out, text, sizeof out - strlen(out) - 1);
+  }
+  return out;
+}
 
 fd_capsule_frame fd_test_fleet_in_window(void) {
   fd_capsule_frame out = {0, 0, 0};

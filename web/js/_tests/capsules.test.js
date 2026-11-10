@@ -19,6 +19,8 @@ const words = {
   set_theme_light: "Светлая",
   set_theme_auto: "Авто",
   set_theme_dark: "Тёмная",
+  limits_busiest_first: "сначала самые занятые",
+  limits_sources: "Источники…",
 };
 const t = (key) => words[key] ?? key;
 const colors = { cool: "#2f9e44", warm: "#a15c00", hot: "#c92a2a", stale: "#5b6470", off: "#8791a0", attn: "#c2410c", muted: "#6b7280" };
@@ -91,6 +93,27 @@ test("the counters say how many wait and how many stalled, in their colours", ()
 test("the theme is its three segments and the choice, the system's when none", () => {
   assert.deepEqual(capsuleModel(base).theme, { label: "Тема", choice: "system", light: "Светлая", system: "Авто", dark: "Тёмная" });
   assert.equal(capsuleModel({ ...base, theme: "dark" }).theme.choice, "dark");
+});
+
+// The bar's limits menu is the window's system menu (T-226): every model and
+// its windows, coloured by level, with the page's words for its head and foot.
+test("the limits menu carries every model's windows in their colours", () => {
+  const limitsMenu = {
+    models: [{ name: "Codex", kind: "5 ч и неделя", level: "warm", rows: [{ title: "5 часов", text: "63%", pct: 63, level: "warm", note: "сброс через 2 ч" }, { title: "7 дней", text: "—", pct: null, level: "off", note: "" }] }],
+    updated: "обновлено Codex: 1 мин",
+  };
+  const m = capsuleModel({ ...base, limitsMenu });
+  assert.deepEqual(m.limitsMenu, {
+    title: "Лимиты",
+    note: "сначала самые занятые",
+    models: [{ name: "Codex", kind: "5 ч и неделя", color: "#a15c00", rows: [
+      { title: "5 часов", text: "63%", pct: 63, note: "сброс через 2 ч", color: "#a15c00" },
+      { title: "7 дней", text: "—", pct: -1, note: "", color: "#8791a0" },
+    ] }],
+    updated: "обновлено Codex: 1 мин",
+    sources: "Источники…",
+  });
+  assert.equal(capsuleModel(base).limitsMenu, undefined, "no menu, no menu in the model");
 });
 
 // The window tints the fleet's dot and the update with the accent and goes

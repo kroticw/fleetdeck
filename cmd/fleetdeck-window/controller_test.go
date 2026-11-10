@@ -497,6 +497,7 @@ func TestACapsulePressBecomesAMessageToTheBoard(t *testing.T) {
 	c := loadedFrame()
 	cases := map[string]map[string]any{
 		"limits":       {"type": "limits"},
+		"limitSources": {"type": "limitSources"},
 		"theme:light":  {"type": "setTheme", "choice": "light"},
 		"theme:system": {"type": "setTheme", "choice": ""},
 		"theme:dark":   {"type": "setTheme", "choice": "dark"},

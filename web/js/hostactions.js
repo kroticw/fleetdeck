@@ -8,7 +8,7 @@
 import { onHostMessage } from "./host.js";
 
 const ACCEPTS = {
-  board: new Set(["open", "limits", "setTheme", "insets", "glass"]),
+  board: new Set(["open", "limits", "limitSources", "setTheme", "insets", "glass"]),
   orchestrator: new Set(["theme", "glass", "folded", "focusTerminal", "fullscreen", "update"]),
   sessions: new Set(["theme", "glass", "folded"]),
 };
@@ -28,6 +28,9 @@ export function wireHostActions(win, host, targets) {
         return;
       case "limits":
         targets.toggleLimits?.(Number.isFinite(message.left) ? { left: message.left, top: message.top } : undefined);
+        return;
+      case "limitSources":
+        targets.openLimitSources();
         return;
       case "setTheme":
         if (THEMES.has(message.choice)) targets.setTheme(message.choice);

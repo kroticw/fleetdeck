@@ -397,6 +397,40 @@ function balanceHTML(p) {
   return `<div class="limits-balance"><div class="limits-balance-line"><span class="limits-window">${escapeHTML(t("limits_balance"))}</span><span class="limits-amount">${escapeHTML(money(b.amount, b.currency))}</span>${total > 0 ? `<span class="limits-of">${escapeHTML(t("limits_balance_of"))} ${escapeHTML(money(total, b.currency))}</span>` : ""}</div><div class="limits-bar"><span style="width: ${spent}%"></span></div><span class="limits-reset">${escapeHTML([today, t("limits_no_reset")].filter(Boolean).join(" · "))}</span></div>`;
 }
 
+// limitsMenuOf is the menu as data rather than markup, for the fleetdeck
+// window, whose bar opens it as a system menu over every panel (T-226): every
+// model, the busiest first, each with a row per window -- its title, its
+// number, its level, when it resets -- or its balance, then when each last
+// spoke. The words are the table's.
+export function limitsMenuOf(snap, nowMs) {
+  const providers = busiestFirst(providerLimits(snap, nowMs));
+  const windowRow = (w) => ({
+    title: w.title,
+    text: w.pct === null ? "—" : `${w.pct}%`,
+    pct: w.pct,
+    level: w.level,
+    note: w.pct === null ? "" : `${t("resets_in")} ${humanDuration(w.resetsAt)}`,
+  });
+  const balanceRow = (p) => {
+    const b = p.balance ?? {};
+    const total = Number(b.total ?? 0);
+    const spent = total > 0 ? Math.max(0, Math.min(100, Math.round(((total - Number(b.amount ?? 0)) / total) * 100))) : null;
+    const today = b.spentToday !== undefined ? `${t("limits_spent_today")} ${money(b.spentToday, b.currency)}` : "";
+    const of = total > 0 ? ` ${t("limits_balance_of")} ${money(total, b.currency)}` : "";
+    return { title: t("limits_balance"), text: `${money(b.amount, b.currency)}${of}`, pct: spent, level: p.level, note: [today, t("limits_no_reset")].filter(Boolean).join(" · ") };
+  };
+  const ages = providers.filter((p) => p.fetchedAt).map((p) => `${p.name}: ${humanAge(p.fetchedAt)}`).join(" · ");
+  return {
+    models: providers.map((p) => ({
+      name: p.name,
+      kind: [kindLabel(p), p.source].filter(Boolean).join(" · "),
+      level: p.level,
+      rows: p.kind === "balance" ? [balanceRow(p)] : p.windows.map(windowRow),
+    })),
+    updated: ages ? `${t("limits_updated")} ${ages}` : "",
+  };
+}
+
 // limitsTableHTML is the menu: every model as a card, the busiest first, each
 // with the windows it has or its balance, then when each last spoke.
 // sources adds the way to the settings the limits come from, for the window's

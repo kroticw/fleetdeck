@@ -24,8 +24,9 @@ const barModel = `{"version":1,
 	"accent":"#4f56d9"}`
 
 var (
-	capsulesResult capsulesProbe
-	themeResult    capsuleThemeProbe
+	capsulesResult   capsulesProbe
+	limitsMenuResult limitsMenuProbe
+	themeResult      capsuleThemeProbe
 	// plainCount is how many parts a bar with no update and no counters shows.
 	plainCount int
 )
@@ -36,6 +37,15 @@ func collectCapsuleResults() {
 		panic(err)
 	}
 	capsulesResult = probeCapsulesForTest(m)
+	withMenu := m
+	withMenu.LimitsMenu = &capsuleLimitsMenu{
+		Title: "Лимиты", Note: "сначала самые занятые", Updated: "обновлено Codex: 1 мин", Sources: "Источники…",
+		Models: []capsuleLimitsModel{{Name: "Codex", Kind: "5 ч и неделя", Color: "#d9480f", Rows: []capsuleLimitsRow{
+			{Title: "5 часов", Text: "63%", Pct: 63, Note: "сброс через 2 ч", Color: "#d9480f"},
+			{Title: "7 дней", Text: "—", Pct: -1, Color: "#8791a0"},
+		}}},
+	}
+	limitsMenuResult = probeLimitsMenuForTest(withMenu)
 	collectCapsuleLayoutResults(m)
 	themeResult = probeCapsuleThemeForTest(m)
 	m.Update, m.Counters = nil, nil
@@ -141,6 +151,48 @@ func TestTheFleetsMenuOpensUnderItsCapsule(t *testing.T) {
 	}
 	if r.menuY < r.fleetBottom || r.menuY > r.fleetBottom+10 {
 		t.Errorf("the menu's top at %v, want just under the capsule's bottom at %v", r.menuY, r.fleetBottom)
+	}
+}
+
+// The page's limits popover lay in the board's web view, under the
+// orchestrator panel (T-226): the limits capsule opens a system menu of its
+// own, over every panel, under the capsule.
+func TestTheLimitsMenuOpensUnderItsCapsule(t *testing.T) {
+	r := limitsMenuResult
+	if len(r.menu) == 0 {
+		t.Fatal("the limits capsule opened no menu")
+	}
+	if math.Abs(r.menuX-r.ownerX) > 0.5 {
+		t.Errorf("the menu's left edge at %v, the capsule's at %v", r.menuX, r.ownerX)
+	}
+	if r.menuY < r.ownerBottom || r.menuY > r.ownerBottom+10 {
+		t.Errorf("the menu's top at %v, want just under the capsule's bottom at %v", r.menuY, r.ownerBottom)
+	}
+}
+
+func TestTheLimitsMenuIsThePagesTable(t *testing.T) {
+	var views []string
+	for _, item := range limitsMenuResult.menu {
+		if item.view != "" {
+			views = append(views, item.view)
+		}
+	}
+	want := []string{
+		"Лимиты | сначала самые занятые",
+		"● | Codex | 5 ч и неделя",
+		"5 часов | сброс через 2 ч | 63%",
+		"7 дней | —",
+		"обновлено Codex: 1 мин",
+	}
+	if !reflect.DeepEqual(views, want) {
+		t.Fatalf("menu = %q\nwant %q", views, want)
+	}
+	last := limitsMenuResult.menu[len(limitsMenuResult.menu)-1]
+	if last.title != "Источники…" {
+		t.Fatalf("last item = %+v, want Sources…", last)
+	}
+	if !reflect.DeepEqual(limitsMenuResult.presses, []string{"limitSources"}) {
+		t.Fatalf("presses = %v: opening the menu says nothing, Sources… asks for the settings", limitsMenuResult.presses)
 	}
 }
 

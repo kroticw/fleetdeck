@@ -20,6 +20,18 @@ typedef struct {
   const char *limitsLabel, *busyName, *busyText, *limitsTooltip;
   const double *busyRGB, *limitRGB;
   int limitCount;
+  // The limits capsule's menu: its head, menuModelCount models with their
+  // name, kind and colour, menuRowCount rows each of model menuRowModel (pct
+  // -1 for no number, and no bar), when each last spoke, and the way to the
+  // limits' sources. No models is no menu: a press then goes to the page.
+  const char *menuTitle, *menuNote, *menuUpdated, *menuSources;
+  const char **menuModelNames, **menuModelKinds;
+  const double *menuModelRGB;
+  int menuModelCount;
+  const char **menuRowTitles, **menuRowTexts, **menuRowNotes;
+  const double *menuRowPct, *menuRowRGB;
+  const int *menuRowModel;
+  int menuRowCount;
   const char *updateText, *updateAction;
   // The counters at the right: text in counterRGB on a tint of it, the dot a
   // ring where counterHollow.
@@ -111,9 +123,14 @@ int fd_test_menu_item_separator(int i);
 // The waiting count an item shows: its badge, or 0.
 long fd_test_menu_item_waiting(int i);
 void fd_test_menu_pick(int i);
-// Where the menu's top left goes, in the window's content from its top left.
+// The words in a menu item drawn as a view of its own, " | " between them.
+const char *fd_test_menu_item_view_text(int i);
+// Where the menu's top left goes, in the window's content from its top left,
+// and the left and the bottom of the capsule it opened under.
 double fd_test_menu_x(void);
 double fd_test_menu_y(void);
+double fd_test_menu_owner_x(void);
+double fd_test_menu_owner_bottom(void);
 // The fleet capsule's frame in the window's content, from its top left.
 fd_capsule_frame fd_test_fleet_in_window(void);
 double fd_test_fleet_bottom_in_window(void);

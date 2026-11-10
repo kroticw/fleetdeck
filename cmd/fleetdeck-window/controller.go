@@ -489,8 +489,10 @@ func (c *controller) capsuleAction(action string) []effect {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch action {
-	case "limits":
-		return c.to("board", map[string]any{"type": "limits"})
+	case "limits", "limitSources":
+		// limitSources: "Sources…" in the limits capsule's menu, the settings
+		// the limits come from.
+		return c.to("board", map[string]any{"type": action})
 	case "update":
 		// The orchestrator's page asks about text unsent in its terminal before
 		// an update starts, and shows the update's progress over it.

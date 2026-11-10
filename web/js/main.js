@@ -1,6 +1,6 @@
 import { connect, subscribe, get } from "./store.js";
 import { renderSessions } from "./sessions.js";
-import { renderHeader, HEADER_PARTS, limitsOf, createStalledTracker, headerCounts } from "./header.js";
+import { renderHeader, HEADER_PARTS, limitsOf, limitsMenuOf, createStalledTracker, headerCounts } from "./header.js";
 import { renderBoard } from "./board.js";
 import { renderOrchestrator } from "./orchestrator.js";
 import { createCardPanel, cardPathForLink } from "./card.js";
@@ -423,6 +423,7 @@ function publishCapsules() {
     fleet: snap.fleet ?? "",
     fleets: fleetEntries(snap, isWaiting),
     limits: limitsOf(snap, now),
+    limitsMenu: limitsMenuOf(snap, now),
     update: offerOf(barUpdate),
     counts: { waiting: counts.waiting.length, stalled: counts.stalled.length, unknown: counts.unknown.length },
     theme: currentTheme(),
@@ -524,6 +525,8 @@ if (host) {
     },
     openSession: showSession,
     toggleLimits: (at) => limitsPopover?.toggle(at),
+    // "Sources…" in the bar's limits menu: the settings the limits come from.
+    openLimitSources,
     // The bar's theme segments: applied at once, as the settings section's
     // answer is, and saved as ui.theme ("" the system's).
     setTheme: (choice) => {

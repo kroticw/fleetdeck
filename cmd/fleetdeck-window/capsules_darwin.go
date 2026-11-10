@@ -64,6 +64,32 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) floa
 		c := rgbOf(pill.Color)
 		copy(counterRGB[3*i:], c[:])
 	}
+	// The limits capsule's menu, flattened: the models, then every row with the
+	// model it is of.
+	var menu capsuleLimitsMenu
+	if m.LimitsMenu != nil {
+		menu = *m.LimitsMenu
+	}
+	modelNames := make([]*C.char, len(menu.Models)+1)
+	modelKinds := make([]*C.char, len(menu.Models)+1)
+	modelRGB := make([]C.double, 3*len(menu.Models)+3)
+	var rowTitles, rowTexts, rowNotes []*C.char
+	var rowPct, rowRGB []C.double
+	var rowModel []C.int
+	for i, model := range menu.Models {
+		modelNames[i], modelKinds[i] = cstr(model.Name), cstr(model.Kind)
+		c := rgbOf(model.Color)
+		copy(modelRGB[3*i:], c[:])
+		for _, row := range model.Rows {
+			rowTitles, rowTexts, rowNotes = append(rowTitles, cstr(row.Title)), append(rowTexts, cstr(row.Text)), append(rowNotes, cstr(row.Note))
+			rowPct, rowModel = append(rowPct, C.double(row.Pct)), append(rowModel, C.int(i))
+			c := rgbOf(row.Color)
+			rowRGB = append(rowRGB, c[:]...)
+		}
+	}
+	rows := len(rowTitles)
+	rowTitles, rowTexts, rowNotes = append(rowTitles, nil), append(rowTexts, nil), append(rowNotes, nil)
+	rowPct, rowModel, rowRGB = append(rowPct, 0), append(rowModel, 0), append(rowRGB, 0, 0, 0)
 	busy := m.busiestLimit()
 	busyRGB, accentRGB := rgbOf(busy.Color), rgbOf(m.Accent)
 	var update capsuleUpdate
@@ -71,41 +97,57 @@ func drawCapsules(container unsafe.Pointer, m capsuleModel, mode glassMode) floa
 		update = *m.Update
 	}
 	bar := C.fd_bar{
-		mode:          cstr(string(mode)),
-		brandName:     cstr(m.Brand.Name),
-		brandVersion:  cstr(m.Brand.Version),
-		fleetName:     cstr(m.Fleet.Name),
-		fleetLabel:    cstr(m.Fleet.Label),
-		fleetAll:      cstr(m.Fleet.All),
-		fleetAdd:      cstr(m.Fleet.Add),
-		fleetNames:    &fleetNames[0],
-		fleetWaiting:  &fleetWaiting[0],
-		fleetCurrent:  &fleetCurrent[0],
-		fleetCount:    C.int(len(m.Fleet.Fleets)),
-		limitsLabel:   cstr(m.LimitsLabel),
-		busyName:      cstr(busy.Name),
-		busyText:      cstr(busy.Text),
-		limitsTooltip: cstr(busy.Tooltip),
-		busyRGB:       &busyRGB[0],
-		limitRGB:      &limitRGB[0],
-		limitCount:    C.int(len(m.Limits)),
-		updateText:    cstr(update.Text),
-		updateAction:  cstr(update.Action),
-		counterTexts:  &counterTexts[0],
-		counterRGB:    &counterRGB[0],
-		counterHollow: &counterHollow[0],
-		counterCount:  C.int(len(m.Counters)),
-		themeLabel:    cstr(m.Theme.Label),
-		themeLabels:   [3]*C.char{cstr(m.Theme.Light), cstr(m.Theme.System), cstr(m.Theme.Dark)},
-		themeSegment:  C.int(m.Theme.segment()),
-		accentRGB:     &accentRGB[0],
-		frameMinWidth: C.double(frameMinWidth()),
+		mode:           cstr(string(mode)),
+		brandName:      cstr(m.Brand.Name),
+		brandVersion:   cstr(m.Brand.Version),
+		fleetName:      cstr(m.Fleet.Name),
+		fleetLabel:     cstr(m.Fleet.Label),
+		fleetAll:       cstr(m.Fleet.All),
+		fleetAdd:       cstr(m.Fleet.Add),
+		fleetNames:     &fleetNames[0],
+		fleetWaiting:   &fleetWaiting[0],
+		fleetCurrent:   &fleetCurrent[0],
+		fleetCount:     C.int(len(m.Fleet.Fleets)),
+		limitsLabel:    cstr(m.LimitsLabel),
+		busyName:       cstr(busy.Name),
+		busyText:       cstr(busy.Text),
+		limitsTooltip:  cstr(busy.Tooltip),
+		busyRGB:        &busyRGB[0],
+		limitRGB:       &limitRGB[0],
+		limitCount:     C.int(len(m.Limits)),
+		menuTitle:      cstr(menu.Title),
+		menuNote:       cstr(menu.Note),
+		menuUpdated:    cstr(menu.Updated),
+		menuSources:    cstr(menu.Sources),
+		menuModelNames: &modelNames[0],
+		menuModelKinds: &modelKinds[0],
+		menuModelRGB:   &modelRGB[0],
+		menuModelCount: C.int(len(menu.Models)),
+		menuRowTitles:  &rowTitles[0],
+		menuRowTexts:   &rowTexts[0],
+		menuRowNotes:   &rowNotes[0],
+		menuRowPct:     &rowPct[0],
+		menuRowRGB:     &rowRGB[0],
+		menuRowModel:   &rowModel[0],
+		menuRowCount:   C.int(rows),
+		updateText:     cstr(update.Text),
+		updateAction:   cstr(update.Action),
+		counterTexts:   &counterTexts[0],
+		counterRGB:     &counterRGB[0],
+		counterHollow:  &counterHollow[0],
+		counterCount:   C.int(len(m.Counters)),
+		themeLabel:     cstr(m.Theme.Label),
+		themeLabels:    [3]*C.char{cstr(m.Theme.Light), cstr(m.Theme.System), cstr(m.Theme.Dark)},
+		themeSegment:   C.int(m.Theme.segment()),
+		accentRGB:      &accentRGB[0],
+		frameMinWidth:  C.double(frameMinWidth()),
 	}
 	// bar is Go memory holding pointers into Go slices: cgo takes it only with
 	// those slices pinned.
 	var pins runtime.Pinner
 	defer pins.Unpin()
-	for _, p := range []any{&fleetNames[0], &fleetWaiting[0], &fleetCurrent[0], &limitRGB[0], &counterTexts[0], &counterRGB[0], &counterHollow[0], &busyRGB[0], &accentRGB[0]} {
+	for _, p := range []any{&fleetNames[0], &fleetWaiting[0], &fleetCurrent[0], &limitRGB[0], &counterTexts[0], &counterRGB[0], &counterHollow[0], &busyRGB[0], &accentRGB[0],
+		&modelNames[0], &modelKinds[0], &modelRGB[0], &rowTitles[0], &rowTexts[0], &rowNotes[0], &rowPct[0], &rowRGB[0], &rowModel[0]} {
 		pins.Pin(p)
 	}
 	return float64(C.fd_capsules_draw(container, &bar))
@@ -144,6 +186,53 @@ type menuItemProbe struct {
 	checked   bool
 	separator bool
 	waiting   int
+	// view is the words of an item drawn as a view, " | " between them.
+	view string
+}
+
+// capturedMenu is the menu the last press opened, as the tests keep it.
+func capturedMenu() []menuItemProbe {
+	var out []menuItemProbe
+	for i := 0; i < int(C.fd_test_menu_items()); i++ {
+		out = append(out, menuItemProbe{
+			title:     C.GoString(C.fd_test_menu_item_title(C.int(i))),
+			checked:   C.fd_test_menu_item_state(C.int(i)) == 1,
+			separator: C.fd_test_menu_item_separator(C.int(i)) != 0,
+			waiting:   int(C.fd_test_menu_item_waiting(C.int(i))),
+			view:      C.GoString(C.fd_test_menu_item_view_text(C.int(i))),
+		})
+	}
+	return out
+}
+
+// limitsMenuProbe is the limits capsule pressed with a page's menu: the menu
+// it opened, where, the capsule's left and bottom, and what picking its last
+// item -- Sources… -- pressed.
+type limitsMenuProbe struct {
+	menu                []menuItemProbe
+	menuX, menuY        float64
+	ownerX, ownerBottom float64
+	presses             []string
+}
+
+func probeLimitsMenuForTest(m capsuleModel) limitsMenuProbe {
+	var out limitsMenuProbe
+	window := C.fd_test_window(1512, 982)
+	f := installFrame(window)
+	f.layout(layoutPastButtons(1512, 982, panelWidths{Orchestrator: 368, Sessions: 348}, 79))
+	f.setMode(glassModeGlass)
+	setCapsuleEvents(func(action string) { out.presses = append(out.presses, action) })
+	defer setCapsuleEvents(nil)
+	drawCapsules(f.capsules(), m, glassModeGlass)
+	C.fd_test_capture_menus(1)
+	testPress("limits")
+	C.fd_test_capture_menus(0)
+	out.menu = capturedMenu()
+	out.menuX, out.menuY = float64(C.fd_test_menu_x()), float64(C.fd_test_menu_y())
+	out.ownerX, out.ownerBottom = float64(C.fd_test_menu_owner_x()), float64(C.fd_test_menu_owner_bottom())
+	C.fd_test_menu_pick(C.int(len(out.menu) - 1))
+	clearCapsules(f.capsules())
+	return out
 }
 
 type capsulesProbe struct {
@@ -253,14 +342,7 @@ func probeCapsulesForTest(m capsuleModel) capsulesProbe {
 	C.fd_test_capture_menus(1)
 	testPress("fleet")
 	C.fd_test_capture_menus(0)
-	for i := 0; i < int(C.fd_test_menu_items()); i++ {
-		out.menu = append(out.menu, menuItemProbe{
-			title:     C.GoString(C.fd_test_menu_item_title(C.int(i))),
-			checked:   C.fd_test_menu_item_state(C.int(i)) == 1,
-			separator: C.fd_test_menu_item_separator(C.int(i)) != 0,
-			waiting:   int(C.fd_test_menu_item_waiting(C.int(i))),
-		})
-	}
+	out.menu = capturedMenu()
 	out.menuX, out.menuY = float64(C.fd_test_menu_x()), float64(C.fd_test_menu_y())
 	fleet := C.fd_test_fleet_in_window()
 	out.fleetX, out.fleetBottom = float64(fleet.x), float64(C.fd_test_fleet_bottom_in_window())
