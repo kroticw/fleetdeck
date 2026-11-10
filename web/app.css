@@ -172,32 +172,38 @@
   --radius-xl: 18px;
 }
 
-:root[data-accent="indigo"] {
+:root[data-accent="indigo"],
+[data-accent-swatch="indigo"] {
   --accent-light: #4f56d9;
   --accent-dark: #8b93ff;
 }
 
-:root[data-accent="blue"] {
+:root[data-accent="blue"],
+[data-accent-swatch="blue"] {
   --accent-light: #1f6feb;
   --accent-dark: #5aa2ff;
 }
 
-:root[data-accent="teal"] {
+:root[data-accent="teal"],
+[data-accent-swatch="teal"] {
   --accent-light: #0f766e;
   --accent-dark: #2dd4bf;
 }
 
-:root[data-accent="violet"] {
+:root[data-accent="violet"],
+[data-accent-swatch="violet"] {
   --accent-light: #7c3aed;
   --accent-dark: #b794ff;
 }
 
-:root[data-accent="rose"] {
+:root[data-accent="rose"],
+[data-accent-swatch="rose"] {
   --accent-light: #d6336c;
   --accent-dark: #ff7a9a;
 }
 
-:root[data-accent="graphite"] {
+:root[data-accent="graphite"],
+[data-accent-swatch="graphite"] {
   --accent-light: #18191c;
   --accent-dark: #ecedef;
 }
@@ -6744,59 +6750,86 @@ body.is-resizing {
  * variant A: sizes and, in the dark theme, colours are the design's own. */
 
 :root {
-  --set-card: #ffffff;
-  --set-line: #dde1e7;
-  --set-track: #eef0f3;
-  --set-selected: #ffffff;
-  --set-selected-text: #14161a;
-  --set-control-text: #4b5260;
-  --set-input-line: #cdd2da;
-  --set-muted: #5f6672;
-  --set-on: #2f6fd6;
-  --set-off: #cdd2da;
+  --set-card: var(--col);
+  --set-line: var(--border);
+  --set-track: var(--neutral-soft);
+  --set-selected: var(--glass-control-hover);
+  --set-selected-text: var(--text);
+  --set-control-text: var(--text-muted);
+  --set-input-line: var(--border);
+  --set-muted: var(--text-muted);
+  --set-on: var(--accent);
+  --set-off: var(--track);
   --set-off-knob: #ffffff;
-  --set-ok: #1f8a57;
-  --set-badge-bg: #fbeed5;
-  --set-badge-text: #8a5a00;
-  --set-code-bg: #f4f5f7;
+  --set-ok: var(--ok);
+  --set-badge-bg: var(--attn-soft);
+  --set-badge-text: var(--attn);
+  --set-code-bg: var(--code-bg);
+}
+
+/* A row whose control is wider than a line: its titles above, the control
+ * under them. */
+.set-row.set-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* The accent swatches: each dot wears its own preset (the presets above name
+ * [data-accent-swatch] too), the picked one ringed in its colour. */
+.set-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.set-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: 82px;
+  padding: 10px 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.set-swatch:hover {
+  background: var(--neutral-soft);
+}
+
+.set-swatch.on {
+  border-color: var(--border-strong);
+  background: var(--neutral-soft);
+  font-weight: 650;
+}
+
+.set-swatch-dot {
+  --swatch: var(--accent-light);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--swatch);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --set-card: #1f2125;
-    --set-line: #33363c;
-    --set-track: #26282d;
-    --set-selected: #3a3d45;
-    --set-selected-text: #ffffff;
-    --set-control-text: #c9ccd1;
-    --set-input-line: #383b42;
-    --set-muted: #a3a8b0;
-    --set-on: #3f7be0;
-    --set-off: #3a3d45;
-    --set-off-knob: #c9ccd1;
-    --set-ok: #4cc38a;
-    --set-badge-bg: #3a2e17;
-    --set-badge-text: #f0c27a;
-    --set-code-bg: #141518;
+  :root:not([data-theme="light"]) .set-swatch-dot {
+    --swatch: var(--accent-dark);
   }
 }
 
-:root[data-theme="dark"] {
-  --set-card: #1f2125;
-  --set-line: #33363c;
-  --set-track: #26282d;
-  --set-selected: #3a3d45;
-  --set-selected-text: #ffffff;
-  --set-control-text: #c9ccd1;
-  --set-input-line: #383b42;
-  --set-muted: #a3a8b0;
-  --set-on: #3f7be0;
-  --set-off: #3a3d45;
-  --set-off-knob: #c9ccd1;
-  --set-ok: #4cc38a;
-  --set-badge-bg: #3a2e17;
-  --set-badge-text: #f0c27a;
-  --set-code-bg: #141518;
+:root[data-theme="dark"] .set-swatch-dot {
+  --swatch: var(--accent-dark);
+}
+
+.set-swatch.on .set-swatch-dot {
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--swatch);
 }
 
 #settings {
