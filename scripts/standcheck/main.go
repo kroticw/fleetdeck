@@ -640,6 +640,10 @@ const foldedStripWidth = 48
 // MIN_PIXELS). A folded strip is narrower than that, however wide it is: the
 // orchestrator's widens to hold the window's buttons (geometry.go
 // foldedButtonsPad), 81 pt beside a 79 pt row of them.
+//
+// shortcut: a window narrower than about 460 pt squeezes an open panel below
+// this and the stand would take it for a strip; the stands run at 1000 pt and
+// up. Read the folded state from the frame report if a narrower stand appears.
 const openPanelMin = 220
 
 func orchestratorFolded(f frameReport) bool {
