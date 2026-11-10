@@ -773,3 +773,14 @@ func TestAStripLeftInItsFullScreenLayoutAfterFullScreenStillFails(t *testing.T) 
 	problems := check(foldedTripLog(t, stripIn(t, true, 4)), 2)
 	wantProblem(t, problems, "after full screen 1: ", "no overflow report from the folded orchestrator strip laid out out of full screen")
 }
+
+// The folded orchestrator strip holds the window's buttons, 81 pt wide beside
+// them: still a strip, not an open panel asked for its head.
+func TestAStripWideEnoughForTheWindowsButtonsIsStillFolded(t *testing.T) {
+	var f frameReport
+	f.Orchestrator.W = 81
+	f.Sessions.W = 348
+	if !orchestratorFolded(f) || sessionsFolded(f) {
+		t.Fatalf("folded: orchestrator %v, sessions %v", orchestratorFolded(f), sessionsFolded(f))
+	}
+}
