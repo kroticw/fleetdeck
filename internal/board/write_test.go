@@ -478,3 +478,44 @@ func TestASessionWrittenFirstLetsTheStageBeSetToActive(t *testing.T) {
 		t.Fatalf("stage active after a session was written: %v", err)
 	}
 }
+
+// A dispatch writes a card's session and its stage together (SetFields): one
+// write, so the board's queue has one job naming both, and a stage that needs a
+// session finds it in the same write.
+func TestSetFieldsWritesEveryFieldInOneWrite(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", cardNoSession)
+	empty, was := "", "new"
+	err := SetFields(p, []FieldWrite{
+		{Field: "session", Value: "5e55c0de", Expect: &empty},
+		{Field: "stage", Value: "active", Expect: &was},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := ParseCard(p)
+	if c.Session != "5e55c0de" || c.Stage != "active" {
+		t.Fatalf("card reads back session %q, stage %q", c.Session, c.Stage)
+	}
+}
+
+// Either both fields are written or neither: a stage that moved on refuses the
+// whole write, and the error names the field that refused.
+func TestSetFieldsWritesNothingWhenOneFieldIsRefused(t *testing.T) {
+	p := writeCard(t, t.TempDir(), "c.md", cardNoSession)
+	before, _ := os.ReadFile(p)
+	empty, was := "", "review"
+	err := SetFields(p, []FieldWrite{
+		{Field: "session", Value: "5e55c0de", Expect: &empty},
+		{Field: "stage", Value: "active", Expect: &was},
+	})
+	if !errors.Is(err, ErrStale) {
+		t.Fatalf("want ErrStale, got %v", err)
+	}
+	var fe *FieldError
+	if !errors.As(err, &fe) || fe.Field != "stage" {
+		t.Fatalf("the error does not name the stage: %v", err)
+	}
+	if after, _ := os.ReadFile(p); !bytes.Equal(before, after) {
+		t.Fatal("a refused write changed the card")
+	}
+}

@@ -372,3 +372,20 @@ func TestEveryChangeOfTheQueueIsAnnounced(t *testing.T) {
 		t.Fatalf("the queue changed twice (queued, committed) and said so %d times", told)
 	}
 }
+
+// Fields written in one write are one job: its commit names them all, whatever
+// the queue's timing (the dispatch's session and stage, which a slow runner
+// once split between the file and the message).
+func TestFieldsWrittenTogetherAreOneCommitNamingThemAll(t *testing.T) {
+	var messages []string
+	c := NewCommitter(t.TempDir(), nil, nil)
+	c.commit = func(_, message string, _ ...string) error {
+		messages = append(messages, message)
+		return nil
+	}
+	c.SetFields("cards/c.md", []FieldWrite{{Field: "session", Value: "5e55c0de"}, {Field: "stage", Value: "active"}})
+	c.drain()
+	if len(messages) != 1 || messages[0] != "chore(board): set session to 5e55c0de, stage to active" {
+		t.Fatalf("commits %q", messages)
+	}
+}

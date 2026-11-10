@@ -107,6 +107,16 @@ func (c *Committer) SetField(path, field, value string) {
 	c.enqueue(commitJob{paths: []string{path}, fields: []commitField{{field, value}}})
 }
 
+// SetFields queues the commit of fields written to a card in one write
+// (board.SetFields): one job, so its commit names every one of them.
+func (c *Committer) SetFields(path string, writes []FieldWrite) {
+	fields := make([]commitField, len(writes))
+	for i, w := range writes {
+		fields[i] = commitField{w.Field, w.Value}
+	}
+	c.enqueue(commitJob{paths: []string{path}, fields: fields})
+}
+
 // AddCard queues the commit of a card started on the board: name is its file
 // name, paths the card and its attachments, relative to the board.
 func (c *Committer) AddCard(name string, paths ...string) {
