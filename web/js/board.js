@@ -223,6 +223,19 @@ export function columnHTML(label, stage, cards, orphanPaths, stoppedPaths = new 
 // healthy empty board (spec section 7's "degrade in parts, never silently").
 // snap?.boardError rather than snap.boardError so this still falls through
 // to the normal empty-columns render when snap itself is null.
+// The markup last written into each board. The same markup is not written
+// again: a snapshot comes every second, and columns drawn anew between a press
+// and its release replace the card under the pointer, so the click never
+// happens (T-226). Answers whether it wrote.
+const written = new WeakMap();
+
+function writeOnce(root, html) {
+  if (written.get(root) === html) return false;
+  written.set(root, html);
+  root.innerHTML = html;
+  return true;
+}
+
 export function render(root, snap) {
   // A card being dragged is held by the browser as the element the gesture
   // started on. Replacing #board's children mid-gesture therefore ends the
@@ -234,7 +247,7 @@ export function render(root, snap) {
   if (root.dataset?.dragging) return;
 
   if (snap?.boardError) {
-    root.innerHTML = `<div class="kerror">${escapeHTML(snap.boardError)}</div>`;
+    writeOnce(root, `<div class="kerror">${escapeHTML(snap.boardError)}</div>`);
     return;
   }
 
@@ -262,7 +275,10 @@ export function render(root, snap) {
     if (column.scrollTop > 0) scrolled.set(column.dataset.stage, column.scrollTop);
   }
 
-  root.innerHTML = columns + otherColumn;
+  if (!writeOnce(root, columns + otherColumn)) {
+    markScrollable(root);
+    return;
+  }
 
   for (const column of root.querySelectorAll(":scope > .kcol")) {
     const top = scrolled.get(column.dataset.stage);
@@ -557,9 +573,12 @@ export function renderBoard(root, onOpenCard, { onAddCard, onMove } = {}) {
   // dragend fires whatever ended the gesture — a drop, Escape, a release over
   // nothing — so the board is drawn again from here rather than from drop
   // alone, which a cancelled drag never reaches.
-  root.addEventListener("dragend", () => {
+  root.addEventListener("dragend", (ev) => {
     hold(null);
     unlight();
+    // A drag that moved nothing draws the same columns, which render leaves as
+    // they are: the card's own mark goes here.
+    ev.target?.closest?.(".kcard")?.classList?.remove?.("kcard-dragging");
     draw();
   });
 

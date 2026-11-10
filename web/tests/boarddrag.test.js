@@ -350,4 +350,7 @@ test("board: a cancelled drag takes every light off", () => {
   // Escape, or a release over nothing: dragend with no drop before it.
   fireEvent(card, "dragend");
   for (const column of Object.values(cols)) assert.deepEqual(lit(column), [], column.dataset.stage);
+  // Nothing moved, so the board is not drawn again and its nodes stay: the
+  // card itself is put back as it was (T-226).
+  assert.equal(card.classList.contains("kcard-dragging"), false, "the card dragged and let go is no longer marked dragging");
 });

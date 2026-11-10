@@ -115,7 +115,7 @@ test("a session with no transcript UUID gets no edit button — there is nothing
 // drive renderSessions against the fake DOM and the real store, the same way
 // the orchestrator column's own tests do.
 
-import { installDOM, settle, fireEvent } from "../../tests/fake-dom.js";
+import { installDOM, settle, fireEvent, fireDocumentEvent } from "../../tests/fake-dom.js";
 
 class ListSocket {
   constructor() {
@@ -769,5 +769,56 @@ test("a session row is followed by its short id, a start's row by its card", asy
   assert.equal(sessionFlipKeys.keyOf({ dataset: { short: "aa11" } }), "aa11");
   assert.equal(sessionFlipKeys.keyOf({ dataset: { start: STARTING_CARD.path } }), `start:${STARTING_CARD.path}`);
   assert.equal(sessionFlipKeys.groupOf({ dataset: { short: "aa11" } }), sessionFlipKeys.groupOf({ dataset: { start: "x" } }));
+  dom.restore();
+});
+
+// --- a press is never lost to a snapshot ---
+//
+// The column is rewritten from markup, and a snapshot arrives once a second. A
+// click is a press and a release on the same node: a rewrite between the two
+// replaced the row under the pointer and the click never happened -- the
+// operator's "sessions press badly, as if they lag" (T-226).
+
+// writesOf counts what is written to root.innerHTML from now on.
+function writesOf(root) {
+  let html = root.innerHTML;
+  const counter = { writes: 0 };
+  Object.defineProperty(root, "innerHTML", {
+    configurable: true,
+    get: () => html,
+    set: (value) => {
+      counter.writes += 1;
+      html = value;
+    },
+  });
+  return counter;
+}
+
+test("a snapshot that draws the same column leaves it as it is", async () => {
+  const { root, dom } = await list(structuredClone(FLEET));
+  const counter = writesOf(root);
+  listSocket.push(structuredClone(FLEET));
+  await settle();
+  assert.equal(counter.writes, 0, "the same column must not be rewritten under the pointer");
+  const renamed = structuredClone(FLEET);
+  renamed.sessions[1].name = "a renamed task";
+  listSocket.push(renamed);
+  await settle();
+  assert.equal(counter.writes, 1, "a column that did change is drawn");
+  assert.ok(root.innerHTML.includes("a renamed task"));
+  dom.restore();
+});
+
+test("a press held in the column holds the next snapshot until it is let go", async () => {
+  const { root, dom } = await list(structuredClone(FLEET));
+  fireEvent(root, "pointerdown");
+  const renamed = structuredClone(FLEET);
+  renamed.sessions[1].name = "a renamed task";
+  listSocket.push(renamed);
+  await settle();
+  assert.ok(!root.innerHTML.includes("a renamed task"), "the row under the pointer must stay until the click is done");
+  fireDocumentEvent(dom.document, "pointerup");
+  await settle();
+  assert.ok(root.innerHTML.includes("a renamed task"), "let go, the column catches up at once");
   dom.restore();
 });

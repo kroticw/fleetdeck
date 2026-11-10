@@ -18,6 +18,7 @@ function boardRoot() {
   let html = "";
   let columns = [];
   return {
+    writes: 0,
     classList: { toggle: () => {} },
     scrollLeft: 0,
     clientWidth: 800,
@@ -26,6 +27,7 @@ function boardRoot() {
       return html;
     },
     set innerHTML(value) {
+      this.writes += 1;
       html = value;
       columns = [...value.matchAll(/class="kcol[^"]*" data-stage="([^"]*)"/g)].map((m) => ({ dataset: { stage: m[1] }, scrollTop: 0 }));
     },
@@ -56,6 +58,19 @@ test("a scrolled column keeps its place when the snapshot changes, and the other
   render(root, snapshot(25));
   assert.equal(root.column("done").scrollTop, 240);
   assert.equal(root.column("active").scrollTop, 0);
+});
+
+// A click is a press and a release on the same card: columns drawn anew between
+// the two replaced the card under the pointer and the click never happened --
+// the operator's cards and sessions that "press badly, as if they lag" (T-226).
+test("the same snapshot again leaves the columns as they are", () => {
+  const root = boardRoot();
+  render(root, snapshot(24));
+  const writes = root.writes;
+  render(root, snapshot(24));
+  assert.equal(root.writes, writes, "the same columns must not be drawn again under the pointer");
+  render(root, snapshot(25));
+  assert.equal(root.writes, writes + 1, "changed columns are drawn");
 });
 
 // A board that failed to load has no columns; when it loads again they start
