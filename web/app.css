@@ -5009,17 +5009,28 @@ body.is-resizing {
 /* The setup page (setup.html, web/js/setup.js): one column of text and one row
    of controls, for a panel that has no configuration yet. */
 .setup {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: var(--gap-lg);
+  /* The card is as tall as its steps; the page scrolls, the card does not
+     shrink into the window and spill its own content. */
+  flex: none;
+  box-sizing: border-box;
+  max-width: min(620px, calc(100% - 32px));
+  margin: 40px auto;
+  padding: 30px;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: 18px;
+  border-radius: 26px;
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
 }
 
 .setup-title {
-  font-size: var(--fs-md);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   margin: 0;
 }
 
@@ -5298,12 +5309,18 @@ body.is-resizing {
 }
 
 .start {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: var(--gap-lg);
+  box-sizing: border-box;
+  max-width: min(560px, calc(100% - 32px));
+  margin: 40px auto;
+  padding: 28px;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: 18px;
+  border-radius: 26px;
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
 }
 
@@ -5311,14 +5328,15 @@ body.is-resizing {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--gap);
-  padding: calc(var(--gap-lg) * 2) 0 var(--gap);
+  gap: 10px;
+  padding: 0;
   text-align: center;
 }
 
 .start-title {
-  font-size: var(--fs-md);
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   margin: 0;
 }
 
@@ -5326,7 +5344,7 @@ body.is-resizing {
   margin: 0;
   line-height: 1.5;
   color: var(--text-muted);
-  font-size: var(--fs-sm);
+  font-size: 14px;
 }
 
 /* Said, rather than shown as a machine with no fleets: an empty list and a
@@ -5348,7 +5366,7 @@ body.is-resizing {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+  gap: 6px;
 }
 
 /* A listed fleet's row carries its delete button beside the entry, which keeps
@@ -5375,15 +5393,15 @@ body.is-resizing {
   text-align: left;
   font: inherit;
   color: var(--text);
-  padding: var(--gap) var(--gap-lg);
+  padding: 12px 12px 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border-radius: 14px;
+  background: var(--col);
   cursor: pointer;
 }
 
 .start-fleet:hover {
-  background: var(--surface-hover);
+  background: var(--neutral-soft);
 }
 
 .start-fleet-head {
@@ -5395,14 +5413,20 @@ body.is-resizing {
 }
 
 .start-fleet-name {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
 }
 
 /* The fleet the panel was last opened in. A mark on a row, never a decision:
    the page opens nothing by itself (web/js/fleet.js rememberedFleet). */
 .start-fleet-last {
-  font-size: var(--fs-xs);
-  color: var(--accent-strong);
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--accent);
 }
 
 .start-fleet-meta {
@@ -5453,11 +5477,10 @@ body.is-resizing {
 
 .start-footer {
   margin: 0;
-  padding-top: var(--gap-lg);
-  border-top: 1px solid var(--border);
   color: var(--text-faint);
-  font-size: var(--fs-xs);
+  font-size: 12px;
   line-height: 1.5;
+  text-align: center;
 }
 
 /* The application's icon (web/js/icon.js). Both variants are in the markup and
