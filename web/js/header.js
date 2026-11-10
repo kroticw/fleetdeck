@@ -301,34 +301,56 @@ export function isCodexLimitsStale(snap, nowMs) {
   return nowMs - new Date(snap.codexLimits.fetchedAt).getTime() > RATE_LIMITS_AGE_WORTH_SHOWING_MS;
 }
 
-// providerLimits is each provider's windows, and the provider summarised by
-// its worst window. Claude is always listed (a dash without numbers); Codex
-// only once it has reported. Two providers' windows are never merged.
+// providerLimits is each model's limits, and the model summarised by its worst
+// window. Claude is always listed (a dash without numbers); Codex once it has
+// reported; any other model the snapshot lists in `providers`, each with the
+// windows it has -- five hours and a week, one of them, or none at all for an
+// API key, which has a balance instead. Two models' limits are never merged.
+const WINDOW_TITLES = { "5h": ["limits_5h", "limit_5h"], "7d": ["limits_7d", "limit_7d"] };
+
+function windowOf(id, window_, stale) {
+  const [title, label] = (WINDOW_TITLES[id] ?? [id, id]).map((key) => t(key));
+  if (!window_) return { id, title, label, pct: null, level: "off", resetsAt: null };
+  const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
+  return { id, title, label, pct, level: stale ? "stale" : gaugeLevel(pct), resetsAt: window_.resetsAt };
+}
+
+function summarised(base, windows) {
+  const known = windows.filter((w) => w.pct !== null);
+  if (known.length === 0) return { ...base, pct: null, level: "off", windows };
+  const worst = known.reduce((a, b) => (b.pct > a.pct ? b : a));
+  return { ...base, pct: worst.pct, level: worst.level, windows };
+}
+
 export function providerLimits(snap, nowMs) {
-  const provider = (name, limits, stale) => {
-    const windows = [
-      [t("limits_5h"), t("limit_5h"), limits?.fiveHour],
-      [t("limits_7d"), t("limit_7d"), limits?.sevenDay],
-    ].map(([title, label, window_]) => {
-      if (!window_) return { title, label, pct: null, level: "off", resetsAt: null };
-      const pct = Math.max(0, Math.min(100, Math.round(window_.utilization)));
-      return { title, label, pct, level: stale ? "stale" : gaugeLevel(pct), resetsAt: window_.resetsAt };
-    });
-    const known = windows.filter((w) => w.pct !== null);
-    if (known.length === 0) return { name, pct: null, level: "off", windows, fetchedAt: null };
-    const worst = known.reduce((a, b) => (b.pct > a.pct ? b : a));
-    return { name, pct: worst.pct, level: worst.level, windows, fetchedAt: limits.fetchedAt };
-  };
-  const list = [provider("Claude", snap.limits, isUsageStale(snap, nowMs))];
-  if (snap.codexLimits) list.push(provider("Codex", snap.codexLimits, isCodexLimitsStale(snap, nowMs)));
+  const account = (name, limits, stale) =>
+    summarised({ name, kind: "windows", fetchedAt: limits?.fetchedAt ?? null }, [
+      windowOf("5h", limits?.fiveHour, stale),
+      windowOf("7d", limits?.sevenDay, stale),
+    ]);
+  const list = [account("Claude", snap.limits, isUsageStale(snap, nowMs))];
+  if (snap.codexLimits) list.push(account("Codex", snap.codexLimits, isCodexLimitsStale(snap, nowMs)));
+  for (const p of snap.providers ?? []) {
+    const stale = p.fetchedAt ? nowMs - new Date(p.fetchedAt).getTime() > RATE_LIMITS_AGE_WORTH_SHOWING_MS : false;
+    const base = { name: String(p.name ?? ""), kind: p.kind === "balance" ? "balance" : "windows", fetchedAt: p.fetchedAt ?? null, balance: p.balance ?? null };
+    list.push(summarised(base, (p.windows ?? []).map((w) => windowOf(w.id, w, stale))));
+  }
   return list;
 }
 
-// limitsOf is the providers as data rather than markup, for the fleetdeck
-// window, which draws them as capsules of its own (web/js/capsules.js). pct
-// is null where a capsule shows a dash.
+// busiestFirst orders the models by their worst window, the fullest first; a
+// model with no percentage (an API key, a dash) after every one that has one.
+function busiestFirst(providers) {
+  return [...providers].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));
+}
+
+// limitsOf is the limits as data rather than markup, for the fleetdeck window,
+// which draws them as a capsule of its own (web/js/capsules.js): the busiest
+// model alone, since a row of capsules cannot grow with the models; the menu
+// lists them all. pct is null where the capsule shows a dash.
 export function limitsOf(snap, nowMs) {
-  return providerLimits(snap, nowMs).map(({ name, pct, level }) => ({ label: name, pct, level }));
+  const [busiest] = busiestFirst(providerLimits(snap, nowMs));
+  return [{ label: busiest.name, pct: busiest.pct, level: busiest.level }];
 }
 
 // limitsButtonHTML is the limits capsule of the header: each provider's
@@ -343,28 +365,52 @@ export function limitsButtonHTML(snap, nowMs, open) {
   return `<button type="button" class="limits-button" aria-haspopup="true" aria-expanded="${open}" aria-label="${escapeHTML(label)}">${parts}<span class="limits-chevron" aria-hidden="true">▾</span></button>`;
 }
 
-// limitsTableHTML is the menu's table: providers down, windows across, each
-// cell its percentage, meter and reset, then when each provider last spoke.
+const money = (amount, currency) => {
+  const value = Number(amount ?? 0).toFixed(2);
+  return currency && currency !== "USD" ? `${value} ${currency}` : `$${value}`;
+};
+
+// kindLabel says which limits a model has: both windows, one, or a balance.
+function kindLabel(p) {
+  if (p.kind === "balance") return t("limits_kind_balance");
+  const ids = p.windows.map((w) => w.id);
+  if (ids.includes("5h") && ids.includes("7d")) return t("limits_kind_both");
+  if (ids.includes("7d")) return t("limits_kind_week");
+  if (ids.includes("5h")) return t("limits_kind_5h");
+  return "";
+}
+
+function windowRowHTML(p, w) {
+  if (w.pct === null) {
+    return `<div class="limits-row limits-off"><span class="limits-window">${escapeHTML(w.title)}</span><span class="limits-none">—</span></div>`;
+  }
+  return `<div class="limits-row limits-${w.level}"><span class="limits-window">${escapeHTML(w.title)}</span><div class="limits-meter"><div class="limits-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${w.pct}" aria-label="${escapeHTML(`${p.name} ${w.title}`)}"><span style="width: ${Math.min(100, Math.max(0, w.pct))}%"></span></div><span class="limits-reset">${escapeHTML(t("resets_in"))} ${escapeHTML(humanDuration(w.resetsAt))}</span></div><span class="limits-pct">${w.pct}%</span></div>`;
+}
+
+function balanceHTML(p) {
+  const b = p.balance ?? {};
+  const total = Number(b.total ?? 0);
+  const spent = total > 0 ? Math.max(0, Math.min(100, Math.round(((total - Number(b.amount ?? 0)) / total) * 100))) : 0;
+  const today = b.spentToday !== undefined ? `${t("limits_spent_today")} ${money(b.spentToday, b.currency)}` : "";
+  return `<div class="limits-balance"><div class="limits-balance-line"><span class="limits-window">${escapeHTML(t("limits_balance"))}</span><span class="limits-amount">${escapeHTML(money(b.amount, b.currency))}</span>${total > 0 ? `<span class="limits-of">${escapeHTML(t("limits_balance_of"))} ${escapeHTML(money(total, b.currency))}</span>` : ""}</div><div class="limits-bar"><span style="width: ${spent}%"></span></div><span class="limits-reset">${escapeHTML([today, t("limits_no_reset")].filter(Boolean).join(" · "))}</span></div>`;
+}
+
+// limitsTableHTML is the menu: every model as a card, the busiest first, each
+// with the windows it has or its balance, then when each last spoke.
 export function limitsTableHTML(snap, nowMs) {
-  const providers = providerLimits(snap, nowMs);
-  const head = providers[0].windows.map((w) => `<span class="limits-col">${escapeHTML(w.title)}</span>`).join("");
-  const rows = providers
+  const providers = busiestFirst(providerLimits(snap, nowMs));
+  const cards = providers
     .map((p) => {
-      const cells = p.windows
-        .map((w) =>
-          w.pct === null
-            ? `<div class="limits-cell limits-off">—</div>`
-            : `<div class="limits-cell limits-${w.level}"><span class="limits-pct">${w.pct}%</span><div class="limits-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${w.pct}" aria-label="${escapeHTML(`${p.name} ${w.title}`)}"><span style="width: ${Math.min(100, Math.max(0, w.pct))}%"></span></div><span class="limits-reset">${escapeHTML(t("resets_in"))} ${escapeHTML(humanDuration(w.resetsAt))}</span></div>`,
-        )
-        .join("");
-      return `<span class="limits-name">${escapeHTML(p.name)}</span>${cells}`;
+      const body = p.kind === "balance" ? balanceHTML(p) : p.windows.map((w) => windowRowHTML(p, w)).join("");
+      const kind = kindLabel(p);
+      return `<section class="limits-card limits-${p.level}"><div class="limits-card-head"><span class="limits-dot limits-${p.level}" aria-hidden="true"></span><span class="limits-name">${escapeHTML(p.name)}</span>${kind ? `<span class="limits-kind">${escapeHTML(kind)}</span>` : ""}</div>${body}</section>`;
     })
     .join("");
   const ages = providers
     .filter((p) => p.fetchedAt)
     .map((p) => `${escapeHTML(p.name)}: ${escapeHTML(humanAge(p.fetchedAt))}`)
     .join(" · ");
-  return `<div class="limits-grid"><span></span>${head}${rows}</div>${ages ? `<div class="limits-ages">${escapeHTML(t("limits_updated"))} ${ages}</div>` : ""}`;
+  return `<div class="limits-head"><span class="limits-heading">${escapeHTML(t("limits_title"))}</span><span class="limits-order">${escapeHTML(t("limits_busiest_first"))}</span></div><div class="limits-list">${cards}</div>${ages ? `<div class="limits-ages">${escapeHTML(t("limits_updated"))} ${ages}</div>` : ""}`;
 }
 
 // The header's parts, in the order the header draws them. A browser tab draws

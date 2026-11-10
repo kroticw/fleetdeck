@@ -6057,14 +6057,26 @@ body.is-resizing {
 .limits-popover {
   z-index: 3;
   box-sizing: border-box;
-  width: 380px;
+  width: 420px;
+  max-height: min(640px, calc(100vh - 80px));
+  overflow-y: auto;
   padding: 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 14px;
-  background: var(--surface-raised);
+  border: none;
+  border-radius: var(--radius-xl);
+  background-color: var(--surface-on-glass);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--sheet-shadow), inset 0 0 0 0.5px var(--glass-control-edge);
   color: var(--text);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
+}
+
+:root[data-glass="opaque"] .limits-menu,
+:root[data-glass="opaque"] .limits-popover {
+  background-color: var(--surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .limits-menu {
@@ -6084,43 +6096,107 @@ body.is-resizing {
   max-width: calc(100vw - var(--host-inset-left, 0px) - var(--host-inset-content-right, 0px) - 2 * var(--gap));
 }
 
-.limits-grid {
-  display: grid;
-  grid-template-columns: 80px minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px 12px;
-  align-items: center;
+/* The menu: a heading, then every model as a card, the busiest first. */
+.limits-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  margin-bottom: 10px;
 }
 
-.limits-col {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
+.limits-heading {
+  flex: 1;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.limits-order {
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+}
+
+.limits-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.limits-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px;
+  border-radius: 13px;
+  background: var(--col);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.limits-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.limits-card .limits-dot {
+  width: 8px;
+  height: 8px;
+  color: var(--limits-level, var(--text-faint));
 }
 
 .limits-name {
+  font-weight: 650;
+}
+
+.limits-kind {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
   font-weight: 600;
 }
 
-.limits-cell {
+/* A window: its name, the bar with when it resets under it, the percentage. */
+.limits-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-xs);
+}
+
+.limits-window {
+  color: var(--text-muted);
+}
+
+.limits-meter {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.limits-pct {
+  font-family: var(--font-mono);
+  text-align: right;
   color: var(--text);
 }
 
-.limits-cell.limits-warm .limits-pct,
-.limits-cell.limits-hot .limits-pct {
+.limits-row.limits-warm .limits-pct,
+.limits-row.limits-hot .limits-pct {
   color: var(--limits-level);
 }
 
-.limits-cell.limits-off {
+.limits-none {
+  grid-column: 2 / -1;
   color: var(--text-faint);
 }
 
 .limits-bar {
   height: 5px;
   border-radius: 3px;
-  background: var(--border-strong);
+  background: var(--track);
   overflow: hidden;
 }
 
@@ -6128,36 +6204,64 @@ body.is-resizing {
   display: block;
   height: 100%;
   border-radius: 3px;
-  background: var(--limits-level);
+  background: var(--limits-level, var(--text-muted));
 }
 
-.limits-cell.limits-cool {
+.limits-row.limits-cool,
+.limits-card.limits-cool {
   --limits-level: var(--ok);
 }
-.limits-cell.limits-warm {
+
+.limits-row.limits-warm,
+.limits-card.limits-warm {
   --limits-level: var(--attn);
 }
-.limits-cell.limits-hot {
+
+.limits-row.limits-hot,
+.limits-card.limits-hot {
   --limits-level: var(--danger);
 }
-.limits-cell.limits-stale {
+
+.limits-row.limits-stale,
+.limits-card.limits-stale {
   --limits-level: var(--text-muted);
 }
 
 .limits-reset {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-size: var(--fs-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* An API key: what is left of what was paid in, and what today cost. */
+.limits-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-xs);
+}
+
+.limits-balance-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.limits-amount {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.limits-of {
+  color: var(--text-faint);
+}
+
 .limits-ages {
   margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-size: var(--fs-2xs);
 }
 
 /* The settings section (web/js/settings.js), drawn to the settings design,
