@@ -1260,27 +1260,42 @@ main {
   font-weight: 600;
 }
 
+/* A row: a dot in the state's colour, the name with the cost beside it, the
+   state as a word with how long, the reason when a person is needed, and the
+   context used. A row waiting for an answer is tinted with the attention
+   colour; a stalled one is outlined, quieter. */
 .srow {
-  margin: var(--gap) var(--gap) 0;
-  border: 1px solid var(--border);
-  background: var(--surface-hover);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+  --row-dot: var(--accent);
+  --row-halo: var(--accent-soft);
+  margin: 4px var(--gap) 0;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 13px;
+  padding: 10px;
   cursor: pointer;
 }
 
 .srow:hover {
-  border-color: var(--border-strong);
+  background: var(--neutral-soft);
+}
+
+.srow[data-state="waiting"] {
+  --row-dot: var(--attn);
+  --row-halo: var(--attn-soft);
+}
+
+.srow[data-state="stalled"],
+.srow[data-state="idle"] {
+  --row-dot: var(--text-faint);
+  --row-halo: var(--neutral-soft);
 }
 
 .srow-waiting {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-hover));
-  border-color: var(--danger);
-  border-width: 2px;
+  background: var(--attn-soft);
+  border-color: var(--attn-edge);
 }
 
 .srow-stalled {
-  background: var(--surface);
   border-color: var(--border-strong);
   border-style: dashed;
 }
@@ -1292,7 +1307,28 @@ main {
   gap: 8px;
 }
 
+.srow-head::before {
+  content: "";
+  flex: none;
+  align-self: flex-start;
+  margin-top: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--row-dot);
+  box-shadow: 0 0 0 3px var(--row-halo);
+}
+
+.srow .scost {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+}
+
 .sname {
+  font-size: var(--fs-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1307,20 +1343,19 @@ main {
 .sbadge {
   flex: none;
   font-size: var(--fs-2xs);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
+/* The row's tint and its state word already say it waits: no badge too. */
 .sbadge-waiting {
-  background: var(--danger);
-  color: #fff;
+  display: none;
 }
 
 .sbadge-stalled {
-  background: var(--border-strong);
-  color: var(--text);
+  background: var(--neutral-soft);
+  color: var(--text-muted);
 }
 
 /* A session being started for a card (T-159): the daemon lists nothing until
@@ -1381,10 +1416,16 @@ main {
 
 .smeta {
   display: flex;
-  gap: 8px;
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  margin-top: 2px;
+  gap: 6px;
+  padding-left: 15px;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  margin-top: 6px;
+}
+
+.sstate {
+  font-weight: 600;
+  color: var(--row-dot);
 }
 
 /* A session's reason, clipped to three lines with an ellipsis, full text in
@@ -1400,9 +1441,11 @@ main {
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  margin-top: 4px;
+  padding-left: 15px;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--text);
+  margin-top: 6px;
   overflow-wrap: anywhere;
 }
 
@@ -1424,7 +1467,7 @@ main {
 }
 
 .scard {
-  margin-top: 4px;
+  margin: 6px 0 0 15px;
   font-size: var(--fs-2xs);
   color: var(--text-muted);
 }
@@ -1432,7 +1475,8 @@ main {
 .ctx {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding-left: 15px;
   font-size: var(--fs-2xs);
   margin-top: 6px;
 }
@@ -1444,9 +1488,9 @@ main {
 
 .ctx-track {
   flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
+  height: 3px;
+  border-radius: 2px;
+  background: var(--track);
   overflow: hidden;
   display: inline-block;
 }
@@ -1458,7 +1502,7 @@ main {
 }
 
 .ctx-cool .ctx-fill {
-  background: var(--ok);
+  background: var(--text-muted);
 }
 
 .ctx-warm .ctx-fill {
@@ -1471,7 +1515,8 @@ main {
 
 .ctx-pct {
   flex: none;
-  color: var(--text-muted);
+  font-family: var(--font-mono);
+  color: var(--text-faint);
 }
 
 .est {
@@ -3922,26 +3967,42 @@ button.review-line-add:hover {
  * button does not have by default. Everything else it inherits.
  */
 
+/* The row says "ctx 14%" at the bar's end, as the orchestrator's head does:
+   the word before the bar is for a screen reader. */
 .ctx-label {
-  color: var(--text-muted);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.ctx-pct::before {
+  content: "ctx ";
 }
 
 /* Only what a <button> needs that the existing .scard rule above does not give
  * it. Its margin, size and colour are already set there and are not repeated
  * here: two rules for one selector saying overlapping things is how a
  * stylesheet stops being readable. */
+/* The card a session works, as a chip at the row's foot. */
 .scard {
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
   border: 0;
-  background: none;
+  border-radius: 999px;
+  background: var(--neutral-soft);
   font: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
 .scard:hover,
 .scard:focus-visible {
   color: var(--text);
-  text-decoration: underline;
 }
 
 /* The card's number on the session list's button wears the board's chip
@@ -4885,26 +4946,54 @@ body.is-resizing {
  * The look is shared with .srow through the grouped selector below rather
  * than copied, so a change to the row's shape reaches both.
  */
+/* A stopped session, one line under its group's heading: a hollow dot, the
+   name over its last state, and the button that brings it back at the end. The
+   group's heading already says "stopped", so the row does not repeat it. */
 .sgone {
-  margin: var(--gap) var(--gap) 0;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+  position: relative;
+  margin: 0 var(--gap);
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  padding: 7px 10px;
 }
 
-.sgone-stopped {
-  border-left: 3px solid var(--border-strong);
+.sgone-stopped:has(.sresume) {
+  padding-right: 96px;
+}
+
+.sgone .srow-head::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  margin-top: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 1.5px solid var(--text-faint);
+}
+
+.sgone .sname {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.sgone .smeta {
+  margin-top: 1px;
+}
+
+.sgone .sstate {
+  font-weight: 400;
+  color: var(--text-faint);
 }
 
 .sgone-dead {
-  border-style: dashed;
   opacity: 0.75;
 }
 
 .sbadge-stopped {
-  background: var(--border-strong);
-  color: var(--text);
+  display: none;
 }
 
 .sbadge-gone {
@@ -4924,12 +5013,14 @@ body.is-resizing {
    were: on a row with one control, anything else that took on a border and a
    surface would read as a second one. */
 .sresume {
-  margin-top: 6px;
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
 }
 
 .sresume-btn {
   font-weight: 600;
-  color: var(--accent-strong);
 }
 
 /* Pressed and working. The resume does not answer until the session is up or
@@ -4963,7 +5054,7 @@ body.is-resizing {
    orphaned: the session exists and the work is paused, which is the whole
    point of telling this apart from .kcard-orphan above. */
 .kcard-stopped {
-  border-left: 3px solid var(--border-strong);
+  --bar: var(--text-faint);
 }
 
 .ksession-stopped {
@@ -5265,29 +5356,16 @@ body.is-resizing {
   white-space: nowrap;
 }
 
+/* On the sessions glass a row is the glass itself, lit under the pointer; a
+   waiting row keeps its tint and a stalled one its outline. */
 :root[data-surface="sessions"] .srow,
 :root[data-surface="sessions"] .sgone {
-  margin: 10px 10px 0;
-  border: none;
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--island-shadow);
+  margin: 4px 8px 0;
 }
 
-/* Waiting and stalled carry meaning; the island rule above must not wash them
-   out. */
 :root[data-surface="sessions"] .srow-waiting {
-  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
-  box-shadow: inset 0 0 0 2px var(--danger), var(--island-shadow);
-}
-
-:root[data-surface="sessions"] .srow-stalled {
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
-  box-shadow: inset 0 0 0 1px var(--on-glass-muted);
-}
-
-:root[data-surface="sessions"] .sgone-stopped {
-  box-shadow: inset 3px 0 0 var(--border-strong), var(--island-shadow);
+  background: var(--attn-soft);
+  box-shadow: inset 0 0 0 1px var(--attn-edge);
 }
 
 /* The board: no column chrome, and the tabs and the new card button are the
@@ -6426,4 +6504,18 @@ textarea.set-input {
   .set-row-card {
     flex-wrap: wrap;
   }
+}
+
+/* The pencils that rename a session stay in sight, quietly: the name is what a
+   row is read for. */
+.label-edit-btn,
+.o-name-edit {
+  opacity: 0.55;
+}
+
+.label-edit-btn:hover,
+.label-edit-btn:focus-visible,
+.o-name-edit:hover,
+.o-name-edit:focus-visible {
+  opacity: 1;
 }
